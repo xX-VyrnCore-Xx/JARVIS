@@ -80,7 +80,7 @@ Restano decisioni del proprietario, perché richiedono suoi account, certificati
 **Rilascio:**
 1. Aggiornare la versione in `core/server/Cargo.toml`.
 2. Unire la modifica con CI verde.
-3. Il proprietario crea il tag `vX.Y.Z`: il workflow di release costruisce gli archivi per i 3 sistemi con i file `.sha256` e prepara una bozza di release da approvare.
+3. Su richiesta del proprietario si crea il tag `vX.Y.Z`: il workflow di release costruisce e prova gli archivi per i 3 sistemi e pubblica la release con i file `.sha256`. I tag con suffisso (`-rc.1`) diventano prerelease.
 
 **Verifica di un archivio:**
 

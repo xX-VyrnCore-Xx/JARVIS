@@ -427,14 +427,14 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 
 ### ADR-0015 — Release precompilata, rollback di release e audit delle dipendenze (Fasi 6 e 7)
 
-- **Data:** 2026-11-17 · **Stato:** Accettato. Restano decisioni del proprietario: firma dei binari e degli installatori, canali Stable/Beta, pubblicazione del tag.
+- **Data:** 2026-11-17 · **Stato:** Accettato. Restano decisioni del proprietario: firma dei binari e degli installatori, canali Stable/Beta. Prima release: `v0.1.0`, richiesta dal proprietario e pubblicata subito, prima delle prove P1–P12 (prototipo, non 1.0.0).
 - **Contesto:**
   - RNF-08 chiede il rollback di release;
   - DEVOPS_QA_OBSERVABILITY.md chiede release riproducibili e verifica crittografica;
   - finora l'avvio richiedeva Rust e un compilatore C sul computer del proprietario.
 - **Decisione:**
   - **Archivio di release** (`scripts/package.py`): Core precompilato in `bin/`, runtime AI, contratti, lanciatori, README e [ACCEPTANCE.md](ACCEPTANCE.md); file `.sha256` accanto all'archivio. I lanciatori riconoscono la release (presenza di `bin/jarvis` e assenza di `core/`) e saltano la compilazione: serve solo Python. L'app desktop resta fuori dall'archivio.
-  - **Workflow `release.yml`:** costruisce gli archivi su Linux, macOS e Windows, li verifica, li estrae senza sorgenti del Core e li avvia con i lanciatori (prova di avvio completa). Con un tag `v*` prepara una **bozza** di release: la pubblicazione resta al proprietario.
+  - **Workflow `release.yml`:** costruisce gli archivi su Linux, macOS e Windows, li verifica, li estrae senza sorgenti del Core e li avvia con i lanciatori (prova di avvio completa). Con un tag `v*` pubblica la release (aggiornamento del 2026-11-17: il proprietario ha chiesto la pubblicazione diretta, prima prevista come bozza); i tag con suffisso diventano prerelease. Il tag si crea solo su richiesta del proprietario.
   - **Rollback di release** (`rollback.rs`):
     - la cartella dati registra in `VERSION` l'ultima versione che l'ha usata;
     - quando parte una versione diversa, prima di aprire il database (quindi prima di qualunque migrazione) il Core copia database, audit, chiave dei segreti e workspace (fino a 1 GiB) in `<dati>-rollback/<versione>-<istante>/` e conserva le ultime 3 copie;
