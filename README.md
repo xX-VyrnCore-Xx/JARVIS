@@ -44,7 +44,7 @@ sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev
 
 - **Backup**: dalla sezione Sistema o con `./jarvis.sh backup` crei una copia cifrata dei tuoi dati, protetta da una passphrase che scegli tu (senza passphrase la copia non si apre). Per ripristinarla, con JARVIS chiuso: `./jarvis.sh restore data-backups/<file>.jbak`.
 - **Connettori**: nella sezione Connettori incolli il manifest JSON di un servizio esterno (esempio in `tests/contracts/fixtures/valid/connector.meteo.json`), lo autorizzi con il suo token e lo usi in chat con «connettore <id> <operazione> chiave=valore». Il token resta cifrato nel Core e non viene mai mostrato. Le operazioni che scrivono verso l'esterno chiedono sempre conferma. «Revoca» cancella il token e blocca subito le chiamate.
-- **Sistema**: la sezione omonima mostra stato dei componenti e latenze misurate. I log diagnostici sono in `data/logs/core.jsonl` e non contengono i tuoi messaggi.
+- **Sistema**: la sezione omonima mostra stato dei componenti, latenze misurate e lo storico delle ultime 24 ore (conservato 7 giorni), esportabile in JSON o nel formato di Prometheus. I log diagnostici sono in `data/logs/core.jsonl` e non contengono i tuoi messaggi.
 
 Cosa osservare:
 - ogni azione mostra agente, strumento, decisione di policy ed esito;

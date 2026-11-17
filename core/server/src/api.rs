@@ -166,6 +166,8 @@ pub fn router(state: Shared) -> Router {
         .route("/api/workspace", get(workspace))
         .route("/api/tools", get(tool_catalog))
         .route("/api/metrics", get(metrics))
+        .route("/api/metrics/history", get(metrics_history))
+        .route("/api/metrics/export", get(metrics_export))
         .route("/api/backups", get(backups))
         .route("/api/backup", post(create_backup))
         .route(
@@ -337,6 +339,47 @@ async fn create_backup(State(state): State<Shared>, Json(body): Json<Value>) -> 
 
 async fn metrics(State(state): State<Shared>) -> Json<Value> {
     Json(state.obs.snapshot())
+}
+
+async fn metrics_history(
+    State(state): State<Shared>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let hours = q.get("hours").and_then(|h| h.parse().ok()).unwrap_or(24);
+    reply(
+        with_core(&state, move |j| {
+            j.metrics_history(hours)
+                .map(|items| json!({"items": items}))
+        })
+        .await,
+    )
+}
+
+/// Esportazione: `format=prometheus` (testo 0.0.4) oppure JSON con stato attuale e storico di 7 giorni.
+async fn metrics_export(
+    State(state): State<Shared>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let snap = state.obs.snapshot();
+    if q.get("format").map(String::as_str) == Some("prometheus") {
+        return (
+            [(
+                header::CONTENT_TYPE,
+                "text/plain; version=0.0.4; charset=utf-8",
+            )],
+            crate::observability::prometheus(&snap),
+        )
+            .into_response();
+    }
+    let history = with_core(&state, |j| j.metrics_history(24 * 7)).await;
+    match history {
+        Ok(items) => (
+            [(header::CONTENT_DISPOSITION, "attachment; filename=\"jarvis-metrics.json\"")],
+            Json(json!({"format": "jarvis-metrics/1", "exported_at": crate::now(), "current": snap, "history": items})),
+        )
+            .into_response(),
+        Err(e) => e.into_response(),
+    }
 }
 
 async fn tool_catalog(State(state): State<Shared>) -> Json<Value> {

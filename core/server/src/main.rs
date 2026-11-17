@@ -157,12 +157,17 @@ async fn main() {
     );
     println!("  Arresto     : Ctrl+C");
     api::spawn_scheduler(state.clone(), std::time::Duration::from_secs(tick));
+    let core = state.core.clone();
     let app = api::router(state);
     if let Err(e) = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
     {
         eprintln!("Server terminato con errore: {e}");
+    }
+    // Ultima istantanea delle metriche, così lo storico copre anche la fine della sessione.
+    if let Ok(mut j) = core.lock() {
+        let _ = j.persist_metrics(true);
     }
     println!("JARVIS arrestato.");
 }

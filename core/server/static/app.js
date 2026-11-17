@@ -402,7 +402,25 @@ views.system = async () => {
   const bk = await api("/api/backups");
   $("#backup-list").replaceChildren(...(bk.items.length ? bk.items.slice(0, 5).map((b) => el("div", { class: "sub" }, `${b.file} · ${(b.bytes / 1024).toFixed(1)} KiB`)) : [el("div", { class: "sub" }, `Nessun backup in ${bk.dir}`)]));
   $("#metrics-table tbody").replaceChildren(...(rows.length ? rows : [el("tr", {}, el("td", { colspan: "6" }, "Nessuna misura ancora."))]));
+  const { items } = await api("/api/metrics/history?hours=24");
+  const total = (s, k) => Object.values((s && s.http) || {}).reduce((a, x) => a + (x[k] || 0), 0);
+  $("#history-table tbody").replaceChildren(...(items.length ? items.slice(-48).reverse().map((x) => el("tr", {},
+    el("td", {}, fmtTime(x.at)), el("td", {}, fmtUptime(x.uptime_s || 0)), el("td", {}, String(total(x.series, "count"))),
+    el("td", {}, String(total(x.series, "errors"))),
+    el("td", {}, x.series && x.series.http && x.series.http["POST /api/chat"] ? `${x.series.http["POST /api/chat"].p95_ms} ms` : "—"))) :
+    [el("tr", {}, el("td", { colspan: "5" }, "Ancora nessuna istantanea: la prima viene salvata entro 5 minuti dall'avvio."))]));
 };
+
+async function download(path, name) {
+  const res = await fetch(path, { headers: { "X-Jarvis-Token": TOKEN } });
+  if (!res.ok) return alert(`Esportazione non riuscita (HTTP ${res.status})`);
+  const url = URL.createObjectURL(await res.blob());
+  const a = el("a", { href: url, download: name });
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+$("#export-json").addEventListener("click", () => download("/api/metrics/export", "jarvis-metrics.json"));
+$("#export-prom").addEventListener("click", () => download("/api/metrics/export?format=prometheus", "jarvis-metrics.prom"));
 
 $("#backup-form").addEventListener("submit", async (e) => {
   e.preventDefault();

@@ -136,6 +136,8 @@ pub struct Jarvis {
     pending: HashMap<String, Pending>,
     obs: std::sync::Arc<Observability>,
     secrets: crate::secrets::SecretStore,
+    /// Ultima istantanea delle metriche salvata (RNF-07).
+    metrics_saved: Option<std::time::Instant>,
     /// Blocco esclusivo sulla cartella dati: un solo Core per volta (rilasciato alla chiusura).
     _lock: std::fs::File,
 }
@@ -182,6 +184,7 @@ impl Jarvis {
             pending: HashMap::new(),
             obs: std::sync::Arc::new(Observability::new(Some(&cfg_logs))),
             secrets,
+            metrics_saved: None,
             _lock: lock,
         };
         jarvis.register_authorized_connectors()?;
@@ -1497,6 +1500,7 @@ impl Jarvis {
     /// Controlli periodici del monitor, eseguiti dal pianificatore anche senza interfaccia aperta.
     pub fn monitor(&mut self) -> Result<(), CoreError> {
         self.check_audit();
+        self.persist_metrics(false)?;
         if self.worker.as_mut().is_some_and(|w| w.has_exited()) {
             self.worker = None;
             self.obs.count("worker.crashed");
@@ -1792,6 +1796,42 @@ impl Jarvis {
             map.remove("audio_b64");
         }
         Ok((audio, out))
+    }
+}
+
+// ---------------------------------------------------------------------- Metriche persistenti (RNF-07)
+
+/// Intervallo fra due istantanee salvate e periodo di conservazione.
+const METRICS_EVERY: std::time::Duration = std::time::Duration::from_secs(300);
+const METRICS_KEEP_DAYS: i64 = 7;
+
+impl Jarvis {
+    /// Salva un'istantanea compatta delle metriche (conteggi, errori, p95 per serie) al massimo ogni
+    /// 5 minuti, o subito con `force`. Le istantanee non contengono contenuti dell'utente.
+    pub fn persist_metrics(&mut self, force: bool) -> Result<Option<Value>, CoreError> {
+        if !force
+            && self
+                .metrics_saved
+                .is_some_and(|t| t.elapsed() < METRICS_EVERY)
+        {
+            return Ok(None);
+        }
+        let snap = self.obs.snapshot();
+        let at = now();
+        let doc = json!({"at": at, "uptime_s": snap["uptime_s"], "series": snap["series"], "counters": snap["counters"]});
+        let keep = (chrono::Utc::now() - chrono::Duration::days(METRICS_KEEP_DAYS))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        self.store.metrics_put(&at, &doc, &keep).map_err(internal)?;
+        self.metrics_saved = Some(std::time::Instant::now());
+        Ok(Some(doc))
+    }
+
+    /// Istantanee delle ultime `hours` ore (al massimo 7 giorni), anche di sessioni precedenti.
+    pub fn metrics_history(&self, hours: u32) -> Result<Vec<Value>, CoreError> {
+        let since = (chrono::Utc::now()
+            - chrono::Duration::hours(i64::from(hours.clamp(1, 24 * 7))))
+        .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        self.store.metrics_since(&since).map_err(internal)
     }
 }
 
