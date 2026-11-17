@@ -12,7 +12,7 @@ Il repository GitHub privato e il mirror locale conservano codice, documenti e c
 │   └── server/        crate jarvis-core: binario `jarvis`, API locale e interfaccia Web
 ├── ai/                runtime agenti e adapter Python (jarvis_ai)
 ├── apps/
-│   ├── desktop/       Tauri, React e TypeScript
+│   ├── desktop/       launcher/ (crate jarvis-launcher) e src-tauri/ (app Tauri)
 │   ├── web/           dashboard React
 │   └── mobile/        client successivi
 ├── contracts/         schemi, API ed eventi versionati; catalog/tools: descrittori degli strumenti

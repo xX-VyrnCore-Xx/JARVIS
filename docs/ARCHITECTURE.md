@@ -25,6 +25,7 @@ flowchart LR
 | Voice Engine | Acquisizione, wake word, STT, TTS e stream vocale |
 | Computer Use Engine | Operazioni OS, file, terminale e interfacce di un nodo |
 | Web Agent Engine | Ricerca, navigazione, interazione e verifica fonti |
+| Client desktop | Guscio Tauri che avvia e supervisiona il Core e ne mostra l'interfaccia | `apps/desktop` |
 | Automation Engine | Trigger, esecuzioni durevoli, monitoraggio e recupero |
 | Integration Engine | API, connettori, plugin, SDK e webhook |
 | Security Engine | Identità, decisioni di policy, rischio e audit |

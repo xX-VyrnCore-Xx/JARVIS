@@ -235,6 +235,33 @@ Valutare stack mobile, motori vocali, trasporto degli eventi e RPC, implementazi
   - E2E: modulo precompilato e salvataggio come v2.
 - **Documenti interessati:** AUTONOMY_AND_TOOLS.md, REQUIREMENTS.md, README.md, `contracts/README.md`.
 
+### ADR-0009 — App desktop Tauri come guscio sottile del Core
+
+- **Data:** 2026-11-17 · **Stato:** Accettato per la Fase 3 (RF-10, desktop). Supera in parte la deviazione «interfaccia senza Tauri» di ADR-0004; l'interfaccia resta in HTML, CSS e JavaScript senza React.
+- **Contesto:** TECH_STACK.md prevede Tauri, React e TypeScript per il desktop Windows, macOS e Linux. L'interfaccia esiste già ed è servita dal Core con le sue difese: token, controllo dell'header Host, CSP. Duplicarla nel client creerebbe due superfici da mantenere e proteggere.
+- **Opzioni:**
+  - riscrivere l'interfaccia dentro Tauri con chiamate IPC al Core;
+  - usare Tauri come guscio che avvia il Core e mostra la sua interfaccia;
+  - impacchettare un browser.
+- **Decisione:**
+  - **Struttura:** app `apps/desktop/src-tauri` (Tauri 2.12, workspace Cargo separato) più crate `jarvis-launcher` (`apps/desktop/launcher`, membro del workspace del Core e quindi testato in CI).
+  - **Avvio:** il launcher sceglie una porta di loopback libera e avvia `jarvis` con i dati nella cartella dell'applicazione dell'utente, l'ambiente Python di `jarvis.sh` e il log in `core.log`. Attende `/api/health`; in caso di errore mostra il motivo nella pagina di attesa.
+  - **Arresto:** alla chiusura il Core viene terminato. Il Core riceve anche `JARVIS_EXIT_WITH_PARENT=stdin` e si arresta quando il processo padre chiude lo stdin, cosa che avviene anche se il padre muore in modo anomalo, su ogni sistema operativo. Senza questo, un crash dell'app lasciava Core e worker orfani (osservato nella prova con SIGKILL).
+  - **Sicurezza:**
+    - nessuna capability Tauri, quindi la pagina del Core non ha accesso alle API native;
+    - navigazione consentita solo verso la pagina locale e il Core sulla sua porta;
+    - gli altri link http(s), comprese le fonti Web, si aprono nel browser di sistema.
+- **Motivazione:** una sola interfaccia, con le stesse difese e gli stessi test E2E. Il desktop aggiunge finestra, ciclo di vita e dati per utente senza logica di dominio.
+- **Conseguenze:**
+  - l'app richiede ancora il checkout del repository (Core compilato e ambiente Python): un installatore autonomo con Core e runtime Python inclusi, firma e aggiornamenti resta da fare (DEVOPS_QA_OBSERVABILITY.md);
+  - su Linux servono le librerie WebKitGTK;
+  - icona generata dal progetto.
+- **Evidenza:**
+  - `cargo test --locked` in `core/`: 4 test del launcher con il Core reale (avvio, interfaccia servita, arresto, uscita alla morte del padre, errore all'avvio con log, binario mancante);
+  - prova manuale con Xvfb: finestra Tauri con l'interfaccia del Core (screenshot); dopo SIGKILL dell'app i processi passano da 2 a 0;
+  - CI: build e clippy dell'app su Linux, macOS e Windows.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, TECH_STACK.md, DEVELOPMENT.md, ARCHITECTURE.md, REQUIREMENTS.md, README.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

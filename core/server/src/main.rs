@@ -66,12 +66,28 @@ async fn main() {
     api::spawn_scheduler(state.clone(), std::time::Duration::from_secs(tick));
     let app = api::router(state);
     if let Err(e) = axum::serve(listener, app)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
+        .with_graceful_shutdown(shutdown_signal())
         .await
     {
         eprintln!("Server terminato con errore: {e}");
     }
     println!("JARVIS arrestato.");
+}
+
+/// Arresto con Ctrl+C oppure, se `JARVIS_EXIT_WITH_PARENT=stdin`, quando il processo padre (per esempio
+/// l'app desktop) chiude lo stdin: accade anche se il padre termina in modo anomalo, su ogni sistema operativo.
+async fn shutdown_signal() {
+    let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    if std::env::var("JARVIS_EXIT_WITH_PARENT").is_ok_and(|v| v == "stdin") {
+        std::thread::spawn(move || {
+            let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+            let _ = tx.send(());
+        });
+    } else {
+        std::mem::forget(tx);
+    }
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = rx => println!("Processo padre terminato: arresto del Core."),
+    }
 }

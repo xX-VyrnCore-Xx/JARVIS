@@ -35,6 +35,7 @@ Versionare dipendenze e contratti alla loro introduzione. Per Rust/Python, descr
 | rusqlite | 0.32, `bundled` | Memoria, task e conversazione | ADR-0004 |
 | Ollama (opzionale) | API `/api/chat` e `/api/tags` | Backend AI locale; nessuna libreria client, solo `urllib` | ADR-0004 |
 | Playwright | 1.63.0 | Test E2E dell'interfaccia | `tests/e2e/ui_smoke.cjs` |
-| Interfaccia Web | HTML, CSS e JavaScript senza dipendenze | Deviazione temporanea da React e Tauri | ADR-0004 |
+| Interfaccia Web | HTML, CSS e JavaScript senza dipendenze | Deviazione temporanea da React (Tauri adottato per il desktop) | ADR-0004, ADR-0009 |
 | Pianificatore | `tokio::time::interval` nel Core | Automazioni (RF-07) | ADR-0005 |
+| Tauri | 2.12 (WebKitGTK 4.1 su Linux, WebView2 su Windows, WKWebView su macOS) | App desktop `apps/desktop/src-tauri` | ADR-0009 |
 | `ureq` / `url` (Rust) | 2.12 / 2.5 | Client HTTP del Web Agent con risolutore vincolato | ADR-0007 |
