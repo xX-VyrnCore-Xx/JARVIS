@@ -175,6 +175,20 @@ class OfflineBackend(unittest.TestCase):
         self.assertEqual(self.call("esegui automazione 1a2b3c4d")["tool_call"]["arguments"], {"id": "1a2b3c4d"})
         self.assertEqual(self.call("elimina automazione 1a2b3c4d")["tool_call"]["tool"], "workflow.delete")
 
+    def test_edit_intents(self):
+        r = self.call("modifica automazione 1a2b3c4d ogni 2 ore")["tool_call"]
+        self.assertEqual((r["tool"], r["arguments"]), ("workflow.update", {"id": "1a2b3c4d", "trigger": {"kind": "interval", "every_seconds": 7200}}))
+        self.assertEqual(self.call("cambia automazione 1a2b3c4d ogni giorno alle 7:15")["tool_call"]["arguments"]["trigger"], {"kind": "daily", "at": "07:15"})
+        steps = self.call("modifica automazione 1a2b3c4d: scrivi a.txt: ciao")["tool_call"]["arguments"]["steps"]
+        self.assertEqual(steps, [{"tool": "fs.write", "arguments": {"path": "a.txt", "content": "ciao"}}])
+        self.assertEqual(self.call("rinomina automazione 1a2b3c4d in Report mattutino")["tool_call"]["arguments"], {"id": "1a2b3c4d", "name": "Report mattutino"})
+        self.assertIn("Non so cosa cambiare", self.call("modifica automazione 1a2b3c4d boh")["text"])
+        self.assertIn("minimo", self.call("modifica automazione 1a2b3c4d ogni 10 secondi")["text"])
+        r = self.call("x", tool_result={"tool": "workflow.update", "status": "succeeded", "output": {
+            "id": "1a2b3c4d", "name": "Ora", "version": 2, "changes": ["frequenza: ogni ora → ogni 2 ore"], "next_run": "17/11/2026 18:00"}})
+        self.assertIn("versione 2", r["text"])
+        self.assertIn("ogni ora → ogni 2 ore", r["text"])
+
     def test_scheduling_errors_are_explained(self):
         self.assertIn("minimo", self.call("ogni 30 secondi info sistema")["text"])
         self.assertIn("Non so pianificare", self.call("ogni ora fai qualcosa di strano")["text"])

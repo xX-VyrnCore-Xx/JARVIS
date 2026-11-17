@@ -134,7 +134,7 @@ Valutare stack mobile, motori vocali, trasporto degli eventi e RPC, implementazi
   - Ogni esecuzione crea un task con richiedente `module:automation`, eventi di audit e una voce di cronologia.
 - **Motivazione:** il proprietario decide una volta sola su azioni precise. La policy resta l'ultima parola e ogni alterazione dei passi è rilevata. Recuperare una sola esecuzione evita raffiche di azioni dopo un lungo spegnimento.
 - **Conseguenze:**
-  - modificare i passi richiede di creare una nuova automazione (versione 1); non è ancora prevista una modifica in loco con nuova approvazione;
+  - ~~modificare i passi richiede di creare una nuova automazione~~ superato da ADR-0008 (modifica con versioni);
   - le notifiche sugli esiti (RF-13) non ci sono ancora;
   - il fuso orario è quello del Core.
 - **Evidenza:**
@@ -214,6 +214,26 @@ Valutare stack mobile, motori vocali, trasporto degli eventi e RPC, implementazi
   - E2E: ricerca, lettura, fonti e dominio vietato.
   - Prova sul Web reale sospesa: il proxy del container nega l'accesso a Internet.
 - **Documenti interessati:** SECURITY_AND_PRIVACY.md, AUTONOMY_AND_TOOLS.md, AI_SYSTEM.md, ARCHITECTURE.md, TECH_STACK.md, REQUIREMENTS.md, README.md.
+
+### ADR-0008 — Modifica delle automazioni con versioni e nuova approvazione
+
+- **Data:** 2026-11-17 · **Stato:** Accettato per la Fase 3 (RF-07). Supera la limitazione «modificare i passi richiede di ricreare l'automazione» di ADR-0005.
+- **Contesto:** AUTONOMY_AND_TOOLS.md chiede che un workflow conservi la versione. Modificare passi o frequenza cambia ciò che verrà eseguito in background, quindi serve una nuova decisione del proprietario. La cronologia deve continuare a dire quale versione ha prodotto ogni esecuzione.
+- **Decisione:**
+  - **Strumento e API:** `workflow.update` (rischio alto, con conferma) e `PUT /api/workflows/{id}` (azione diretta del proprietario, registrata nell'audit). Campi modificabili: `name`, `trigger`, `steps`, `on_failure`.
+  - **Nuova versione:** ogni modifica effettiva porta `version` + 1, `updated_at` e una nuova approvazione (`chat_confirmation` o `owner_ui`) con il digest dei nuovi passi. Una modifica senza cambiamenti viene rifiutata.
+  - **Storico:** la tabella `workflow_versions` conserva ogni versione approvata, anche dopo l'eliminazione. Le esecuzioni portano già `workflow_version`. `GET /api/workflows/{id}/versions` restituisce la cronologia.
+  - **Pianificazione:** se cambia la frequenza, la prossima esecuzione si ricalcola da adesso; altrimenti resta invariata. Un'automazione sospesa resta sospesa.
+  - **Conferma leggibile:** riporta i campi proposti; l'esito elenca le differenze (es. «frequenza: ogni ora → ogni 2 ore»).
+- **Motivazione:** nessuna esecuzione in background senza un'approvazione dei passi esatti. L'identità dell'automazione, la cronologia e il legame fra esecuzione e versione restano intatti.
+- **Conseguenze:**
+  - il ripristino di una versione precedente non è ancora previsto: si può fare riproponendone i campi;
+  - il controllo dei passi alterati (`security.approval_mismatch`) vale anche dopo ogni modifica.
+- **Evidenza:**
+  - `core/server/tests/automation.rs`: 6 nuovi test (conferma e versione 2, ripianificazione, rinomina con audit, modifiche non valide, automazione sospesa, manomissione dopo la modifica);
+  - `tests/ai/test_gateway.py`: intenti di modifica;
+  - E2E: modulo precompilato e salvataggio come v2.
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, REQUIREMENTS.md, README.md, `contracts/README.md`.
 
 ### Decisione operativa — Merge automatico con CI verde
 

@@ -714,6 +714,17 @@ impl Jarvis {
                 let doc = self.build_workflow(arguments, "chat_confirmation")?;
                 self.store_new_workflow(&doc)
             }
+            "workflow.update" => {
+                if !confirmed {
+                    return Err(tool_error(
+                        "workflow.not_confirmed",
+                        "la modifica richiede la conferma del proprietario",
+                    ));
+                }
+                let (current, next) =
+                    self.find_workflow(arguments["id"].as_str().unwrap_or_default())?;
+                self.apply_update(&current, next, arguments, "chat_confirmation")
+            }
             "workflow.list" => Ok(
                 json!({"items": self.workflow_views().map_err(|e| tool_error("workflow.unavailable", format!("{e:?}")))?}),
             ),
@@ -765,9 +776,10 @@ impl Jarvis {
     }
 
     /// Costruisce un `jarvis.workflow/1` da argomenti dello strumento o del modulo dell'interfaccia.
-    fn build_workflow(&self, args: &Value, method: &str) -> Result<Value, tools::ToolError> {
+    /// Valida i passi contro il catalogo e fissa la versione di ogni strumento.
+    fn normalize_steps(&self, raw: &Value) -> Result<Value, tools::ToolError> {
         let invalid = |m: String| tool_error("workflow.invalid", m);
-        let raw_steps = args["steps"]
+        let raw_steps = raw
             .as_array()
             .filter(|s| !s.is_empty())
             .ok_or_else(|| invalid("servono da 1 a 10 passi".into()))?;
@@ -796,7 +808,12 @@ impl Jarvis {
             }
             steps.push(json!({"tool": name, "version": tool.version(), "arguments": arguments}));
         }
-        let steps = Value::Array(steps);
+        Ok(Value::Array(steps))
+    }
+
+    fn build_workflow(&self, args: &Value, method: &str) -> Result<Value, tools::ToolError> {
+        let invalid = |m: String| tool_error("workflow.invalid", m);
+        let steps = self.normalize_steps(&args["steps"])?;
         let at = now();
         let doc = json!({
             "contract": "jarvis.workflow/1",
@@ -828,6 +845,7 @@ impl Jarvis {
             .map(automation::ts);
         self.store
             .workflow_put(doc, next.as_deref())
+            .and_then(|()| self.store.workflow_version_put(doc))
             .map_err(|e| tool_error("workflow.unavailable", e.to_string()))?;
         Ok(json!({
             "id": short(doc), "workflow_id": doc["workflow_id"], "name": doc["name"],
@@ -848,7 +866,7 @@ impl Jarvis {
                 .into_iter()
                 .next();
             out.push(json!({
-                "id": short(&doc), "workflow_id": id, "name": doc["name"], "enabled": doc["enabled"],
+                "id": short(&doc), "workflow_id": id, "name": doc["name"], "enabled": doc["enabled"], "version": doc["version"], "updated_at": doc["updated_at"],
                 "trigger": doc["trigger"], "trigger_text": automation::describe(&doc["trigger"]),
                 "steps": doc["steps"], "on_failure": doc["on_failure"], "approval": doc["approval"],
                 "next_run_at": next, "next_run": next.as_deref().map(automation::fmt_local),
@@ -1358,6 +1376,149 @@ fn sources_of(tool: &str, output: &Value) -> Vec<Value> {
             })
             .unwrap_or_default(),
         _ => Vec::new(),
+    }
+}
+
+// ---------------------------------------------------------------------- Modifica delle automazioni
+
+impl Jarvis {
+    /// Nuova versione di un workflow: campi modificati, versione + 1, nuova approvazione legata ai passi.
+    fn build_update(
+        &self,
+        current: &Value,
+        args: &Value,
+        method: &str,
+    ) -> Result<(Value, Vec<String>), tools::ToolError> {
+        let invalid = |m: String| tool_error("workflow.invalid", m);
+        let mut doc = current.clone();
+        let mut changes = Vec::new();
+        if let Some(name) = args["name"]
+            .as_str()
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+        {
+            let name: String = name.chars().take(200).collect();
+            if doc["name"] != name.as_str() {
+                changes.push(format!(
+                    "nome: «{}» → «{name}»",
+                    doc["name"].as_str().unwrap_or("")
+                ));
+                doc["name"] = name.into();
+            }
+        }
+        if args["trigger"].is_object() && args["trigger"] != doc["trigger"] {
+            changes.push(format!(
+                "frequenza: {} → {}",
+                automation::describe(&doc["trigger"]),
+                automation::describe(&args["trigger"])
+            ));
+            doc["trigger"] = args["trigger"].clone();
+        }
+        if !args["steps"].is_null() {
+            let steps = self.normalize_steps(&args["steps"])?;
+            if steps != doc["steps"] {
+                let list = |s: &Value| {
+                    s.as_array()
+                        .map(|a| {
+                            a.iter()
+                                .map(|x| x["tool"].as_str().unwrap_or("?").to_string())
+                                .collect::<Vec<_>>()
+                                .join(" → ")
+                        })
+                        .unwrap_or_default()
+                };
+                changes.push(format!("passi: {} → {}", list(&doc["steps"]), list(&steps)));
+                doc["steps"] = steps;
+            }
+        }
+        if let Some(policy) = args["on_failure"]
+            .as_str()
+            .filter(|p| matches!(*p, "stop" | "continue"))
+        {
+            if doc["on_failure"] != policy {
+                changes.push(format!(
+                    "in caso di errore: {} → {policy}",
+                    doc["on_failure"].as_str().unwrap_or("stop")
+                ));
+                doc["on_failure"] = policy.into();
+            }
+        }
+        if changes.is_empty() {
+            return Err(invalid(
+                "nessuna modifica rispetto alla versione attuale".into(),
+            ));
+        }
+        let at = now();
+        doc["version"] = (doc["version"].as_u64().unwrap_or(1) + 1).into();
+        doc["updated_at"] = at.clone().into();
+        doc["approval"] = json!({"approved_by": {"kind": "owner", "id": "owner"}, "method": method, "approved_at": at,
+                                  "steps_digest": automation::steps_digest(&doc["steps"])});
+        let report = validate(Contract::Workflow, &doc);
+        if !report.is_valid() {
+            return Err(invalid(format!(
+                "automazione non conforme: {}",
+                report.schema.join("; ")
+            )));
+        }
+        if doc["trigger"] != current["trigger"]
+            && automation::first_run(&doc["trigger"], chrono::Utc::now(), &chrono::Local).is_none()
+        {
+            return Err(invalid("la data indicata è già passata".into()));
+        }
+        Ok((doc, changes))
+    }
+
+    fn apply_update(
+        &mut self,
+        current: &Value,
+        next: Option<String>,
+        args: &Value,
+        method: &str,
+    ) -> Result<Value, tools::ToolError> {
+        let (doc, changes) = self.build_update(current, args, method)?;
+        // Una nuova frequenza riparte da adesso; altrimenti resta la prossima esecuzione prevista.
+        let next = if doc["enabled"] != true {
+            None
+        } else if doc["trigger"] != current["trigger"] {
+            automation::first_run(&doc["trigger"], chrono::Utc::now(), &chrono::Local)
+                .map(automation::ts)
+        } else {
+            next
+        };
+        self.store
+            .workflow_put(&doc, next.as_deref())
+            .and_then(|()| self.store.workflow_version_put(&doc))
+            .map_err(|e| tool_error("workflow.unavailable", e.to_string()))?;
+        Ok(json!({
+            "id": short(&doc), "workflow_id": doc["workflow_id"], "name": doc["name"], "version": doc["version"],
+            "changes": changes, "trigger": automation::describe(&doc["trigger"]),
+            "next_run": next.as_deref().map(automation::fmt_local),
+        }))
+    }
+
+    /// Modifica dall'interfaccia: il proprietario autenticato approva direttamente la nuova versione.
+    pub fn update_workflow(&mut self, key: &str, body: &Value) -> Result<Value, CoreError> {
+        let (current, next) = self
+            .find_workflow(key)
+            .map_err(|e| CoreError::NotFound(e.message))?;
+        let out = self
+            .apply_update(&current, next, body, "owner_ui")
+            .map_err(|e| match e.code {
+                "workflow.unavailable" => CoreError::Internal(e.message),
+                _ => CoreError::BadRequest(e.message),
+            })?;
+        self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "owner", "id": "owner"},
+                          "node": "core-local", "action": "workflow.update", "outcome": "succeeded", "effect": "applied"}))?;
+        Ok(out)
+    }
+
+    pub fn workflow_versions(&self, key: &str) -> Result<Vec<Value>, CoreError> {
+        let (doc, _) = self
+            .find_workflow(key)
+            .map_err(|e| CoreError::NotFound(e.message))?;
+        self.store
+            .workflow_versions(doc["workflow_id"].as_str().unwrap_or_default())
+            .map_err(internal)
     }
 }
 

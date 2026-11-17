@@ -32,7 +32,7 @@ Il catalogo iniziale è in `contracts/catalog/tools`, con un descrittore `jarvis
 | `web.search`, `web.fetch` | medio, destinazione esterna | no (policy su domini e indirizzi) |
 | `workflow.list` | basso | no |
 | `workflow.run` | medio | no (esegue passi già approvati) |
-| `workflow.create`, `workflow.delete` | alto | sì |
+| `workflow.create`, `workflow.update`, `workflow.delete` | alto | sì |
 
 Ciclo di un'operazione: proposta dell'agente → validazione degli argomenti → decisione di policy → eventuale conferma → esecuzione nel Core → evento di audit → risposta composta dall'agente con il risultato. Un timeout o un crash del worker termina il task come `failed`, con un errore v1 a effetto `unknown`.
 
@@ -50,3 +50,5 @@ Garanzie:
 - **riavvio:** le automazioni sopravvivono al riavvio; dopo uno spegnimento si recupera al più un'esecuzione persa.
 
 Dettagli in ADR-0005.
+
+**Modifica (ADR-0008):** nome, frequenza, passi e comportamento in caso di errore si modificano dalla chat («modifica automazione <id> ogni 2 ore», «modifica automazione <id>: info sistema», «rinomina automazione <id> in …») o dall'interfaccia. Ogni modifica crea una nuova versione con una nuova approvazione; le versioni precedenti e il legame fra esecuzione e versione restano consultabili.

@@ -285,3 +285,230 @@ fn every_run_is_audited_with_intact_chain() {
         "creazione dal proprietario registrata: {actors:?}"
     );
 }
+
+// ---------------------------------------------------------------------- modifica (versioni)
+
+#[test]
+fn chat_edit_requires_confirmation_and_creates_a_new_approved_version() {
+    let (mut j, data) = fresh();
+    let id = j
+        .create_workflow(&interval_workflow(
+            json!([{"tool": "time.now", "arguments": {}}]),
+        ))
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    j.run_due(Utc::now() + Duration::seconds(61)).unwrap();
+    let old_digest = j.workflows().unwrap()[0]["approval"]["steps_digest"].clone();
+
+    let out = j
+        .chat(&format!(
+            "modifica automazione {id}: scrivi stato.txt: aggiornato"
+        ))
+        .unwrap();
+    assert_eq!(
+        out.task["state"], "waiting_confirmation",
+        "una modifica richiede conferma"
+    );
+    assert_eq!(
+        j.workflows().unwrap()[0]["version"],
+        1,
+        "nessun effetto prima della conferma"
+    );
+    let cid = out.confirmation.as_ref().unwrap()["confirmation_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let done = j.confirm(&cid, true).unwrap();
+    assert!(
+        done.reply.as_ref().unwrap().contains("versione 2"),
+        "{:?}",
+        done.reply
+    );
+
+    let wf = &j.workflows().unwrap()[0];
+    assert_eq!(wf["version"], 2);
+    assert_eq!(wf["approval"]["method"], "chat_confirmation");
+    assert_ne!(
+        wf["approval"]["steps_digest"], old_digest,
+        "nuova approvazione legata ai nuovi passi"
+    );
+    // Il nuovo passo ad alto rischio è eseguito perché coperto dalla nuova approvazione.
+    let runs = j.run_due(Utc::now() + Duration::seconds(125)).unwrap();
+    assert_eq!(runs[0]["status"], "succeeded");
+    assert_eq!(runs[0]["workflow_version"], 2);
+    assert_eq!(
+        std::fs::read_to_string(data.join("workspace/stato.txt")).unwrap(),
+        "aggiornato"
+    );
+    // Cronologia: la prima esecuzione resta associata alla versione 1.
+    let history = j.workflow_runs(&id, 10).unwrap();
+    assert_eq!(
+        history
+            .iter()
+            .map(|r| r["workflow_version"].as_u64().unwrap())
+            .collect::<Vec<_>>(),
+        [2, 1]
+    );
+    let versions = j.workflow_versions(&id).unwrap();
+    assert_eq!(
+        versions
+            .iter()
+            .map(|v| v["version"].as_u64().unwrap())
+            .collect::<Vec<_>>(),
+        [2, 1]
+    );
+    assert_eq!(
+        versions[1]["steps"][0]["tool"], "time.now",
+        "la versione precedente è conservata intatta"
+    );
+}
+
+#[test]
+fn trigger_change_reschedules_from_now() {
+    let (mut j, _) = fresh();
+    let id = j
+        .create_workflow(&interval_workflow(
+            json!([{"tool": "time.now", "arguments": {}}]),
+        ))
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let out = j
+        .update_workflow(
+            &id,
+            &json!({"trigger": {"kind": "interval", "every_seconds": 7200}}),
+        )
+        .unwrap();
+    assert_eq!(out["changes"][0], "frequenza: ogni minuto → ogni 2 ore");
+    assert!(
+        j.run_due(Utc::now() + Duration::seconds(61))
+            .unwrap()
+            .is_empty(),
+        "la vecchia scadenza non vale più"
+    );
+    assert_eq!(
+        j.run_due(Utc::now() + Duration::seconds(7201))
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn rename_keeps_schedule_and_is_audited() {
+    let (mut j, _) = fresh();
+    let id = j
+        .create_workflow(&interval_workflow(
+            json!([{"tool": "time.now", "arguments": {}}]),
+        ))
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let before = j.workflows().unwrap()[0]["next_run_at"].clone();
+    j.update_workflow(
+        &id,
+        &json!({"name": "Ora esatta", "on_failure": "continue"}),
+    )
+    .unwrap();
+    let wf = &j.workflows().unwrap()[0];
+    assert_eq!(
+        (
+            wf["name"].as_str().unwrap(),
+            wf["on_failure"].as_str().unwrap(),
+            wf["version"].as_u64().unwrap()
+        ),
+        ("Ora esatta", "continue", 2)
+    );
+    assert_eq!(
+        wf["next_run_at"], before,
+        "senza cambio di frequenza la prossima esecuzione resta invariata"
+    );
+    assert_eq!(wf["approval"]["method"], "owner_ui");
+    let audit = j.audit_log(5).unwrap();
+    assert!(audit["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["action"] == "workflow.update" && e["actor"]["kind"] == "owner"));
+}
+
+#[test]
+fn invalid_or_empty_edits_are_rejected_without_changes() {
+    let (mut j, _) = fresh();
+    let id = j
+        .create_workflow(&interval_workflow(
+            json!([{"tool": "time.now", "arguments": {}}]),
+        ))
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    for body in [
+        json!({}),
+        json!({"name": "Prova"}),
+        json!({"trigger": {"kind": "interval", "every_seconds": 5}}),
+        json!({"steps": [{"tool": "workflow.delete", "arguments": {"id": "abcd"}}]}),
+        json!({"steps": [{"tool": "fs.read", "arguments": {}}]}),
+        json!({"trigger": {"kind": "once", "at": "2020-01-01T00:00:00Z"}}),
+    ] {
+        assert!(
+            j.update_workflow(&id, &body).is_err(),
+            "doveva essere rifiutata: {body}"
+        );
+    }
+    assert_eq!(j.workflows().unwrap()[0]["version"], 1);
+    assert!(j
+        .update_workflow("ffffffff", &json!({"name": "x"}))
+        .is_err());
+}
+
+#[test]
+fn editing_a_suspended_workflow_keeps_it_suspended() {
+    let (mut j, _) = fresh();
+    let id = j
+        .create_workflow(&interval_workflow(
+            json!([{"tool": "time.now", "arguments": {}}]),
+        ))
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    j.set_workflow_enabled(&id, false).unwrap();
+    j.update_workflow(
+        &id,
+        &json!({"trigger": {"kind": "interval", "every_seconds": 120}}),
+    )
+    .unwrap();
+    let wf = &j.workflows().unwrap()[0];
+    assert_eq!(wf["enabled"], false);
+    assert!(wf["next_run_at"].is_null());
+    assert!(j
+        .run_due(Utc::now() + Duration::minutes(10))
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
+fn tampering_after_an_edit_is_still_detected() {
+    let (mut j, _) = fresh();
+    let id = j
+        .create_workflow(&interval_workflow(
+            json!([{"tool": "time.now", "arguments": {}}]),
+        ))
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    j.update_workflow(
+        &id,
+        &json!({"steps": [{"tool": "system.info", "arguments": {}}]}),
+    )
+    .unwrap();
+    j.tamper_workflow_for_tests(&id, json!([{"tool": "fs.write", "version": "1.0.0", "arguments": {"path": "x", "content": "y"}}])).unwrap();
+    let runs = j.run_due(Utc::now() + Duration::seconds(61)).unwrap();
+    assert_eq!(runs[0]["error"]["code"], "security.approval_mismatch");
+}

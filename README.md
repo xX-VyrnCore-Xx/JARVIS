@@ -23,7 +23,7 @@ Poi apri **http://localhost:8765**. La prima compilazione richiede qualche minut
 - **Senza Ollama** JARVIS parte in modalità *offline*: un modello a regole capisce comandi come «che ore sono», «info sistema», «elenca file», «scrivi note.txt: testo», «leggi note.txt», «ricorda che …», «cosa ricordi» e «dimentica <id>».
 - **Con Ollama** installa un modello con supporto agli strumenti (per esempio `ollama pull qwen2.5:3b`) e riavvia `./jarvis.sh`: JARVIS lo rileva da solo.
 
-- **Automazioni**: scrivi in chat «ogni ora info sistema», «ogni giorno alle 08:00 scrivi buongiorno.txt: ciao» o «tra 5 minuti che ore sono», oppure usa la sezione Automazioni. Le automazioni sopravvivono al riavvio e conservano la cronologia di ogni esecuzione.
+- **Automazioni**: scrivi in chat «ogni ora info sistema», «ogni giorno alle 08:00 scrivi buongiorno.txt: ciao» o «tra 5 minuti che ore sono», oppure usa la sezione Automazioni. Le automazioni sopravvivono al riavvio e conservano la cronologia di ogni esecuzione. Si possono modificare («modifica automazione <id> ogni 2 ore» o il pulsante Modifica): ogni modifica crea una nuova versione, approvata da te.
 
 - **Ricerca Web**: «cerca intelligenza artificiale» (Wikipedia, oppure il tuo SearXNG) e «apri https://…». Sotto ogni risposta compaiono le **fonti**: link, ora di recupero e impronta SHA-256 della pagina letta. Le istruzioni contenute nelle pagine non vengono mai eseguite. Gli indirizzi locali e della rete di casa sono bloccati.
 - **Notifiche**: la campanella in alto segnala conferme in attesa, automazioni fallite e anomalie (agente AI non disponibile, audit alterato). Ogni notifica è collegata al task che l'ha generata.

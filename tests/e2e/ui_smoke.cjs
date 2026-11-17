@@ -70,7 +70,8 @@ function check(cond, msg) {
   await page.waitForFunction((n) => document.querySelectorAll(".msg.assistant").length > n, before);
   check((await page.locator(".msg.assistant").last().innerText()).includes("diario.txt"), "scrittura eseguita dopo l'approvazione");
   await page.waitForFunction(() => document.querySelector("#notif-count").hidden);
-  check(true, "notifica chiusa dopo l'approvazione");
+  check(!(await page.isVisible("#notif-count")), "contatore nascosto davvero (non solo l'attributo) dopo l'approvazione");
+  check((await page.locator(".toast", { hasText: "diario.txt" }).count()) === 0, "toast della conferma rimosso dopo la decisione");
   check((await send("leggi diario.txt")).includes("nota creata dal test E2E"), "lettura del file scritto");
   check((await send("leggi ../../etc/passwd")).includes("negato"), "uscita dalla workspace negata");
   await send("ricorda che il test E2E è passato");
@@ -112,6 +113,16 @@ function check(cond, msg) {
   await page.click('#wf-form button[type="submit"]');
   await page.waitForFunction(() => /Battito dal modulo/.test(document.querySelector("#automations").innerText));
   check((await page.locator("#automations").innerText()).includes("ogni 5 minuti"), "automazione creata dal modulo");
+  // Modifica: nuova versione dal modulo precompilato.
+  const card = page.locator("#automations .card", { hasText: "Battito dal modulo" });
+  await card.getByRole("button", { name: "Modifica" }).click();
+  check((await page.inputValue('#wf-form input[name="name"]')) === "Battito dal modulo", "modulo precompilato per la modifica");
+  check((await page.inputValue('#wf-steps [data-arg="path"]')) === "battito.txt", "passi precompilati");
+  await page.fill('#wf-form input[name="every"]', "10");
+  page.once("dialog", (d) => d.accept());
+  await page.click('#wf-form button[type="submit"]');
+  await page.waitForFunction(() => /ogni 10 minuti/.test(document.querySelector("#automations").innerText));
+  check((await page.locator("#automations .card", { hasText: "Battito dal modulo" }).innerText()).includes("v2"), "modifica salvata come versione 2");
   if (shots) await page.screenshot({ path: `${shots}/jarvis-automazioni.png` });
 
   // Ricerca Web con fonti e provenienza (RF-06).

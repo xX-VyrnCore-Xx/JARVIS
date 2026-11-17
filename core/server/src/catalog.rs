@@ -17,7 +17,7 @@ macro_rules! tool_file {
     };
 }
 
-const SOURCES: [&str; 14] = [
+const SOURCES: [&str; 15] = [
     tool_file!("fs.list"),
     tool_file!("fs.read"),
     tool_file!("fs.write"),
@@ -32,6 +32,7 @@ const SOURCES: [&str; 14] = [
     tool_file!("workflow.delete"),
     tool_file!("workflow.list"),
     tool_file!("workflow.run"),
+    tool_file!("workflow.update"),
 ];
 
 pub struct Tool {

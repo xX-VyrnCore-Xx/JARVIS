@@ -95,6 +95,7 @@ function addConfirmation(c) {
   const card = el("div", { class: "confirm", role: "group", "aria-label": "Conferma richiesta" });
   const decide = async (approve) => {
     card.querySelectorAll("button").forEach((b) => (b.disabled = true));
+    document.querySelectorAll(".toast").forEach((t) => { if (t.dataset.key === `confirmation:${c.confirmation_id}`) t.remove(); });
     try {
       const out = await api(`/api/confirmations/${encodeURIComponent(c.confirmation_id)}`, { method: "POST", body: JSON.stringify({ approve }) });
       card.replaceWith(el("div", { class: "confirm" }, el("p", { class: "small" }, approve ? "✓ Confermato" : "✗ Rifiutato")));
@@ -218,7 +219,7 @@ async function catalog() {
   return toolCatalog;
 }
 
-async function addStep() {
+async function addStep(initial) {
   const tools = await catalog();
   const box = el("div", { class: "step-box" });
   const select = el("select", { "aria-label": "Strumento" }, tools.map((t) => el("option", { value: t.name }, `${t.name} — ${t.summary}`)));
@@ -236,7 +237,45 @@ async function addStep() {
   select.addEventListener("change", renderArgs);
   box.append(el("div", { class: "head" }, select, el("button", { type: "button", class: "ghost danger", onclick: () => box.remove(), "aria-label": "Rimuovi passo" }, "✕")), args);
   $("#wf-steps").append(box);
+  if (initial && initial.tool) select.value = initial.tool;
   renderArgs();
+  if (initial && initial.arguments) {
+    for (const [k, v] of Object.entries(initial.arguments)) {
+      const input = box.querySelector(`[data-arg="${CSS.escape(k)}"]`);
+      if (input) input.value = String(v);
+    }
+  }
+}
+
+let editing = null;
+
+async function editWorkflow(w) {
+  const form = $("#wf-form");
+  editing = w;
+  $("#wf-new").open = true;
+  $("#wf-new summary").textContent = `Modifica «${w.name}» (versione ${w.version} → ${w.version + 1})`;
+  form.querySelector('button[type="submit"]').textContent = "Salva nuova versione";
+  form.name.value = w.name;
+  form.kind.value = w.trigger.kind;
+  form.kind.dispatchEvent(new Event("change"));
+  if (w.trigger.kind === "daily") form.at.value = w.trigger.at;
+  if (w.trigger.kind === "interval") form.every.value = Math.round(w.trigger.every_seconds / 60);
+  if (w.trigger.kind === "once") form.every.value = Math.max(1, Math.round((new Date(w.trigger.at) - Date.now()) / 60000));
+  form.continue.checked = w.on_failure === "continue";
+  $("#wf-steps").replaceChildren();
+  for (const step of w.steps) await addStep(step);
+  $("#wf-new").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function resetWorkflowForm() {
+  editing = null;
+  $("#wf-form").reset();
+  $("#wf-steps").replaceChildren();
+  $("#wf-new").open = false;
+  $("#wf-new summary").textContent = "Nuova automazione";
+  $("#wf-form").querySelector('button[type="submit"]').textContent = "Crea automazione";
+  $("#wf-at").hidden = true;
+  $("#wf-every").hidden = false;
 }
 
 function readForm(form) {
@@ -253,7 +292,7 @@ function readForm(form) {
   return { name: f.get("name"), trigger, steps, on_failure: f.get("continue") ? "continue" : "stop" };
 }
 
-$("#wf-add-step").addEventListener("click", addStep);
+$("#wf-add-step").addEventListener("click", () => addStep());
 $("#wf-form").kind.addEventListener("change", (e) => {
   $("#wf-at").hidden = e.target.value !== "daily";
   $("#wf-every").hidden = e.target.value === "daily";
@@ -264,12 +303,16 @@ $("#wf-form").addEventListener("submit", async (e) => {
   const body = readForm(e.target);
   if (!body.steps.length) return alert("Aggiungi almeno un passo.");
   const list = body.steps.map((s, i) => `${i + 1}. ${s.tool} ${JSON.stringify(s.arguments)}`).join("\n");
-  if (!confirm(`Approvi l'automazione «${body.name}»?\n\n${list}\n\nI passi verranno eseguiti in background con la policy vigente.`)) return;
+  const what = editing ? `la nuova versione (${editing.version + 1}) di «${body.name}»` : `l'automazione «${body.name}»`;
+  if (!confirm(`Approvi ${what}?\n\n${list}\n\nI passi verranno eseguiti in background con la policy vigente.`)) return;
   try {
-    await api("/api/workflows", { method: "POST", body: JSON.stringify(body) });
-    e.target.reset();
-    $("#wf-steps").replaceChildren();
-    $("#wf-new").open = false;
+    if (editing) {
+      if (editing.trigger.kind === "once" && body.trigger.kind === "once" && body.trigger.at && Math.abs(new Date(body.trigger.at) - new Date(editing.trigger.at)) < 60000) body.trigger = editing.trigger;
+      await api(`/api/workflows/${editing.workflow_id}`, { method: "PUT", body: JSON.stringify(body) });
+    } else {
+      await api("/api/workflows", { method: "POST", body: JSON.stringify(body) });
+    }
+    resetWorkflowForm();
     views.automations();
   } catch (err) { alert(err.message); }
 });
@@ -278,7 +321,7 @@ async function showRuns(w, box) {
   if (box.childElementCount) return box.replaceChildren();
   const { items } = await api(`/api/workflows/${w.workflow_id}/runs`);
   box.replaceChildren(...(items.length ? items.map((r) => el("div", { class: "sub" },
-    `${fmtTime(r.started_at)} · ${r.trigger.kind} · ${r.status} · ` + r.steps.map((s) => `${s.tool}:${s.status}${s.preapproved ? " (pre-approvato)" : ""}${s.error_code ? " " + s.error_code : ""}`).join(", "))) :
+    `${fmtTime(r.started_at)} · v${r.workflow_version} · ${r.trigger.kind} · ${r.status} · ` + r.steps.map((s) => `${s.tool}:${s.status}${s.preapproved ? " (pre-approvato)" : ""}${s.error_code ? " " + s.error_code : ""}`).join(", "))) :
     [el("div", { class: "sub" }, "Nessuna esecuzione.")]));
 }
 
@@ -291,12 +334,13 @@ views.automations = async () => {
     } }, label);
     return el("div", { class: "card" },
       el("div", { class: "body" },
-        el("div", { class: "title" }, `${w.name}`),
+        el("div", { class: "title" }, `${w.name} `, el("span", { class: "sub" }, `v${w.version}`)),
         el("div", { class: "sub" }, `[${w.id}] ${w.trigger_text} · ${w.steps.map((s) => s.tool).join(" → ")}`),
         el("div", { class: "sub" }, `prossima: ${w.next_run || "—"} · ultima: ${w.last_run ? `${w.last_run.status} (${fmtTime(w.last_run.started_at)})` : "mai"}`),
         el("div", { class: "actions-row" },
           act("Esegui ora", () => api(`/api/workflows/${w.workflow_id}/run`, { method: "POST" })),
           act(w.enabled ? "Sospendi" : "Riattiva", () => api(`/api/workflows/${w.workflow_id}/enabled`, { method: "POST", body: JSON.stringify({ enabled: !w.enabled }) })),
+          el("button", { class: "ghost", onclick: () => editWorkflow(w).catch((e) => alert(e.message)) }, "Modifica"),
           el("button", { class: "ghost", onclick: () => showRuns(w, runs).catch((e) => alert(e.message)) }, "Cronologia"),
           act("Elimina", async () => {
             if (!confirm(`Eliminare «${w.name}»?`)) throw new Error("Annullato");
@@ -324,7 +368,7 @@ let notifSince = null;
 let notifPrimed = false;
 
 function toast(n) {
-  const t = el("div", { class: `toast ${n.severity}`, role: "status", onclick: () => { openNotification(n); t.remove(); } },
+  const t = el("div", { class: `toast ${n.severity}`, role: "status", "data-key": n.dedupe_key || n.notification_id, onclick: () => { openNotification(n); t.remove(); } },
     el("div", { class: "t" }, n.title), n.body ? el("div", { class: "b" }, n.body) : null);
   $("#toasts").append(t);
   setTimeout(() => t.remove(), 8000);

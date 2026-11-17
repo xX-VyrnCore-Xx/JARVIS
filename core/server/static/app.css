@@ -91,6 +91,7 @@ main { flex: 1; min-width: 0; min-height: 0; display: flex; }
 
 .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .bell { position: relative; padding: .15rem .55rem; border-radius: 999px; background: transparent; line-height: 1.4; }
+.bell .count[hidden] { display: none; }
 .bell .count { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; background: var(--bad); color: #fff; font-size: .7rem; font-weight: 700; display: grid; place-items: center; }
 .notif-panel { position: absolute; right: 1rem; top: calc(100% + 6px); width: min(420px, calc(100vw - 32px)); max-height: 70vh; overflow: auto; z-index: 20; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 12px 32px rgba(0,0,0,.25); }
 .notif-head { position: sticky; top: 0; background: var(--panel); display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .6rem .8rem; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
