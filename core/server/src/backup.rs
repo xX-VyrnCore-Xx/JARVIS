@@ -105,6 +105,11 @@ pub fn create(
         ("data/jarvis.sqlite3".into(), db),
         ("data/audit/core-security.jsonl".into(), audit),
     ];
+    // Chiave dei segreti dei connettori: senza di essa i segreti ripristinati sarebbero illeggibili.
+    // Resta protetta dalla cifratura del backup.
+    if let Ok(key) = fs::read(data_dir.join(".secrets.key")) {
+        files.push(("data/.secrets.key".into(), key));
+    }
     let workspace = data_dir.join("workspace");
     for path in workspace_files(&workspace) {
         let rel = path.strip_prefix(data_dir).map_err(|e| e.to_string())?;

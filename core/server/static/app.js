@@ -174,6 +174,27 @@ async function loadConversation() {
 // ------------------------------------------------------------------ altre viste
 
 const views = {
+  async connectors() {
+    const { items } = await api("/api/connectors");
+    const box = $("#connectors");
+    box.replaceChildren(...(items.length ? items.map((c) => {
+      const cred = el("input", { type: "password", autocomplete: "off", placeholder: c.auth === "none" ? "nessuna credenziale" : "token o chiave API", "aria-label": `Credenziale per ${c.name}` });
+      const act = (path, method, body) => async () => {
+        try { await api(path, { method, body: body ? JSON.stringify(body()) : undefined }); views.connectors(); } catch (e) { alert(e.message); }
+      };
+      return el("div", { class: "card" },
+        el("div", { class: "body" },
+          el("div", { class: "title" }, `${c.name} `, el("span", { class: "sub" }, `${c.id} · v${c.version}`)),
+          el("div", { class: "sub" }, `${c.base_url} · autenticazione ${c.auth}${c.webhook ? ` · webhook ${c.webhook_path}` : ""}`),
+          el("ul", { class: "history" }, (c.operations || []).map((o) => el("li", {}, `${o.tool} — ${o.summary} (${o.method}, rischio ${o.risk}${o.effects === "write_external" ? ", con conferma" : ""})`))),
+          el("div", { class: "row" },
+            c.auth === "none" ? null : cred,
+            el("button", { class: "primary", onclick: act(`/api/connectors/${encodeURIComponent(c.id)}/authorize`, "POST", () => ({ credential: cred.value })) }, c.authorized ? "Aggiorna credenziale" : "Autorizza"),
+            c.authorized ? el("button", { class: "ghost", onclick: act(`/api/connectors/${encodeURIComponent(c.id)}/revoke`, "POST") }, "Revoca") : null,
+            el("button", { class: "danger", onclick: async () => { if (confirm(`Disinstallare ${c.name}? Credenziale e webhook verranno cancellati.`)) await act(`/api/connectors/${encodeURIComponent(c.id)}`, "DELETE")(); } }, "Disinstalla"))),
+        el("span", { class: `badge ${c.authorized ? "succeeded" : "pending"}` }, c.authorized ? "autorizzato" : "da autorizzare"));
+    }) : [el("p", { class: "empty" }, "Nessun connettore installato.")]));
+  },
   async tasks() {
     const { items } = await api("/api/tasks?limit=50");
     const box = $("#tasks");
@@ -398,6 +419,21 @@ $("#backup-form").addEventListener("submit", async (e) => {
   } catch (err) { alert(err.message); } finally { button.disabled = false; button.textContent = "Crea backup"; }
 });
 
+$("#connector-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  let manifest;
+  try { manifest = JSON.parse(f.manifest.value); } catch { alert("Il manifest non è JSON valido"); return; }
+  try {
+    const out = await api("/api/connectors", { method: "POST", body: JSON.stringify(manifest) });
+    f.reset();
+    const note = $("#connector-secret");
+    note.hidden = !out.webhook_secret;
+    note.textContent = out.webhook_secret ? `Segreto del webhook (mostrato una sola volta, usalo per firmare X-Jarvis-Signature con HMAC-SHA256): ${out.webhook_secret}` : "";
+    views.connectors();
+  } catch (err) { alert(err.message); }
+});
+
 function show(view) {
   document.querySelectorAll(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${view}`));
@@ -410,7 +446,7 @@ document.querySelectorAll("[data-refresh]").forEach((b) => b.addEventListener("c
 
 // ------------------------------------------------------------------ notifiche (RF-13)
 
-const CATEGORY = { automation: "automazione", confirmation: "conferma", system: "sistema", security: "sicurezza" };
+const CATEGORY = { automation: "automazione", confirmation: "conferma", system: "sistema", security: "sicurezza", integration: "integrazione" };
 let notifSince = null;
 let notifPrimed = false;
 

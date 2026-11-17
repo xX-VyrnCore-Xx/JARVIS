@@ -74,6 +74,12 @@ fn resource_uri(tool: &str, args: &Value) -> String {
                 .unwrap_or_default();
             format!("jarvis://web/{}", clean(&host))
         }
+        _ if tool.starts_with("connector.") => {
+            format!(
+                "jarvis://connector/{}",
+                clean(&tool["connector.".len()..].replacen('.', "/", 1))
+            )
+        }
         _ => format!("jarvis://tool/{}", clean(tool)),
     }
 }
@@ -143,6 +149,10 @@ fn expected_effect(tool: &str, args: &Value) -> String {
             "Cancellare definitivamente l'elemento di memoria {}",
             args["id"].as_str().unwrap_or("?")
         ),
+        t if t.starts_with("connector.") => format!(
+            "Inviare al servizio esterno del connettore ({t}) i dati: {}",
+            args.to_string().chars().take(300).collect::<String>()
+        ),
         _ => format!("Eseguire {tool} con argomenti {args}"),
     }
 }
@@ -201,7 +211,7 @@ pub fn decide(catalog: &Catalog, web: &WebConfig, req: &Request) -> Value {
             "action": {"tool": if tool.is_some() { req.tool } else { "unknown" }, "version": if tool.is_some() { req.version } else { "0.0.0" }},
             "resource": resource_uri(req.tool, req.arguments),
             "node": "core-local",
-            "destination": if req.tool.starts_with("web.") { "external" } else { "local" },
+            "destination": if req.tool.starts_with("web.") || req.tool.starts_with("connector.") { "external" } else { "local" },
             "parameters_digest": req.digest,
         },
         "decision": decision,

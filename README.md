@@ -43,6 +43,7 @@ sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev
 - **Notifiche**: la campanella in alto segnala conferme in attesa, automazioni fallite e anomalie (agente AI non disponibile, audit alterato). Ogni notifica è collegata al task che l'ha generata.
 
 - **Backup**: dalla sezione Sistema o con `./jarvis.sh backup` crei una copia cifrata dei tuoi dati, protetta da una passphrase che scegli tu (senza passphrase la copia non si apre). Per ripristinarla, con JARVIS chiuso: `./jarvis.sh restore data-backups/<file>.jbak`.
+- **Connettori**: nella sezione Connettori incolli il manifest JSON di un servizio esterno (esempio in `tests/contracts/fixtures/valid/connector.meteo.json`), lo autorizzi con il suo token e lo usi in chat con «connettore <id> <operazione> chiave=valore». Il token resta cifrato nel Core e non viene mai mostrato. Le operazioni che scrivono verso l'esterno chiedono sempre conferma. «Revoca» cancella il token e blocca subito le chiamate.
 - **Sistema**: la sezione omonima mostra stato dei componenti e latenze misurate. I log diagnostici sono in `data/logs/core.jsonl` e non contengono i tuoi messaggi.
 
 Cosa osservare:
@@ -69,7 +70,7 @@ Cosa osservare:
 
 Limiti noti della v0.1:
 - un solo utente locale e una richiesta alla volta;
-- nessuna voce, nessun client desktop o mobile, nessun Web Agent;
+- nessun client mobile; connettori solo HTTP dichiarativi (niente OAuth né plugin con codice);
 - con Ollama la qualità degli strumenti dipende dal modello scelto.
 
 Dettagli in [docs/ROADMAP.md](docs/ROADMAP.md) e nell'ADR-0004 in [docs/DECISIONS.md](docs/DECISIONS.md).

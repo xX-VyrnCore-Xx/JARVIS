@@ -37,6 +37,7 @@
       <button class="nav-item" data-view="automations">Automazioni</button>
       <button class="nav-item" data-view="memory">Memoria</button>
       <button class="nav-item" data-view="workspace">Workspace</button>
+      <button class="nav-item" data-view="connectors">Connettori</button>
       <button class="nav-item" data-view="audit">Audit</button>
       <button class="nav-item" data-view="system">Sistema</button>
     </nav>
@@ -109,6 +110,16 @@
         <div class="view-head"><h2>Workspace</h2><button class="ghost" data-refresh="workspace">Aggiorna</button></div>
         <p class="hint">L'unica cartella in cui gli strumenti file possono leggere e scrivere.</p>
         <div id="workspace" class="list"></div>
+      </section>
+      <section class="view" id="view-connectors" aria-label="Connettori">
+        <div class="view-head"><h2>Connettori</h2><button class="ghost" data-refresh="connectors">Aggiorna</button></div>
+        <p class="hint">Servizi esterni descritti da un manifest <code>jarvis.connector/1</code>. Le credenziali restano cifrate nel Core e non vengono mai mostrate; le scritture verso l'esterno chiedono sempre conferma. In chat: «connettore &lt;id&gt; &lt;operazione&gt; chiave=valore».</p>
+        <div id="connectors" class="list"></div>
+        <form id="connector-form" class="form">
+          <label>Manifest del connettore (JSON)<textarea name="manifest" rows="8" required spellcheck="false" placeholder='{"contract": "jarvis.connector/1", "id": "meteo", ...}'></textarea></label>
+          <div class="row"><button type="submit" class="primary">Installa</button></div>
+          <p class="hint" id="connector-secret" hidden></p>
+        </form>
       </section>
       <section class="view" id="view-audit" aria-label="Audit">
         <div class="view-head"><h2>Audit</h2><button class="ghost" data-refresh="audit">Aggiorna</button></div>

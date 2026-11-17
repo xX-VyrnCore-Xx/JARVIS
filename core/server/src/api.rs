@@ -47,6 +47,7 @@ impl IntoResponse for CoreError {
             CoreError::Unavailable(m) => error(StatusCode::SERVICE_UNAVAILABLE, "unavailable", m),
             CoreError::NotFound(m) => error(StatusCode::NOT_FOUND, "not_found", m),
             CoreError::Gone(m) => error(StatusCode::GONE, "expired", m),
+            CoreError::Unauthorized(m) => error(StatusCode::UNAUTHORIZED, "unauthorized", m),
             CoreError::Internal(m) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal", m),
         }
     }
@@ -87,7 +88,8 @@ async fn guard(State(state): State<Shared>, req: Request, next: Next) -> Respons
         .map(|m| m.as_str().to_string())
         .unwrap_or_else(|| "non trovato".into());
     let method = req.method().to_string();
-    if path.starts_with("/api/") && path != "/api/health" {
+    // I webhook dei connettori si autenticano con la firma HMAC del corpo, non con il token di sessione.
+    if path.starts_with("/api/") && path != "/api/health" && !path.starts_with("/api/hooks/") {
         let token = req
             .headers()
             .get("x-jarvis-token")
@@ -171,6 +173,14 @@ pub fn router(state: Shared) -> Router {
             post(voice_transcribe).layer(axum::extract::DefaultBodyLimit::max(5 * 1024 * 1024)),
         )
         .route("/api/voice/speak", post(voice_speak))
+        .route("/api/connectors", get(connectors).post(install_connector))
+        .route("/api/connectors/{id}", delete(uninstall_connector))
+        .route("/api/connectors/{id}/authorize", post(authorize_connector))
+        .route("/api/connectors/{id}/revoke", post(revoke_connector))
+        .route(
+            "/api/hooks/{id}",
+            post(connector_hook).layer(axum::extract::DefaultBodyLimit::max(256 * 1024)),
+        )
         .route("/api/notifications", get(notifications))
         .route("/api/notifications/read-all", post(read_all))
         .route("/api/notifications/{id}/read", post(read_one))
@@ -402,6 +412,54 @@ async fn workflows(State(state): State<Shared>) -> Response {
     reply(
         with_core(&state, |j| {
             j.workflows().map(|items| json!({"items": items}))
+        })
+        .await,
+    )
+}
+
+async fn connectors(State(state): State<Shared>) -> Response {
+    reply(
+        with_core(&state, |j| {
+            j.connectors().map(|items| json!({"items": items}))
+        })
+        .await,
+    )
+}
+
+async fn install_connector(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply(with_core(&state, move |j| j.install_connector(&body)).await)
+}
+
+async fn authorize_connector(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    let credential = body["credential"].as_str().unwrap_or_default().to_string();
+    reply(with_core(&state, move |j| j.authorize_connector(&id, &credential)).await)
+}
+
+async fn revoke_connector(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    reply(with_core(&state, move |j| j.revoke_connector(&id, false)).await)
+}
+
+async fn uninstall_connector(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    reply(with_core(&state, move |j| j.revoke_connector(&id, true)).await)
+}
+
+async fn connector_hook(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> Response {
+    let signature = headers
+        .get("x-jarvis-signature")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+    reply(
+        with_core(&state, move |j| {
+            j.connector_webhook(&id, &body, signature.as_deref())
         })
         .await,
     )

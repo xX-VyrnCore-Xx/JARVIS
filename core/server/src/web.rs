@@ -301,6 +301,76 @@ fn get(cfg: &WebConfig, start: Url, trusted_endpoint: bool) -> Result<Fetched, T
     ))
 }
 
+/// Richiesta HTTP per i connettori: host vincolato a `allowed_hosts`, controlli SSRF, nessun redirect.
+/// Restituisce stato, tipo di contenuto e corpo (al massimo 1 MiB).
+pub fn request(
+    cfg: &WebConfig,
+    method: &str,
+    url: &Url,
+    headers: &[(String, String)],
+    body: Option<&[u8]>,
+    allowed_hosts: &[String],
+) -> Result<(u16, String, Vec<u8>), ToolError> {
+    let host = url.host_str().unwrap_or_default().to_ascii_lowercase();
+    if !allowed_hosts.iter().any(|h| h == &host) {
+        return Err(err(
+            "connector.host_not_allowed",
+            format!("host {host} non dichiarato dal connettore"),
+        ));
+    }
+    check_url(cfg, url.as_str()).map_err(|reason| {
+        err(
+            "connector.blocked",
+            format!("indirizzo non ammesso ({reason})"),
+        )
+    })?;
+    let pinned = resolve_checked(url, cfg.allow_private)?;
+    let agent = ureq::AgentBuilder::new()
+        .timeout(cfg.timeout)
+        .redirects(0)
+        .user_agent(concat!("JARVIS/", env!("CARGO_PKG_VERSION")))
+        .resolver(move |_: &str| Ok(pinned.clone()))
+        .build();
+    let mut req = agent.request(method, url.as_str());
+    for (k, v) in headers {
+        req = req.set(k, v);
+    }
+    let result = match body {
+        Some(b) => req.set("Content-Type", "application/json").send_bytes(b),
+        None => req.call(),
+    };
+    let response = match result {
+        Ok(r) => r,
+        Err(ureq::Error::Status(_, r)) => r,
+        Err(ureq::Error::Transport(t)) => {
+            let timeout = t.to_string().to_ascii_lowercase().contains("timed out");
+            return Err(err(
+                if timeout {
+                    "web.timeout"
+                } else {
+                    "web.unreachable"
+                },
+                format!("{host}: {t}"),
+            ));
+        }
+    };
+    let status = response.status();
+    if (300..400).contains(&status) {
+        return Err(err(
+            "connector.redirect_refused",
+            "i connettori non seguono redirect",
+        ));
+    }
+    let ctype = response.content_type().to_ascii_lowercase();
+    let mut data = Vec::new();
+    response
+        .into_reader()
+        .take(MAX_BYTES)
+        .read_to_end(&mut data)
+        .map_err(|e| err("web.unreachable", format!("lettura interrotta: {e}")))?;
+    Ok((status, ctype, data))
+}
+
 fn now() -> String {
     crate::now()
 }
