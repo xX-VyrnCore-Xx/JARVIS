@@ -25,6 +25,7 @@ Poi apri **http://localhost:8765**. La prima compilazione richiede qualche minut
 
 - **Automazioni**: scrivi in chat «ogni ora info sistema», «ogni giorno alle 08:00 scrivi buongiorno.txt: ciao» o «tra 5 minuti che ore sono», oppure usa la sezione Automazioni. Le automazioni sopravvivono al riavvio e conservano la cronologia di ogni esecuzione.
 
+- **Ricerca Web**: «cerca intelligenza artificiale» (Wikipedia, oppure il tuo SearXNG) e «apri https://…». Sotto ogni risposta compaiono le **fonti**: link, ora di recupero e impronta SHA-256 della pagina letta. Le istruzioni contenute nelle pagine non vengono mai eseguite. Gli indirizzi locali e della rete di casa sono bloccati.
 - **Notifiche**: la campanella in alto segnala conferme in attesa, automazioni fallite e anomalie (agente AI non disponibile, audit alterato). Ogni notifica è collegata al task che l'ha generata.
 
 Cosa osservare:
@@ -41,6 +42,10 @@ Cosa osservare:
 | `JARVIS_OLLAMA_URL` | `http://127.0.0.1:11434` | Indirizzo di Ollama |
 | `JARVIS_OLLAMA_MODEL` | primo modello installato | Modello da usare, per esempio `qwen2.5:3b` |
 | `JARVIS_SCHEDULER_TICK_S` | `20` | Ogni quanti secondi il Core controlla le automazioni scadute |
+| `JARVIS_WEB` | attivo | `off` disattiva ricerca e lettura di pagine |
+| `JARVIS_SEARCH_LANG` | `it` | Lingua di Wikipedia per la ricerca |
+| `JARVIS_SEARXNG_URL` | — | Usa un'istanza SearXNG (anche locale) al posto di Wikipedia |
+| `JARVIS_WEB_ALLOW` / `JARVIS_WEB_DENY` | — | Domini consentiti o vietati, separati da virgola (`wikipedia.org,example.org`) |
 
 Limiti noti della v0.1:
 - un solo utente locale e una richiesta alla volta;

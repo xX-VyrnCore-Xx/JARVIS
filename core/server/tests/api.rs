@@ -33,6 +33,7 @@ fn env() -> Env {
         delegation_timeout_ms: 30_000,
         scheduler_tick_s: 20,
         token: TOKEN.into(),
+        web: jarvis_core::web::WebConfig::default(),
     };
     let core = Jarvis::new(cfg).expect("core");
     Env {
@@ -401,6 +402,7 @@ async fn conversation_and_tasks_persist_across_restart() {
         delegation_timeout_ms: 30_000,
         scheduler_tick_s: 20,
         token: TOKEN.into(),
+        web: jarvis_core::web::WebConfig::default(),
     };
     let again = Env {
         app: api::router(api::state(Jarvis::new(cfg).unwrap(), TOKEN.into(), PORT)),

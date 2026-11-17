@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 
 use crate::catalog::Catalog;
 use crate::tools::lexically_inside;
+use crate::web::{check_url, WebConfig};
 
 pub const POLICY_VERSION: &str = "0.1.0";
 pub const CONFIRMATION_TTL_SECS: i64 = 300;
@@ -21,6 +22,14 @@ pub fn explain(reason: &str) -> &'static str {
         "policy.unknown_tool" => "strumento non presente nel catalogo autorizzato",
         "policy.invalid_arguments" => "argomenti non conformi al descrittore dello strumento",
         "policy.path_outside_workspace" => "il percorso è fuori dalla workspace di JARVIS",
+        "policy.web_disabled" => "l'accesso al Web è disattivato (JARVIS_WEB=off)",
+        "policy.private_address" => {
+            "l'indirizzo è locale o privato: JARVIS legge solo pagine pubbliche"
+        }
+        "policy.url_not_allowed" => "il dominio non è consentito dalla configurazione Web",
+        "policy.url_scheme_not_allowed" => "sono ammessi solo indirizzi http e https",
+        "policy.url_with_credentials" => "l'indirizzo contiene credenziali",
+        "policy.invalid_url" => "l'indirizzo non è valido",
         _ => "azione non autorizzata dalla policy",
     }
 }
@@ -57,6 +66,14 @@ fn resource_uri(tool: &str, args: &Value) -> String {
     };
     match args["path"].as_str() {
         Some(p) if tool.starts_with("fs.") => format!("jarvis://file/workspace/{}", clean(p)),
+        _ if tool == "web.fetch" => {
+            let host = args["url"]
+                .as_str()
+                .and_then(|u| url::Url::parse(u).ok())
+                .and_then(|u| u.host_str().map(str::to_string))
+                .unwrap_or_default();
+            format!("jarvis://web/{}", clean(&host))
+        }
         _ => format!("jarvis://tool/{}", clean(tool)),
     }
 }
@@ -73,6 +90,28 @@ fn expected_effect(tool: &str, args: &Value) -> String {
             };
             format!("Scrivere {} byte nel file '{}' della workspace (sovrascrive se esiste). Anteprima: «{preview}{more}»", content.len(), args["path"].as_str().unwrap_or("?"))
         }
+        "workflow.create" => {
+            let steps: Vec<String> = args["steps"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .map(|x| {
+                            format!("{} {}", x["tool"].as_str().unwrap_or("?"), x["arguments"])
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            format!(
+                "Creare l'automazione «{}» ({}) che eseguirà in background, senza altre conferme: {}",
+                args["name"].as_str().unwrap_or("?"),
+                crate::automation::describe(&args["trigger"]),
+                steps.join(" → ")
+            )
+        }
+        "workflow.delete" => format!(
+            "Eliminare definitivamente l'automazione {}",
+            args["id"].as_str().unwrap_or("?")
+        ),
         "memory.forget" => format!(
             "Cancellare definitivamente l'elemento di memoria {}",
             args["id"].as_str().unwrap_or("?")
@@ -81,7 +120,7 @@ fn expected_effect(tool: &str, args: &Value) -> String {
     }
 }
 
-pub fn decide(catalog: &Catalog, req: &Request) -> Value {
+pub fn decide(catalog: &Catalog, web: &WebConfig, req: &Request) -> Value {
     let now = Utc::now();
     let ts = |t: chrono::DateTime<Utc>| t.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
     let tool = catalog.get(req.tool).filter(|t| t.version() == req.version);
@@ -98,6 +137,21 @@ pub fn decide(catalog: &Catalog, req: &Request) -> Value {
             (
                 "deny",
                 vec!["policy.path_outside_workspace"],
+                t.risk().into(),
+            )
+        }
+        Some(t) if t.name().starts_with("web.") && !web.enabled => {
+            ("deny", vec!["policy.web_disabled"], t.risk().into())
+        }
+        Some(t)
+            if t.name() == "web.fetch"
+                && check_url(web, req.arguments["url"].as_str().unwrap_or_default()).is_err() =>
+        {
+            (
+                "deny",
+                vec![
+                    check_url(web, req.arguments["url"].as_str().unwrap_or_default()).unwrap_err(),
+                ],
                 t.risk().into(),
             )
         }
@@ -120,7 +174,7 @@ pub fn decide(catalog: &Catalog, req: &Request) -> Value {
             "action": {"tool": if tool.is_some() { req.tool } else { "unknown" }, "version": if tool.is_some() { req.version } else { "0.0.0" }},
             "resource": resource_uri(req.tool, req.arguments),
             "node": "core-local",
-            "destination": "local",
+            "destination": if req.tool.starts_with("web.") { "external" } else { "local" },
             "parameters_digest": req.digest,
         },
         "decision": decision,

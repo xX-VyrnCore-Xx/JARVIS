@@ -87,6 +87,7 @@ pub fn resolve(workspace: &Path, rel: &str, must_exist: bool) -> Result<PathBuf,
 pub struct Context<'a> {
     pub workspace: &'a Path,
     pub store: &'a Store,
+    pub web: &'a crate::web::WebConfig,
 }
 
 pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolError> {
@@ -193,6 +194,22 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
                     format!("nessun elemento con id {}", s("id")),
                 ))
             }
+        }
+        "web.search" => {
+            if !ctx.web.enabled {
+                return Err(ToolError::new("web.disabled", "accesso al Web disattivato"));
+            }
+            crate::web::search(
+                ctx.web,
+                s("query"),
+                args["limit"].as_u64().unwrap_or(5) as usize,
+            )
+        }
+        "web.fetch" => {
+            if !ctx.web.enabled {
+                return Err(ToolError::new("web.disabled", "accesso al Web disattivato"));
+            }
+            crate::web::fetch(ctx.web, s("url"))
         }
         other => Err(ToolError::new(
             "tool.unknown",

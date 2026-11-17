@@ -105,6 +105,8 @@ pub struct Outcome {
     pub confirmation: Option<Value>,
     pub steps: Vec<Value>,
     pub backend: Option<Value>,
+    /// Fonti Web consultate (RF-06): aggiunte dal Core, indipendentemente dal testo del modello.
+    pub sources: Vec<Value>,
 }
 
 impl Outcome {
@@ -115,6 +117,7 @@ impl Outcome {
             "confirmation": self.confirmation,
             "steps": self.steps,
             "backend": self.backend,
+            "sources": self.sources,
         })
     }
 }
@@ -217,6 +220,7 @@ impl Jarvis {
         }
         json!({
             "core": {"version": env!("CARGO_PKG_VERSION"), "status": "up"},
+            "web": self.cfg.web.describe(),
             "ai": ai,
             "audit": {"events": events, "chain_valid": errors.is_empty()},
             "pending_confirmations": self.pending.len(),
@@ -318,7 +322,7 @@ impl Jarvis {
         self.expire_pending()?;
         let mut task = Task::new(message, json!({"kind": "owner", "id": "owner"}));
         self.store
-            .message_add("user", message, &task.id(), &now())
+            .message_add("user", message, &task.id(), &now(), None)
             .map_err(internal)?;
         task.transition("planned", "Delega al General Assistant");
         task.transition("running", "Agente in esecuzione");
@@ -361,6 +365,7 @@ impl Jarvis {
         let (tid, corr) = (task.id(), task.correlation());
         let decision = policy::decide(
             &self.catalog,
+            &self.cfg.web,
             &policy::Request {
                 subject: json!({"kind": "agent", "id": "general_assistant"}),
                 task_id: &tid,
@@ -405,7 +410,7 @@ impl Jarvis {
                     conf["expected_effect"].as_str().unwrap_or_default()
                 );
                 self.store
-                    .message_add("assistant", &text, &task.id(), &now())
+                    .message_add("assistant", &text, &task.id(), &now(), None)
                     .map_err(internal)?;
                 out.task = task.doc.clone();
                 out.reply = Some(text);
@@ -575,6 +580,7 @@ impl Jarvis {
                 ))?;
                 out.steps
                     .push(json!({"kind": "tool_result", "tool": tool, "status": "succeeded"}));
+                out.sources.extend(sources_of(tool, &output));
                 Ok(("succeeded", output))
             }
             Err(e) => {
@@ -616,7 +622,13 @@ impl Jarvis {
     fn finish(&mut self, task: Task, mut out: Outcome, text: String) -> Result<Outcome, CoreError> {
         self.save(&task)?;
         self.store
-            .message_add("assistant", &text, &task.id(), &now())
+            .message_add(
+                "assistant",
+                &text,
+                &task.id(),
+                &now(),
+                Some(&Value::Array(out.sources.clone())),
+            )
             .map_err(internal)?;
         out.task = task.doc;
         out.reply = Some(text);
@@ -667,6 +679,7 @@ impl Jarvis {
             &tools::Context {
                 workspace: &workspace,
                 store: &self.store,
+                web: &self.cfg.web,
             },
         )
         .map_err(|e| CoreError::Internal(e.message))
@@ -726,6 +739,7 @@ impl Jarvis {
                     &tools::Context {
                         workspace: &workspace,
                         store: &self.store,
+                        web: &self.cfg.web,
                     },
                 )
             }
@@ -882,6 +896,7 @@ impl Jarvis {
             );
             let decision = policy::decide(
                 &self.catalog,
+                &self.cfg.web,
                 &policy::Request {
                     subject: subject.clone(),
                     task_id: &tid,
@@ -1323,6 +1338,26 @@ impl Jarvis {
         if let Some(w) = self.worker.as_mut() {
             w.kill_for_tests();
         }
+    }
+}
+
+/// Provenienza delle evidenze Web: URL, titolo, istante di recupero e, per le pagine lette, SHA-256 del contenuto.
+fn sources_of(tool: &str, output: &Value) -> Vec<Value> {
+    match tool {
+        "web.fetch" => vec![json!({
+            "kind": "page", "title": output["title"], "url": output["final_url"], "requested_url": output["url"],
+            "retrieved_at": output["retrieved_at"], "content_sha256": output["content_sha256"],
+        })],
+        "web.search" => output["results"]
+            .as_array()
+            .map(|r| {
+                r.iter()
+                    .map(|x| json!({"kind": "search_result", "rank": x["rank"], "title": x["title"], "url": x["url"],
+                                    "provider": output["provider"], "retrieved_at": output["retrieved_at"]}))
+                    .collect()
+            })
+            .unwrap_or_default(),
+        _ => Vec::new(),
     }
 }
 

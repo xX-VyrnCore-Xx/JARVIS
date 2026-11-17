@@ -94,7 +94,9 @@
                 "memory.list",
                 "memory.remember",
                 "system.info",
-                "time.now"
+                "time.now",
+                "web.fetch",
+                "web.search"
               ]
             },
             "arguments": {

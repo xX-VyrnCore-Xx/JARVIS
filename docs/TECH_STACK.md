@@ -37,3 +37,4 @@ Versionare dipendenze e contratti alla loro introduzione. Per Rust/Python, descr
 | Playwright | 1.63.0 | Test E2E dell'interfaccia | `tests/e2e/ui_smoke.cjs` |
 | Interfaccia Web | HTML, CSS e JavaScript senza dipendenze | Deviazione temporanea da React e Tauri | ADR-0004 |
 | Pianificatore | `tokio::time::interval` nel Core | Automazioni (RF-07) | ADR-0005 |
+| `ureq` / `url` (Rust) | 2.12 / 2.5 | Client HTTP del Web Agent con risolutore vincolato | ADR-0007 |

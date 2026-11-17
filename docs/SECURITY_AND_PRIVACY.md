@@ -30,6 +30,9 @@ Documentare insieme ai contratti la classificazione dei dati, i flussi egress, l
 | Azioni critiche | Conferma monouso, con scadenza, legata al digest dei parametri | `high_risk_write_requires_single_use_confirmation` |
 | Audit | JSONL append-only a catena SHA-256, verificato a ogni lettura | `audit_chain_records_every_decision` |
 | Minimizzazione | Nessun backend cloud; fixture sintetiche; diagnostica senza payload | ADR-0004 |
+| SSRF (Web) | Solo http e https pubblici; niente loopback, LAN o link-local (metadati cloud); DNS verificato e controllo ripetuto a ogni redirect | `ssrf_targets_are_denied_by_default`, `redirect_to_blocked_domain_is_stopped_at_each_hop` |
+| Prompt injection (Web) | Contenuto marcato non attendibile; dopo un risultato di strumento sono accettate solo risposte testuali | `page_instructions_are_never_executed`, `test_web_tool_result_is_wrapped_as_untrusted_for_the_model` |
+| Dati in uscita (Web) | Interruttore `JARVIS_WEB`, domini consentiti e vietati, audit di ogni chiamata | `web_can_be_disabled_or_restricted_to_an_allowlist` |
 
 Da completare:
 - identità con passkey o WebAuthn e MFA;
