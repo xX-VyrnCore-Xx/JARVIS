@@ -127,7 +127,7 @@ pub fn tool_descriptors(manifest: &Value) -> Vec<Value> {
                 "effects": if write { "write_external" } else { "read" },
                 "risk": risk,
                 "permissions": [if write { "integration.connectors:write" } else { "integration.connectors:read" }],
-                "errors": ["connector.http_error", "connector.not_authorized", "web.unreachable"],
+                "errors": ["connector.http_error", "connector.server_error", "connector.not_authorized", "web.timeout", "web.unreachable"],
                 "timeout_ms": 20000,
                 "retry": if write { json!({"mode": "never"}) } else { json!({"mode": "safe", "max_attempts": 2}) },
                 "confirmation": if matches!(risk, "high" | "critical") { "required" } else { "none" },
@@ -228,6 +228,12 @@ pub fn call(
         .collect();
     let (status, ctype, data) =
         crate::web::request(web, method, &url, &headers, body.as_deref(), &hosts)?;
+    if status >= 500 {
+        return Err(err(
+            "connector.server_error",
+            format!("{} ha risposto {status}", url.host_str().unwrap_or("?")),
+        ));
+    }
     if status >= 400 {
         return Err(err(
             "connector.http_error",
@@ -255,6 +261,14 @@ pub fn call(
         "connector": manifest["id"], "operation": op_name, "status": status, "data": content,
         "retrieved_at": crate::now(), "untrusted": true,
     }))
+}
+
+/// Errori transitori: una lettura può essere ripetuta, una scrittura no (potrebbe essere già avvenuta).
+pub fn transient(code: &str) -> bool {
+    matches!(
+        code,
+        "web.timeout" | "web.unreachable" | "connector.server_error"
+    )
 }
 
 /// Verifica la firma `sha256=<hex>` di un webhook (confronto a tempo costante).

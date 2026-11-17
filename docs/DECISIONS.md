@@ -347,7 +347,7 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
     - solo dopo, i dati attuali vengono spostati in `<dati>.before-restore-<istante>` e sostituiti.
 
     Qualsiasi errore lascia i dati intatti e rimuove la cartella di appoggio.
-  - **Blocco esclusivo** `data/.lock`: un solo Core per cartella dati. Il ripristino da riga di comando lo rifiuta se JARVIS è in esecuzione.
+  - **Blocco esclusivo** `data/.lock`: un solo Core per cartella dati. All'avvio il blocco viene ritentato per 3 secondi, perché un Core appena chiuso o un processo figlio fra fork ed exec può trattenerlo per poco (causa di un test intermittente osservato il 2026-11-17). Il ripristino da riga di comando lo rifiuta se JARVIS è in esecuzione.
   - **Accessi:**
     - interfaccia: `POST /api/backup`, con token, audit e notifica; l'API non espone percorsi assoluti;
     - riga di comando: `./jarvis.sh backup` e `./jarvis.sh restore <file>`;
@@ -391,6 +391,13 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - fixture del contratto (1 valida, 5 non valide);
   - E2E: installazione dall'interfaccia, autorizzazione e chiamata dalla chat.
 - **Documenti interessati:** REQUIREMENTS.md, SECURITY_AND_PRIVACY.md, AUTONOMY_AND_TOOLS.md, README.md.
+- **Aggiornamento 2026-11-17 — guasti dei connettori:**
+  - errori distinti: `connector.server_error` (5xx), `connector.http_error` (4xx), `web.timeout`, `web.unreachable`;
+  - le letture (`retry: safe`, 2 tentativi) sono ripetute una volta sugli errori transitori; le scritture mai, perché potrebbero essere già arrivate al servizio;
+  - una scrittura interrotta da timeout o rete è registrata con `effect: unknown` nell'audit e nel passo, e la notifica chiede di verificare prima di ripeterla;
+  - ogni fallimento di connettore, da chat o da automazione, produce una notifica `integration` correlata al task e deduplicata per connettore;
+  - evidenza: `connector_faults_are_retried_safely_and_notified`.
+- **Custodia della chiave:** il portachiavi del sistema operativo resta da fare. Richiede prove su Windows, macOS e Linux con sessione grafica, non disponibili nel container né nella CI, ed è rinviato alla validazione di sicurezza della Fase 6 sul computer del proprietario.
 
 ### Decisione operativa — Merge automatico con CI verde
 
