@@ -12,60 +12,25 @@ il test dimostra che la regola semantica è quella che le respinge.
 from __future__ import annotations
 
 import json
+import sys
 import unittest
-from datetime import datetime, timezone
 from pathlib import Path
 
 from jsonschema import Draft202012Validator
-from referencing import Registry, Resource
 
 ROOT = Path(__file__).resolve().parents[2]
-SCHEMA_DIR = ROOT / "contracts" / "v1"
+sys.path.insert(0, str(ROOT / "ai"))
+
+from jarvis_ai.contracts import (  # noqa: E402
+    SCHEMA_DIR,
+    TRANSITIONS,
+    _load,
+    audit_chain_errors,
+    semantic_errors,
+    validator_for,
+)
+
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures"
-
-
-def _load(path: Path) -> dict:
-    with path.open(encoding="utf-8") as fh:
-        return json.load(fh)
-
-
-def _registry() -> Registry:
-    resources = []
-    for path in SCHEMA_DIR.glob("*.schema.json"):
-        schema = _load(path)
-        resource = Resource.from_contents(schema)
-        resources.append((schema["$id"], resource))
-    return Registry().with_resources(resources)
-
-
-REGISTRY = _registry()
-
-
-def validator_for(schema_name: str) -> Draft202012Validator:
-    schema = _load(SCHEMA_DIR / f"{schema_name}.schema.json")
-    return Draft202012Validator(schema, registry=REGISTRY)
-
-
-def _ts(value: str) -> datetime:
-    return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(timezone.utc)
-
-
-def semantic_errors(schema_name: str, doc: dict) -> list[str]:
-    """Invarianti non esprimibili in JSON Schema. Documentati in contracts/README.md."""
-    errors: list[str] = []
-    if schema_name == "delegation":
-        issued, expires = _ts(doc["issued_at"]), _ts(doc["expires_at"])
-        lifetime_ms = (expires - issued).total_seconds() * 1000
-        if lifetime_ms <= 0:
-            errors.append("expires_at deve seguire issued_at")
-        elif doc["timeout_ms"] > lifetime_ms:
-            errors.append("timeout_ms supera la durata della delega")
-    if schema_name == "envelope":
-        if doc["sender"] == doc["recipient"]:
-            errors.append("sender e recipient coincidono")
-        if doc.get("causation_id") == doc["message_id"]:
-            errors.append("causation_id non può riferirsi al messaggio stesso")
-    return errors
 
 
 def _fixtures(kind: str) -> list[Path]:
@@ -110,6 +75,36 @@ class Fixtures(unittest.TestCase):
                     self.assertNotEqual(semantic_errors(name, doc), [])
                 else:
                     self.assertFalse(schema_ok, "la fixture doveva essere respinta dallo schema")
+
+
+class AuditChain(unittest.TestCase):
+    def _stream(self, name: str) -> list[dict]:
+        path = FIXTURE_DIR / "streams" / name
+        events = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+        for event in events:
+            validator_for("audit-event").validate(event)
+        return events
+
+    def test_valid_chain(self) -> None:
+        self.assertEqual(audit_chain_errors(self._stream("audit-event.valid.jsonl")), [])
+
+    def test_tampered_event_is_detected(self) -> None:
+        self.assertIn("hash non corrispondente all'evento 1", audit_chain_errors(self._stream("audit-event.tampered.jsonl")))
+
+    def test_deleted_event_is_detected(self) -> None:
+        errors = audit_chain_errors(self._stream("audit-event.deleted-event.jsonl"))
+        self.assertIn("prev_hash errato all'evento 1", errors)
+
+
+class TaskTransitions(unittest.TestCase):
+    def test_table_is_consistent(self) -> None:
+        table = TRANSITIONS["transitions"]
+        states = set(_load(SCHEMA_DIR / "task.schema.json")["$defs"]["state"]["enum"])
+        self.assertEqual(set(table), states)
+        for state in TRANSITIONS["terminal"]:
+            self.assertEqual(table[state], [])
+        for targets in table.values():
+            self.assertLessEqual(set(targets), states)
 
 
 if __name__ == "__main__":

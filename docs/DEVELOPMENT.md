@@ -1,12 +1,15 @@
 # Sviluppo nel monorepo
 
-Il repository GitHub privato e il mirror locale conservano codice, documenti e checkpoint. Tenere in radice i 14 documenti, con README.md come indice e CLAUDE.md come istruzioni per Claude Code. La disposizione seguente è una proposta operativa per i moduli futuri. Adeguarla al repository effettivo quando esistono già confini coerenti.
+Il repository GitHub privato e il mirror locale conservano codice, documenti e checkpoint. In radice stanno README.md come indice e CLAUDE.md come istruzioni per Claude Code; le altre 12 specifiche stanno in `docs/` (scelta del proprietario, commit `d482b80`). La disposizione seguente indica le directory già presenti e la proposta per i moduli futuri. Adeguarla al repository effettivo quando esistono già confini coerenti.
 
 ```text
 /
-├── README.md, CLAUDE.md e altre specifiche
-├── core/              Core Linux e componenti Rust
-├── ai/                runtime agenti e adapter Python
+├── README.md, CLAUDE.md
+├── docs/              specifiche, registro decisioni e checkpoint (ROADMAP.md)
+├── core/              Core Linux e componenti Rust (workspace Cargo)
+│   ├── contracts/     crate jarvis-contracts: validazione dei contratti v1
+│   └── bridge/        crate jarvis-bridge: prototipo Core–worker Python
+├── ai/                runtime agenti e adapter Python (jarvis_ai)
 ├── apps/
 │   ├── desktop/       Tauri, React e TypeScript
 │   ├── web/           dashboard React
@@ -15,7 +18,7 @@ Il repository GitHub privato e il mirror locale conservano codice, documenti e c
 ├── integrations/      plugin, connettori e SDK
 ├── migrations/        evoluzione dei dati
 ├── infra/             systemd, container e release
-└── tests/             prove trasversali e fixture sintetiche
+└── tests/             prove trasversali e fixture sintetiche (contracts/, ai/)
 ```
 
 ## Flusso di lavoro

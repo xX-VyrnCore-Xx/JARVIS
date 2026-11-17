@@ -1,0 +1,16 @@
+{
+  "contract": "jarvis.task-transitions/1",
+  "description": "Transizioni ammesse per jarvis.task/1. Il primo elemento della history non ha 'from' e porta a 'initial'. Gli stati terminali non hanno uscite.",
+  "initial": "pending",
+  "terminal": ["succeeded", "failed", "cancelled"],
+  "transitions": {
+    "pending": ["planned", "cancelled"],
+    "planned": ["running", "blocked", "cancelled"],
+    "running": ["waiting_confirmation", "blocked", "succeeded", "failed", "cancelled"],
+    "waiting_confirmation": ["running", "failed", "cancelled"],
+    "blocked": ["planned", "running", "failed", "cancelled"],
+    "succeeded": [],
+    "failed": [],
+    "cancelled": []
+  }
+}

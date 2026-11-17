@@ -26,12 +26,40 @@
       "description": "Identità di un mittente o destinatario. L'autenticazione avviene nel Security Engine, non nel payload.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "id"],
+      "required": [
+        "kind",
+        "id"
+      ],
       "properties": {
-        "kind": { "enum": ["owner", "client", "module", "agent", "node", "plugin"] },
-        "id": { "$ref": "#/$defs/identifier" }
+        "kind": {
+          "enum": [
+            "owner",
+            "client",
+            "module",
+            "agent",
+            "node",
+            "plugin"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/identifier"
+        }
       }
     },
-    "duration_ms": { "type": "integer", "minimum": 1, "maximum": 86400000 }
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 86400000
+    },
+    "resource_uri": {
+      "description": "Riferimento a una risorsa JARVIS.",
+      "type": "string",
+      "pattern": "^jarvis://[a-z]+/[A-Za-z0-9._/-]+$",
+      "maxLength": 1024
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
   }
 }

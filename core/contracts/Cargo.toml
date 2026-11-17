@@ -1,0 +1,15 @@
+[package]
+name = "jarvis-contracts"
+version = "0.1.0"
+description = "Validazione dei contratti versionati JARVIS v1 (schema e invarianti semantici)"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+hex = "0.4"
+jsonschema = { version = "0.30", default-features = false }
+serde_json = "1"
+sha2 = "0.10"

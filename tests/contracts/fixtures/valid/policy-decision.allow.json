@@ -1,0 +1,32 @@
+{
+ "contract": "jarvis.policy-decision/1",
+ "decision_id": "0b6f4c1e-1d2a-4c3b-9e8f-0000000000e1",
+ "request": {
+  "task_id": "0b6f4c1e-1d2a-4c3b-9e8f-0000000000a1",
+  "correlation_id": "0b6f4c1e-1d2a-4c3b-9e8f-0000000000c0",
+  "subject": {
+   "kind": "agent",
+   "id": "system"
+  },
+  "on_behalf_of": {
+   "kind": "owner",
+   "id": "owner"
+  },
+  "action": {
+   "tool": "fs.write_file",
+   "version": "1.0.0"
+  },
+  "resource": "jarvis://file/workspace/report.md",
+  "node": "core-linux",
+  "destination": "local",
+  "parameters_digest": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+ },
+ "decision": "allow",
+ "reasons": [
+  "policy.scope_match"
+ ],
+ "risk": "medium",
+ "policy_version": "1.0.0",
+ "decided_at": "2026-11-17T12:00:03Z",
+ "expires_at": "2026-11-17T12:05:03Z"
+}
