@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["bridge", "contracts", "server"]
+members = ["bridge", "contracts", "server", "../apps/desktop/launcher"]
 
 [workspace.package]
 edition = "2021"

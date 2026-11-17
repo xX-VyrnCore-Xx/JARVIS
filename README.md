@@ -20,6 +20,12 @@ cd JARVIS && ./jarvis.sh
 
 Poi apri **http://localhost:8765**. La prima compilazione richiede qualche minuto.
 
+**App desktop (Tauri):** con `./jarvis.sh desktop` JARVIS si apre in una finestra sua. L'app avvia il Core da sola, tiene i dati nella cartella dell'applicazione dell'utente e alla chiusura spegne tutto. Su Linux servono le librerie WebKitGTK:
+
+```bash
+sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev
+```
+
 - **Senza Ollama** JARVIS parte in modalità *offline*: un modello a regole capisce comandi come «che ore sono», «info sistema», «elenca file», «scrivi note.txt: testo», «leggi note.txt», «ricorda che …», «cosa ricordi» e «dimentica <id>».
 - **Con Ollama** installa un modello con supporto agli strumenti (per esempio `ollama pull qwen2.5:3b`) e riavvia `./jarvis.sh`: JARVIS lo rileva da solo.
 

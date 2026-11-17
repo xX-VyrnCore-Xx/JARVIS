@@ -1,0 +1,12 @@
+[package]
+name = "jarvis-launcher"
+workspace = "../../../core"
+version = "0.1.0"
+description = "Avvio supervisionato del Core JARVIS per i client desktop (porta libera, dati utente, attesa della salute, arresto)"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+ureq = "2"

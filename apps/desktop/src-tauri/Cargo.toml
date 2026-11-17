@@ -1,0 +1,21 @@
+[package]
+name = "jarvis-desktop"
+version = "0.1.0"
+description = "JARVIS desktop (Tauri): avvia il Core locale e ne mostra l'interfaccia"
+edition = "2021"
+rust-version = "1.82"
+license = "LicenseRef-Proprietary"
+publish = false
+
+# Workspace separato: le dipendenze Tauri non appesantiscono la build del Core.
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+jarvis-launcher = { path = "../launcher" }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+url = "2"

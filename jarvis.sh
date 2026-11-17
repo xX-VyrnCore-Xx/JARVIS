@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Avvia il prototipo JARVIS: prepara l'ambiente Python, compila il Core e apre il server locale.
-# Uso: ./jarvis.sh            (variabili utili: JARVIS_PORT, JARVIS_DATA_DIR, JARVIS_AI_BACKEND,
+# Uso: ./jarvis.sh            interfaccia nel browser su http://localhost:8765
+#      ./jarvis.sh desktop    app desktop (Tauri) che avvia il Core da sola
+#                             (variabili utili: JARVIS_PORT, JARVIS_DATA_DIR, JARVIS_AI_BACKEND,
 #                              JARVIS_OLLAMA_URL, JARVIS_OLLAMA_MODEL — vedi README.md)
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -30,4 +32,15 @@ fi
 
 export JARVIS_PYTHON="$VENV/bin/python"
 export JARVIS_HOME="$ROOT"
+
+if [ "${1:-}" = "desktop" ]; then
+  shift
+  if [ "$(uname -s)" = "Linux" ] && ! pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
+    fail "Per l'app desktop servono le librerie WebKitGTK: sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev"
+  fi
+  echo "→ Compilo l'app desktop (la prima volta richiede alcuni minuti)"
+  (cd "$ROOT/apps/desktop/src-tauri" && cargo build --release --locked -q)
+  exec "$ROOT/apps/desktop/src-tauri/target/release/jarvis-desktop" "$@"
+fi
+
 exec "$ROOT/core/target/release/jarvis" "$@"

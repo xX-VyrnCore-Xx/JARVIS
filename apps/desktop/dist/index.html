@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JARVIS</title>
+  <style>
+    :root { color-scheme: dark; --bg: #0d1117; --text: #e6edf3; --muted: #8b98a8; --accent: #4cc2ff; --bad: #f85149; }
+    @media (prefers-color-scheme: light) { :root { color-scheme: light; --bg: #f6f8fa; --text: #1f2328; --muted: #59636e; --accent: #0969da; } }
+    html, body { height: 100%; margin: 0; }
+    body { background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; display: grid; place-items: center; }
+    main { text-align: center; padding: 16px; max-width: 560px; }
+    .orb { width: 64px; height: 64px; margin: 0 auto 1rem; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #bff0ff, var(--accent) 45%, #0b3a5a 75%); box-shadow: 0 0 28px var(--accent); animation: pulse 1.6s ease-in-out infinite; }
+    @keyframes pulse { 50% { transform: scale(.9); opacity: .75; } }
+    h1 { letter-spacing: .12em; font-size: 1.4rem; margin: 0 0 .3rem; }
+    p { color: var(--muted); margin: .3rem 0; }
+    #error { display: none; color: var(--bad); white-space: pre-wrap; text-align: left; border: 1px solid var(--bad); border-radius: 10px; padding: .8rem 1rem; margin-top: 1rem; }
+    @media (prefers-reduced-motion: reduce) { .orb { animation: none; } }
+  </style>
+  <script src="loading.js" defer></script>
+</head>
+<body>
+  <main>
+    <div class="orb" aria-hidden="true"></div>
+    <h1>JARVIS</h1>
+    <p id="status">Avvio del Core locale…</p>
+    <div id="error" role="alert"></div>
+  </main>
+</body>
+</html>
