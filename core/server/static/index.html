@@ -38,6 +38,7 @@
       <button class="nav-item" data-view="memory">Memoria</button>
       <button class="nav-item" data-view="workspace">Workspace</button>
       <button class="nav-item" data-view="audit">Audit</button>
+      <button class="nav-item" data-view="system">Sistema</button>
     </nav>
     <main>
       <section class="view active" id="view-chat" aria-label="Chat">
@@ -113,6 +114,13 @@
         <div class="view-head"><h2>Audit</h2><button class="ghost" data-refresh="audit">Aggiorna</button></div>
         <p class="hint" id="audit-summary"></p>
         <div id="audit" class="list"></div>
+      </section>
+      <section class="view" id="view-system" aria-label="Sistema">
+        <div class="view-head"><h2>Sistema</h2><button class="ghost" data-refresh="system">Aggiorna</button></div>
+        <p class="hint">Stato dei componenti e latenze misurate dall'avvio. I log strutturati sono in <code>data/logs/core.jsonl</code> e non contengono i tuoi messaggi.</p>
+        <div id="system-cards" class="grid"></div>
+        <h3 class="sub-head">Latenze</h3>
+        <div class="table-wrap"><table id="metrics-table" class="metrics"><thead><tr><th scope="col">Serie</th><th scope="col">Richieste</th><th scope="col">Errori</th><th scope="col">p50</th><th scope="col">p95</th><th scope="col">max</th></tr></thead><tbody></tbody></table></div>
       </section>
     </main>
   </div>

@@ -42,6 +42,8 @@ sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev
   L'audio non lascia il computer e non viene salvato. Le conferme restano un clic.
 - **Notifiche**: la campanella in alto segnala conferme in attesa, automazioni fallite e anomalie (agente AI non disponibile, audit alterato). Ogni notifica è collegata al task che l'ha generata.
 
+- **Sistema**: la sezione omonima mostra stato dei componenti e latenze misurate. I log diagnostici sono in `data/logs/core.jsonl` e non contengono i tuoi messaggi.
+
 Cosa osservare:
 - ogni azione mostra agente, strumento, decisione di policy ed esito;
 - scrivere un file o cancellare un ricordo richiede la tua conferma, valida una sola volta e per 5 minuti;

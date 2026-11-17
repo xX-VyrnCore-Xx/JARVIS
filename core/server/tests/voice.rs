@@ -25,6 +25,7 @@ fn app(voice: &str) -> axum::Router {
         ai_backend: Some("offline".into()),
         delegation_timeout_ms: 30_000,
         voice_engine: Some(voice.into()),
+        worker_env: vec![],
         scheduler_tick_s: 20,
         token: TOKEN.into(),
         web: jarvis_core::web::WebConfig::default(),

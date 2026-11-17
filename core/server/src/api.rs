@@ -24,6 +24,7 @@ const VOICE_WORKLET: &str = include_str!("../static/voice-worklet.js");
 
 pub struct AppState {
     pub core: Arc<Mutex<Jarvis>>,
+    pub obs: Arc<crate::observability::Observability>,
     pub token: String,
     pub port: u16,
     pub last_health: Mutex<Value>,
@@ -79,7 +80,13 @@ async fn guard(State(state): State<Shared>, req: Request, next: Next) -> Respons
     if !allowed.iter().any(|a| a == host) {
         return error(StatusCode::FORBIDDEN, "forbidden_host", "host non ammesso");
     }
-    let path = req.uri().path();
+    let path = req.uri().path().to_string();
+    let route = req
+        .extensions()
+        .get::<axum::extract::MatchedPath>()
+        .map(|m| m.as_str().to_string())
+        .unwrap_or_else(|| "non trovato".into());
+    let method = req.method().to_string();
     if path.starts_with("/api/") && path != "/api/health" {
         let token = req
             .headers()
@@ -93,7 +100,19 @@ async fn guard(State(state): State<Shared>, req: Request, next: Next) -> Respons
             );
         }
     }
+    let timer = crate::observability::Timer::start();
     let mut res = next.run(req).await;
+    let status = res.status().as_u16();
+    state
+        .obs
+        .observe(&format!("http {method} {route}"), timer.ms(), status >= 500);
+    if status >= 500 {
+        state.obs.log(
+            "error",
+            "http.error",
+            json!({"method": method, "route": route, "status": status}),
+        );
+    }
     let h = res.headers_mut();
     h.insert(
         "x-content-type-options",
@@ -144,6 +163,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/audit", get(audit))
         .route("/api/workspace", get(workspace))
         .route("/api/tools", get(tool_catalog))
+        .route("/api/metrics", get(metrics))
         .route(
             "/api/voice/transcribe",
             post(voice_transcribe).layer(axum::extract::DefaultBodyLimit::max(5 * 1024 * 1024)),
@@ -286,6 +306,10 @@ async fn workspace(State(state): State<Shared>) -> Response {
         Ok(v) => Json(v).into_response(),
         Err(e) => e.into_response(),
     }
+}
+
+async fn metrics(State(state): State<Shared>) -> Json<Value> {
+    Json(state.obs.snapshot())
 }
 
 async fn tool_catalog(State(state): State<Shared>) -> Json<Value> {
@@ -459,8 +483,10 @@ pub fn spawn_scheduler(state: Shared, tick: std::time::Duration) -> tokio::task:
 
 /// Usato dai test per costruire lo stato senza aprire una porta.
 pub fn state(core: Jarvis, token: String, port: u16) -> Shared {
+    let obs = core.observability();
     Arc::new(AppState {
         core: Arc::new(Mutex::new(core)),
+        obs,
         token,
         port,
         last_health: Mutex::new(json!({})),

@@ -168,6 +168,13 @@ function check(cond, msg) {
   check(true, "catena di audit integra");
   if (shots) await page.screenshot({ path: `${shots}/jarvis-audit.png` });
 
+  // Sistema (Fase 4): stato dei componenti e latenze misurate.
+  await page.click('[data-view="system"]');
+  await page.waitForSelector("#metrics-table tbody tr td");
+  check((await page.locator("#system-cards").innerText()).includes("catena integra"), "pannello Sistema con stato dei componenti");
+  check((await page.locator("#metrics-table").innerText()).includes("POST /api/chat"), "latenze misurate per endpoint");
+  if (shots) await page.screenshot({ path: `${shots}/jarvis-sistema.png` });
+
   await page.setViewportSize({ width: 390, height: 800 });
   await page.click('[data-view="chat"]');
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);

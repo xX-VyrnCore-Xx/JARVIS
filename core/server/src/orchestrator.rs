@@ -17,6 +17,7 @@ use serde_json::{json, Map, Value};
 use crate::audit::AuditLog;
 use crate::catalog::Catalog;
 use crate::config::Config;
+use crate::observability::{Observability, Timer};
 use crate::store::Store;
 use crate::{automation, now, policy, tools};
 
@@ -131,6 +132,7 @@ pub struct Jarvis {
     catalog: Catalog,
     worker: Option<Worker>,
     pending: HashMap<String, Pending>,
+    obs: std::sync::Arc<Observability>,
 }
 
 fn obj(v: Value) -> Map<String, Value> {
@@ -152,6 +154,7 @@ impl Jarvis {
         )
         .map_err(|e| format!("audit: {e}"))?;
         let catalog = Catalog::load()?;
+        let cfg_logs = cfg.data_dir.join("logs");
         Ok(Self {
             cfg,
             store,
@@ -159,11 +162,16 @@ impl Jarvis {
             catalog,
             worker: None,
             pending: HashMap::new(),
+            obs: std::sync::Arc::new(Observability::new(Some(&cfg_logs))),
         })
     }
 
     pub fn config(&self) -> &Config {
         &self.cfg
+    }
+
+    pub fn observability(&self) -> std::sync::Arc<Observability> {
+        self.obs.clone()
     }
 
     // ------------------------------------------------------------------ worker
@@ -182,7 +190,21 @@ impl Jarvis {
             if let Some(engine) = &self.cfg.voice_engine {
                 cmd.env("JARVIS_VOICE_ENGINE", engine);
             }
-            self.worker = Some(Worker::spawn(cmd).map_err(|e| e.to_contract())?);
+            for (k, v) in &self.cfg.worker_env {
+                cmd.env(k, v);
+            }
+            let spawned = Worker::spawn(cmd).map_err(|e| e.to_contract());
+            self.obs.count(if spawned.is_ok() {
+                "worker.spawned"
+            } else {
+                "worker.spawn_failed"
+            });
+            self.obs.log(
+                if spawned.is_ok() { "info" } else { "error" },
+                "worker.spawn",
+                json!({"ok": spawned.is_ok()}),
+            );
+            self.worker = Some(spawned?);
         }
         Ok(self.worker.as_mut().expect("worker presente"))
     }
@@ -260,6 +282,23 @@ impl Jarvis {
 
     /// Delega all'agente; restituisce l'esito `jarvis.agent-result/1` o un errore v1.
     fn call_agent(&mut self, task: &Task, inputs: &Value) -> Result<Value, Value> {
+        let timer = Timer::start();
+        let result = self.call_agent_inner(task, inputs);
+        self.obs
+            .observe("delegation general_assistant", timer.ms(), result.is_err());
+        if let Err(e) = &result {
+            self.obs.count("delegation.failed");
+            self.obs.log(
+                "warn",
+                "delegation.failed",
+                json!({"task_id": task.id(), "correlation_id": task.correlation(),
+                "code": e["code"], "duration_ms": timer.ms()}),
+            );
+        }
+        result
+    }
+
+    fn call_agent_inner(&mut self, task: &Task, inputs: &Value) -> Result<Value, Value> {
         let delegation = self.delegation(task, inputs);
         let (id, corr) = (task.id(), task.correlation());
         let worker = self.worker()?;
@@ -318,6 +357,44 @@ impl Jarvis {
     // ------------------------------------------------------------------ chat
 
     pub fn chat(&mut self, message: &str) -> Result<Outcome, CoreError> {
+        let timer = Timer::start();
+        let out = self.chat_inner(message);
+        self.record_task("chat", &timer, &out);
+        out
+    }
+
+    /// Metriche e log di fine richiesta: identificativi, stato e durata, mai il contenuto.
+    fn record_task(&self, kind: &str, timer: &Timer, out: &Result<Outcome, CoreError>) {
+        let ms = timer.ms();
+        match out {
+            Ok(o) => {
+                let state = o.task["state"].as_str().unwrap_or("unknown");
+                self.obs
+                    .observe(&format!("task {kind}"), ms, state == "failed");
+                self.obs.log(if state == "failed" { "warn" } else { "info" }, "task.finished", json!({
+                    "kind": kind, "task_id": o.task["task_id"], "correlation_id": o.task["correlation_id"], "state": state,
+                    "steps": o.steps.len(), "error_code": o.task["error"]["code"], "duration_ms": (ms * 10.0).round() / 10.0,
+                }));
+            }
+            Err(e) => {
+                self.obs.observe(&format!("task {kind}"), ms, true);
+                let kind_of = match e {
+                    CoreError::BadRequest(_) => "bad_request",
+                    CoreError::NotFound(_) => "not_found",
+                    CoreError::Gone(_) => "gone",
+                    CoreError::Unavailable(_) => "unavailable",
+                    CoreError::Internal(_) => "internal",
+                };
+                self.obs.log(
+                    "warn",
+                    "task.rejected",
+                    json!({"kind": kind, "reason": kind_of}),
+                );
+            }
+        }
+    }
+
+    fn chat_inner(&mut self, message: &str) -> Result<Outcome, CoreError> {
         let message = message.trim();
         if message.is_empty() || message.chars().count() > MAX_MESSAGE {
             return Err(CoreError::BadRequest(format!(
@@ -456,6 +533,17 @@ impl Jarvis {
     }
 
     pub fn confirm(&mut self, confirmation_id: &str, approve: bool) -> Result<Outcome, CoreError> {
+        let timer = Timer::start();
+        let out = self.confirm_inner(confirmation_id, approve);
+        self.record_task("confirm", &timer, &out);
+        out
+    }
+
+    fn confirm_inner(
+        &mut self,
+        confirmation_id: &str,
+        approve: bool,
+    ) -> Result<Outcome, CoreError> {
         let Pending {
             mut task,
             decision,
@@ -708,6 +796,22 @@ impl Jarvis {
         arguments: &Value,
         confirmed: bool,
     ) -> Result<Value, tools::ToolError> {
+        let timer = Timer::start();
+        let result = self.execute_tool_inner(tool, arguments, confirmed);
+        self.obs
+            .observe(&format!("tool {tool}"), timer.ms(), result.is_err());
+        if let Err(e) = &result {
+            self.obs.log("warn", "tool.failed", json!({"tool": tool, "code": e.code, "duration_ms": (timer.ms() * 10.0).round() / 10.0}));
+        }
+        result
+    }
+
+    fn execute_tool_inner(
+        &mut self,
+        tool: &str,
+        arguments: &Value,
+        confirmed: bool,
+    ) -> Result<Value, tools::ToolError> {
         match tool {
             "workflow.create" => {
                 if !confirmed {
@@ -884,6 +988,30 @@ impl Jarvis {
     /// Esegue un workflow con la policy vigente. I passi a rischio alto passano solo se coperti
     /// dall'approvazione del proprietario, verificata ricalcolando il digest dei passi.
     pub fn run_workflow(
+        &mut self,
+        doc: &Value,
+        kind: &str,
+        scheduled_for: Option<&str>,
+    ) -> Result<Value, CoreError> {
+        let timer = Timer::start();
+        let run = self.run_workflow_inner(doc, kind, scheduled_for);
+        let status = run
+            .as_ref()
+            .map(|r| r["status"].as_str().unwrap_or("unknown").to_string())
+            .unwrap_or_else(|_| "error".into());
+        self.obs.observe(
+            &format!("workflow {kind}"),
+            timer.ms(),
+            status != "succeeded",
+        );
+        self.obs.log(if status == "succeeded" { "info" } else { "warn" }, "workflow.run", json!({
+            "workflow_id": doc["workflow_id"], "version": doc["version"], "trigger": kind, "status": status,
+            "task_id": run.as_ref().ok().map(|r| r["task_id"].clone()), "duration_ms": (timer.ms() * 10.0).round() / 10.0,
+        }));
+        run
+    }
+
+    fn run_workflow_inner(
         &mut self,
         doc: &Value,
         kind: &str,
@@ -1247,6 +1375,12 @@ impl Jarvis {
             )));
         }
         self.store.notification_put(&doc, 500).map_err(internal)?;
+        self.obs.count(&format!(
+            "notification.{}",
+            doc["severity"].as_str().unwrap_or("info")
+        ));
+        self.obs.log("info", "notification", json!({"severity": doc["severity"], "category": doc["category"],
+            "task_id": doc["task_id"], "workflow_id": doc["workflow_id"], "correlation_id": doc["correlation_id"]}));
         Ok(Some(doc))
     }
 
@@ -1315,6 +1449,7 @@ impl Jarvis {
         self.check_audit();
         if self.worker.as_mut().is_some_and(|w| w.has_exited()) {
             self.worker = None;
+            self.obs.count("worker.crashed");
             self.notify(json!({
                 "severity": "warning", "category": "system", "title": "Worker AI terminato",
                 "body": "Il processo dell'agente si è chiuso; verrà riavviato alla prossima richiesta.",

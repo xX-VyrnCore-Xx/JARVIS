@@ -298,6 +298,26 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage 
   - E2E con microfono finto di Chromium: 8 verifiche vocali. Una di queste ha scoperto la CSP che bloccava l'audio, poi corretta.
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, SECURITY_AND_PRIVACY.md, AI_SYSTEM.md, ARCHITECTURE.md, TECH_STACK.md, REQUIREMENTS.md, README.md.
 
+### ADR-0011 — Fase 4: osservabilità, iniezione di guasti e primi SLO
+
+- **Data:** 2026-11-17 · **Stato:** Accettato (Fase 4 «Integrazione», RNF-02, RNF-07)
+- **Contesto:** la condizione di uscita della Fase 4 chiede interazioni fra moduli e gestione degli errori verificate. DEVOPS_QA_OBSERVABILITY.md chiede di correlare richiesta, task, agente, strumento e nodo, e di definire soglie con misure riproducibili.
+- **Decisione:**
+  - **Metriche** in memoria (`core/server/src/observability.rs`): conteggio, errori, p50, p95 e max sugli ultimi 512 campioni per endpoint (modello di rotta), strumento, delega, task e automazione. Contatori di avvii e arresti anomali del worker, deleghe fallite e notifiche. Esposte da `GET /api/metrics` (con token) e dalla sezione «Sistema» dell'interfaccia.
+  - **Log strutturati** JSON Lines in `data/logs/core.jsonl`, con rotazione a 5 MiB. Eventi: `task.finished`, `delegation.failed`, `tool.failed`, `workflow.run`, `worker.spawn`, `notification`, `http.error`. Ogni riga porta `task_id`, `correlation_id` e durata, mai contenuti dell'utente.
+  - **Iniezione di guasti** nel worker (`JARVIS_FAULT_INJECTION=1`, `JARVIS_FAULT=hang|crash|garbage|slow:<ms>[-once]`), attiva solo in modo esplicito e usata dai test di sistema (`core/server/tests/resilience.rs`).
+  - **Avvio verificato** sui tre sistemi operativi (job CI `avvio`, `tests/smoke/start_smoke.py`).
+  - **Primi obiettivi di latenza** (`tests/perf/slo.json`, misurati da `tests/perf/latency.py` nella CI) per il percorso offline.
+- **Motivazione:** ogni guasto simulato deve essere rilevabile, correlato al task, isolato e seguito da un recupero automatico. Le soglie si fissano solo dopo averle misurate.
+- **Conseguenze:**
+  - le metriche si azzerano al riavvio: per la persistenza storica servirà l'Observability Engine completo (trace distribuite, esportazione);
+  - gli SLO con modelli reali (Ollama, faster-whisper, Piper) vanno misurati sul computer del proprietario.
+- **Evidenza:**
+  - `resilience.rs`: 9 test (hang, crash e output non JSON con recupero; lentezza misurata; log correlati senza contenuti; audit cancellato rilevato; workspace rimossa; 20 richieste concorrenti; metriche protette);
+  - misura locale p95: health 3,4 ms, elenco task 1,7 ms, chat 9,1 ms, chat con strumento 15,3 ms;
+  - E2E: pannello Sistema.
+- **Documenti interessati:** DEVOPS_QA_OBSERVABILITY.md, ARCHITECTURE.md, REQUIREMENTS.md, INTERFACE_AND_DEVICES.md, README.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

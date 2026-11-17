@@ -116,6 +116,7 @@ jobs:
         run: |
           ./jarvis.sh > jarvis.log 2>&1 &
           python tests/smoke/start_smoke.py http://127.0.0.1:8765 1200 || { cat jarvis.log; exit 1; }
+          python tests/perf/latency.py http://127.0.0.1:8765 30
       - name: Avvio con jarvis.ps1 (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

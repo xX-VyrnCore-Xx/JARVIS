@@ -9,6 +9,7 @@ pub mod audit;
 pub mod automation;
 pub mod catalog;
 pub mod config;
+pub mod observability;
 pub mod orchestrator;
 pub mod policy;
 pub mod store;

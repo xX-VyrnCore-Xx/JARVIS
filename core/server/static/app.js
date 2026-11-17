@@ -354,6 +354,33 @@ views.automations = async () => {
   }) : [el("p", { class: "empty" }, "Nessuna automazione. Creane una qui sopra o scrivi in chat: \"ogni ora info sistema\".")]));
 };
 
+views.system = async () => {
+  const [h, m] = await Promise.all([fetch("/api/health").then((r) => r.json()), api("/api/metrics")]);
+  const fmtUptime = (s) => s < 3600 ? `${Math.floor(s / 60)} min` : `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
+  const b = h.ai && h.ai.gateway && h.ai.gateway.backend;
+  const v = h.ai && h.ai.gateway && h.ai.gateway.voice;
+  const c = m.counters || {};
+  const card = (k, val, detail) => el("div", { class: "stat" }, el("div", { class: "k" }, k), el("div", { class: "v" }, val), detail ? el("div", { class: "d" }, detail) : null);
+  $("#system-cards").replaceChildren(
+    card("Core", `v${h.core.version} · attivo da ${fmtUptime(m.uptime_s)}`),
+    card("AI", b ? `${b.name} · ${b.model}` : "non disponibile", b && b.degraded_reason ? b.degraded_reason : (h.ai.status === "up" ? "worker attivo" : (h.ai.error || {}).message)),
+    card("Voce", v && v.available ? `${v.stt.name} · ${v.tts ? v.tts.name : "senza sintesi"}` : "non disponibile", v ? (v.available ? `attivazione: ${v.wake}` : (v.reasons || []).join("; ")) : ""),
+    card("Web", h.web && h.web.enabled ? `attivo · ${h.web.provider}` : "disattivato", h.web ? h.web.provider_url : ""),
+    card("Audit", `${h.audit.events} eventi`, h.audit.chain_valid ? "catena integra ✓" : "catena ALTERATA ✗"),
+    card("Worker", `${c["worker.spawned"] || 0} avvii · ${c["worker.crashed"] || 0} arresti anomali`, `${c["delegation.failed"] || 0} deleghe fallite`),
+  );
+  const rows = [];
+  for (const [group, series] of Object.entries(m.series || {})) {
+    for (const [name, x] of Object.entries(series)) {
+      rows.push(el("tr", {},
+        el("td", {}, `${group} · ${name}`), el("td", {}, String(x.count)),
+        el("td", { class: x.errors ? "bad" : "" }, String(x.errors)),
+        el("td", {}, `${x.p50_ms} ms`), el("td", {}, `${x.p95_ms} ms`), el("td", {}, `${x.max_ms} ms`)));
+    }
+  }
+  $("#metrics-table tbody").replaceChildren(...(rows.length ? rows : [el("tr", {}, el("td", { colspan: "6" }, "Nessuna misura ancora."))]));
+};
+
 function show(view) {
   document.querySelectorAll(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${view}`));
