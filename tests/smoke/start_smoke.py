@@ -12,6 +12,11 @@ import sys
 import time
 import urllib.request
 
+# Console Windows in cp1252: i simboli ✓/✗ non devono far fallire la prova.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 
 def get(url: str, headers: dict | None = None) -> str:
     req = urllib.request.Request(url, headers=headers or {})

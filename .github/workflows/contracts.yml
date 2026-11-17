@@ -121,6 +121,9 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          # Analisi sintattica con Windows PowerShell 5.1 (quello del doppio clic): fallisce subito invece di attendere.
+          powershell -NoProfile -Command "`$e = `$null; [void][System.Management.Automation.Language.Parser]::ParseFile('jarvis.ps1', [ref]`$null, [ref]`$e); if (`$e) { `$e; exit 1 }"
+          if ($LASTEXITCODE -ne 0) { exit 1 }
           $p = Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','jarvis.ps1' -RedirectStandardOutput jarvis.log -RedirectStandardError jarvis.err -PassThru -NoNewWindow
           python tests/smoke/start_smoke.py http://127.0.0.1:8765 1500
           if ($LASTEXITCODE -ne 0) { Get-Content jarvis.log, jarvis.err; exit 1 }

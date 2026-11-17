@@ -1,4 +1,5 @@
 # Avvio di JARVIS su Windows (PowerShell). Equivalente di jarvis.sh.
+# Il file resta solo ASCII: Windows PowerShell 5.1 legge gli script senza BOM come ANSI (cp1252).
 #
 # Uso: .\jarvis.ps1               interfaccia nel browser su http://localhost:8765
 #      .\jarvis.ps1 desktop       app desktop (Tauri)
@@ -15,8 +16,8 @@ $Port = if ($env:JARVIS_PORT) { $env:JARVIS_PORT } else { "8765" }
 $Venv = Join-Path $Root ".venv"
 $VenvPython = Join-Path $Venv "Scripts\python.exe"
 
-function Fail($msg) { Write-Host "✗ $msg" -ForegroundColor Red; exit 1 }
-function Ok($msg) { Write-Host "✓ $msg" -ForegroundColor Green }
+function Fail($msg) { Write-Host "[x] $msg" -ForegroundColor Red; exit 1 }
+function Ok($msg) { Write-Host "[ok] $msg" -ForegroundColor Green }
 function Warn($msg) { Write-Host "! $msg" -ForegroundColor Yellow }
 
 function Find-Python {
@@ -34,13 +35,13 @@ function Find-Python {
 
 function Invoke-Doctor {
     $problems = 0
-    Write-Host "JARVIS — controllo dei prerequisiti (Windows)"
+    Write-Host "JARVIS - controllo dei prerequisiti (Windows)"
     $py = Find-Python
     if ($py) { Ok "Python 3.10+ ($($py -join ' '))" } else { Warn "Python 3.10+ mancante: https://www.python.org/downloads/ (spunta 'Add to PATH')"; $problems++ }
     if (Get-Command cargo -ErrorAction SilentlyContinue) { Ok "Rust $((cargo --version).Split(' ')[1])" } else { Warn "Rust mancante: https://rustup.rs/ (installa anche 'Desktop development with C++' se richiesto)"; $problems++ }
-    if (Test-Path (Join-Path $Root "core\target\release\jarvis.exe")) { Ok "Core già compilato" } else { Write-Host "· Core non ancora compilato (succede al primo avvio)" }
+    if (Test-Path (Join-Path $Root "core\target\release\jarvis.exe")) { Ok "Core gia' compilato" } else { Write-Host "- Core non ancora compilato (succede al primo avvio)" }
     $busy = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
-    if ($busy) { Warn "La porta $Port è occupata: imposta `$env:JARVIS_PORT=8766"; $problems++ } else { Ok "Porta $Port libera" }
+    if ($busy) { Warn "La porta $Port e' occupata: imposta `$env:JARVIS_PORT=8766"; $problems++ } else { Ok "Porta $Port libera" }
     if ($problems -eq 0) { Ok "Tutto pronto: .\jarvis.ps1" } else { Write-Host "Problemi trovati: $problems" }
     return $problems
 }
@@ -53,20 +54,20 @@ if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { Invoke-Doctor | Ou
 
 if ((Test-Path $Venv) -and -not (Test-Path $VenvPython)) { Warn "Ambiente .venv incompleto: lo ricreo"; Remove-Item -Recurse -Force $Venv }
 if (-not (Test-Path $VenvPython)) {
-    Write-Host "→ Creo l'ambiente Python in .venv"
+    Write-Host "-> Creo l'ambiente Python in .venv"
     $pyArgs = @(); if ($py.Length -gt 1) { $pyArgs = $py[1..($py.Length - 1)] }
     & $py[0] @pyArgs -m venv $Venv
     if ($LASTEXITCODE -ne 0) { Fail "Impossibile creare .venv" }
 }
-Write-Host "→ Dipendenze Python"
+Write-Host "-> Dipendenze Python"
 & $VenvPython -m pip install -q --disable-pip-version-check -r (Join-Path $Root "tests\contracts\requirements.txt")
 if ($LASTEXITCODE -ne 0) { Fail "Installazione delle dipendenze Python non riuscita (serve la rete la prima volta)" }
 
 $CoreExe = Join-Path $Root "core\target\release\jarvis.exe"
 Push-Location (Join-Path $Root "core")
 try {
-    if (-not (Test-Path $CoreExe)) { Write-Host "→ Compilo il Core: la prima volta richiede alcuni minuti"; cargo build --release --locked -p jarvis-core }
-    else { Write-Host "→ Aggiorno il Core"; cargo build --release --locked -q -p jarvis-core }
+    if (-not (Test-Path $CoreExe)) { Write-Host "-> Compilo il Core: la prima volta richiede alcuni minuti"; cargo build --release --locked -p jarvis-core }
+    else { Write-Host "-> Aggiorno il Core"; cargo build --release --locked -q -p jarvis-core }
     if ($LASTEXITCODE -ne 0) { Fail "Compilazione non riuscita: esegui .\jarvis.ps1 doctor" }
 } finally { Pop-Location }
 
