@@ -13,6 +13,8 @@ pub struct Config {
     /// Override di `JARVIS_AI_BACKEND` per il worker (`auto`, `ollama`, `offline`).
     pub ai_backend: Option<String>,
     pub delegation_timeout_ms: u64,
+    /// Override di `JARVIS_VOICE_ENGINE` per il worker (`auto`, `local`, `fake`, `off`).
+    pub voice_engine: Option<String>,
     /// Intervallo del pianificatore in secondi.
     pub scheduler_tick_s: u64,
     pub token: String,
@@ -74,6 +76,7 @@ impl Config {
             delegation_timeout_ms: var("JARVIS_DELEGATION_TIMEOUT_MS")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(180_000),
+            voice_engine: var("JARVIS_VOICE_ENGINE"),
             scheduler_tick_s: var("JARVIS_SCHEDULER_TICK_S")
                 .and_then(|v| v.parse().ok())
                 .filter(|v| *v >= 1)

@@ -26,6 +26,8 @@ const MAX_MESSAGE: usize = 8000;
 #[derive(Debug)]
 pub enum CoreError {
     BadRequest(String),
+    /// Capacità non disponibile su questo nodo (es. motori vocali non installati).
+    Unavailable(String),
     NotFound(String),
     Gone(String),
     Internal(String),
@@ -176,6 +178,9 @@ impl Jarvis {
                 .current_dir(&self.cfg.ai_dir);
             if let Some(backend) = &self.cfg.ai_backend {
                 cmd.env("JARVIS_AI_BACKEND", backend);
+            }
+            if let Some(engine) = &self.cfg.voice_engine {
+                cmd.env("JARVIS_VOICE_ENGINE", engine);
             }
             self.worker = Some(Worker::spawn(cmd).map_err(|e| e.to_contract())?);
         }
@@ -1519,6 +1524,89 @@ impl Jarvis {
         self.store
             .workflow_versions(doc["workflow_id"].as_str().unwrap_or_default())
             .map_err(internal)
+    }
+}
+
+// ---------------------------------------------------------------------- Voce (RF-09)
+
+impl Jarvis {
+    fn voice_call(&mut self, kind: &str, payload: Value) -> Result<Value, CoreError> {
+        let (t, c) = (
+            uuid::Uuid::new_v4().to_string(),
+            uuid::Uuid::new_v4().to_string(),
+        );
+        let worker = self.worker().map_err(|e| {
+            CoreError::Unavailable(
+                e["message"]
+                    .as_str()
+                    .unwrap_or("worker non disponibile")
+                    .into(),
+            )
+        })?;
+        let env = worker.request(
+            &t,
+            &c,
+            json!({"kind": "module", "id": "ai-worker"}),
+            kind,
+            &payload,
+            Duration::from_secs(120),
+        );
+        match env {
+            Ok(env) if env["status"] == "succeeded" => Ok(env["payload"].clone()),
+            Ok(env) => {
+                let message = env["error"]["message"]
+                    .as_str()
+                    .unwrap_or("errore vocale")
+                    .to_string();
+                Err(match env["error"]["code"].as_str() {
+                    Some("voice.unavailable") => CoreError::Unavailable(message),
+                    Some("voice.invalid_result") => CoreError::Internal(message),
+                    _ => CoreError::BadRequest(message),
+                })
+            }
+            Err(e) => {
+                self.worker = None;
+                Err(CoreError::Unavailable(e.message))
+            }
+        }
+    }
+
+    /// Trascrive un WAV registrato dal client. L'audio non viene salvato: resta solo il testo restituito.
+    pub fn voice_transcribe(&mut self, wav: &[u8], wake_word: bool) -> Result<Value, CoreError> {
+        use base64::Engine as _;
+        if wav.is_empty() {
+            return Err(CoreError::BadRequest("audio vuoto".into()));
+        }
+        let mode = if wake_word {
+            "wake_word"
+        } else {
+            "push_to_talk"
+        };
+        let out = self.voice_call("voice.transcribe", json!({"audio_b64": base64::engine::general_purpose::STANDARD.encode(wav), "mode": mode}))?;
+        if !validate(Contract::VoiceTranscription, &out).is_valid() {
+            return Err(CoreError::Internal("trascrizione non conforme".into()));
+        }
+        Ok(out)
+    }
+
+    /// Sintetizza un testo; restituisce l'audio WAV e i metadati (senza audio).
+    pub fn voice_speak(&mut self, text: &str) -> Result<(Vec<u8>, Value), CoreError> {
+        use base64::Engine as _;
+        let text: String = text.trim().chars().take(4000).collect();
+        if text.is_empty() {
+            return Err(CoreError::BadRequest("testo vuoto".into()));
+        }
+        let mut out = self.voice_call("voice.synthesize", json!({"text": text}))?;
+        if !validate(Contract::VoiceSynthesis, &out).is_valid() {
+            return Err(CoreError::Internal("sintesi non conforme".into()));
+        }
+        let audio = base64::engine::general_purpose::STANDARD
+            .decode(out["audio_b64"].as_str().unwrap_or_default())
+            .map_err(|_| CoreError::Internal("audio non decodificabile".into()))?;
+        if let Some(map) = out.as_object_mut() {
+            map.remove("audio_b64");
+        }
+        Ok((audio, out))
     }
 }
 

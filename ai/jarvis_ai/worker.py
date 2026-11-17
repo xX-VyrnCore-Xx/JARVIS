@@ -62,6 +62,16 @@ def synthetic_handler(delegation: dict) -> dict:
 
 
 _GATEWAY = None
+_VOICE = None
+
+
+def voice_service():
+    global _VOICE
+    if _VOICE is None:
+        from jarvis_ai.voice import VoiceService
+
+        _VOICE = VoiceService()
+    return _VOICE
 
 
 def assistant_handler(delegation: dict) -> dict:
@@ -120,8 +130,34 @@ def handle_line(line: str, handler: Callable[[dict], dict]) -> dict:
         err = HandlerError("bridge.invalid_envelope", "validation", "Envelope non conforme", False).error
         err["details"] = {"violations": (schema + semantic)[:10]}
         return _reply(None, "failed", {}, err)
+    if request["type"] in ("voice.transcribe", "voice.synthesize"):
+        from jarvis_ai.contracts import validation_errors as _check
+        from jarvis_ai.voice import VoiceError
+
+        payload = request["payload"]
+        try:
+            if request["type"] == "voice.transcribe":
+                result = voice_service().transcribe(str(payload.get("audio_b64", "")), "wake_word" if payload.get("mode") == "wake_word" else "push_to_talk")
+                contract = "voice-transcription"
+            else:
+                result = voice_service().synthesize(str(payload.get("text", "")))
+                contract = "voice-synthesis"
+        except VoiceError as exc:
+            err = HandlerError(exc.code, "unavailable" if exc.code == "voice.unavailable" else "validation", str(exc), retryable=False).error
+            reply = _reply(request, "failed", {}, err)
+            reply["type"] = "voice.result"
+            return reply
+        schema, semantic = _check(contract, result)
+        if schema or semantic:
+            reply = _reply(request, "failed", {}, HandlerError("voice.invalid_result", "internal", "Esito vocale non conforme", False).error)
+        else:
+            reply = _reply(request, "succeeded", result)
+        reply["type"] = "voice.result"
+        return reply
     if request["type"] == "health.request":
         status = assistant_status() if handler is assistant_handler else {"handler": handler.__name__}
+        if handler is assistant_handler:
+            status["voice"] = voice_service().status()
         reply = _reply(request, "succeeded", status)
         reply["type"] = "health.result"
         return reply

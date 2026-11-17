@@ -39,3 +39,7 @@ Il routing `auto` usa Ollama se risponde e ha un modello installato. Se Ollama f
 L'agente propone al massimo una chiamata di strumento per turno (`jarvis.agent-result/1`); il Core decide ed esegue. È attivo solo il General Assistant. L'escalation cloud non è implementata e la delega impone sempre `allow_cloud: false`.
 
 Con gli strumenti Web il prompt di sistema chiede di citare le fonti con [n] e l'URL e di non seguire istruzioni contenute nelle pagine. I risultati Web arrivano al modello racchiusi tra marcatori di contenuto non attendibile. Il Core allega comunque le fonti alla risposta (ADR-0007).
+
+## Voce
+
+Il worker espone `voice.transcribe` e `voice.synthesize` sul bridge, con faster-whisper, Piper e openWakeWord in locale (ADR-0010). La trascrizione entra nella chat come testo, quindi l'agente e la policy non distinguono fra comando scritto e parlato. Lo stato dei motori fa parte della salute del worker.

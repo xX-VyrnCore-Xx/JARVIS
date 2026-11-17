@@ -32,6 +32,12 @@ sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev
 - **Automazioni**: scrivi in chat «ogni ora info sistema», «ogni giorno alle 08:00 scrivi buongiorno.txt: ciao» o «tra 5 minuti che ore sono», oppure usa la sezione Automazioni. Le automazioni sopravvivono al riavvio e conservano la cronologia di ogni esecuzione. Si possono modificare («modifica automazione <id> ogni 2 ore» o il pulsante Modifica): ogni modifica crea una nuova versione, approvata da te.
 
 - **Ricerca Web**: «cerca intelligenza artificiale» (Wikipedia, oppure il tuo SearXNG) e «apri https://…». Sotto ogni risposta compaiono le **fonti**: link, ora di recupero e impronta SHA-256 della pagina letta. Le istruzioni contenute nelle pagine non vengono mai eseguite. Gli indirizzi locali e della rete di casa sono bloccati.
+- **Voce** (tutto locale): `./jarvis.sh voice-setup` installa una volta faster-whisper, Piper e openWakeWord e scarica i modelli (circa 500 MB). Poi:
+  - premi 🎤 per parlare e premilo di nuovo per inviare;
+  - attiva «Risposte vocali» per farti leggere le risposte (⏹ o il microfono le interrompono);
+  - attiva «Mani libere» per dire «Ehi Jarvis, …» senza toccare nulla.
+
+  L'audio non lascia il computer e non viene salvato. Le conferme restano un clic.
 - **Notifiche**: la campanella in alto segnala conferme in attesa, automazioni fallite e anomalie (agente AI non disponibile, audit alterato). Ogni notifica è collegata al task che l'ha generata.
 
 Cosa osservare:
@@ -49,6 +55,9 @@ Cosa osservare:
 | `JARVIS_OLLAMA_MODEL` | primo modello installato | Modello da usare, per esempio `qwen2.5:3b` |
 | `JARVIS_SCHEDULER_TICK_S` | `20` | Ogni quanti secondi il Core controlla le automazioni scadute |
 | `JARVIS_WEB` | attivo | `off` disattiva ricerca e lettura di pagine |
+| `JARVIS_VOICE_ENGINE` | `auto` | `off` disattiva la voce; `fake` usa motori finti (test) |
+| `JARVIS_STT_MODEL` | `small` | Modello faster-whisper (`tiny`, `base`, `small`, `medium`) |
+| `JARVIS_TTS_VOICE_NAME` | `it_IT-paola-medium` | Voce Piper scaricata da `voice-setup` |
 | `JARVIS_SEARCH_LANG` | `it` | Lingua di Wikipedia per la ricerca |
 | `JARVIS_SEARXNG_URL` | — | Usa un'istanza SearXNG (anche locale) al posto di Wikipedia |
 | `JARVIS_WEB_ALLOW` / `JARVIS_WEB_DENY` | — | Domini consentiti o vietati, separati da virgola (`wikipedia.org,example.org`) |

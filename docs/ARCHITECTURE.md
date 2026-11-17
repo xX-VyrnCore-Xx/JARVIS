@@ -25,6 +25,7 @@ flowchart LR
 | Voice Engine | Acquisizione, wake word, STT, TTS e stream vocale |
 | Computer Use Engine | Operazioni OS, file, terminale e interfacce di un nodo |
 | Web Agent Engine | Ricerca, navigazione, interazione e verifica fonti |
+| Voice Engine | STT, TTS e parola di attivazione locali nel worker; acquisizione e riproduzione nell'interfaccia | `ai/jarvis_ai/voice.py`, `core/server/src/api.rs` (`/api/voice/*`) |
 | Client desktop | Guscio Tauri che avvia e supervisiona il Core e ne mostra l'interfaccia | `apps/desktop` |
 | Automation Engine | Trigger, esecuzioni durevoli, monitoraggio e recupero |
 | Integration Engine | API, connettori, plugin, SDK e webhook |
@@ -54,4 +55,4 @@ La disposizione proposta dei moduli nel repository è descritta in [DEVELOPMENT.
 | Observability (parziale) | Notifiche correlate e monitor delle anomalie (audit, worker, AI, automazioni) | `orchestrator.rs` (sezione Notifiche e monitor), `store.rs` |
 | Web Agent (parziale) | Ricerca (Wikipedia o SearXNG) e lettura di pagine con provenienza, difese SSRF e iniezione | `core/server/src/web.rs` |
 
-Non ancora implementati: Voice, navigazione interattiva con Playwright, Integration Engine, nodi distribuiti, sincronizzazione, metriche e trace.
+Non ancora implementati: navigazione interattiva con Playwright, Integration Engine, nodi distribuiti, sincronizzazione, metriche e trace.

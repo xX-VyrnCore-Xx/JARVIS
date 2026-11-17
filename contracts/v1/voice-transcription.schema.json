@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.local/contracts/v1/voice-transcription.schema.json",
+  "title": "Trascrizione vocale v1",
+  "description": "RF-09: STT locale. INTERFACE_AND_DEVICES.md: la voce rende visibili ascolto ed elaborazione. RNF-05: l'audio non lascia il computer e non viene conservato; il documento contiene solo testo e metadati.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "text", "language", "duration_ms", "engine", "wake"],
+  "properties": {
+    "contract": { "const": "jarvis.voice-transcription/1" },
+    "text": { "type": "string", "maxLength": 8000 },
+    "language": { "type": "string", "pattern": "^[a-z]{2}(-[A-Z]{2})?$" },
+    "duration_ms": { "type": "integer", "minimum": 0, "maximum": 120000 },
+    "engine": { "$ref": "#/$defs/engine" },
+    "wake": {
+      "description": "Esito della parola di attivazione (solo in modalità mani libere). 'command' è il testo che segue la parola di attivazione.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "detected"],
+      "properties": {
+        "mode": { "enum": ["push_to_talk", "wake_word"] },
+        "detected": { "type": "boolean" },
+        "engine": { "type": "string", "maxLength": 100 },
+        "score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "command": { "type": "string", "maxLength": 8000 }
+      }
+    }
+  },
+  "$defs": {
+    "engine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "model", "location"],
+      "properties": {
+        "name": { "enum": ["faster-whisper", "piper", "fake"] },
+        "model": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "location": { "const": "local" }
+      }
+    }
+  }
+}

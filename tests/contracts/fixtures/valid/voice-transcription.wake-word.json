@@ -1,0 +1,18 @@
+{
+ "contract": "jarvis.voice-transcription/1",
+ "text": "Jarvis, che ore sono",
+ "language": "it",
+ "duration_ms": 1400,
+ "engine": {
+  "name": "faster-whisper",
+  "model": "small",
+  "location": "local"
+ },
+ "wake": {
+  "mode": "wake_word",
+  "detected": true,
+  "engine": "openwakeword:hey_jarvis",
+  "score": 0.91,
+  "command": "che ore sono"
+ }
+}

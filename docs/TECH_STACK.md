@@ -15,7 +15,7 @@
 | Deploy del Core | systemd e Docker | Servizi nativi e componenti isolati |
 | Versionamento | GitHub privato e mirror locale | Sorgenti, contratti e checkpoint |
 
-Lo stack mobile richiede valutazione comparativa. Restano da selezionare le implementazioni per STT, TTS, wake word, event bus, RPC, object storage, knowledge graph, gestione dei segreti, VPN mesh e aggiornamento Desktop. Il piano conferma le relative capacità. Revisioni minime, modelli e soglie prestazionali saranno fissati con prove riproducibili.
+Lo stack mobile richiede valutazione comparativa. Restano da selezionare le implementazioni per event bus, RPC, object storage, knowledge graph, gestione dei segreti, VPN mesh e aggiornamento Desktop. Il piano conferma le relative capacità. Revisioni minime, modelli e soglie prestazionali saranno fissati con prove riproducibili.
 
 Versionare dipendenze e contratti alla loro introduzione. Per Rust/Python, descrivere input, output, compatibilità, propagazione degli errori, timeouts e stato. Mantenere frontend e adapter indipendenti dalle credenziali dei provider. Verificare prestazioni sul primo host e documentare il profilo hardware prima di stabilire il catalogo dei modelli.
 
@@ -37,5 +37,6 @@ Versionare dipendenze e contratti alla loro introduzione. Per Rust/Python, descr
 | Playwright | 1.63.0 | Test E2E dell'interfaccia | `tests/e2e/ui_smoke.cjs` |
 | Interfaccia Web | HTML, CSS e JavaScript senza dipendenze | Deviazione temporanea da React (Tauri adottato per il desktop) | ADR-0004, ADR-0009 |
 | Pianificatore | `tokio::time::interval` nel Core | Automazioni (RF-07) | ADR-0005 |
+| faster-whisper / Piper / openWakeWord | 1.2.1 / 1.8.0 / 0.4.0 (opzionali) | Voce locale | ADR-0010 |
 | Tauri | 2.12 (WebKitGTK 4.1 su Linux, WebView2 su Windows, WKWebView su macOS) | App desktop `apps/desktop/src-tauri` | ADR-0009 |
 | `ureq` / `url` (Rust) | 2.12 / 2.5 | Client HTTP del Web Agent con risolutore vincolato | ADR-0007 |

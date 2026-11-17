@@ -32,6 +32,7 @@ Documentare insieme ai contratti la classificazione dei dati, i flussi egress, l
 | Minimizzazione | Nessun backend cloud; fixture sintetiche; diagnostica senza payload | ADR-0004 |
 | SSRF (Web) | Solo http e https pubblici; niente loopback, LAN o link-local (metadati cloud); DNS verificato e controllo ripetuto a ogni redirect | `ssrf_targets_are_denied_by_default`, `redirect_to_blocked_domain_is_stopped_at_each_hop` |
 | Prompt injection (Web) | Contenuto marcato non attendibile; dopo un risultato di strumento sono accettate solo risposte testuali | `page_instructions_are_never_executed`, `test_web_tool_result_is_wrapped_as_untrusted_for_the_model` |
+| Voce | Motori solo locali; audio non salvato né registrato nell'audit; parlato senza «Jarvis» scartato; microfono sempre segnalato; nessuna conferma a voce | `tests/ai/test_voice.py`, `core/server/tests/voice.rs`, E2E |
 | Dati in uscita (Web) | Interruttore `JARVIS_WEB`, domini consentiti e vietati, audit di ogni chiamata | `web_can_be_disabled_or_restricted_to_an_allowlist` |
 
 Da completare:
