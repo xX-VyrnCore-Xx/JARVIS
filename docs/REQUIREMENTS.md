@@ -34,3 +34,15 @@ Lo scope operativo include produttività e documenti, email e calendario, svilup
 | RNF-08 | Backup, ripristino e rollback | Restore su ambiente pulito e rollback di release |
 
 Per ogni requisito registrare milestone, componente, test, riferimento alla revisione, esito e stato. Gli stati sono Pianificato, In corso, Implementato, Verificato e Bloccato. L'accettazione finale segue [DEVOPS_QA_OBSERVABILITY.md](DEVOPS_QA_OBSERVABILITY.md).
+
+## Tracciabilità
+
+| ID | Milestone | Componente | Test | Revisione | Esito | Stato |
+|---|---|---|---|---|---|---|
+| RF-02 | Fase 1 | `contracts/v1/task.schema.json`, `task-transitions.json` | Fixture `task.*`, `TaskTransitions` | Branch `claude/cool-ramanujan-bogarl` | Python e Rust OK | In corso (contratto, non ancora esecuzione) |
+| RF-03 | Fase 1 | `contracts/v1/delegation.schema.json`, `envelope.schema.json` | Fixture `delegation.*`, `envelope.*` | Idem | Python e Rust OK | In corso (contratto) |
+| RF-05 | Fase 1 | `contracts/v1/tool-descriptor.schema.json` | Fixture `tool-descriptor.*` | Idem | Python e Rust OK | In corso (contratto) |
+| RNF-01 | Fase 1–2 | `contracts/v1/`, `core/contracts` | Stesse fixture in Python e Rust | Idem | Esiti identici su 14 fixture valide e 24 non valide | In corso |
+| RNF-04 | Fase 1 | `policy-decision.schema.json`, `audit-event.schema.json` | Fixture `policy-decision.*`, `audit-event.*`, catene `streams/` | Idem | Modifica e cancellazione di un evento rilevate | In corso (contratto) |
+| RNF-07 | Fase 1 | Correlazione in `envelope`, `task`, `audit-event` | Fixture comuni | Idem | OK | In corso (contratto) |
+

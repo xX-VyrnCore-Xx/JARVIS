@@ -18,20 +18,21 @@ La prima versione include Core, Orchestrator, agenti fondamentali, AI locale e c
 
 Il checkpoint è la sezione di ripresa versionata con Git. Ogni voce va aggiornata quando cambia lo stato verificato. Includere gli identificativi dei requisiti e percorsi alle prove.
 
-| Campo | Stato al 2026-11-17 |
+| Campo | Stato al 2026-11-17 (seconda ripresa) |
 |---|---|
-| Ultima revisione verificata | Base `ad1972c` sul branch `claude/cool-ramanujan-bogarl`; le modifiche di questa sessione sono nel commit successivo dello stesso branch |
-| Milestone effettiva | Fase 1 — Architettura e contratti, in corso |
-| Risultato disponibile | Contratti v1 in `contracts/v1/`: common, envelope, error, delegation, tool-descriptor (RF-03, RF-05, RNF-01, RNF-04, RNF-07). Vedi [contracts/README.md](../contracts/README.md) e ADR-0001 in [DECISIONS.md](DECISIONS.md) |
-| Verifiche del software | `python3 -m unittest discover -s tests/contracts -v` — Python 3.13.18, jsonschema 4.26.0, container Linux remoto — 4 test OK (7 fixture valide, 11 non valide, ciascuna respinta dalla sola regola prevista). Workflow CI `.github/workflows/contracts.yml`: run 44082465183 fallita senza runner assegnato (nessun log, 2 s), quindi blocco dell'account GitHub Actions e non dei test |
-| Lacune documentali | Risposte 75–80 senza fonte, lasciate vuote. Scelte aperte invariate: RPC/event bus, storage, segreti, VPN mesh, motori vocali, stack mobile, SLO |
-| Blocchi | Nessuno per la Fase 1. `origin/main` ha una cronologia non correlata (piano in inglese, `docs/PLAN.md`) senza merge base con questo branch: integrazione da decidere con il proprietario. GitHub Actions non avvia i job (verificare in Settings → Billing il limite di spesa o i minuti per i repository privati, e in Settings → Actions che siano abilitate) |
-| Prossima azione | Contratti `task` (stato e transizioni del task: RF-02) e `policy-decision` (decisione del Security Engine con audit: RNF-04), con fixture e test nello stesso schema. Poi workspace Cargo in `core/` che carica e valida i contratti v1 |
+| Ultima revisione verificata | `f5aba7b` sul branch `claude/cool-ramanujan-bogarl`, con CI verde (job 134038010136). Le modifiche di questa ripresa sono nel commit successivo dello stesso branch, in [PR #1](https://github.com/xX-VyrnCore-Xx/JARVIS/pull/1) |
+| Milestone effettiva | Fase 1 — condizione di uscita raggiunta (contratti iniziali verificabili, dipendenze documentate in [contracts/README.md](../contracts/README.md)), in attesa di accettazione del proprietario. Fase 2 — Prototipi tecnici, in corso |
+| Risultato disponibile | Contratti v1: common, envelope, error, delegation, tool-descriptor, task (+ tabella transizioni), policy-decision, audit-event. Crate Rust `jarvis-contracts` in `core/contracts` con gli stessi schemi e invarianti (ADR-0001, ADR-0002 in [DECISIONS.md](DECISIONS.md)). Tracciabilità in [REQUIREMENTS.md](REQUIREMENTS.md) |
+| Verifiche del software | Container remoto Linux: `python3 -m unittest discover -s tests/contracts -v` (Python 3.13.18, jsonschema 4.26.0) — 8 test OK; `cargo test --locked` in `core/` (Rust 1.97.0) — 5 test OK; `cargo clippy --all-targets -- -D warnings` e `cargo fmt --check` OK. Esiti identici Python/Rust su 14 fixture valide e 24 non valide, catena di audit valida, manomessa e con evento cancellato. CI GitHub: job Python verde su `f5aba7b`; job Rust aggiunto in questa ripresa, esito da leggere sulla PR |
+| Lacune documentali | Risposte 75–80 senza fonte, lasciate vuote. Scelte aperte invariate: RPC/event bus, storage, segreti, VPN mesh, motori vocali, stack mobile, SLO. Firma o ancoraggio esterno della catena di audit da decidere con la gestione dei segreti |
+| Blocchi | Nessuno tecnico. Il blocco di GitHub Actions è risolto dopo che il repository è stato reso pubblico. `origin/main` resta una cronologia non correlata senza merge base: integrazione da decidere con il proprietario. MSRV 1.80 dichiarata ma non verificata |
+| Prossima azione | Fase 2, integrazione Rust/Python: prototipo di bridge fra Core Rust e worker Python con messaggi `jarvis.envelope/1` in JSON Lines su stdio. Il Core avvia il worker, invia una `delegation`, riceve l'esito o un `error`, applica il timeout e chiude il processo; entrambi i lati validano con i contratti v1. Il trasporto definitivo (RPC) resta aperto: il bridge è una prova, non una scelta |
 
 ### Registro delle riprese
 
 | Data | Revisione di partenza | Lavoro | Verifiche | Prossimo passo |
 |---|---|---|---|---|
 | 2026-11-17 | `ad1972c` | Inventario: solo documentazione in `docs/`. Creati contratti v1, fixture sintetiche, test, CI, `CLAUDE.md` in radice, ADR-0001 | 4 test unittest OK | Contratti `task` e `policy-decision` |
+| 2026-11-17 | `f5aba7b` | CI rieseguita e verde dopo che il repository è stato reso pubblico. Contratti task, policy-decision e audit-event; matrice delle dipendenze; chiusura tecnica della Fase 1. Fase 2: crate Rust `jarvis-contracts`, job CI Rust, ADR-0002, tracciabilità dei requisiti | Python 8 OK, Rust 5 OK, clippy e fmt OK | Bridge Rust–Python su stdio |
 
 Per ogni ripresa registrare data, revisione, lavoro completato, verifiche eseguite, blocchi, ipotesi e prossimo passo concreto. Conservare il checkpoint con le modifiche alle quali si riferisce.

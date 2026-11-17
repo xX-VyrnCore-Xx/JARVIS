@@ -6,7 +6,7 @@ Comando di ripresa dalla radice del monorepo:
 
 ## Orientamento
 
-Leggi [README.md](README.md), [ROADMAP.md](ROADMAP.md), [DEVELOPMENT.md](DEVELOPMENT.md) e [DECISIONS.md](DECISIONS.md). Controlla branch, commit, working tree, manifest, struttura, test disponibili e checkpoint. Verifica che il checkpoint descriva la revisione effettiva. Poi leggi requisiti, architettura e documenti dei sottosistemi interessati.
+Leggi [README.md](README.md), [ROADMAP.md](docs/ROADMAP.md), [DEVELOPMENT.md](docs/DEVELOPMENT.md) e [DECISIONS.md](docs/DECISIONS.md). Controlla branch, commit, working tree, manifest, struttura, test disponibili e checkpoint. Verifica che il checkpoint descriva la revisione effettiva. Poi leggi requisiti, architettura e documenti dei sottosistemi interessati.
 
 ## Esecuzione
 
@@ -19,4 +19,21 @@ Leggi [README.md](README.md), [ROADMAP.md](ROADMAP.md), [DEVELOPMENT.md](DEVELOP
 
 ## Chiusura della sessione
 
-Aggiorna il checkpoint in [ROADMAP.md](ROADMAP.md) con milestone, revisione, esiti, evidenze, blocchi e prossimo passo. Aggiorna le specifiche coinvolte e registra le decisioni in [DECISIONS.md](DECISIONS.md). Indica quali modifiche sono nel checkout e quali sono già disponibili sul branch condiviso. Usa solo le operazioni Git e remote autorizzate per la sessione.
+Aggiorna il checkpoint in [ROADMAP.md](docs/ROADMAP.md) con milestone, revisione, esiti, evidenze, blocchi e prossimo passo. Aggiorna le specifiche coinvolte e registra le decisioni in [DECISIONS.md](docs/DECISIONS.md). Indica quali modifiche sono nel checkout e quali sono già disponibili sul branch condiviso. Usa solo le operazioni Git e remote autorizzate per la sessione.
+
+## Struttura e verifiche
+
+Documenti di specifica in `docs/`, contratti in `contracts/`, Core Rust in `core/`, runtime AI Python in `ai/`, verifiche trasversali in `tests/`. Comandi correnti, gli stessi della CI `.github/workflows/contracts.yml`:
+
+```bash
+python3 -m pip install -r tests/contracts/requirements.txt
+```
+
+```bash
+python3 -m unittest discover -s tests/contracts -v && python3 -m unittest discover -s tests/ai -v
+```
+
+```bash
+cd core && cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked
+```
+
