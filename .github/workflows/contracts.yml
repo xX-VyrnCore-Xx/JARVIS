@@ -2,9 +2,9 @@ name: contracts
 
 on:
   push:
-    paths: ["contracts/**", "tests/**", "core/**", "ai/**", "apps/**", "jarvis.sh", ".github/workflows/contracts.yml"]
+    paths: ["contracts/**", "tests/**", "core/**", "ai/**", "apps/**", "jarvis.sh", "jarvis.ps1", "jarvis.cmd", ".github/workflows/contracts.yml"]
   pull_request:
-    paths: ["contracts/**", "tests/**", "core/**", "ai/**", "apps/**", "jarvis.sh", ".github/workflows/contracts.yml"]
+    paths: ["contracts/**", "tests/**", "core/**", "ai/**", "apps/**", "jarvis.sh", "jarvis.ps1", "jarvis.cmd", ".github/workflows/contracts.yml"]
 
 permissions:
   contents: read
@@ -94,3 +94,32 @@ jobs:
       - run: cargo clippy --locked -- -D warnings
       - run: cargo build --locked
 
+
+  avvio:
+    name: avvio reale (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      JARVIS_NO_BROWSER: "1"
+      JARVIS_AI_BACKEND: offline
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Avvio con jarvis.sh (Linux, macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          ./jarvis.sh > jarvis.log 2>&1 &
+          python tests/smoke/start_smoke.py http://127.0.0.1:8765 1200 || { cat jarvis.log; exit 1; }
+      - name: Avvio con jarvis.ps1 (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $p = Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','jarvis.ps1' -RedirectStandardOutput jarvis.log -RedirectStandardError jarvis.err -PassThru -NoNewWindow
+          python tests/smoke/start_smoke.py http://127.0.0.1:8765 1500
+          if ($LASTEXITCODE -ne 0) { Get-Content jarvis.log, jarvis.err; exit 1 }

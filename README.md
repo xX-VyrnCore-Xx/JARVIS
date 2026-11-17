@@ -8,17 +8,19 @@ L'inferenza e la persistenza privilegiano l'ambiente locale. Il cloud interviene
 
 Il prototipo funziona sul tuo computer, senza cloud. Comprende chat, strumenti con permessi, conferme, memoria, workspace e audit.
 
-**Requisiti:** Linux o macOS (su Windows usa WSL2), [Python 3.10+](https://www.python.org/), [Rust](https://rustup.rs/) e Git. Opzionale: [Ollama](https://ollama.com) per la conversazione libera con un modello locale.
+**Requisiti:** Windows, macOS o Linux con [Python 3.10+](https://www.python.org/) (su Windows spunta «Add to PATH»), [Rust](https://rustup.rs/) e Git. Opzionale: [Ollama](https://ollama.com) per la conversazione libera con un modello locale.
 
 ```bash
 git clone https://github.com/xX-VyrnCore-Xx/JARVIS.git
 ```
 
-```bash
-cd JARVIS && ./jarvis.sh
-```
+Avvio:
+- **Linux e macOS:** nel terminale, `cd JARVIS && ./jarvis.sh`. Se compare «Permission denied», per esempio dopo aver scaricato lo ZIP, usa `bash jarvis.sh`.
+- **Windows:** doppio clic su **`jarvis.cmd`**, oppure in PowerShell `.\jarvis.ps1`.
 
-Poi apri **http://localhost:8765**. La prima compilazione richiede qualche minuto.
+Al primo avvio vengono compilati i componenti: richiede alcuni minuti e l'avanzamento compare nel terminale. Poi il browser si apre da solo su **http://localhost:8765**. Il terminale deve restare aperto finché usi JARVIS; per chiuderlo premi Ctrl+C.
+
+**Se non parte:** `./jarvis.sh doctor` (Windows: `jarvis.cmd doctor`) controlla Python, Rust, compilatore C e porta, e indica cosa installare. Se la porta 8765 è occupata, avvia con `JARVIS_PORT=8766 ./jarvis.sh`.
 
 **App desktop (Tauri):** con `./jarvis.sh desktop` JARVIS si apre in una finestra sua. L'app avvia il Core da sola, tiene i dati nella cartella dell'applicazione dell'utente e alla chiusura spegne tutto. Su Linux servono le librerie WebKitGTK:
 

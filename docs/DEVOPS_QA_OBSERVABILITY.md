@@ -50,3 +50,8 @@ Il Core trasforma eventi e anomalie in notifiche `jarvis.notification/1`, correl
 | Worker AI terminato | warning | finché non letta |
 
 Il monitor gira a ogni intervallo del pianificatore. Le notifiche si consultano da `GET /api/notifications` e si segnano come lette con `POST /api/notifications/{id}/read` o `POST /api/notifications/read-all`.
+
+## Avvio verificato per sistema operativo
+
+Il job CI `avvio` esegue i lanciatori reali (`jarvis.sh` su Linux e macOS, `jarvis.ps1` su Windows) da un checkout pulito. Poi `tests/smoke/start_smoke.py` attende il Core e verifica health, chat con caratteri accentati e uno strumento eseguito tramite policy. I lanciatori offrono `doctor` per la diagnosi dei prerequisiti.
+

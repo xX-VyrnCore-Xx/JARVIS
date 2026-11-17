@@ -183,6 +183,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--handler", choices=sorted(HANDLERS), default="echo")
     args = parser.parse_args(argv)
     handler = HANDLERS[args.handler]
+    # Protocollo in UTF-8 con righe '\n' su ogni sistema: su Windows le pipe userebbero cp1252 e '\r\n'.
+    for stream in (sys.stdin, sys.stdout):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", newline="\n" if stream is sys.stdout else None)
     for line in sys.stdin:
         if not line.strip():
             continue
