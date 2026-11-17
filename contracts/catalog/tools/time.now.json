@@ -1,0 +1,42 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "time.now",
+  "version": "1.0.0",
+  "summary": "Data e ora correnti del Core",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {}
+  },
+  "output_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "utc",
+      "local"
+    ],
+    "properties": {
+      "utc": {
+        "type": "string"
+      },
+      "local": {
+        "type": "string"
+      }
+    }
+  },
+  "scope": "core",
+  "prerequisites": [],
+  "effects": "none",
+  "risk": "low",
+  "permissions": [
+    "core.clock:read"
+  ],
+  "errors": [],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

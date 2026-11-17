@@ -107,5 +107,18 @@ class TaskTransitions(unittest.TestCase):
             self.assertLessEqual(set(targets), states)
 
 
+class ToolCatalog(unittest.TestCase):
+    def test_catalog_descriptors_are_valid(self) -> None:
+        paths = sorted((ROOT / "contracts" / "catalog" / "tools").glob("*.json"))
+        self.assertGreaterEqual(len(paths), 8)
+        for path in paths:
+            with self.subTest(tool=path.name):
+                doc = _load(path)
+                self.assertEqual(list(validator_for("tool-descriptor").iter_errors(doc)), [])
+                self.assertEqual(path.name, f"{doc['name']}.json")
+                Draft202012Validator.check_schema(doc["input_schema"])
+                self.assertEqual(doc["input_schema"].get("additionalProperties"), False, "argomenti chiusi")
+
+
 if __name__ == "__main__":
     unittest.main()

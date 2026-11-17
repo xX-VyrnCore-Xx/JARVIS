@@ -1,0 +1,38 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "memory.forget",
+  "version": "1.0.0",
+  "summary": "Cancella un'informazione dalla memoria",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "id"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "prerequisites": [],
+  "effects": "write_local",
+  "risk": "high",
+  "permissions": [
+    "core.memory:write"
+  ],
+  "errors": [
+    "memory.not_found"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "never"
+  },
+  "confirmation": "required"
+}

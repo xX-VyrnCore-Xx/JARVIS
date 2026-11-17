@@ -1,0 +1,41 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "fs.list",
+  "version": "1.0.0",
+  "summary": "Elenca file e cartelle di una directory della workspace",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {
+      "path": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512,
+        "description": "Percorso relativo alla workspace"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "node",
+  "prerequisites": [
+    "Il percorso deve restare nella workspace di JARVIS"
+  ],
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "node.filesystem:read"
+  ],
+  "errors": [
+    "fs.not_found",
+    "fs.outside_workspace"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

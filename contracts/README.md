@@ -12,6 +12,10 @@ Contratti condivisi fra Core Rust, AI Python, applicazioni e integrazioni (RNF-0
 | `v1/task.schema.json` + `v1/task-transitions.json` | `jarvis.task/1` — task con obiettivo, condizioni, dipendenze e storia delle transizioni | AUTONOMY_AND_TOOLS.md, ARCHITECTURE.md | RF-02, RF-07 |
 | `v1/policy-decision.schema.json` | `jarvis.policy-decision/1` — decisione del Security Engine con conferma vincolata | SECURITY_AND_PRIVACY.md | RNF-04, RNF-05 |
 | `v1/audit-event.schema.json` | `jarvis.audit-event/1` — evento di audit in catena di hash | SECURITY_AND_PRIVACY.md, DEVOPS_QA_OBSERVABILITY.md | RNF-04, RNF-07 |
+| `v1/agent-result.schema.json` | `jarvis.agent-result/1` — esito di un agente: risposta oppure una proposta di strumento, con backend e motivo di degradazione | AI_SYSTEM.md | RF-01, RF-04 |
+| `catalog/tools/*.json` | Catalogo iniziale degli strumenti (`jarvis.tool/1`), con `input_schema` chiuso | AUTONOMY_AND_TOOLS.md | RF-05 |
+
+La delega v1 accetta il campo facoltativo `inputs`: turni recenti (`user` o `assistant`), memoria autorizzata e `tool_result`. È un'aggiunta compatibile: i documenti senza `inputs` restano validi.
 
 ## Dipendenze fra moduli e contratti
 
@@ -23,6 +27,7 @@ Contratti condivisi fra Core Rust, AI Python, applicazioni e integrazioni (RNF-0
 | `jarvis.tool/1` | Computer Use, Web Agent, Integration Engine e plugin | Orchestrator, agenti, Security Engine |
 | `jarvis.policy-decision/1` | Security Engine | Orchestrator, esecutori degli strumenti, client per la conferma |
 | `jarvis.audit-event/1` | Security Engine ed esecutori | Observability, verifiche di accettazione |
+| `jarvis.agent-result/1` | Agenti (worker Python) | Orchestrator |
 | `error` (incorporato) | Ogni modulo | Orchestrator per retry e ripianificazione |
 
 Ordine d'uso in un'esecuzione (ARCHITECTURE.md): il client crea un `task`; l'Orchestrator emette `delegation` in un `envelope`; l'agente propone uno strumento descritto da `tool`; il Security Engine produce `policy-decision` (eventualmente con conferma) e un `audit-event`; l'esecutore restituisce esito o `error` e un nuovo `audit-event`; l'Orchestrator aggiorna la `history` del task.

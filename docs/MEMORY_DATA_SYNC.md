@@ -19,3 +19,10 @@ Classificare i dati all'ingresso e conservare provenienza, proprietario, permess
 Conservare sul dispositivo le attività differibili e le modifiche locali autorizzate. Alla riconnessione, autenticare il nodo, scambiare le revisioni, applicare le operazioni secondo il loro identificativo e confermare quelle già ricevute. Gestire cancellazioni, conflitti concorrenti e revoca di accesso. Quando la strategia del tipo di dato non consente una fusione sicura, mantenere entrambe le versioni per risoluzione. I dettagli del protocollo e le regole per tipo di dato vanno formalizzati nei contratti prima dell'implementazione.
 
 Verificare ripetizione della stessa operazione, crash durante la sincronizzazione, divergenza di due nodi, cancellazione seguita da riconnessione tardiva e ricostruzione dell'indice. Il piano di ripristino deve coprire backup cifrati e convalida di dati, metadati e permessi dopo il restore.
+
+## Stato del prototipo v0.1
+
+- **Memoria del proprietario:** in SQLite (`data/jarvis.sqlite3`), con elementi inseriti tramite «ricorda che …». Ogni elemento può essere consultato e cancellato dall'interfaccia, con evento di audit, oppure dall'agente previa conferma (RF-08).
+- **Contesto dell'agente:** riceve fino a 50 elementi di memoria e gli ultimi 10 turni della conversazione.
+- **Task e conversazione:** persistono dopo un riavvio.
+- **Non ancora implementati:** memoria semantica (pgvector o Qdrant), knowledge graph, sincronizzazione fra nodi e backup cifrati.

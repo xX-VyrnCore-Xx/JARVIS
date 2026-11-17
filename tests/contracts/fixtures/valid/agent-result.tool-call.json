@@ -1,0 +1,17 @@
+{
+ "contract": "jarvis.agent-result/1",
+ "kind": "tool_call",
+ "tool_call": {
+  "tool": "fs.read",
+  "version": "1.0.0",
+  "arguments": {
+   "path": "note.txt"
+  },
+  "rationale": "Richiesta di lettura"
+ },
+ "backend": {
+  "name": "ollama",
+  "model": "qwen2.5:3b",
+  "location": "local"
+ }
+}

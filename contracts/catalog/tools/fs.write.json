@@ -1,0 +1,47 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "fs.write",
+  "version": "1.0.0",
+  "summary": "Crea o sovrascrive un file di testo nella workspace",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "path",
+      "content"
+    ],
+    "properties": {
+      "path": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512,
+        "description": "Percorso relativo alla workspace"
+      },
+      "content": {
+        "type": "string",
+        "maxLength": 65536
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "node",
+  "prerequisites": [
+    "Il percorso deve restare nella workspace di JARVIS"
+  ],
+  "effects": "write_local",
+  "risk": "high",
+  "permissions": [
+    "node.filesystem:write"
+  ],
+  "errors": [
+    "fs.outside_workspace"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "idempotency_key",
+    "max_attempts": 1
+  },
+  "confirmation": "required"
+}

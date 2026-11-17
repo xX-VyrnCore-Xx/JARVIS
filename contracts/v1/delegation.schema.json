@@ -5,33 +5,107 @@
   "description": "AI_SYSTEM.md: obiettivo, riferimento al task, contesto minimo, strumenti, limiti, timeout e condizioni di completamento. RF-03.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["contract", "delegation_id", "task_id", "objective", "delegate", "context", "tools", "limits", "timeout_ms", "completion_conditions", "issued_at", "expires_at"],
+  "required": [
+    "contract",
+    "delegation_id",
+    "task_id",
+    "objective",
+    "delegate",
+    "context",
+    "tools",
+    "limits",
+    "timeout_ms",
+    "completion_conditions",
+    "issued_at",
+    "expires_at"
+  ],
   "properties": {
-    "contract": { "const": "jarvis.delegation/1" },
-    "delegation_id": { "$ref": "common.schema.json#/$defs/uuid" },
-    "task_id": { "$ref": "common.schema.json#/$defs/uuid" },
-    "parent_delegation_id": { "$ref": "common.schema.json#/$defs/uuid" },
-    "objective": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "contract": {
+      "const": "jarvis.delegation/1"
+    },
+    "delegation_id": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "task_id": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "parent_delegation_id": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "objective": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4000
+    },
     "delegate": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["agent", "temporary"],
+      "required": [
+        "agent",
+        "temporary"
+      ],
       "properties": {
-        "agent": { "enum": ["general_assistant", "research", "coding", "system", "automation", "planning", "memory", "vision", "voice", "monitoring", "temporary"] },
-        "temporary": { "type": "boolean" },
-        "role": { "type": "string", "maxLength": 200 }
+        "agent": {
+          "enum": [
+            "general_assistant",
+            "research",
+            "coding",
+            "system",
+            "automation",
+            "planning",
+            "memory",
+            "vision",
+            "voice",
+            "monitoring",
+            "temporary"
+          ]
+        },
+        "temporary": {
+          "type": "boolean"
+        },
+        "role": {
+          "type": "string",
+          "maxLength": 200
+        }
       },
-      "if": { "properties": { "agent": { "const": "temporary" } } },
-      "then": { "required": ["role"], "properties": { "temporary": { "const": true } } }
+      "if": {
+        "properties": {
+          "agent": {
+            "const": "temporary"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "role"
+        ],
+        "properties": {
+          "temporary": {
+            "const": true
+          }
+        }
+      }
     },
     "context": {
       "description": "Contesto minimo: solo riferimenti autorizzati, non copie di memoria.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["refs"],
+      "required": [
+        "refs"
+      ],
       "properties": {
-        "refs": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/resource_uri" } },
-        "summary": { "type": "string", "maxLength": 4000 }
+        "refs": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "common.schema.json#/$defs/resource_uri"
+          }
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 4000
+        }
       }
     },
     "tools": {
@@ -40,27 +114,126 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["name", "version"],
+        "required": [
+          "name",
+          "version"
+        ],
         "properties": {
-          "name": { "$ref": "common.schema.json#/$defs/identifier" },
-          "version": { "$ref": "common.schema.json#/$defs/semver" }
+          "name": {
+            "$ref": "common.schema.json#/$defs/identifier"
+          },
+          "version": {
+            "$ref": "common.schema.json#/$defs/semver"
+          }
         }
       }
     },
     "limits": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["max_steps"],
+      "required": [
+        "max_steps"
+      ],
       "properties": {
-        "max_steps": { "type": "integer", "minimum": 1, "maximum": 1000 },
-        "max_tokens": { "type": "integer", "minimum": 1 },
-        "max_subdelegations": { "type": "integer", "minimum": 0, "maximum": 16 },
-        "allow_cloud": { "type": "boolean", "default": false }
+        "max_steps": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "max_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_subdelegations": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16
+        },
+        "allow_cloud": {
+          "type": "boolean",
+          "default": false
+        }
       }
     },
-    "timeout_ms": { "$ref": "common.schema.json#/$defs/duration_ms" },
-    "completion_conditions": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1, "maxLength": 1000 } },
-    "issued_at": { "$ref": "common.schema.json#/$defs/timestamp" },
-    "expires_at": { "$ref": "common.schema.json#/$defs/timestamp" }
+    "timeout_ms": {
+      "$ref": "common.schema.json#/$defs/duration_ms"
+    },
+    "completion_conditions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1000
+      }
+    },
+    "issued_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "expires_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "inputs": {
+      "description": "Dati strutturati minimi per l'agente: turni recenti, memoria autorizzata, risultato di uno strumento. Aggiunta compatibile (facoltativa) della v1.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "messages": {
+          "type": "array",
+          "maxItems": 40,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "role",
+              "content"
+            ],
+            "properties": {
+              "role": {
+                "enum": [
+                  "user",
+                  "assistant"
+                ]
+              },
+              "content": {
+                "type": "string",
+                "maxLength": 8000
+              }
+            }
+          }
+        },
+        "memory": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        },
+        "tool_result": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tool",
+            "status",
+            "output"
+          ],
+          "properties": {
+            "tool": {
+              "$ref": "common.schema.json#/$defs/identifier"
+            },
+            "status": {
+              "enum": [
+                "succeeded",
+                "failed",
+                "denied",
+                "cancelled"
+              ]
+            },
+            "output": {}
+          }
+        }
+      }
+    }
   }
 }

@@ -1,0 +1,10 @@
+{
+ "contract": "jarvis.agent-result/1",
+ "kind": "reply",
+ "text": "x",
+ "backend": {
+  "name": "openai",
+  "model": "x",
+  "location": "cloud"
+ }
+}

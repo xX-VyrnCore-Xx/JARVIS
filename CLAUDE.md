@@ -37,3 +37,11 @@ python3 -m unittest discover -s tests/contracts -v && python3 -m unittest discov
 cd core && cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked
 ```
 
+Prototipo avviabile con `./jarvis.sh` (porta 8765). Test E2E dell'interfaccia, con il Core avviato e `JARVIS_AI_BACKEND=offline`:
+
+```bash
+JARVIS_URL=http://localhost:8765 node tests/e2e/ui_smoke.cjs
+```
+
+Il proprietario ha autorizzato il merge automatico delle PR quando la CI è verde (vedi `docs/DEVELOPMENT.md`).
+

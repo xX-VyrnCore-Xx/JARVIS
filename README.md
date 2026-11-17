@@ -4,6 +4,46 @@ JARVIS è un ecosistema AI privato, autonomo, modulare e multipiattaforma per un
 
 L'inferenza e la persistenza privilegiano l'ambiente locale. Il cloud interviene quando serve una capacità superiore e la policy autorizza la trasmissione. L'autonomia comprende pianificazione, esecuzione e verifica, entro i permessi del proprietario.
 
+## Prova il prototipo (v0.1)
+
+Il prototipo funziona sul tuo computer, senza cloud. Comprende chat, strumenti con permessi, conferme, memoria, workspace e audit.
+
+**Requisiti:** Linux o macOS (su Windows usa WSL2), [Python 3.10+](https://www.python.org/), [Rust](https://rustup.rs/) e Git. Opzionale: [Ollama](https://ollama.com) per la conversazione libera con un modello locale.
+
+```bash
+git clone https://github.com/xX-VyrnCore-Xx/JARVIS.git
+```
+
+```bash
+cd JARVIS && ./jarvis.sh
+```
+
+Poi apri **http://localhost:8765**. La prima compilazione richiede qualche minuto.
+
+- **Senza Ollama** JARVIS parte in modalità *offline*: un modello a regole capisce comandi come «che ore sono», «info sistema», «elenca file», «scrivi note.txt: testo», «leggi note.txt», «ricorda che …», «cosa ricordi» e «dimentica <id>».
+- **Con Ollama** installa un modello con supporto agli strumenti (per esempio `ollama pull qwen2.5:3b`) e riavvia `./jarvis.sh`: JARVIS lo rileva da solo.
+
+Cosa osservare:
+- ogni azione mostra agente, strumento, decisione di policy ed esito;
+- scrivere un file o cancellare un ricordo richiede la tua conferma, valida una sola volta e per 5 minuti;
+- i file restano nella cartella `data/workspace`, e ogni tentativo di uscirne viene negato;
+- le sezioni Attività, Memoria e Audit mostrano stato, ricordi cancellabili e la catena di hash verificata.
+
+| Variabile | Predefinito | Effetto |
+|---|---|---|
+| `JARVIS_PORT` | `8765` | Porta locale (il Core ascolta solo su 127.0.0.1) |
+| `JARVIS_DATA_DIR` | `./data` | Database, workspace e audit. Per ripartire da zero cancella questa cartella |
+| `JARVIS_AI_BACKEND` | `auto` | `auto`, `ollama` oppure `offline` |
+| `JARVIS_OLLAMA_URL` | `http://127.0.0.1:11434` | Indirizzo di Ollama |
+| `JARVIS_OLLAMA_MODEL` | primo modello installato | Modello da usare, per esempio `qwen2.5:3b` |
+
+Limiti noti della v0.1:
+- un solo utente locale e una richiesta alla volta;
+- nessuna voce, nessun client desktop o mobile, nessun Web Agent;
+- con Ollama la qualità degli strumenti dipende dal modello scelto.
+
+Dettagli in [docs/ROADMAP.md](docs/ROADMAP.md) e nell'ADR-0004 in [docs/DECISIONS.md](docs/DECISIONS.md).
+
 ## Da dove partire
 
 - Per riprendere lo sviluppo da Claude Code, aprire la radice del repository e seguire [CLAUDE.md](CLAUDE.md), [ROADMAP.md](docs/ROADMAP.md) e [DEVELOPMENT.md](docs/DEVELOPMENT.md).

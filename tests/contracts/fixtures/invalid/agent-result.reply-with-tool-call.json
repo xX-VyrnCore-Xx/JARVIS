@@ -1,0 +1,15 @@
+{
+ "contract": "jarvis.agent-result/1",
+ "kind": "reply",
+ "text": "x",
+ "tool_call": {
+  "tool": "fs.read",
+  "version": "1.0.0",
+  "arguments": {}
+ },
+ "backend": {
+  "name": "offline",
+  "model": "jarvis-offline-1",
+  "location": "local"
+ }
+}

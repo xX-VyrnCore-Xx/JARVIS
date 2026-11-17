@@ -27,3 +27,13 @@ L'AI Gateway uniforma chat, streaming, tool calling, embeddings, vision ed error
 Ogni delega temporanea comprende un obiettivo, un riferimento al task, contesto minimo, strumenti, limiti, timeout e condizioni di completamento. I messaggi strutturati identificano mittente, destinatario, task, payload, stato, istante e correlazione. L'Orchestrator controlla esiti ed effetti prima di chiudere il task. Le policy restano sotto il controllo del Security Engine.
 
 Per aggiornare prompt, agenti e adapter, versionare le modifiche e provarle su casi comparabili. Verificare routing offline, rifiuto di payload non autorizzati, risposta parziale, cancellazione in streaming, agenti scaduti e fallimento di un provider.
+
+## Stato del prototipo v0.1
+
+L'AI Gateway (`ai/jarvis_ai/gateway.py`) espone due backend locali:
+- **Ollama**, con tool calling: il catalogo degli strumenti delegati viene convertito in funzioni;
+- **offline**, a regole: deterministico e sempre disponibile.
+
+Il routing `auto` usa Ollama se risponde e ha un modello installato. Se Ollama fallisce durante una richiesta, il gateway passa al modello offline e riporta il motivo in `backend.degraded_reason`.
+
+L'agente propone al massimo una chiamata di strumento per turno (`jarvis.agent-result/1`); il Core decide ed esegue. È attivo solo il General Assistant. L'escalation cloud non è implementata e la delega impone sempre `allow_cloud: false`.

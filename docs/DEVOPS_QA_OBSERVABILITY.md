@@ -24,3 +24,12 @@ Correlare richiesta, task, agente, provider, strumento e nodo con identificativi
 ## Enterprise Acceptance System
 
 Per l'accettazione finale raccogliere la matrice requisiti–test con esiti, la compatibilità multipiattaforma, la validazione di sicurezza e privacy, le misure di prestazione rispetto agli SLO, le prove di fault tolerance, restore e rollback, la documentazione e le evidenze di deploy e aggiornamento. Registrare eventuali difetti aperti e verificare l'assenza di problemi critici o bloccanti. La chiusura richiede l'accettazione esplicita del proprietario. Valori numerici per SLO e obiettivi di recovery richiedono definizione con evidenze prima della relativa verifica.
+
+## Stato della CI (prototipo v0.1)
+
+Il workflow `.github/workflows/contracts.yml` esegue tre job:
+- **Python:** contratti e AI Gateway;
+- **Rust:** fmt, clippy e test, compresi quelli d'integrazione sull'API con il worker reale;
+- **E2E:** Core in modalità offline più Chromium (`tests/e2e/ui_smoke.cjs`), con gli screenshot pubblicati come artefatto.
+
+Il proprietario ha autorizzato il merge automatico con CI verde ([DEVELOPMENT.md](DEVELOPMENT.md#integrazione-delle-modifiche)).
