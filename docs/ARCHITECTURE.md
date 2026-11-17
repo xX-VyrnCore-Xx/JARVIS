@@ -51,5 +51,6 @@ La disposizione proposta dei moduli nel repository è descritta in [DEVELOPMENT.
 
 | Automation Engine | Workflow pianificati, pianificatore nel Core, cronologia, approvazione legata ai passi | `core/server/src/automation.rs`, `orchestrator.rs` |
 | Observability (parziale) | Notifiche correlate e monitor delle anomalie (audit, worker, AI, automazioni) | `orchestrator.rs` (sezione Notifiche e monitor), `store.rs` |
+| Web Agent (parziale) | Ricerca (Wikipedia o SearXNG) e lettura di pagine con provenienza, difese SSRF e iniezione | `core/server/src/web.rs` |
 
-Non ancora implementati: Voice, Web Agent, Integration Engine, nodi distribuiti, sincronizzazione, metriche e trace.
+Non ancora implementati: Voice, navigazione interattiva con Playwright, Integration Engine, nodi distribuiti, sincronizzazione, metriche e trace.

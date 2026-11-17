@@ -175,6 +175,46 @@ Valutare stack mobile, motori vocali, trasporto degli eventi e RPC, implementazi
   - E2E: contatore, toast, pannello e chiusura dopo l'approvazione.
 - **Documenti interessati:** DEVOPS_QA_OBSERVABILITY.md, INTERFACE_AND_DEVICES.md, REQUIREMENTS.md, ARCHITECTURE.md, `contracts/README.md`.
 
+### ADR-0007 — Web Agent: ricerca e lettura con provenienza, SSRF e prompt injection
+
+- **Data:** 2026-11-17 · **Stato:** Accettato per la Fase 3 (RF-06)
+- **Contesto:** RF-06 chiede ricerca, navigazione e verifica delle fonti; la verifica è «una ricerca riporta fonti e provenienza delle evidenze». SECURITY_AND_PRIVACY.md chiede di trattare come dati i contenuti dei siti e di difendersi dalla prompt injection. RNF-05 chiede di minimizzare i dati in uscita. Il Core gira sul computer del proprietario, quindi un fetch arbitrario potrebbe raggiungere la rete di casa o l'API locale (SSRF).
+- **Opzioni:**
+  - motori di ricerca con chiave API, a pagamento e con dati verso terzi;
+  - scraping di motori generalisti, fragile;
+  - Wikipedia API, senza chiave e stabile;
+  - SearXNG self-hosted;
+  - Playwright per la navigazione completa.
+- **Decisione:**
+  - **Strumenti:** `web.search` (fornitori Wikipedia predefinito e SearXNG configurabile) e `web.fetch` (HTTP GET con estrazione del testo), eseguiti dal Core con `ureq`. Playwright per l'interazione con le pagine resta per una fase successiva.
+  - **Policy:**
+    - `destination: external`;
+    - interruttore `JARVIS_WEB`;
+    - domini consentiti e vietati;
+    - solo http e https, nessuna credenziale nell'URL;
+    - niente indirizzi privati o di loopback.
+  - **Esecuzione:**
+    - risoluzione DNS verificata e connessione agli indirizzi controllati;
+    - controllo ripetuto a ogni redirect (al massimo 3);
+    - limiti di 1 MiB, di tempo e di tipo di contenuto.
+  - **Provenienza:** il Core allega le fonti a ogni risposta, indipendentemente dal testo del modello: URL, titolo, istante di recupero, SHA-256 del contenuto, fornitore. Le fonti restano salvate con il messaggio.
+  - **Prompt injection:**
+    - il contenuto è marcato `untrusted` e incapsulato per il modello;
+    - il prompt di sistema vieta di seguirne le istruzioni;
+    - strutturalmente, dopo un risultato di strumento l'Orchestrator accetta solo una risposta testuale, quindi una pagina non può avviare altre azioni nello stesso turno.
+- **Motivazione:** fonti verificabili senza chiavi né costi. L'opzione self-hosted rispetta il local-first. La difesa strutturale non dipende dalla bravura del modello.
+- **Conseguenze:**
+  - la query di ricerca esce dal computer: il catalogo lo dichiara e l'audit registra ogni chiamata;
+  - Wikipedia non è un motore generalista: per il Web intero serve SearXNG;
+  - con un proxy di sistema il controllo degli indirizzi avviene sulla risoluzione locale.
+- **Evidenza:**
+  - `core/server/tests/web.rs`: 8 test con server locale (ricerca, estrazione, SHA-256, iniezione, SSRF, redirect verso dominio vietato, limiti, allowlist e disattivazione, audit);
+  - 3 test unitari in `web.rs`;
+  - `tests/ai/test_gateway.py`: intenti, citazioni, marcatura per Ollama;
+  - E2E: ricerca, lettura, fonti e dominio vietato.
+  - Prova sul Web reale sospesa: il proxy del container nega l'accesso a Internet.
+- **Documenti interessati:** SECURITY_AND_PRIVACY.md, AUTONOMY_AND_TOOLS.md, AI_SYSTEM.md, ARCHITECTURE.md, TECH_STACK.md, REQUIREMENTS.md, README.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

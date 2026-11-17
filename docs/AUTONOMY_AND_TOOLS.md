@@ -29,6 +29,7 @@ Il catalogo iniziale è in `contracts/catalog/tools`, con un descrittore `jarvis
 | `memory.remember` | medio | no |
 | `fs.write`, `memory.forget` | alto | sì |
 
+| `web.search`, `web.fetch` | medio, destinazione esterna | no (policy su domini e indirizzi) |
 | `workflow.list` | basso | no |
 | `workflow.run` | medio | no (esegue passi già approvati) |
 | `workflow.create`, `workflow.delete` | alto | sì |

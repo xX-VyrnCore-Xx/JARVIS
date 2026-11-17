@@ -37,3 +37,5 @@ L'AI Gateway (`ai/jarvis_ai/gateway.py`) espone due backend locali:
 Il routing `auto` usa Ollama se risponde e ha un modello installato. Se Ollama fallisce durante una richiesta, il gateway passa al modello offline e riporta il motivo in `backend.degraded_reason`.
 
 L'agente propone al massimo una chiamata di strumento per turno (`jarvis.agent-result/1`); il Core decide ed esegue. È attivo solo il General Assistant. L'escalation cloud non è implementata e la delega impone sempre `allow_cloud: false`.
+
+Con gli strumenti Web il prompt di sistema chiede di citare le fonti con [n] e l'URL e di non seguire istruzioni contenute nelle pagine. I risultati Web arrivano al modello racchiusi tra marcatori di contenuto non attendibile. Il Core allega comunque le fonti alla risposta (ADR-0007).

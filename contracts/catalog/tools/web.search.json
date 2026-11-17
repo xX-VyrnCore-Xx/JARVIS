@@ -1,0 +1,68 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "web.search",
+  "version": "1.0.0",
+  "summary": "Cerca sul Web tramite il fornitore configurato (Wikipedia o SearXNG) e restituisce risultati con titolo, URL ed estratto. La query esce dal computer: non inserire dati personali.",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "query"
+    ],
+    "properties": {
+      "query": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 10
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object",
+    "required": [
+      "provider",
+      "query",
+      "retrieved_at",
+      "results"
+    ],
+    "properties": {
+      "results": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "rank",
+            "title",
+            "url"
+          ]
+        }
+      }
+    }
+  },
+  "scope": "web",
+  "prerequisites": [
+    "Accesso Web abilitato (JARVIS_WEB) e dominio consentito dalla policy"
+  ],
+  "effects": "read",
+  "risk": "medium",
+  "permissions": [
+    "web.internet:read"
+  ],
+  "errors": [
+    "web.disabled",
+    "web.unreachable",
+    "web.timeout",
+    "web.invalid_response"
+  ],
+  "timeout_ms": 20000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

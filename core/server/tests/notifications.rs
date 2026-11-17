@@ -19,6 +19,7 @@ fn config(data: &Path, python: &str) -> Config {
         delegation_timeout_ms: 30_000,
         scheduler_tick_s: 20,
         token: "t".into(),
+        web: jarvis_core::web::WebConfig::default(),
     }
 }
 

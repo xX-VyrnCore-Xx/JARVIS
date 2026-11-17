@@ -74,9 +74,18 @@ function stepChips(steps) {
   return chips;
 }
 
+function sourceList(sources) {
+  if (!sources || !sources.length) return null;
+  const safe = sources.filter((s) => /^https?:\/\//i.test(s.url || ""));
+  return el("div", { class: "sources" }, el("div", { class: "sources-title" }, "Fonti"),
+    el("ol", {}, safe.map((s) => el("li", {},
+      el("a", { href: s.url, target: "_blank", rel: "noopener noreferrer nofollow" }, s.title || s.url),
+      el("span", { class: "src-meta" }, ` · ${new URL(s.url).hostname} · ${fmtTime(s.retrieved_at)}${s.content_sha256 ? " · sha256 " + s.content_sha256.slice(0, 12) + "…" : ""}${s.provider ? " · " + s.provider : ""}`)))));
+}
+
 function addMessage(role, text, extra = {}) {
   const meta = extra.steps && extra.steps.length ? el("div", { class: "meta" }, stepChips(extra.steps)) : null;
-  const node = el("div", { class: `msg ${role}${extra.error ? " error" : ""}` }, text, meta);
+  const node = el("div", { class: `msg ${role}${extra.error ? " error" : ""}` }, text, sourceList(extra.sources), meta);
   messages.append(node);
   scrollDown();
   return node;
@@ -89,7 +98,7 @@ function addConfirmation(c) {
     try {
       const out = await api(`/api/confirmations/${encodeURIComponent(c.confirmation_id)}`, { method: "POST", body: JSON.stringify({ approve }) });
       card.replaceWith(el("div", { class: "confirm" }, el("p", { class: "small" }, approve ? "✓ Confermato" : "✗ Rifiutato")));
-      addMessage("assistant", out.reply, { steps: out.steps });
+      addMessage("assistant", out.reply, { steps: out.steps, sources: out.sources });
     } catch (e) {
       addMessage("assistant", `Errore: ${e.message}`, { error: true });
       card.remove();
@@ -120,7 +129,7 @@ async function send(text) {
   try {
     const out = await api("/api/chat", { method: "POST", body: JSON.stringify({ message: text }) });
     typing.remove();
-    addMessage("assistant", out.reply || "(nessuna risposta)", { steps: out.steps, error: out.task && out.task.state === "failed" });
+    addMessage("assistant", out.reply || "(nessuna risposta)", { steps: out.steps, sources: out.sources, error: out.task && out.task.state === "failed" });
     if (out.confirmation) addConfirmation(out.confirmation);
   } catch (e) {
     typing.remove();
@@ -150,7 +159,7 @@ async function loadConversation() {
   try {
     const { items } = await api("/api/conversation?limit=50");
     if (!items.length) addMessage("assistant", "Ciao, sono JARVIS. Scrivimi qualcosa o prova uno dei suggerimenti qui sotto.");
-    for (const m of items) addMessage(m.role === "user" ? "user" : "assistant", m.content);
+    for (const m of items) addMessage(m.role === "user" ? "user" : "assistant", m.content, { sources: m.sources });
     const pending = await api("/api/confirmations");
     for (const c of pending.items) addConfirmation(c);
   } catch (e) {

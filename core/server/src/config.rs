@@ -16,6 +16,7 @@ pub struct Config {
     /// Intervallo del pianificatore in secondi.
     pub scheduler_tick_s: u64,
     pub token: String,
+    pub web: crate::web::WebConfig,
 }
 
 fn repo_root() -> PathBuf {
@@ -78,6 +79,7 @@ impl Config {
                 .filter(|v| *v >= 1)
                 .unwrap_or(20),
             token: uuid::Uuid::new_v4().simple().to_string(),
+            web: crate::web::WebConfig::from_env(),
         })
     }
 

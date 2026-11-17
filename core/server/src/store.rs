@@ -29,6 +29,11 @@ impl Store {
                  dedupe_key TEXT, read_at TEXT, doc TEXT NOT NULL);
              CREATE INDEX IF NOT EXISTS notifications_unread ON notifications (read_at, dedupe_key);",
         )?;
+        // Migrazione additiva: database creati prima delle fonti Web (RF-06).
+        let has_sources = conn.prepare("SELECT sources FROM messages LIMIT 0").is_ok();
+        if !has_sources {
+            conn.execute_batch("ALTER TABLE messages ADD COLUMN sources TEXT;")?;
+        }
         Ok(Self { conn })
     }
 
@@ -87,10 +92,11 @@ impl Store {
         content: &str,
         task_id: &str,
         at: &str,
+        sources: Option<&Value>,
     ) -> StoreResult<()> {
         self.conn.execute(
-            "INSERT INTO messages (role, content, task_id, at) VALUES (?1, ?2, ?3, ?4)",
-            params![role, content, task_id, at],
+            "INSERT INTO messages (role, content, task_id, at, sources) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![role, content, task_id, at, sources.map(|s| s.to_string())],
         )?;
         Ok(())
     }
@@ -98,12 +104,13 @@ impl Store {
     /// Ultimi `limit` messaggi in ordine cronologico.
     pub fn messages_recent(&self, limit: u32) -> StoreResult<Vec<Value>> {
         let mut stmt = self.conn.prepare(
-            "SELECT role, content, task_id, at FROM (SELECT * FROM messages ORDER BY seq DESC LIMIT ?1) ORDER BY seq",
+            "SELECT role, content, task_id, at, sources FROM (SELECT * FROM messages ORDER BY seq DESC LIMIT ?1) ORDER BY seq",
         )?;
         let rows = stmt.query_map([limit], |r| {
             Ok(
                 json!({"role": r.get::<_, String>(0)?, "content": r.get::<_, String>(1)?,
-                      "task_id": r.get::<_, Option<String>>(2)?, "at": r.get::<_, String>(3)?}),
+                      "task_id": r.get::<_, Option<String>>(2)?, "at": r.get::<_, String>(3)?,
+                      "sources": r.get::<_, Option<String>>(4)?.and_then(|s| serde_json::from_str::<Value>(&s).ok()).unwrap_or(Value::Array(vec![]))}),
             )
         })?;
         rows.collect()

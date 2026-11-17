@@ -13,6 +13,7 @@ pub mod orchestrator;
 pub mod policy;
 pub mod store;
 pub mod tools;
+pub mod web;
 
 /// Istante corrente in RFC 3339 UTC con millisecondi (`common.schema.json#/$defs/timestamp`).
 pub fn now() -> String {

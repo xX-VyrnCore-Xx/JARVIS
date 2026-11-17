@@ -106,6 +106,12 @@ button.small { font-size: .78rem; padding: .2rem .5rem; }
 .toast.error { border-left-color: var(--bad); } .toast.warning { border-left-color: var(--warn); } .toast.success { border-left-color: var(--ok); }
 .toast .b { color: var(--muted); font-size: .85rem; }
 
+.sources { margin-top: .6rem; padding-top: .5rem; border-top: 1px dashed var(--border); white-space: normal; font-size: .85rem; }
+.sources-title { font-weight: 600; color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
+.sources ol { margin: .3rem 0 0; padding-left: 1.3rem; }
+.sources a { color: var(--accent); overflow-wrap: anywhere; }
+.src-meta { color: var(--muted); font-size: .78rem; }
+
 @media (max-width: 720px) {
   .layout { flex-direction: column; }
   .nav { width: auto; flex: none; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: .4rem .6rem; }
