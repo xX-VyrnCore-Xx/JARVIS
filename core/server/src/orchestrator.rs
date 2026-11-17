@@ -158,12 +158,18 @@ impl Jarvis {
             .write(true)
             .open(cfg.data_dir.join(".lock"))
             .map_err(|e| format!("blocco della cartella dati: {e}"))?;
-        lock.try_lock().map_err(|_| {
-            format!(
-                "un altro Core JARVIS sta già usando la cartella dati {}",
-                cfg.data_dir.display()
-            )
-        })?;
+        // Il blocco (flock) appartiene al file aperto: un Core appena chiuso, o un processo figlio nato da
+        // un altro thread nell'istante fra fork ed exec, può trattenerlo per poco. Si riprova fino a 3 s.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while lock.try_lock().is_err() {
+            if std::time::Instant::now() >= deadline {
+                return Err(format!(
+                    "un altro Core JARVIS sta già usando la cartella dati {}",
+                    cfg.data_dir.display()
+                ));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
         std::fs::create_dir_all(cfg.data_dir.join("audit")).map_err(|e| format!("audit: {e}"))?;
         let store = Store::open(&cfg.data_dir.join("jarvis.sqlite3"))
             .map_err(|e| format!("database: {e}"))?;
@@ -729,11 +735,13 @@ impl Jarvis {
                 Ok(("succeeded", output))
             }
             Err(e) => {
+                let effect = self.failure_effect(tool, e.code);
                 self.audit(merge(
                     &base,
-                    json!({"outcome": "failed", "effect": "not_applied", "error_code": e.code}),
+                    json!({"outcome": "failed", "effect": effect, "error_code": e.code}),
                 ))?;
-                out.steps.push(json!({"kind": "tool_result", "tool": tool, "status": "failed", "error": e.code}));
+                out.steps.push(json!({"kind": "tool_result", "tool": tool, "status": "failed", "error": e.code, "effect": effect}));
+                self.notify_connector_failure(task, tool, &e, effect)?;
                 Ok(("failed", json!({"code": e.code, "message": e.message})))
             }
         }
@@ -1143,10 +1151,12 @@ impl Jarvis {
                     entry["summary"] = automation::summarize(&output).into();
                 }
                 Err(e) => {
+                    let effect = self.failure_effect(&tool, e.code);
                     self.audit(merge(
                         &base,
-                        json!({"outcome": "failed", "effect": "not_applied", "error_code": e.code}),
+                        json!({"outcome": "failed", "effect": effect, "error_code": e.code}),
                     ))?;
+                    self.notify_connector_failure(&task, &tool, &e, effect)?;
                     entry["status"] = "failed".into();
                     entry["error_code"] = e.code.into();
                     entry["summary"] = e.message.chars().take(2000).collect::<String>().into();
@@ -2077,12 +2087,78 @@ impl Jarvis {
             .secrets
             .get(&token_name(id))
             .map_err(|e| tool_error("connector.unavailable", e))?;
-        let timer = Timer::start();
-        let result =
-            crate::connectors::call(&manifest, op, arguments, secret.as_deref(), &self.cfg.web);
-        self.obs
-            .observe(&format!("connector {id}"), timer.ms(), result.is_err());
-        result
+        // Le letture seguono la politica di ripetizione del descrittore (`safe`, 2 tentativi) sugli errori
+        // transitori; le scritture non vengono mai ripetute.
+        let attempts = if descriptor.descriptor["retry"]["mode"] == "safe" {
+            descriptor.descriptor["retry"]["max_attempts"]
+                .as_u64()
+                .unwrap_or(1)
+                .clamp(1, 3)
+        } else {
+            1
+        };
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            let timer = Timer::start();
+            let result =
+                crate::connectors::call(&manifest, op, arguments, secret.as_deref(), &self.cfg.web);
+            self.obs
+                .observe(&format!("connector {id}"), timer.ms(), result.is_err());
+            match result {
+                Err(e) if attempt < attempts && crate::connectors::transient(e.code) => {
+                    self.obs.count("connector.retry");
+                    self.obs.log(
+                        "warn",
+                        "connector.retry",
+                        json!({"connector": id, "code": e.code, "attempt": attempt}),
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                }
+                other => return other,
+            }
+        }
+    }
+
+    /// Effetto di uno strumento fallito: una scrittura esterna interrotta da timeout o rete può essere
+    /// arrivata al servizio, quindi l'esito è ignoto e va verificato prima di ripeterla.
+    fn failure_effect(&self, tool: &str, code: &str) -> &'static str {
+        let write_external = self
+            .catalog
+            .get(tool)
+            .is_some_and(|t| t.descriptor["effects"] == "write_external");
+        if write_external && matches!(code, "web.timeout" | "web.unreachable") {
+            "unknown"
+        } else {
+            "not_applied"
+        }
+    }
+
+    fn notify_connector_failure(
+        &mut self,
+        task: &Task,
+        tool: &str,
+        e: &tools::ToolError,
+        effect: &str,
+    ) -> Result<(), CoreError> {
+        let Some(id) = tool
+            .strip_prefix("connector.")
+            .and_then(|r| r.split('.').next())
+        else {
+            return Ok(());
+        };
+        let body = if effect == "unknown" {
+            format!("{tool}: {} — la scrittura potrebbe essere arrivata al servizio: verifica prima di ripeterla.", e.message)
+        } else {
+            format!("{tool}: {}", e.message)
+        };
+        self.notify(json!({
+            "severity": "warning", "category": "integration", "title": format!("Connettore {id} non riuscito"),
+            "body": body, "source": {"kind": "module", "id": "integration"},
+            "correlation_id": task.correlation(), "task_id": task.id(),
+            "dedupe_key": format!("connector-failure:{id}"), "link": {"view": "connectors", "ref": id},
+        }))?;
+        Ok(())
     }
 
     /// Webhook in ingresso: firma HMAC-SHA256 obbligatoria. Il contenuto è trattato come non attendibile e

@@ -56,8 +56,21 @@ fn serve() -> (u16, Seen) {
                 log.lock()
                     .unwrap()
                     .push(format!("{method} {path} [{auth}] {body}"));
+                let attempts = log
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .filter(|l| l.contains(path.as_str()))
+                    .count();
+                if path.ends_with("/Lento") || body.contains("lento") {
+                    std::thread::sleep(Duration::from_secs(3));
+                }
                 let (status, payload) = if auth != format!("Bearer {TOKEN}") {
                     ("401 Unauthorized", json!({"error": "no"}))
+                } else if path.ends_with("/Instabile") && attempts == 1 {
+                    ("503 Service Unavailable", json!({"error": "riprova"}))
+                } else if path.ends_with("/Rotto") {
+                    ("500 Internal Server Error", json!({"error": "rotto"}))
                 } else if path.starts_with("/v1/previsioni/") {
                     (
                         "200 OK",
@@ -407,4 +420,78 @@ fn invalid_manifests_are_rejected() {
         j.authorize_connector("meteo", TOKEN),
         Err(CoreError::NotFound(_))
     ));
+}
+
+#[test]
+fn connector_faults_are_retried_safely_and_notified() {
+    let (port, seen) = serve();
+    let data = fresh();
+    let mut j = Jarvis::new(config(&data, web())).unwrap();
+    j.install_connector(&manifest(port, false)).unwrap();
+    j.authorize_connector("meteo", TOKEN).unwrap();
+    let count = |p: &str| {
+        seen.lock()
+            .unwrap()
+            .iter()
+            .filter(|l| l.contains(p))
+            .count()
+    };
+
+    // Lettura con un 503 transitorio: ripetuta una volta e riuscita.
+    let out = j
+        .chat("connettore meteo previsioni citta=Instabile")
+        .unwrap()
+        .to_json();
+    assert_eq!(
+        step(&out, "tool_result").unwrap()["status"],
+        "succeeded",
+        "{out}"
+    );
+    assert_eq!(count("/Instabile"), 2);
+
+    // Errore persistente: due tentativi, poi fallimento notificato e correlato al task.
+    let out = j
+        .chat("connettore meteo previsioni citta=Rotto")
+        .unwrap()
+        .to_json();
+    let result = step(&out, "tool_result").unwrap();
+    assert_eq!(
+        (result["status"].as_str(), result["error"].as_str()),
+        (Some("failed"), Some("connector.server_error"))
+    );
+    assert_eq!(count("/Rotto"), 2);
+    let notes = j.notifications(10, true, None).unwrap();
+    let note = notes["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["title"] == "Connettore meteo non riuscito")
+        .expect("notifica");
+    assert_eq!(note["task_id"], out["task"]["task_id"]);
+    assert_eq!(note["category"], "integration");
+
+    // Scrittura in timeout: mai ripetuta, effetto ignoto nell'audit e avviso di verifica.
+    let pending = j
+        .chat("connettore meteo segnala testo=lento")
+        .unwrap()
+        .confirmation
+        .unwrap();
+    let done = j
+        .confirm(pending["confirmation_id"].as_str().unwrap(), true)
+        .unwrap()
+        .to_json();
+    let result = step(&done, "tool_result").unwrap();
+    assert_eq!(
+        (result["error"].as_str(), result["effect"].as_str()),
+        (Some("web.timeout"), Some("unknown")),
+        "{done}"
+    );
+    std::thread::sleep(Duration::from_millis(1500));
+    assert_eq!(
+        count("/segnalazioni"),
+        1,
+        "una scrittura non viene mai ripetuta"
+    );
+    let audit = j.audit_log(200).unwrap().to_string();
+    assert!(audit.contains(r#""effect":"unknown""#), "{audit}");
 }
