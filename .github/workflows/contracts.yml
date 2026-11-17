@@ -2,9 +2,9 @@ name: contracts
 
 on:
   push:
-    paths: ["contracts/**", "tests/contracts/**", "core/**", ".github/workflows/contracts.yml"]
+    paths: ["contracts/**", "tests/**", "core/**", "ai/**", ".github/workflows/contracts.yml"]
   pull_request:
-    paths: ["contracts/**", "tests/contracts/**", "core/**", ".github/workflows/contracts.yml"]
+    paths: ["contracts/**", "tests/**", "core/**", "ai/**", ".github/workflows/contracts.yml"]
 
 permissions:
   contents: read
@@ -20,6 +20,7 @@ jobs:
           python-version: "3.13"
       - run: python -m pip install -r tests/contracts/requirements.txt
       - run: python -m unittest discover -s tests/contracts -v
+      - run: python -m unittest discover -s tests/ai -v
 
   rust:
     name: validate (rust)
@@ -29,6 +30,11 @@ jobs:
         working-directory: core
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Dipendenze del worker Python usato dai test del bridge
+        run: python -m pip install -r ../tests/contracts/requirements.txt
       - run: rustup component add rustfmt clippy
       - run: cargo fmt --check
       - run: cargo clippy --locked --all-targets -- -D warnings

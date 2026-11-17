@@ -48,7 +48,7 @@ Valutare stack mobile, motori vocali, trasporto degli eventi e RPC, implementazi
 - **Data:** 2026-11-17 · **Stato:** Accettato per la Fase 1, rivedibile dal proprietario
 - **Contesto:** la Fase 1 richiede contratti iniziali verificabili (RNF-01). Il trasporto di eventi e RPC resta aperto. I 14 documenti sono stati caricati in `docs/`, mentre DEVELOPMENT.md li prevede in radice.
 - **Opzioni:** JSON Schema indipendente dal trasporto; IDL legato a un RPC (Protobuf, Cap'n Proto); tipi Rust come fonte primaria.
-- **Decisione:** contratti v1 in JSON Schema draft 2020-12 in `contracts/v1/`, con fixture sintetiche e test in `tests/contracts/`. I documenti restano in `docs/`; un `CLAUDE.md` in radice rimanda a `docs/CLAUDE.md`.
+- **Decisione:** contratti v1 in JSON Schema draft 2020-12 in `contracts/v1/`, con fixture sintetiche e test in `tests/contracts/`. I documenti restano in `docs/`. **Aggiornamento:** il proprietario ha poi spostato `CLAUDE.md` e `README.md` in radice (commit `d482b80`); i loro collegamenti puntano a `docs/`.
 - **Motivazione:** JSON Schema è leggibile da Rust, Python e TypeScript e non anticipa la scelta di RPC ed event bus. Spostare i documenti cambierebbe la struttura caricata dal proprietario senza necessità tecnica.
 - **Conseguenze:** la scelta RPC dovrà mappare o generare questi schemi. Gli invarianti semantici non esprimibili in schema sono elencati in `contracts/README.md` e vanno replicati nelle implementazioni.
 - **Evidenza:** `python3 -m unittest discover -s tests/contracts -v` (4 test, OK).
@@ -64,6 +64,17 @@ Valutare stack mobile, motori vocali, trasporto degli eventi e RPC, implementazi
 - **Conseguenze:** gli invarianti semantici esistono in due implementazioni, tenute allineate dai test comuni. La catena da sola non protegge da chi riscrive tutto il flusso: firma o ancoraggio esterno restano da decidere con la gestione dei segreti. Il `Cargo.lock` è versionato.
 - **Evidenza:** `cargo test --locked` in `core/` (5 test OK), `cargo clippy --all-targets -- -D warnings` (OK), `python3 -m unittest discover -s tests/contracts -v` (8 test OK).
 - **Documenti interessati:** `contracts/README.md`, TECH_STACK.md, SECURITY_AND_PRIVACY.md, REQUIREMENTS.md.
+
+### ADR-0003 — Bridge prototipale Core Rust–worker Python su stdio
+
+- **Data:** 2026-11-17 · **Stato:** Prototipo della Fase 2; non sostituisce la scelta RPC ed event bus, che resta aperta
+- **Contesto:** la Fase 2 richiede una prova riproducibile di integrazione Rust/Python. TECH_STACK.md chiede di descrivere input, output, compatibilità, propagazione degli errori, timeout e stato.
+- **Opzioni:** gRPC o altro RPC con IDL; HTTP locale; JSON Lines su stdio di un processo figlio; FFI (PyO3).
+- **Decisione:** prototipo in JSON Lines su stdio. Il Core (`core/bridge`, crate `jarvis-bridge`) avvia `python3 -m jarvis_ai.worker` e scambia `jarvis.envelope/1` con `delegation.request` e `delegation.result`. Entrambi i lati validano con i contratti v1. Il Core verifica che `causation_id`, `correlation_id` e `task_id` siano correlati alla richiesta, e allo scadere di `timeout_ms` termina il worker.
+- **Motivazione:** nessuna dipendenza di rete o IDL anticipa la scelta RPC. L'isolamento di processo rende osservabili crash e timeout (RNF-02) e prova la compatibilità dei contratti fra linguaggi (RNF-01).
+- **Conseguenze:** timeout e crash producono `effect: unknown` e `retryable: false`: prima di ripetere, l'Orchestrator deve interrogare lo stato. Il worker gestisce una richiesta alla volta. Mancano ancora multiplexing, backpressure, riavvio supervisionato e autenticazione del canale: vanno risolti con la scelta RPC o con systemd.
+- **Evidenza:** `cargo test --locked` in `core/`, 6 test del bridge con il worker Python reale; `python3 -m unittest discover -s tests/ai -v`, 6 test.
+- **Documenti interessati:** ARCHITECTURE.md, TECH_STACK.md, AI_SYSTEM.md, REQUIREMENTS.md.
 
 ## Aggiornamento del registro
 

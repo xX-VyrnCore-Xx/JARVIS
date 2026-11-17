@@ -42,7 +42,9 @@ Per ogni requisito registrare milestone, componente, test, riferimento alla revi
 | RF-02 | Fase 1 | `contracts/v1/task.schema.json`, `task-transitions.json` | Fixture `task.*`, `TaskTransitions` | Branch `claude/cool-ramanujan-bogarl` | Python e Rust OK | In corso (contratto, non ancora esecuzione) |
 | RF-03 | Fase 1 | `contracts/v1/delegation.schema.json`, `envelope.schema.json` | Fixture `delegation.*`, `envelope.*` | Idem | Python e Rust OK | In corso (contratto) |
 | RF-05 | Fase 1 | `contracts/v1/tool-descriptor.schema.json` | Fixture `tool-descriptor.*` | Idem | Python e Rust OK | In corso (contratto) |
-| RNF-01 | Fase 1–2 | `contracts/v1/`, `core/contracts` | Stesse fixture in Python e Rust | Idem | Esiti identici su 14 fixture valide e 24 non valide | In corso |
+| RNF-01 | Fase 1–2 | `contracts/v1/`, `core/contracts`, `core/bridge`, `ai/jarvis_ai` | Stesse fixture in Python e Rust; scambio reale di envelope fra processi | Idem | Esiti identici su 14 fixture valide e 24 non valide; round trip validato da entrambi i lati | In corso |
 | RNF-04 | Fase 1 | `policy-decision.schema.json`, `audit-event.schema.json` | Fixture `policy-decision.*`, `audit-event.*`, catene `streams/` | Idem | Modifica e cancellazione di un evento rilevate | In corso (contratto) |
 | RNF-07 | Fase 1 | Correlazione in `envelope`, `task`, `audit-event` | Fixture comuni | Idem | OK | In corso (contratto) |
+| RNF-02 | Fase 2 | `core/bridge` | `timeout_kills_worker_and_reports_unknown_effect`, `worker_crash_is_detected`, `malformed_response_is_rejected` | Idem | Guasti del worker isolati e riportati come `error` v1 | In corso (prototipo) |
+| RF-03 | Fase 2 | `core/bridge`, `ai/jarvis_ai/worker.py` | `delegation_round_trip_is_valid_and_correlated`, `tests/ai/test_worker.py` | Idem | Delega consegnata e risposta correlata | In corso (agente sintetico) |
 

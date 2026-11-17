@@ -6,10 +6,10 @@ L'inferenza e la persistenza privilegiano l'ambiente locale. Il cloud interviene
 
 ## Da dove partire
 
-- Per riprendere lo sviluppo da Claude Code, aprire la radice del repository e seguire [CLAUDE.md](CLAUDE.md), [ROADMAP.md](ROADMAP.md) e [DEVELOPMENT.md](DEVELOPMENT.md).
-- Per conoscere lo scope, leggere [REQUIREMENTS.md](REQUIREMENTS.md), [ARCHITECTURE.md](ARCHITECTURE.md) e [TECH_STACK.md](TECH_STACK.md).
-- Per lavorare sui sottosistemi, consultare [AI_SYSTEM.md](AI_SYSTEM.md), [MEMORY_DATA_SYNC.md](MEMORY_DATA_SYNC.md), [AUTONOMY_AND_TOOLS.md](AUTONOMY_AND_TOOLS.md), [SECURITY_AND_PRIVACY.md](SECURITY_AND_PRIVACY.md) e [INTERFACE_AND_DEVICES.md](INTERFACE_AND_DEVICES.md).
-- Per validare e distribuire il prodotto, usare [DEVOPS_QA_OBSERVABILITY.md](DEVOPS_QA_OBSERVABILITY.md).
-- Per verificare approvazioni, lacune e proposte, consultare [DECISIONS.md](DECISIONS.md).
+- Per riprendere lo sviluppo da Claude Code, aprire la radice del repository e seguire [CLAUDE.md](CLAUDE.md), [ROADMAP.md](docs/ROADMAP.md) e [DEVELOPMENT.md](docs/DEVELOPMENT.md).
+- Per conoscere lo scope, leggere [REQUIREMENTS.md](docs/REQUIREMENTS.md), [ARCHITECTURE.md](docs/ARCHITECTURE.md) e [TECH_STACK.md](docs/TECH_STACK.md).
+- Per lavorare sui sottosistemi, consultare [AI_SYSTEM.md](docs/AI_SYSTEM.md), [MEMORY_DATA_SYNC.md](docs/MEMORY_DATA_SYNC.md), [AUTONOMY_AND_TOOLS.md](docs/AUTONOMY_AND_TOOLS.md), [SECURITY_AND_PRIVACY.md](docs/SECURITY_AND_PRIVACY.md) e [INTERFACE_AND_DEVICES.md](docs/INTERFACE_AND_DEVICES.md).
+- Per validare e distribuire il prodotto, usare [DEVOPS_QA_OBSERVABILITY.md](docs/DEVOPS_QA_OBSERVABILITY.md).
+- Per verificare approvazioni, lacune e proposte, consultare [DECISIONS.md](docs/DECISIONS.md).
 
 Estrarre i 14 file insieme alla radice del monorepo privato. Il piano e il registro descrivono lo scope approvato. Il codice, i contratti versionati e le verifiche riproducibili attestano lo stato di implementazione. Questo pacchetto stabilisce il riferimento documentale e non attesta lo stato del codice.

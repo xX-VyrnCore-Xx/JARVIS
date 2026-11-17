@@ -29,4 +29,5 @@ Versionare dipendenze e contratti alla loro introduzione. Per Rust/Python, descr
 | Rust | MSRV dichiarata 1.80, verificata solo con 1.97.0 | Crate `jarvis-contracts` | `core/Cargo.toml` |
 | `jsonschema` (Rust) | 0.30, senza feature predefinite | Validazione dei contratti nel Core | `core/Cargo.lock` |
 | `sha2`, `hex`, `chrono`, `serde_json` | Vedi `core/Cargo.lock` | Catena di audit e timestamp | ADR-0002 |
-
+| `uuid` (Rust) | 1, feature `v4` | Identificativi dei messaggi del bridge | ADR-0003 |
+| Bridge Core–AI | JSON Lines su stdio (prototipo) | `core/bridge` ↔ `ai/jarvis_ai/worker.py` | ADR-0003 |
