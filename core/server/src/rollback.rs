@@ -96,10 +96,8 @@ pub fn prepare(data_dir: &Path) -> Result<Option<Value>, String> {
                 fs::copy(&src, staging.join(name))?;
             }
         }
-        for sub in ["audit"] {
-            if data_dir.join(sub).is_dir() {
-                copy_tree(&data_dir.join(sub), &staging.join(sub))?;
-            }
+        if data_dir.join("audit").is_dir() {
+            copy_tree(&data_dir.join("audit"), &staging.join("audit"))?;
         }
         let workspace = data_dir.join("workspace");
         if workspace.is_dir() && dir_size(&workspace) <= MAX_WORKSPACE_BYTES {
