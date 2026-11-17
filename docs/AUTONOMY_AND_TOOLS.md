@@ -18,3 +18,15 @@ Gli strumenti dichiarano input, output, ambito, prerequisiti, effetti, errori, t
 La decisione 81 prevede il framework di integrazione completo fin dall'inizio e un catalogo iniziale prioritario. Le categorie coprono servizi cloud e Web, produttività, sviluppo, database e infrastrutture, comunicazione, dispositivi, API, webhook e plugin. Le integrazioni concrete crescono per milestone. Il catalogo e l'ordine dei singoli connettori richiedono ancora conferma. I plugin operano con isolamento e permessi revocabili.
 
 Le proposte di auto-evoluzione passano attraverso modifiche versionate, test isolati e i controlli di rilascio. La configurazione di sicurezza resta sotto controllo del proprietario.
+
+## Stato del prototipo v0.1
+
+Il catalogo iniziale è in `contracts/catalog/tools`, con un descrittore `jarvis.tool/1` per ogni strumento:
+
+| Strumento | Rischio | Conferma del proprietario |
+|---|---|---|
+| `time.now`, `system.info`, `fs.list`, `fs.read`, `memory.list` | basso | no |
+| `memory.remember` | medio | no |
+| `fs.write`, `memory.forget` | alto | sì |
+
+Ciclo di un'operazione: proposta dell'agente → validazione degli argomenti → decisione di policy → eventuale conferma → esecuzione nel Core → evento di audit → risposta composta dall'agente con il risultato. Un timeout o un crash del worker termina il task come `failed`, con un errore v1 a effetto `unknown`.

@@ -1,0 +1,27 @@
+[package]
+name = "jarvis-core"
+version = "0.1.0"
+description = "Core JARVIS: API locale, orchestrazione, policy, strumenti, memoria e audit (prototipo v0.1)"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "jarvis"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.8"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+jarvis-bridge = { path = "../bridge" }
+jarvis-contracts = { path = "../contracts" }
+jsonschema = { version = "0.30", default-features = false }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync"] }
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+http-body-util = "0.1"
+tower = { version = "0.5", features = ["util"] }

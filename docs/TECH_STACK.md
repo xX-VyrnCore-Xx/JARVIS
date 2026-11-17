@@ -26,8 +26,13 @@ Versionare dipendenze e contratti alla loro introduzione. Per Rust/Python, descr
 | JSON Schema | draft 2020-12 | Contratti `contracts/v1/` | ADR-0001 |
 | Python | 3.13 (CI), 3.13.18 (container di sviluppo) | Test dei contratti | `.github/workflows/contracts.yml` |
 | `jsonschema` (Python) | 4.26.0 | Validazione dei contratti | `tests/contracts/requirements.txt` |
-| Rust | MSRV dichiarata 1.80, verificata solo con 1.97.0 | Crate `jarvis-contracts` | `core/Cargo.toml` |
+| Rust | MSRV dichiarata 1.82, verificata solo con 1.97.0 | Workspace `core/` | `core/Cargo.toml` |
 | `jsonschema` (Rust) | 0.30, senza feature predefinite | Validazione dei contratti nel Core | `core/Cargo.lock` |
 | `sha2`, `hex`, `chrono`, `serde_json` | Vedi `core/Cargo.lock` | Catena di audit e timestamp | ADR-0002 |
 | `uuid` (Rust) | 1, feature `v4` | Identificativi dei messaggi del bridge | ADR-0003 |
 | Bridge Core–AI | JSON Lines su stdio (prototipo) | `core/bridge` ↔ `ai/jarvis_ai/worker.py` | ADR-0003 |
+| axum / tokio | 0.8 / 1 | API HTTP locale del Core | ADR-0004 |
+| rusqlite | 0.32, `bundled` | Memoria, task e conversazione | ADR-0004 |
+| Ollama (opzionale) | API `/api/chat` e `/api/tags` | Backend AI locale; nessuna libreria client, solo `urllib` | ADR-0004 |
+| Playwright | 1.63.0 | Test E2E dell'interfaccia | `tests/e2e/ui_smoke.cjs` |
+| Interfaccia Web | HTML, CSS e JavaScript senza dipendenze | Deviazione temporanea da React e Tauri | ADR-0004 |

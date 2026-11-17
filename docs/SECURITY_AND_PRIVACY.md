@@ -18,3 +18,22 @@ Centralizzare i segreti e limitarne l'accesso ai componenti autorizzati. Tenere 
 Per resistere alla prompt injection, mantenere distinti contenuto consultato, richieste del proprietario e decisione di policy. Verificare il confine anche per argomenti generati da un agente. Testare revoca durante un task, scadenza della conferma, tentativo di accesso oltre ambito, riuso di una conferma, divulgazione a un provider e manipolazione di input e log.
 
 Documentare insieme ai contratti la classificazione dei dati, i flussi egress, la retention, i ruoli minimi e le procedure di revoca e ripristino.
+
+## Controlli implementati nel prototipo v0.1
+
+| Controllo | Implementazione | Verifica |
+|---|---|---|
+| Esposizione di rete | Ascolto solo su loopback; host non di loopback rifiutato all'avvio | `config.rs` |
+| DNS rebinding e CSRF | Header `Host` in lista ammessa; token di sessione casuale richiesto da `/api/*` | `api_requires_token_and_local_host` |
+| Iniezione di script | CSP `script-src 'self'`; testo inserito solo con `textContent` | E2E: nessun errore CSP |
+| Ambito dei file | Policy lessicale, poi controllo canonico in esecuzione (link simbolici compresi) | `path_traversal_is_denied_by_policy`, `symlink_escape_is_blocked_at_execution` |
+| Azioni critiche | Conferma monouso, con scadenza, legata al digest dei parametri | `high_risk_write_requires_single_use_confirmation` |
+| Audit | JSONL append-only a catena SHA-256, verificato a ogni lettura | `audit_chain_records_every_decision` |
+| Minimizzazione | Nessun backend cloud; fixture sintetiche; diagnostica senza payload | ADR-0004 |
+
+Da completare:
+- identità con passkey o WebAuthn e MFA;
+- identità dei nodi e mTLS;
+- isolamento dei plugin;
+- cifratura dei dati a riposo e dei backup;
+- firma o ancoraggio esterno dell'audit.

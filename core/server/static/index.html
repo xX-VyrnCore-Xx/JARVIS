@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="jarvis-token" content="{{JARVIS_TOKEN}}">
+  <title>JARVIS</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span>JARVIS <small>v0.1 prototipo</small></div>
+    <div class="status" id="status" role="status" aria-live="polite">
+      <span class="pill" id="st-ai">AI: …</span>
+      <span class="pill" id="st-audit">Audit: …</span>
+    </div>
+  </header>
+  <div class="layout">
+    <nav class="nav" aria-label="Sezioni">
+      <button class="nav-item active" data-view="chat">Chat</button>
+      <button class="nav-item" data-view="tasks">Attività</button>
+      <button class="nav-item" data-view="memory">Memoria</button>
+      <button class="nav-item" data-view="workspace">Workspace</button>
+      <button class="nav-item" data-view="audit">Audit</button>
+    </nav>
+    <main>
+      <section class="view active" id="view-chat" aria-label="Chat">
+        <div class="messages" id="messages" aria-live="polite"></div>
+        <div class="suggestions" id="suggestions">
+          <button class="chip">ciao</button>
+          <button class="chip">che ore sono</button>
+          <button class="chip">info sistema</button>
+          <button class="chip">scrivi note.txt: la mia prima nota</button>
+          <button class="chip">leggi note.txt</button>
+          <button class="chip">ricorda che preferisco risposte brevi</button>
+          <button class="chip">cosa ricordi</button>
+        </div>
+        <form class="composer" id="composer">
+          <textarea id="input" rows="1" placeholder="Scrivi a JARVIS…" title="Invio per inviare, Maiusc+Invio per andare a capo" aria-label="Messaggio (Invio per inviare, Maiusc+Invio per andare a capo)" maxlength="8000"></textarea>
+          <button type="submit" id="send" class="primary">Invia</button>
+        </form>
+      </section>
+      <section class="view" id="view-tasks" aria-label="Attività">
+        <div class="view-head"><h2>Attività</h2><button class="ghost" data-refresh="tasks">Aggiorna</button></div>
+        <p class="hint">Ogni richiesta è un task con stati verificati dal contratto <code>jarvis.task/1</code>.</p>
+        <div id="tasks" class="list"></div>
+      </section>
+      <section class="view" id="view-memory" aria-label="Memoria">
+        <div class="view-head"><h2>Memoria</h2><button class="ghost" data-refresh="memory">Aggiorna</button></div>
+        <p class="hint">Ciò che JARVIS ricorda di te. Puoi cancellare ogni elemento; la cancellazione viene registrata nell'audit.</p>
+        <div id="memory" class="list"></div>
+      </section>
+      <section class="view" id="view-workspace" aria-label="Workspace">
+        <div class="view-head"><h2>Workspace</h2><button class="ghost" data-refresh="workspace">Aggiorna</button></div>
+        <p class="hint">L'unica cartella in cui gli strumenti file possono leggere e scrivere.</p>
+        <div id="workspace" class="list"></div>
+      </section>
+      <section class="view" id="view-audit" aria-label="Audit">
+        <div class="view-head"><h2>Audit</h2><button class="ghost" data-refresh="audit">Aggiorna</button></div>
+        <p class="hint" id="audit-summary"></p>
+        <div id="audit" class="list"></div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

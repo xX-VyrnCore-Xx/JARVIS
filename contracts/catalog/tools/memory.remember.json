@@ -1,0 +1,37 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "memory.remember",
+  "version": "1.0.0",
+  "summary": "Salva un'informazione nella memoria persistente del proprietario",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "text"
+    ],
+    "properties": {
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1000
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "prerequisites": [],
+  "effects": "write_local",
+  "risk": "medium",
+  "permissions": [
+    "core.memory:write"
+  ],
+  "errors": [],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "idempotency_key",
+    "max_attempts": 1
+  },
+  "confirmation": "none"
+}

@@ -1,0 +1,9 @@
+{
+ "contract": "jarvis.agent-result/1",
+ "kind": "reply",
+ "backend": {
+  "name": "offline",
+  "model": "jarvis-offline-1",
+  "location": "local"
+ }
+}

@@ -47,4 +47,10 @@ Per ogni requisito registrare milestone, componente, test, riferimento alla revi
 | RNF-07 | Fase 1 | Correlazione in `envelope`, `task`, `audit-event` | Fixture comuni | Idem | OK | In corso (contratto) |
 | RNF-02 | Fase 2 | `core/bridge` | `timeout_kills_worker_and_reports_unknown_effect`, `worker_crash_is_detected`, `malformed_response_is_rejected` | Idem | Guasti del worker isolati e riportati come `error` v1 | In corso (prototipo) |
 | RF-03 | Fase 2 | `core/bridge`, `ai/jarvis_ai/worker.py` | `delegation_round_trip_is_valid_and_correlated`, `tests/ai/test_worker.py` | Idem | Delega consegnata e risposta correlata | In corso (agente sintetico) |
-
+| RF-01 | Fase 2 (v0.1) | Chat in `core/server`, contesto in `store.rs` | `memory_round_trip_and_owner_deletion`, E2E | Branch `claude/cool-ramanujan-bogarl` | Contesto e memoria persistono dopo un riavvio | In corso (solo testo; voce assente) |
+| RF-04 | Fase 2 (v0.1) | `ai/jarvis_ai/gateway.py` | `tests/ai/test_gateway.py` (Ollama sintetico, degradazione) | Idem | Routing locale e degradazione dichiarata | In corso (Ollama reale non verificato) |
+| RF-05 | Fase 2 (v0.1) | `tools.rs`, `policy.rs` | `low_risk_tool_runs_without_confirmation`, `high_risk_write_requires_single_use_confirmation` | Idem | Effetto osservabile nella workspace | In corso (file e informazioni di sistema) |
+| RF-08 | Fase 2 (v0.1) | Memoria SQLite e interfaccia Memoria | `memory_round_trip_and_owner_deletion`, E2E | Idem | Il proprietario corregge e cancella | In corso (nessun indice derivato) |
+| RNF-04 | Fase 2 (v0.1) | `api.rs`, `policy.rs`, `audit.rs` | `api_requires_token_and_local_host`, `path_traversal_*`, `symlink_*`, `audit_chain_records_every_decision` | Idem | Accesso negato, conferma monouso, manomissione rilevata | In corso (manca l'identità forte) |
+| RNF-05 | Fase 2 (v0.1) | Delega con `allow_cloud: false`, nessun backend cloud | `OllamaAdapter` (solo URL locale) | Idem | Nessun traffico cloud | In corso |
+| RNF-06 | Fase 2 (v0.1) | Modello offline | `OfflineBackend`, test API ed E2E senza rete | Idem | Funzionamento completo senza rete | In corso |

@@ -36,3 +36,17 @@ Un client autentica la richiesta. Il Core registra il task, l'Orchestrator lo sc
 I confini applicativi usano contratti versionati. Ogni modulo espone responsabilità, API, eventi, errori, permessi e segnali di salute. Le scritture passano dal modulo proprietario. Usare HTTP per richieste, WebSocket per aggiornamenti, code persistenti per lavoro differito. RPC ed event bus specifici richiedono una scelta tecnica. Nel frattempo il prototipo di confine Core–AI usa JSON Lines su stdio con `jarvis.envelope/1` (ADR-0003, `core/bridge`). Iniziare con moduli coesi e separare processi o servizi quando il confine di isolamento, prestazioni o distribuzione lo richiede. Il deployment usa systemd e Docker.
 
 La disposizione proposta dei moduli nel repository è descritta in [DEVELOPMENT.md](DEVELOPMENT.md). Il monorepo conserva assieme codice, specifiche, contratti e verifiche.
+
+## Stato del prototipo v0.1
+
+| Modulo previsto | Implementazione attuale | Codice |
+|---|---|---|
+| API Gateway e client Web | API HTTP locale e interfaccia Web | `core/server/src/api.rs`, `core/server/static/` |
+| Core Runtime e Orchestrator | Task `jarvis.task/1`, delega, ripresa dopo conferma, una richiesta alla volta | `core/server/src/orchestrator.rs` |
+| Multi-Agent Runtime | Un agente (General Assistant) in un worker Python supervisionato e riavviato se termina | `core/bridge`, `ai/jarvis_ai/worker.py` |
+| AI Gateway | Ollama locale e modello offline, con degradazione dichiarata | `ai/jarvis_ai/gateway.py` |
+| Security Engine | Policy a regole, conferme monouso, audit a catena di hash | `core/server/src/policy.rs`, `audit.rs` |
+| Computer Use (parziale) | File nella workspace e informazioni di sistema | `core/server/src/tools.rs` |
+| Memory e Data & Storage | Memoria, task e conversazione in SQLite | `core/server/src/store.rs` |
+
+Non ancora implementati: Voice, Web Agent, Automation, Integration Engine, nodi distribuiti, sincronizzazione e Observability oltre all'audit.

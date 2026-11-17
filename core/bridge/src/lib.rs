@@ -129,17 +129,39 @@ impl Worker {
                 "not_applied",
             ));
         }
+        let recipient = json!({"kind": "agent", "id": delegation["delegate"]["agent"]});
+        let timeout = Duration::from_millis(delegation["timeout_ms"].as_u64().unwrap_or(1));
+        self.request(
+            task_id,
+            correlation_id,
+            recipient,
+            "delegation.request",
+            delegation,
+            timeout,
+        )
+    }
+
+    /// Richiesta generica: costruisce e valida l'envelope, attende una risposta correlata entro `timeout`.
+    pub fn request(
+        &mut self,
+        task_id: &str,
+        correlation_id: &str,
+        recipient: Value,
+        message_type: &str,
+        payload: &Value,
+        timeout: Duration,
+    ) -> Result<Value, BridgeError> {
         let request = json!({
             "contract": "jarvis.envelope/1",
             "message_id": Uuid::new_v4().to_string(),
             "correlation_id": correlation_id,
             "task_id": task_id,
             "sender": self.sender,
-            "recipient": {"kind": "agent", "id": delegation["delegate"]["agent"]},
-            "type": "delegation.request",
+            "recipient": recipient,
+            "type": message_type,
             "status": "proposed",
             "issued_at": Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
-            "payload": delegation,
+            "payload": payload,
         });
         let report = validate(Contract::Envelope, &request);
         if !report.is_valid() {
@@ -163,7 +185,6 @@ impl Worker {
             .and_then(|()| stdin.flush())
             .map_err(|_| Self::closed("scrittura verso il worker non riuscita", "unknown"))?;
 
-        let timeout = Duration::from_millis(delegation["timeout_ms"].as_u64().unwrap_or(1));
         let raw = match self.lines.recv_timeout(timeout) {
             Ok(Ok(raw)) => raw,
             Ok(Err(_)) | Err(RecvTimeoutError::Disconnected) => {

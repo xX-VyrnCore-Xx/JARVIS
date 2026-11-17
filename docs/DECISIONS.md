@@ -76,6 +76,48 @@ Valutare stack mobile, motori vocali, trasporto degli eventi e RPC, implementazi
 - **Evidenza:** `cargo test --locked` in `core/`, 6 test del bridge con il worker Python reale; `python3 -m unittest discover -s tests/ai -v`, 6 test.
 - **Documenti interessati:** ARCHITECTURE.md, TECH_STACK.md, AI_SYSTEM.md, REQUIREMENTS.md.
 
+### ADR-0004 — Prototipo integrato v0.1 testabile dal proprietario
+
+- **Data:** 2026-11-17 · **Stato:** Accettato per la Fase 2. Il proprietario ha chiesto un prototipo funzionante da provare.
+- **Contesto:** servono flussi principali dimostrabili (ROADMAP fasi 2–3) senza anticipare scelte ancora aperte: RPC, storage distribuito, segreti, VPN, voce, mobile.
+- **Decisione:**
+  - Binario `jarvis` (crate `jarvis-core`, axum 0.8 e tokio) con API HTTP locale e interfaccia Web servita dal Core.
+  - Orchestrator sincrono, che esegue una richiesta alla volta.
+  - Security Engine a regole (`policy.rs`).
+  - Strumenti descritti in `contracts/catalog/tools` ed eseguiti solo dal Core, confinati in `data/workspace`.
+  - Memoria, task e conversazione in SQLite (`rusqlite`, motore incluso nel binario). Audit JSONL a catena di hash.
+  - AI Gateway Python con adapter Ollama e modello offline a regole, raggiunto tramite il bridge stdio (ADR-0003). Nuovo contratto `jarvis.agent-result/1` e campo facoltativo `inputs` nella delega v1.
+  - Interfaccia in HTML, CSS e JavaScript senza dipendenze.
+- **Controlli di sicurezza:**
+  - ascolto solo su loopback;
+  - controllo dell'header `Host` contro il DNS rebinding;
+  - token di sessione casuale, presente solo nella pagina servita dal Core;
+  - CSP restrittiva;
+  - argomenti degli strumenti validati sullo schema;
+  - percorsi controllati sia nella policy sia in esecuzione, compresi i link simbolici;
+  - conferma obbligatoria per gli strumenti a rischio alto, monouso, legata al digest dei parametri e valida 5 minuti;
+  - nessun backend cloud: `allow_cloud` è sempre falso.
+- **Motivazione:** l'esperienza completa (chat, strumento, policy, conferma, esito, memoria, audit) diventa provabile end-to-end, in locale e senza rete. Il modello offline rende i test deterministici; Ollama fornisce il linguaggio naturale quando è disponibile.
+- **Deviazioni temporanee da TECH_STACK.md:**
+  - interfaccia senza React e senza Tauri, per evitare una toolchain di build nel prototipo;
+  - SQLite usato anche per i dati centrali al posto di PostgreSQL.
+  Entrambe vanno riviste nella Fase 3.
+- **Conseguenze:**
+  - il modello offline è un supporto di test e di funzionamento minimo, non un assistente generale;
+  - la qualità del tool calling con Ollama non è stata verificata con un modello reale (Ollama non è installabile nel container: il controllo resta sospeso);
+  - un solo utente, senza passkey né MFA: il token di sessione non sostituisce l'identità prevista da SECURITY_AND_PRIVACY.md.
+- **Evidenza:**
+  - `cargo test --locked`: 23 test, di cui 12 d'integrazione sull'API con il worker reale;
+  - `python3 -m unittest discover -s tests/ai -v`: 17 test, con l'adapter Ollama provato su un server sintetico;
+  - `tests/e2e/ui_smoke.cjs`: 12 verifiche in Chromium;
+  - avvio da zero con `./jarvis.sh`.
+- **Documenti interessati:** README.md, ARCHITECTURE.md, AI_SYSTEM.md, AUTONOMY_AND_TOOLS.md, SECURITY_AND_PRIVACY.md, MEMORY_DATA_SYNC.md, INTERFACE_AND_DEVICES.md, TECH_STACK.md, REQUIREMENTS.md, DEVOPS_QA_OBSERVABILITY.md.
+
+### Decisione operativa — Merge automatico con CI verde
+
+- **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).
+- **Regola:** dettagliata in [DEVELOPMENT.md](DEVELOPMENT.md#integrazione-delle-modifiche).
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

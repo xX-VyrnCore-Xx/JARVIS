@@ -15,3 +15,13 @@ La GUI è il punto di avvio principale. I flussi chat, task e notifiche condivid
 Registrare l'identità e dichiarare piattaforma, connettività, risorse e servizi autorizzati. Assegnare lavoro in base a capacità e policy. Visualizzare stato di connessione e sincronizzazione distinguendo attività in esecuzione, accodate e sospese. Alla riconnessione riconciliare progressi e dati come descritto in [MEMORY_DATA_SYNC.md](MEMORY_DATA_SYNC.md). Revocare identità e accessi quando il nodo viene rimosso.
 
 Verificare per piattaforma enrollment, revoca, segnalazione dei limiti OS, ripresa della connessione, gestione dei permessi locali, interruzione vocale e stato coerente fra client.
+
+## Stato del prototipo v0.1
+
+L'interfaccia Web è servita dal Core su `http://localhost:8765` e comprende:
+- chat, con i passaggi di ogni risposta (agente, strumento, policy, esito);
+- schede di conferma con effetto atteso, destinazione e scadenza;
+- sezioni Attività, Memoria, Workspace e Audit;
+- stato del backend AI e dell'integrità dell'audit nell'intestazione.
+
+Si adatta al tema chiaro e scuro e allo schermo dello smartphone (verificata a 390 px). Desktop Tauri, voce, avatar e mobile nativo restano da sviluppare.

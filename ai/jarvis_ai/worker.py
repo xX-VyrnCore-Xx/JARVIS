@@ -61,7 +61,33 @@ def synthetic_handler(delegation: dict) -> dict:
     return echo_handler(delegation)
 
 
-HANDLERS: dict[str, Callable[[dict], dict]] = {"echo": echo_handler, "synthetic": synthetic_handler}
+_GATEWAY = None
+
+
+def assistant_handler(delegation: dict) -> dict:
+    """Agente General Assistant: delega all'AI Gateway e valida l'esito (jarvis.agent-result/1)."""
+    global _GATEWAY
+    if _GATEWAY is None:
+        from jarvis_ai.gateway import Gateway
+
+        _GATEWAY = Gateway()
+    result = _GATEWAY.respond(delegation)
+    schema, semantic = validation_errors("agent-result", result)
+    if schema or semantic:
+        raise HandlerError("agent.invalid_result", "internal", "Esito dell'agente non conforme", retryable=False)
+    return result
+
+
+def assistant_status() -> dict:
+    global _GATEWAY
+    if _GATEWAY is None:
+        from jarvis_ai.gateway import Gateway
+
+        _GATEWAY = Gateway()
+    return _GATEWAY.status()
+
+
+HANDLERS: dict[str, Callable[[dict], dict]] = {"echo": echo_handler, "synthetic": synthetic_handler, "assistant": assistant_handler}
 
 
 def _reply(request: dict | None, status: str, payload: dict, error: dict | None = None) -> dict:
@@ -94,6 +120,11 @@ def handle_line(line: str, handler: Callable[[dict], dict]) -> dict:
         err = HandlerError("bridge.invalid_envelope", "validation", "Envelope non conforme", False).error
         err["details"] = {"violations": (schema + semantic)[:10]}
         return _reply(None, "failed", {}, err)
+    if request["type"] == "health.request":
+        status = assistant_status() if handler is assistant_handler else {"handler": handler.__name__}
+        reply = _reply(request, "succeeded", status)
+        reply["type"] = "health.result"
+        return reply
     if request["type"] != "delegation.request":
         return _reply(request, "failed", {}, HandlerError("bridge.unsupported_type", "validation", "Tipo non supportato", False).error)
     delegation = request["payload"]

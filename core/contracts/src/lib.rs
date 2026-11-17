@@ -29,12 +29,19 @@ const COMMON: &str = schema_file!("common.schema.json");
 const ERROR: &str = schema_file!("error.schema.json");
 const TRANSITIONS: &str = schema_file!("task-transitions.json");
 
+/// SHA-256 esadecimale del JSON canonico di un valore (chiavi ordinate, nessuno spazio).
+pub fn canonical_digest(value: &Value) -> String {
+    let canonical = serde_json::to_string(value).expect("serializzazione");
+    hex::encode(Sha256::digest(canonical.as_bytes()))
+}
+
 /// Hash di partenza della catena di audit.
 pub const GENESIS_HASH: &str = "0000000000000000000000000000000000000000000000000000000000000000";
 
 /// Contratti v1 validabili.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Contract {
+    AgentResult,
     AuditEvent,
     Delegation,
     Envelope,
@@ -45,7 +52,8 @@ pub enum Contract {
 }
 
 impl Contract {
-    pub const ALL: [Contract; 7] = [
+    pub const ALL: [Contract; 8] = [
+        Contract::AgentResult,
         Contract::AuditEvent,
         Contract::Delegation,
         Contract::Envelope,
@@ -58,6 +66,7 @@ impl Contract {
     /// Nome usato nei file `<nome>.schema.json` e nelle fixture.
     pub fn name(self) -> &'static str {
         match self {
+            Contract::AgentResult => "agent-result",
             Contract::AuditEvent => "audit-event",
             Contract::Delegation => "delegation",
             Contract::Envelope => "envelope",
@@ -74,6 +83,7 @@ impl Contract {
 
     fn source(self) -> &'static str {
         match self {
+            Contract::AgentResult => schema_file!("agent-result.schema.json"),
             Contract::AuditEvent => schema_file!("audit-event.schema.json"),
             Contract::Delegation => schema_file!("delegation.schema.json"),
             Contract::Envelope => schema_file!("envelope.schema.json"),
@@ -85,7 +95,7 @@ impl Contract {
     }
 
     fn validator(self) -> &'static Validator {
-        static CELLS: [OnceLock<Validator>; 7] = [const { OnceLock::new() }; 7];
+        static CELLS: [OnceLock<Validator>; 8] = [const { OnceLock::new() }; 8];
         let index = Self::ALL
             .iter()
             .position(|c| *c == self)
@@ -191,7 +201,10 @@ pub fn semantic_errors(contract: Contract, doc: &Value) -> Vec<String> {
                 }
             }
         }
-        Contract::AuditEvent | Contract::Error | Contract::ToolDescriptor => {}
+        Contract::AgentResult
+        | Contract::AuditEvent
+        | Contract::Error
+        | Contract::ToolDescriptor => {}
     }
     errors
 }
