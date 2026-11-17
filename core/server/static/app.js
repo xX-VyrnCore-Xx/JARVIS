@@ -15,7 +15,9 @@ async function api(path, options = {}) {
     headers: { "Content-Type": "application/json", ...AUTH, ...(options.headers || {}) },
   });
   const data = await res.json().catch(() => ({}));
-  if (DEVICE_MODE && res.status === 401) {
+  if (DEVICE_MODE && res.status === 401 && !window.jarvisLeaving) {
+    // Dispositivo revocato: una sola navigazione, anche se più richieste falliscono insieme.
+    window.jarvisLeaving = true;
     try { localStorage.removeItem("jarvis-device"); } catch { /* niente */ }
     location.replace("/pair");
   }

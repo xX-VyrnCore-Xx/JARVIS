@@ -214,8 +214,10 @@ function check(cond, msg) {
   await page.waitForSelector("#devices .badge.denied");
   await phone.fill("#input", "che ore sono");
   await phone.keyboard.press("Enter");
-  await phone.waitForURL(/\/pair$/, { timeout: 15000 });
-  check(true, "dispositivo revocato: accesso perso subito");
+  // Più richieste possono fallire insieme: si attende l'URL finale senza dipendere da una singola navigazione.
+  for (let i = 0; i < 60 && !phone.url().endsWith("/pair"); i++) await new Promise((r) => setTimeout(r, 250));
+  await phone.waitForSelector("#pair-form");
+  check(phone.url().endsWith("/pair"), "dispositivo revocato: accesso perso subito");
   await phoneCtx.close();
   if (shots) await page.screenshot({ path: `${shots}/jarvis-dispositivi.png` });
 
