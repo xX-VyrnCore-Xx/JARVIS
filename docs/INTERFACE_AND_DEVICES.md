@@ -30,7 +30,16 @@ La campanella nell'intestazione mostra le notifiche non lette. Il pannello elenc
 
 La sezione **Sistema** mostra lo stato di Core, AI, voce, Web, audit e worker, e la tabella delle latenze (p50, p95, max, errori) per endpoint, strumento e delega.
 
-Si adatta al tema chiaro e scuro e allo schermo dello smartphone (verificata a 390 px). Restano da sviluppare: installatori autonomi del desktop, voce, avatar e mobile nativo.
+Si adatta al tema chiaro e scuro e allo schermo dello smartphone (verificata a 390 px).
+
+**Telefono e altri dispositivi (ADR-0014):**
+1. Pubblica JARVIS nella tua rete privata con un proxy HTTPS fidato, per esempio `tailscale serve 8765`.
+2. Avvia JARVIS con `JARVIS_ALLOWED_HOSTS=<nome-host>`.
+3. Sul telefono apri l'indirizzo e inserisci il codice generato nella sezione **Dispositivi**.
+
+L'interfaccia si installa come app («Aggiungi a schermata Home»). Dal dispositivo sono disponibili chat, attività, notifiche, voce e, se concesso, le conferme. La revoca è immediata.
+
+Restano da sviluppare: installatori autonomi del desktop, avatar, app mobili native e nodi esecutori distribuiti.
 
 ## Voce (RF-09, ADR-0010)
 

@@ -61,7 +61,7 @@ jobs:
       - name: Avvia JARVIS in modalità offline
         run: |
           JARVIS_AI_BACKEND=offline JARVIS_PYTHON=python JARVIS_DATA_DIR="$RUNNER_TEMP/jarvis" JARVIS_PORT=8765 \
-          JARVIS_WEB_ALLOW_PRIVATE=1 JARVIS_WIKIPEDIA_URL=http://127.0.0.1:8799 JARVIS_WEB_DENY=vietato.localhost \
+          JARVIS_WEB_ALLOW_PRIVATE=1 JARVIS_WIKIPEDIA_URL=http://127.0.0.1:8799 JARVIS_WEB_DENY=vietato.localhost JARVIS_ALLOWED_HOSTS=jarvis.test \
           JARVIS_VOICE_ENGINE=fake JARVIS_FAKE_STT_TEXT="che ore sono" \
             core/target/release/jarvis > "$RUNNER_TEMP/jarvis.log" 2>&1 &
           for i in $(seq 1 30); do curl -sf http://localhost:8765/api/health && exit 0; sleep 1; done

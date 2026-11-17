@@ -45,6 +45,7 @@ pub enum Contract {
     AuditEvent,
     Connector,
     Delegation,
+    Device,
     Envelope,
     Error,
     Notification,
@@ -58,11 +59,12 @@ pub enum Contract {
 }
 
 impl Contract {
-    pub const ALL: [Contract; 14] = [
+    pub const ALL: [Contract; 15] = [
         Contract::AgentResult,
         Contract::AuditEvent,
         Contract::Connector,
         Contract::Delegation,
+        Contract::Device,
         Contract::Envelope,
         Contract::Error,
         Contract::Notification,
@@ -81,6 +83,7 @@ impl Contract {
             Contract::AgentResult => "agent-result",
             Contract::AuditEvent => "audit-event",
             Contract::Connector => "connector",
+            Contract::Device => "device",
             Contract::Delegation => "delegation",
             Contract::Envelope => "envelope",
             Contract::Error => "error",
@@ -104,6 +107,7 @@ impl Contract {
             Contract::AgentResult => schema_file!("agent-result.schema.json"),
             Contract::AuditEvent => schema_file!("audit-event.schema.json"),
             Contract::Connector => schema_file!("connector.schema.json"),
+            Contract::Device => schema_file!("device.schema.json"),
             Contract::Delegation => schema_file!("delegation.schema.json"),
             Contract::Envelope => schema_file!("envelope.schema.json"),
             Contract::Error => ERROR,
@@ -119,7 +123,7 @@ impl Contract {
     }
 
     fn validator(self) -> &'static Validator {
-        static CELLS: [OnceLock<Validator>; 14] = [const { OnceLock::new() }; 14];
+        static CELLS: [OnceLock<Validator>; 15] = [const { OnceLock::new() }; 15];
         let index = Self::ALL
             .iter()
             .position(|c| *c == self)
@@ -256,7 +260,8 @@ pub fn semantic_errors(contract: Contract, doc: &Value) -> Vec<String> {
         | Contract::Notification
         | Contract::VoiceSynthesis
         | Contract::VoiceTranscription
-        | Contract::Connector => {}
+        | Contract::Connector
+        | Contract::Device => {}
     }
     errors
 }

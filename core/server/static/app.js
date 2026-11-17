@@ -2,14 +2,23 @@
 // Interfaccia del prototipo JARVIS. Nessuna dipendenza esterna; tutto il testo è inserito con textContent.
 
 const TOKEN = document.querySelector('meta[name="jarvis-token"]').content;
+// Dispositivo associato (RF-11): senza token di sessione la pagina è aperta da un host remoto.
+const DEVICE_MODE = !TOKEN;
+const DEVICE_TOKEN = (() => { try { return localStorage.getItem("jarvis-device") || ""; } catch { return ""; } })();
+const AUTH = DEVICE_MODE ? { "X-Jarvis-Device": DEVICE_TOKEN } : { "X-Jarvis-Token": TOKEN };
+if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("/sw.js").catch(() => {});
 const $ = (sel) => document.querySelector(sel);
 
 async function api(path, options = {}) {
   const res = await fetch(path, {
     ...options,
-    headers: { "Content-Type": "application/json", "X-Jarvis-Token": TOKEN, ...(options.headers || {}) },
+    headers: { "Content-Type": "application/json", ...AUTH, ...(options.headers || {}) },
   });
   const data = await res.json().catch(() => ({}));
+  if (DEVICE_MODE && res.status === 401) {
+    try { localStorage.removeItem("jarvis-device"); } catch { /* niente */ }
+    location.replace("/pair");
+  }
   if (!res.ok) throw new Error(data.error ? data.error.message : `HTTP ${res.status}`);
   return data;
 }
@@ -31,7 +40,7 @@ const fmtTime = (iso) => (iso ? new Date(iso).toLocaleString("it-IT") : "");
 
 async function refreshStatus() {
   try {
-    const h = await fetch("/api/health").then((r) => r.json());
+    const h = await fetch("/api/health", { headers: AUTH }).then((r) => r.json());
     const ai = $("#st-ai");
     const b = h.ai && h.ai.gateway && h.ai.gateway.backend;
     if (h.ai && h.ai.status === "up" && b) {
@@ -173,7 +182,23 @@ async function loadConversation() {
 
 // ------------------------------------------------------------------ altre viste
 
+if (DEVICE_MODE) document.querySelectorAll("[data-owner]").forEach((n) => n.remove());
+
+const PLATFORM = { android: "Android", ios: "iOS", desktop: "desktop", web: "browser", other: "altro" };
 const views = {
+  async devices() {
+    const { items } = await api("/api/devices");
+    $("#devices").replaceChildren(...(items.length ? items.map((d) => el("div", { class: "card" },
+      el("div", { class: "body" },
+        el("div", { class: "title" }, `${d.name} `, el("span", { class: "sub" }, PLATFORM[d.platform] || d.platform)),
+        el("div", { class: "sub" }, `associato ${fmtTime(d.enrolled_at)} · ultimo accesso ${d.last_seen_at ? fmtTime(d.last_seen_at) : "mai"} · permessi: ${d.scopes.join(", ")}`)),
+      d.revoked_at ? el("span", { class: "badge denied" }, `revocato ${fmtTime(d.revoked_at)}`) :
+        el("button", { class: "danger", onclick: async () => {
+          if (!confirm(`Revocare «${d.name}»? Perderà subito l'accesso.`)) return;
+          await api(`/api/devices/${encodeURIComponent(d.device_id)}/revoke`, { method: "POST" }).catch((e) => alert(e.message));
+          views.devices();
+        } }, "Revoca"))) : [el("p", { class: "empty" }, "Nessun dispositivo associato.")]));
+  },
   async connectors() {
     const { items } = await api("/api/connectors");
     const box = $("#connectors");
@@ -376,7 +401,7 @@ views.automations = async () => {
 };
 
 views.system = async () => {
-  const [h, m] = await Promise.all([fetch("/api/health").then((r) => r.json()), api("/api/metrics")]);
+  const [h, m] = await Promise.all([fetch("/api/health", { headers: AUTH }).then((r) => r.json()), api("/api/metrics")]);
   const fmtUptime = (s) => s < 3600 ? `${Math.floor(s / 60)} min` : `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
   const b = h.ai && h.ai.gateway && h.ai.gateway.backend;
   const v = h.ai && h.ai.gateway && h.ai.gateway.voice;
@@ -412,7 +437,7 @@ views.system = async () => {
 };
 
 async function download(path, name) {
-  const res = await fetch(path, { headers: { "X-Jarvis-Token": TOKEN } });
+  const res = await fetch(path, { headers: { ...AUTH } });
   if (!res.ok) return alert(`Esportazione non riuscita (HTTP ${res.status})`);
   const url = URL.createObjectURL(await res.blob());
   const a = el("a", { href: url, download: name });
@@ -435,6 +460,16 @@ $("#backup-form").addEventListener("submit", async (e) => {
     alert(`Backup creato: ${out.file} (${out.files} file, audit ${out.audit.chain_valid ? "integro" : "da verificare"}).`);
     views.system();
   } catch (err) { alert(err.message); } finally { button.disabled = false; button.textContent = "Crea backup"; }
+});
+
+$("#pairing-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    const out = await api("/api/devices/pairing", { method: "POST", body: JSON.stringify({ scopes: e.target.confirm.checked ? ["chat", "confirm"] : ["chat"] }) });
+    const box = $("#pairing-code");
+    box.hidden = false;
+    box.replaceChildren(el("strong", {}, `${out.code.slice(0, 4)}-${out.code.slice(4)}`), ` valido fino alle ${new Date(out.expires_at).toLocaleTimeString("it-IT")}, una sola volta.`);
+  } catch (err) { alert(err.message); }
 });
 
 $("#connector-form").addEventListener("submit", async (e) => {
@@ -632,7 +667,7 @@ function onFrame(frame) {
 
 async function transcribe(blob, wakeWord) {
   setVoiceState("transcribing");
-  const res = await fetch(`/api/voice/transcribe${wakeWord ? "?mode=wake_word" : ""}`, { method: "POST", headers: { "Content-Type": "audio/wav", "X-Jarvis-Token": TOKEN }, body: blob });
+  const res = await fetch(`/api/voice/transcribe${wakeWord ? "?mode=wake_word" : ""}`, { method: "POST", headers: { "Content-Type": "audio/wav", ...AUTH }, body: blob });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error ? data.error.message : `HTTP ${res.status}`);
   return data;
@@ -681,7 +716,7 @@ async function speakReply(text) {
   const clean = text.replace(/https?:\/\/\S+/g, "").slice(0, 1500).trim();
   if (!clean) return;
   try {
-    const res = await fetch("/api/voice/speak", { method: "POST", headers: { "Content-Type": "application/json", "X-Jarvis-Token": TOKEN }, body: JSON.stringify({ text: clean }) });
+    const res = await fetch("/api/voice/speak", { method: "POST", headers: { "Content-Type": "application/json", ...AUTH }, body: JSON.stringify({ text: clean }) });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error?.message || `HTTP ${res.status}`);
     const url = URL.createObjectURL(await res.blob());
     player = new Audio(url);

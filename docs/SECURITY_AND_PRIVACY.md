@@ -38,6 +38,7 @@ Documentare insieme ai contratti la classificazione dei dati, i flussi egress, l
 | Segreti dei connettori | Cifrati per valore (XChaCha20-Poly1305), chiave in `data/.secrets.key` con permessi 0600; mai restituiti da API, audit, log o agente | `install_authorize_call_and_secret_never_leaks` |
 | Connettori | Host dichiarati e policy SSRF, nessun redirect; strumenti presenti solo se autorizzati; scritture esterne sempre con conferma; revoca immediata | `writes_need_confirmation_and_revoke_denies_immediately` |
 | Webhook | HMAC-SHA256 del corpo con segreto mostrato una volta; solo notifiche, nessuna azione; firme non valide nell'audit | `webhooks_require_a_valid_signature` |
+| Dispositivi remoti | Solo host ammessi da `JARVIS_ALLOWED_HOSTS` dietro un proxy HTTPS fidato; pagina senza token di sessione; codice monouso (40 bit, 10 minuti, blocco dopo 5 errori); token conservato come SHA-256; permessi `chat` e `confirm`; revoca immediata | `core/server/tests/devices.rs` |
 | Dati in uscita (Web) | Interruttore `JARVIS_WEB`, domini consentiti e vietati, audit di ogni chiamata | `web_can_be_disabled_or_restricted_to_an_allowlist` |
 
 Da completare:

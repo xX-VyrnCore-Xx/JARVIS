@@ -399,6 +399,32 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - evidenza: `connector_faults_are_retried_safely_and_notified`.
 - **Custodia della chiave:** il portachiavi del sistema operativo resta da fare. Richiede prove su Windows, macOS e Linux con sessione grafica, non disponibili nel container né nella CI, ed è rinviato alla validazione di sicurezza della Fase 6 sul computer del proprietario.
 
+### ADR-0014 — Dispositivi associati e app Web installabile (Fase 5, RF-11 e RF-10 mobile)
+
+- **Data:** 2026-11-17 · **Stato:** Accettato. Restano aperte la VPN mesh (decisione 81 e seguenti), l'identità crittografica dei nodi con mTLS e le app native.
+- **Contesto:** RF-11 chiede che un dispositivo revocato perda accesso e assegnazioni. RF-10 prevede il client mobile. Il Core ascolta solo su loopback e la pagina locale riceve il token di sessione: esporla in rete senza altri controlli darebbe il token a chiunque la apra.
+- **Opzioni:** ascolto su LAN con TLS autofirmato (avvisi del browser, niente service worker); app native (fuori portata della milestone); Core sempre su loopback, pubblicato da un proxy fidato con HTTPS valido, più associazione dei dispositivi.
+- **Decisione:**
+  - **Accesso remoto solo tramite proxy fidato** verso `127.0.0.1` (per esempio `tailscale serve`, che fornisce un certificato valido nella rete privata del proprietario). Il proprietario ammette esplicitamente i nomi con `JARVIS_ALLOWED_HOSTS`; nomi senza punto o con caratteri jolly vengono ignorati. Ogni altro host resta rifiutato.
+  - **Pagina remota senza token di sessione;** il token di sessione non vale da un host remoto.
+  - **Associazione:**
+    - codice monouso di 8 caratteri (alfabeto senza caratteri ambigui, 40 bit), valido 10 minuti, generato solo dal computer del Core;
+    - dopo 5 codici errati tutti i codici in attesa vengono annullati, con notifica di sicurezza;
+    - il dispositivo riceve una sola volta un token di 256 bit; il Core ne conserva solo l'impronta SHA-256 (contratto `jarvis.device/1`, senza token).
+  - **Permessi:** `chat` (chat, attività, conferme in attesa, notifiche, voce, stato) e, se il proprietario lo concede, `confirm` (approvare le azioni rischiose). Dispositivi, connettori, backup, audit, memoria, workspace, automazioni e metriche restano al computer del proprietario.
+  - **Revoca immediata:** l'impronta viene cancellata e la richiesta successiva riceve 401. L'interfaccia del dispositivo torna alla pagina di associazione. Associazione e revoca sono registrate nell'audit.
+  - **App Web installabile:** manifest, icona e un service worker che non memorizza dati (senza rete mostra solo un avviso). La CSP ammette `manifest-src` e `worker-src 'self'`.
+- **Motivazione:** il Core non si espone mai direttamente in rete. Il canale cifrato lo fornisce uno strumento già maturo scelto dal proprietario. Il controllo d'accesso e la revoca restano nel Core, con permessi minimi per i dispositivi.
+- **Conseguenze:**
+  - le richieste dei dispositivi sono attribuite al proprietario nei task (l'audit registra associazione e revoca, non ogni messaggio);
+  - nessun nodo esecutore distribuito: i dispositivi sono client, non eseguono strumenti;
+  - va verificato sul computer del proprietario che il proxy scelto conservi l'header `Host`.
+- **Evidenza:**
+  - `core/server/tests/devices.rs`: 4 test (pagina remota senza token, host sconosciuti rifiutati, token di sessione non valido da remoto, rotte del proprietario negate, conferma solo con il permesso `confirm`, revoca immediata nell'audit, codice monouso, blocco dopo 5 errori);
+  - fixture `device.*`;
+  - E2E con un secondo contesto del browser su `jarvis.test`: rimando all'associazione, sezioni del proprietario nascoste, chat dal dispositivo, revoca con perdita immediata dell'accesso.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, SECURITY_AND_PRIVACY.md, REQUIREMENTS.md, README.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

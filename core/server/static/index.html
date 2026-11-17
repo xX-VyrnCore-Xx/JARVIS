@@ -6,7 +6,10 @@
   <meta name="jarvis-token" content="{{JARVIS_TOKEN}}">
   <title>JARVIS</title>
   <link rel="stylesheet" href="/app.css">
-  <script src="/app.js" defer></script>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#0f1115">
+  <script src="/boot.js" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -34,12 +37,13 @@
     <nav class="nav" aria-label="Sezioni">
       <button class="nav-item active" data-view="chat">Chat</button>
       <button class="nav-item" data-view="tasks">Attività</button>
-      <button class="nav-item" data-view="automations">Automazioni</button>
-      <button class="nav-item" data-view="memory">Memoria</button>
-      <button class="nav-item" data-view="workspace">Workspace</button>
-      <button class="nav-item" data-view="connectors">Connettori</button>
-      <button class="nav-item" data-view="audit">Audit</button>
-      <button class="nav-item" data-view="system">Sistema</button>
+      <button class="nav-item" data-owner data-view="automations">Automazioni</button>
+      <button class="nav-item" data-owner data-view="memory">Memoria</button>
+      <button class="nav-item" data-owner data-view="workspace">Workspace</button>
+      <button class="nav-item" data-owner data-view="connectors">Connettori</button>
+      <button class="nav-item" data-owner data-view="devices">Dispositivi</button>
+      <button class="nav-item" data-owner data-view="audit">Audit</button>
+      <button class="nav-item" data-owner data-view="system">Sistema</button>
     </nav>
     <main>
       <section class="view active" id="view-chat" aria-label="Chat">
@@ -120,6 +124,18 @@
           <div class="row"><button type="submit" class="primary">Installa</button></div>
           <p class="hint" id="connector-secret" hidden></p>
         </form>
+      </section>
+      <section class="view" id="view-devices" aria-label="Dispositivi">
+        <div class="view-head"><h2>Dispositivi</h2><button class="ghost" data-refresh="devices">Aggiorna</button></div>
+        <p class="hint">Usa JARVIS dal telefono senza esporlo su Internet: pubblicalo con un proxy fidato verso questo computer (per esempio <code>tailscale serve 8765</code>), avvia JARVIS con <code>JARVIS_ALLOWED_HOSTS=&lt;nome-host&gt;</code>, apri l'indirizzo sul telefono e inserisci il codice. Dal telefono puoi chattare, vedere attività e notifiche e, se lo consenti, confermare azioni; il resto si gestisce solo da qui.</p>
+        <form id="pairing-form" class="form">
+          <div class="row">
+            <label class="check"><input type="checkbox" name="confirm"> Il dispositivo può confermare azioni rischiose</label>
+            <button type="submit" class="primary">Genera codice di associazione</button>
+          </div>
+          <p class="pairing-code" id="pairing-code" hidden></p>
+        </form>
+        <div id="devices" class="list"></div>
       </section>
       <section class="view" id="view-audit" aria-label="Audit">
         <div class="view-head"><h2>Audit</h2><button class="ghost" data-refresh="audit">Aggiorna</button></div>

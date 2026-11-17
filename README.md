@@ -44,6 +44,7 @@ sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev
 
 - **Backup**: dalla sezione Sistema o con `./jarvis.sh backup` crei una copia cifrata dei tuoi dati, protetta da una passphrase che scegli tu (senza passphrase la copia non si apre). Per ripristinarla, con JARVIS chiuso: `./jarvis.sh restore data-backups/<file>.jbak`.
 - **Connettori**: nella sezione Connettori incolli il manifest JSON di un servizio esterno (esempio in `tests/contracts/fixtures/valid/connector.meteo.json`), lo autorizzi con il suo token e lo usi in chat con «connettore <id> <operazione> chiave=valore». Il token resta cifrato nel Core e non viene mai mostrato. Le operazioni che scrivono verso l'esterno chiedono sempre conferma. «Revoca» cancella il token e blocca subito le chiamate.
+- **Dal telefono**: pubblica JARVIS nella tua rete privata con un proxy HTTPS (per esempio [Tailscale](https://tailscale.com): `tailscale serve 8765`), avvialo con `JARVIS_ALLOWED_HOSTS=<nome del computer nella rete Tailscale>`, apri l'indirizzo sul telefono e inserisci il codice generato nella sezione **Dispositivi**. Puoi installarlo come app dalla schermata Home. Ogni dispositivo si revoca con un clic, con effetto immediato.
 - **Sistema**: la sezione omonima mostra stato dei componenti, latenze misurate e lo storico delle ultime 24 ore (conservato 7 giorni), esportabile in JSON o nel formato di Prometheus. I log diagnostici sono in `data/logs/core.jsonl` e non contengono i tuoi messaggi.
 
 Cosa osservare:
@@ -66,11 +67,12 @@ Cosa osservare:
 | `JARVIS_TTS_VOICE_NAME` | `it_IT-paola-medium` | Voce Piper scaricata da `voice-setup` |
 | `JARVIS_SEARCH_LANG` | `it` | Lingua di Wikipedia per la ricerca |
 | `JARVIS_SEARXNG_URL` | — | Usa un'istanza SearXNG (anche locale) al posto di Wikipedia |
+| `JARVIS_ALLOWED_HOSTS` | — | Nomi host del proxy fidato da cui i dispositivi associati raggiungono JARVIS (separati da virgola) |
 | `JARVIS_WEB_ALLOW` / `JARVIS_WEB_DENY` | — | Domini consentiti o vietati, separati da virgola (`wikipedia.org,example.org`) |
 
 Limiti noti della v0.1:
 - un solo utente locale e una richiesta alla volta;
-- nessun client mobile; connettori solo HTTP dichiarativi (niente OAuth né plugin con codice);
+- mobile come app Web installabile, nessuna app nativa; connettori solo HTTP dichiarativi (niente OAuth né plugin con codice);
 - con Ollama la qualità degli strumenti dipende dal modello scelto.
 
 Dettagli in [docs/ROADMAP.md](docs/ROADMAP.md) e nell'ADR-0004 in [docs/DECISIONS.md](docs/DECISIONS.md).

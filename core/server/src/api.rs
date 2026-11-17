@@ -21,6 +21,12 @@ const INDEX: &str = include_str!("../static/index.html");
 const APP_JS: &str = include_str!("../static/app.js");
 const APP_CSS: &str = include_str!("../static/app.css");
 const VOICE_WORKLET: &str = include_str!("../static/voice-worklet.js");
+const MANIFEST: &str = include_str!("../static/manifest.webmanifest");
+const SERVICE_WORKER: &str = include_str!("../static/sw.js");
+const ICON: &str = include_str!("../static/icon.svg");
+const PAIR_HTML: &str = include_str!("../static/pair.html");
+const PAIR_JS: &str = include_str!("../static/pair.js");
+const BOOT_JS: &str = include_str!("../static/boot.js");
 
 pub struct AppState {
     pub core: Arc<Mutex<Jarvis>>,
@@ -28,6 +34,8 @@ pub struct AppState {
     pub token: String,
     pub port: u16,
     pub last_health: Mutex<Value>,
+    /// Host pubblicati da un proxy fidato (es. `tailscale serve`) per i dispositivi associati (RF-11).
+    pub remote_hosts: Vec<String>,
 }
 
 type Shared = Arc<AppState>;
@@ -78,7 +86,20 @@ async fn guard(State(state): State<Shared>, req: Request, next: Next) -> Respons
         format!("localhost:{}", state.port),
         format!("[::1]:{}", state.port),
     ];
-    if !allowed.iter().any(|a| a == host) {
+    let local = allowed.iter().any(|a| a == host);
+    let host_name = host.rsplit_once(':').map_or(host, |(h, p)| {
+        if p.chars().all(|c| c.is_ascii_digit()) {
+            h
+        } else {
+            host
+        }
+    });
+    let remote = !local
+        && state
+            .remote_hosts
+            .iter()
+            .any(|h| h.eq_ignore_ascii_case(host_name));
+    if !local && !remote {
         return error(StatusCode::FORBIDDEN, "forbidden_host", "host non ammesso");
     }
     let path = req.uri().path().to_string();
@@ -88,8 +109,47 @@ async fn guard(State(state): State<Shared>, req: Request, next: Next) -> Respons
         .map(|m| m.as_str().to_string())
         .unwrap_or_else(|| "non trovato".into());
     let method = req.method().to_string();
+    if remote {
+        // Dispositivo associato (RF-11): token del dispositivo, solo le rotte dei suoi permessi.
+        let public = !path.starts_with("/api/")
+            || path == "/api/devices/pair"
+            || path.starts_with("/api/hooks/");
+        if !public {
+            let token = req
+                .headers()
+                .get("x-jarvis-device")
+                .and_then(|t| t.to_str().ok())
+                .unwrap_or_default()
+                .to_string();
+            let device = with_core(&state, move |j| j.device_for_token(&token)).await;
+            let Ok(Some(device)) = device else {
+                return error(
+                    StatusCode::UNAUTHORIZED,
+                    "unauthorized",
+                    "dispositivo non associato o revocato",
+                );
+            };
+            let scopes: Vec<&str> = device["scopes"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            if !device_route_allowed(&method, &route, &scopes) {
+                return error(
+                    StatusCode::FORBIDDEN,
+                    "owner_only",
+                    "operazione disponibile solo dal computer del proprietario",
+                );
+            }
+        }
+    }
     // I webhook dei connettori si autenticano con la firma HMAC del corpo, non con il token di sessione.
-    if path.starts_with("/api/") && path != "/api/health" && !path.starts_with("/api/hooks/") {
+    if local
+        && path.starts_with("/api/")
+        && path != "/api/health"
+        && !path.starts_with("/api/hooks/")
+    {
         let token = req
             .headers()
             .get("x-jarvis-token")
@@ -124,9 +184,31 @@ async fn guard(State(state): State<Shared>, req: Request, next: Next) -> Respons
     h.insert("cache-control", HeaderValue::from_static("no-store"));
     h.insert(
         "content-security-policy",
-        HeaderValue::from_static("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; media-src 'self' blob:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
+        HeaderValue::from_static("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
     );
     res
+}
+
+/// Rotte consentite a un dispositivo associato. Gestione di dispositivi, connettori, backup, audit,
+/// workspace e automazioni resta al computer del proprietario.
+fn device_route_allowed(method: &str, route: &str, scopes: &[&str]) -> bool {
+    let chat = [
+        ("GET", "/api/conversation"),
+        ("POST", "/api/chat"),
+        ("GET", "/api/tasks"),
+        ("GET", "/api/confirmations"),
+        ("GET", "/api/notifications"),
+        ("POST", "/api/notifications/read-all"),
+        ("POST", "/api/notifications/{id}/read"),
+        ("POST", "/api/voice/transcribe"),
+        ("POST", "/api/voice/speak"),
+        ("GET", "/api/devices/me"),
+        ("GET", "/api/health"),
+    ];
+    let allowed = chat.iter().any(|(m, r)| *m == method && *r == route);
+    let confirm =
+        method == "POST" && route == "/api/confirmations/{id}" && scopes.contains(&"confirm");
+    (allowed && scopes.contains(&"chat")) || confirm
 }
 
 pub fn router(state: Shared) -> Router {
@@ -175,6 +257,60 @@ pub fn router(state: Shared) -> Router {
             post(voice_transcribe).layer(axum::extract::DefaultBodyLimit::max(5 * 1024 * 1024)),
         )
         .route("/api/voice/speak", post(voice_speak))
+        .route("/api/devices", get(devices))
+        .route("/api/devices/pairing", post(create_pairing))
+        .route("/api/devices/pair", post(pair_device))
+        .route("/api/devices/me", get(device_me))
+        .route("/api/devices/{id}/revoke", post(revoke_device))
+        .route(
+            "/manifest.webmanifest",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "application/manifest+json")],
+                    MANIFEST,
+                )
+            }),
+        )
+        .route(
+            "/sw.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    SERVICE_WORKER,
+                )
+            }),
+        )
+        .route(
+            "/pair",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                    PAIR_HTML,
+                )
+            }),
+        )
+        .route(
+            "/boot.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    BOOT_JS,
+                )
+            }),
+        )
+        .route(
+            "/pair.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    PAIR_JS,
+                )
+            }),
+        )
+        .route(
+            "/icon.svg",
+            get(|| async { ([(header::CONTENT_TYPE, "image/svg+xml")], ICON) }),
+        )
         .route("/api/connectors", get(connectors).post(install_connector))
         .route("/api/connectors/{id}", delete(uninstall_connector))
         .route("/api/connectors/{id}/authorize", post(authorize_connector))
@@ -199,8 +335,16 @@ pub fn router(state: Shared) -> Router {
         .with_state(state)
 }
 
-async fn index(State(state): State<Shared>) -> Response {
-    let html = INDEX.replace("{{JARVIS_TOKEN}}", &state.token);
+async fn index(State(state): State<Shared>, headers: axum::http::HeaderMap) -> Response {
+    // Il token di sessione va solo al browser del computer del Core; un dispositivo remoto si associa.
+    let host = headers
+        .get(header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or_default();
+    let local = ["127.0.0.1", "localhost", "[::1]"]
+        .iter()
+        .any(|h| host == format!("{h}:{}", state.port));
+    let html = INDEX.replace("{{JARVIS_TOKEN}}", if local { &state.token } else { "" });
     ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response()
 }
 
@@ -460,6 +604,47 @@ async fn workflows(State(state): State<Shared>) -> Response {
     )
 }
 
+async fn devices(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.devices().map(|items| json!({"items": items}))).await)
+}
+
+async fn create_pairing(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let scopes: Vec<String> = body["scopes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|s| s.as_str().map(str::to_string))
+        .collect();
+    reply(with_core(&state, move |j| j.create_pairing(&scopes)).await)
+}
+
+async fn pair_device(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let code = body["code"].as_str().unwrap_or_default().to_string();
+    let name = body["name"].as_str().unwrap_or_default().to_string();
+    let platform = body["platform"].as_str().unwrap_or("other").to_string();
+    reply(with_core(&state, move |j| j.pair_device(&code, &name, &platform)).await)
+}
+
+async fn device_me(State(state): State<Shared>, headers: axum::http::HeaderMap) -> Response {
+    let token = headers
+        .get("x-jarvis-device")
+        .and_then(|t| t.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    reply(
+        with_core(&state, move |j| {
+            j.device_for_token(&token)?.ok_or_else(|| {
+                CoreError::NotFound("nessun dispositivo per questa richiesta".into())
+            })
+        })
+        .await,
+    )
+}
+
+async fn revoke_device(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    reply(with_core(&state, move |j| j.revoke_device(&id)).await)
+}
+
 async fn connectors(State(state): State<Shared>) -> Response {
     reply(
         with_core(&state, |j| {
@@ -601,6 +786,15 @@ pub fn spawn_scheduler(state: Shared, tick: std::time::Duration) -> tokio::task:
 
 /// Usato dai test per costruire lo stato senza aprire una porta.
 pub fn state(core: Jarvis, token: String, port: u16) -> Shared {
+    state_with_remote(core, token, port, vec![])
+}
+
+pub fn state_with_remote(
+    core: Jarvis,
+    token: String,
+    port: u16,
+    remote_hosts: Vec<String>,
+) -> Shared {
     let obs = core.observability();
     Arc::new(AppState {
         core: Arc::new(Mutex::new(core)),
@@ -608,5 +802,6 @@ pub fn state(core: Jarvis, token: String, port: u16) -> Shared {
         token,
         port,
         last_health: Mutex::new(json!({})),
+        remote_hosts,
     })
 }
