@@ -173,6 +173,8 @@ impl Jarvis {
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
+        // Rollback di release: copia dei dati prima che una versione diversa apra (e migri) il database.
+        let upgraded = crate::rollback::prepare(&cfg.data_dir)?;
         std::fs::create_dir_all(cfg.data_dir.join("audit")).map_err(|e| format!("audit: {e}"))?;
         let store = Store::open(&cfg.data_dir.join("jarvis.sqlite3"))
             .map_err(|e| format!("database: {e}"))?;
@@ -199,6 +201,18 @@ impl Jarvis {
             _lock: lock,
         };
         jarvis.register_authorized_connectors()?;
+        crate::rollback::mark(&jarvis.cfg.data_dir)?;
+        if let Some(up) = upgraded {
+            jarvis.obs.log(
+                "info",
+                "release.upgrade",
+                json!({"from": up["from"], "to": up["to"]}),
+            );
+            jarvis.notify(json!({"severity": "info", "category": "system",
+                "title": format!("JARVIS aggiornato da {} a {}", up["from"].as_str().unwrap_or("?"), up["to"].as_str().unwrap_or("?")),
+                "body": "I dati precedenti sono stati copiati per il rollback: con JARVIS chiuso, «./jarvis.sh rollback» li ripristina.",
+                "source": {"kind": "module", "id": "release"}})).map_err(|e| format!("{e:?}"))?;
+        }
         Ok(jarvis)
     }
 

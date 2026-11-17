@@ -425,6 +425,36 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - E2E con un secondo contesto del browser su `jarvis.test`: rimando all'associazione, sezioni del proprietario nascoste, chat dal dispositivo, revoca con perdita immediata dell'accesso.
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, SECURITY_AND_PRIVACY.md, REQUIREMENTS.md, README.md.
 
+### ADR-0015 — Release precompilata, rollback di release e audit delle dipendenze (Fasi 6 e 7)
+
+- **Data:** 2026-11-17 · **Stato:** Accettato. Restano decisioni del proprietario: firma dei binari e degli installatori, canali Stable/Beta, pubblicazione del tag.
+- **Contesto:**
+  - RNF-08 chiede il rollback di release;
+  - DEVOPS_QA_OBSERVABILITY.md chiede release riproducibili e verifica crittografica;
+  - finora l'avvio richiedeva Rust e un compilatore C sul computer del proprietario.
+- **Decisione:**
+  - **Archivio di release** (`scripts/package.py`): Core precompilato in `bin/`, runtime AI, contratti, lanciatori, README e [ACCEPTANCE.md](ACCEPTANCE.md); file `.sha256` accanto all'archivio. I lanciatori riconoscono la release (presenza di `bin/jarvis` e assenza di `core/`) e saltano la compilazione: serve solo Python. L'app desktop resta fuori dall'archivio.
+  - **Workflow `release.yml`:** costruisce gli archivi su Linux, macOS e Windows, li verifica, li estrae senza sorgenti del Core e li avvia con i lanciatori (prova di avvio completa). Con un tag `v*` prepara una **bozza** di release: la pubblicazione resta al proprietario.
+  - **Rollback di release** (`rollback.rs`):
+    - la cartella dati registra in `VERSION` l'ultima versione che l'ha usata;
+    - quando parte una versione diversa, prima di aprire il database (quindi prima di qualunque migrazione) il Core copia database, audit, chiave dei segreti e workspace (fino a 1 GiB) in `<dati>-rollback/<versione>-<istante>/` e conserva le ultime 3 copie;
+    - una notifica indica come tornare indietro;
+    - `jarvis rollback` (anche `./jarvis.sh rollback`) ripristina l'ultima copia con JARVIS chiuso e sposta i dati sostituiti in `<dati>.before-rollback-<istante>`.
+  - **Audit delle dipendenze in CI:** `cargo audit` per Core e app desktop, `pip-audit` per le dipendenze Python. Una vulnerabilità nota fa fallire la CI; gli avvisi «unmaintained» restano visibili ma non bloccano.
+- **Prima evidenza dell'audit:** RUSTSEC-2026-0459 (CVE nella SQLite inclusa in `libsqlite3-sys` 0.30.1, gravità media 6,8), corretta aggiornando `rusqlite` da 0.32 a 0.43 (`libsqlite3-sys` 0.40), senza modifiche al codice. Avvisi aperti non bloccanti:
+  - `chrono` senza manutentore, senza alternativa indicata;
+  - dipendenze transitive di Tauri e GTK nell'app desktop.
+- **Motivazione:** il proprietario può provare JARVIS senza toolchain. Il rollback non dipende da una passphrase e precede sempre le migrazioni. Le copie hanno la stessa protezione della cartella dati che duplicano.
+- **Conseguenze:**
+  - archivi non firmati: l'integrità si verifica con l'impronta SHA-256, non l'autenticità dell'autore;
+  - su macOS Gatekeeper può chiedere conferma per un binario non firmato;
+  - le copie per il rollback occupano spazio accanto ai dati.
+- **Evidenza:**
+  - `core/server/tests/rollback.rs`: 2 test (copia al cambio di versione e non a parità di versione, notifica, ripristino, catena di audit valida, solo le ultime 3 copie);
+  - prova manuale: archivio Linux estratto e avviato con `jarvis.sh` senza cargo nel PATH, `start_smoke.py` superato;
+  - `cargo audit` e `pip-audit` puliti dopo l'aggiornamento.
+- **Documenti interessati:** ACCEPTANCE.md, DEVOPS_QA_OBSERVABILITY.md, REQUIREMENTS.md, SECURITY_AND_PRIVACY.md, README.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

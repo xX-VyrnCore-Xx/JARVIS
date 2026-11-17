@@ -7,6 +7,8 @@
 #      ./jarvis.sh doctor        controlla i prerequisiti e spiega cosa manca
 #      ./jarvis.sh backup        backup cifrato dei dati (passphrase richiesta)
 #      ./jarvis.sh restore FILE  ripristina un backup .jbak (con JARVIS chiuso)
+#      ./jarvis.sh rollback      riporta i dati alla copia fatta prima dell'ultimo aggiornamento
+# In una release scaricata il Core è già compilato (bin/jarvis) e Rust non serve.
 # Su Windows usa jarvis.cmd (doppio clic) oppure jarvis.ps1.
 # Se il file non è eseguibile (es. scaricato come ZIP): bash jarvis.sh
 #
@@ -22,6 +24,8 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PORT="${JARVIS_PORT:-8765}"
 VENV="$ROOT/.venv"
 CMD="${1:-}"
+# Release precompilata: bin/jarvis presente e sorgenti del Core assenti.
+if [ -x "$ROOT/bin/jarvis" ] && [ ! -f "$ROOT/core/Cargo.toml" ]; then PREBUILT=1; CORE_BIN="$ROOT/bin/jarvis"; else PREBUILT=0; CORE_BIN="$ROOT/core/target/release/jarvis"; fi
 
 fail() { echo "✗ $*" >&2; exit 1; }
 ok() { echo "✓ $*"; }
@@ -34,10 +38,12 @@ doctor() {
   echo "JARVIS — controllo dei prerequisiti ($(uname -s) $(uname -m))"
   if python_ok; then ok "Python $(python3 -c 'import platform; print(platform.python_version())')"; else warn "Python 3.10+ mancante: https://www.python.org/downloads/"; problems=$((problems + 1)); fi
   if python3 -c 'import venv, ensurepip' 2>/dev/null; then ok "Modulo venv con pip"; else warn "venv/ensurepip mancante (Debian/Ubuntu: sudo apt install python3-venv)"; problems=$((problems + 1)); fi
-  if command -v cargo >/dev/null; then ok "Rust $(cargo --version | cut -d' ' -f2)"; else warn "Rust mancante: https://rustup.rs/ (poi riapri il terminale)"; problems=$((problems + 1)); fi
-  if command -v cc >/dev/null || command -v gcc >/dev/null || command -v clang >/dev/null; then ok "Compilatore C (serve per SQLite)"; else
-    warn "Compilatore C mancante (Ubuntu: sudo apt install build-essential · macOS: xcode-select --install)"; problems=$((problems + 1)); fi
-  if [ -x "$ROOT/core/target/release/jarvis" ]; then ok "Core già compilato"; else echo "· Core non ancora compilato (succede al primo avvio)"; fi
+  if [ "$PREBUILT" = 1 ]; then ok "Core precompilato (release): Rust non serve"; else
+    if command -v cargo >/dev/null; then ok "Rust $(cargo --version | cut -d' ' -f2)"; else warn "Rust mancante: https://rustup.rs/ (poi riapri il terminale)"; problems=$((problems + 1)); fi
+    if command -v cc >/dev/null || command -v gcc >/dev/null || command -v clang >/dev/null; then ok "Compilatore C (serve per SQLite)"; else
+      warn "Compilatore C mancante (Ubuntu: sudo apt install build-essential · macOS: xcode-select --install)"; problems=$((problems + 1)); fi
+    if [ -x "$CORE_BIN" ]; then ok "Core già compilato"; else echo "· Core non ancora compilato (succede al primo avvio)"; fi
+  fi
   if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then warn "La porta $PORT è occupata: imposta JARVIS_PORT=8766 o chiudi l'altro programma"; problems=$((problems + 1)); else ok "Porta $PORT libera"; fi
   if curl -s -m 1 "${JARVIS_OLLAMA_URL:-http://127.0.0.1:11434}/api/tags" >/dev/null 2>&1; then ok "Ollama attivo"; else echo "· Ollama non attivo (facoltativo: https://ollama.com, poi 'ollama pull qwen2.5:3b')"; fi
   if [ "$problems" -eq 0 ]; then ok "Tutto pronto: ./jarvis.sh"; else echo "Problemi trovati: $problems"; return 1; fi
@@ -49,7 +55,7 @@ if [ "$CMD" = "doctor" ]; then
 fi
 
 python_ok || { doctor || true; fail "Serve Python 3.10 o successivo"; }
-command -v cargo >/dev/null || { doctor || true; fail "Rust non trovato: installalo da https://rustup.rs/ e riapri il terminale"; }
+[ "$PREBUILT" = 1 ] || command -v cargo >/dev/null || { doctor || true; fail "Rust non trovato: installalo da https://rustup.rs/ e riapri il terminale"; }
 
 # Ambiente Python: ricreato se un tentativo precedente l'ha lasciato senza pip.
 if [ -d "$VENV" ] && ! "$VENV/bin/python" -m pip --version >/dev/null 2>&1; then
@@ -64,7 +70,9 @@ echo "→ Dipendenze Python"
 "$VENV/bin/python" -m pip install -q --disable-pip-version-check -r "$ROOT/tests/contracts/requirements.txt" \
   || fail "Installazione delle dipendenze Python non riuscita (serve la rete la prima volta)"
 
-if [ ! -x "$ROOT/core/target/release/jarvis" ]; then
+if [ "$PREBUILT" = 1 ]; then
+  echo "→ Core precompilato: $("$CORE_BIN" --version 2>/dev/null || echo release)"
+elif [ ! -x "$CORE_BIN" ]; then
   echo "→ Compilo il Core: la prima volta richiede alcuni minuti, l'avanzamento è qui sotto"
   (cd "$ROOT/core" && cargo build --release --locked -p jarvis-core) || { doctor || true; fail "Compilazione non riuscita: vedi i messaggi sopra"; }
 else
@@ -97,6 +105,7 @@ fi
 
 if [ "$CMD" = "desktop" ]; then
   shift
+  [ "$PREBUILT" = 1 ] && fail "La release non include l'app desktop: usa ./jarvis.sh (interfaccia nel browser) oppure i sorgenti"
   if [ "$(uname -s)" = "Linux" ] && ! pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
     fail "Per l'app desktop servono le librerie WebKitGTK: sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev"
   fi
@@ -126,13 +135,13 @@ open_browser() {
     sleep 1
   done
 }
-if [ "$CMD" = "backup" ] || [ "$CMD" = "restore" ]; then
-  # Manutenzione da terminale: il Core esegue l'operazione ed esce (restore richiede JARVIS chiuso).
-  exec "$ROOT/core/target/release/jarvis" "$@"
+if [ "$CMD" = "backup" ] || [ "$CMD" = "restore" ] || [ "$CMD" = "rollback" ]; then
+  # Manutenzione da terminale: il Core esegue l'operazione ed esce (restore e rollback richiedono JARVIS chiuso).
+  exec "$CORE_BIN" "$@"
 fi
 if [ "${JARVIS_NO_BROWSER:-0}" != "1" ]; then
   open_browser &
 fi
 
 export JARVIS_PORT="$PORT"
-exec "$ROOT/core/target/release/jarvis" "$@"
+exec "$CORE_BIN" "$@"

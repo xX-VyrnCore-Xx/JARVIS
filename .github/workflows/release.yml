@@ -1,0 +1,81 @@
+name: release
+
+# Archivi di release per Linux, macOS e Windows (Fase 7, ADR-0015). Ogni archivio viene estratto e avviato
+# con il proprio lanciatore senza Rust. Con un tag vX.Y.Z prepara una bozza di release da approvare.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths: ["scripts/package.py", ".github/workflows/release.yml", "jarvis.sh", "jarvis.ps1", "core/server/src/main.rs", "core/server/src/rollback.rs"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: archivio (${{ matrix.target }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: linux-x86_64, bin: jarvis }
+          - { os: macos-latest, target: macos-aarch64, bin: jarvis }
+          - { os: windows-latest, target: windows-x86_64, bin: jarvis.exe }
+    runs-on: ${{ matrix.os }}
+    env:
+      JARVIS_NO_BROWSER: "1"
+      JARVIS_AI_BACKEND: offline
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Core in modalità release
+        working-directory: core
+        run: cargo build --release --locked -p jarvis-core
+      - name: Archivio e impronta
+        run: python scripts/package.py --binary core/target/release/${{ matrix.bin }} --target ${{ matrix.target }} --out dist
+      - name: Avvio dall'archivio (Linux, macOS), senza i sorgenti del Core
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/prova" && tar xzf dist/*.tar.gz -C "$RUNNER_TEMP/prova"
+          (cd dist && shasum -a 256 -c *.sha256)
+          cd "$RUNNER_TEMP"/prova/jarvis-*
+          test ! -e core
+          ./jarvis.sh > jarvis.log 2>&1 &
+          python "$GITHUB_WORKSPACE/tests/smoke/start_smoke.py" http://127.0.0.1:8765 300 || { cat jarvis.log; exit 1; }
+          grep -q "Core precompilato" jarvis.log
+      - name: Avvio dall'archivio (Windows), senza i sorgenti del Core
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dest = Join-Path $env:RUNNER_TEMP "prova"
+          Expand-Archive -Path (Get-Item dist\*.zip).FullName -DestinationPath $dest
+          $dir = (Get-ChildItem $dest -Directory)[0].FullName
+          if (Test-Path (Join-Path $dir "core")) { exit 1 }
+          $p = Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $dir 'jarvis.ps1') -WorkingDirectory $dir -RedirectStandardOutput (Join-Path $dir 'jarvis.log') -RedirectStandardError (Join-Path $dir 'jarvis.err') -PassThru -NoNewWindow
+          python tests/smoke/start_smoke.py http://127.0.0.1:8765 300
+          if ($LASTEXITCODE -ne 0) { Get-Content (Join-Path $dir 'jarvis.log'), (Join-Path $dir 'jarvis.err'); exit 1 }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-${{ matrix.target }}
+          path: dist/
+
+  publish:
+    name: bozza di release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Bozza da approvare dal proprietario
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --draft --generate-notes --repo "$GITHUB_REPOSITORY"

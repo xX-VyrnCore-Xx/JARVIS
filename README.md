@@ -6,6 +6,8 @@ L'inferenza e la persistenza privilegiano l'ambiente locale. Il cloud interviene
 
 ## Prova il prototipo (v0.1)
 
+**Senza Rust:** scarica l'archivio per il tuo sistema da una release (sezione Releases di GitHub, quando il proprietario ne pubblica una) e verifica l'impronta con `sha256sum -c jarvis-*.sha256`. Poi estrai l'archivio e avvia `./jarvis.sh` (Windows: `jarvis.cmd`); serve solo Python 3.10+. Le istruzioni qui sotto valgono per i sorgenti.
+
 Il prototipo funziona sul tuo computer, senza cloud. Comprende chat, strumenti con permessi, conferme, memoria, workspace e audit.
 
 **Requisiti:** Windows, macOS o Linux con [Python 3.10+](https://www.python.org/) (su Windows spunta «Add to PATH»), [Rust](https://rustup.rs/) e Git. Opzionale: [Ollama](https://ollama.com) per la conversazione libera con un modello locale.
@@ -42,7 +44,7 @@ sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev
   L'audio non lascia il computer e non viene salvato. Le conferme restano un clic.
 - **Notifiche**: la campanella in alto segnala conferme in attesa, automazioni fallite e anomalie (agente AI non disponibile, audit alterato). Ogni notifica è collegata al task che l'ha generata.
 
-- **Backup**: dalla sezione Sistema o con `./jarvis.sh backup` crei una copia cifrata dei tuoi dati, protetta da una passphrase che scegli tu (senza passphrase la copia non si apre). Per ripristinarla, con JARVIS chiuso: `./jarvis.sh restore data-backups/<file>.jbak`.
+- **Backup**: dalla sezione Sistema o con `./jarvis.sh backup` crei una copia cifrata dei tuoi dati, protetta da una passphrase che scegli tu (senza passphrase la copia non si apre). Per ripristinarla, con JARVIS chiuso: `./jarvis.sh restore data-backups/<file>.jbak`. Dopo un aggiornamento, `./jarvis.sh rollback` riporta i dati alla copia fatta automaticamente prima del cambio di versione.
 - **Connettori**: nella sezione Connettori incolli il manifest JSON di un servizio esterno (esempio in `tests/contracts/fixtures/valid/connector.meteo.json`), lo autorizzi con il suo token e lo usi in chat con «connettore <id> <operazione> chiave=valore». Il token resta cifrato nel Core e non viene mai mostrato. Le operazioni che scrivono verso l'esterno chiedono sempre conferma. «Revoca» cancella il token e blocca subito le chiamate.
 - **Dal telefono**: pubblica JARVIS nella tua rete privata con un proxy HTTPS (per esempio [Tailscale](https://tailscale.com): `tailscale serve 8765`), avvialo con `JARVIS_ALLOWED_HOSTS=<nome del computer nella rete Tailscale>`, apri l'indirizzo sul telefono e inserisci il codice generato nella sezione **Dispositivi**. Puoi installarlo come app dalla schermata Home. Ogni dispositivo si revoca con un clic, con effetto immediato.
 - **Sistema**: la sezione omonima mostra stato dei componenti, latenze misurate e lo storico delle ultime 24 ore (conservato 7 giorni), esportabile in JSON o nel formato di Prometheus. I log diagnostici sono in `data/logs/core.jsonl` e non contengono i tuoi messaggi.
@@ -75,7 +77,7 @@ Limiti noti della v0.1:
 - mobile come app Web installabile, nessuna app nativa; connettori solo HTTP dichiarativi (niente OAuth né plugin con codice);
 - con Ollama la qualità degli strumenti dipende dal modello scelto.
 
-Dettagli in [docs/ROADMAP.md](docs/ROADMAP.md) e nell'ADR-0004 in [docs/DECISIONS.md](docs/DECISIONS.md).
+Accettazione e prove da fare sul tuo computer: [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md). Dettagli in [docs/ROADMAP.md](docs/ROADMAP.md) e nell'ADR-0004 in [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## Da dove partire
 
