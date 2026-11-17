@@ -9,7 +9,8 @@ Backend disponibili, tutti locali (RNF-05: nessun backend cloud in questo protot
 Routing (``JARVIS_AI_BACKEND``): ``auto`` (predefinito) usa Ollama se risponde e
 ha almeno un modello, altrimenti ``offline``; ``ollama`` o ``offline`` forzano
 la scelta. Se Ollama fallisce durante una richiesta, il gateway degrada su
-``offline`` e lo dichiara in ``backend.degraded_reason``.
+``offline`` e lo dichiara in ``backend.degraded_reason``. Dopo una breve attesa,
+una nuova richiesta verifica se Ollama è tornato disponibile.
 
 L'agente non esegue strumenti: propone al massimo UNA chiamata
 (``jarvis.agent-result/1``) che il Core sottopone a policy ed esegue.
@@ -20,6 +21,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -31,6 +33,7 @@ from jarvis_ai.contracts import SCHEMA_DIR
 
 CATALOG_DIR = SCHEMA_DIR.parent / "catalog" / "tools"
 OFFLINE_MODEL = "jarvis-offline-1"
+OLLAMA_RETRY_SECONDS = 15
 
 SYSTEM_PROMPT = """Sei JARVIS, l'assistente personale privato del proprietario. Rispondi nella lingua dell'utente, in modo conciso e preciso.
 Puoi usare gli strumenti forniti quando servono per rispondere; ogni strumento viene verificato dalla policy del Core e le azioni rischiose richiedono la conferma del proprietario.
@@ -463,14 +466,32 @@ class Gateway:
         env = dict(os.environ if env is None else env)
         self.catalog = load_catalog()
         mode = env.get("JARVIS_AI_BACKEND", "auto")
+        self.ollama_url = (
+            env.get("JARVIS_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
+            if mode in ("auto", "ollama") else None
+        )
+        self.preferred_model = env.get("JARVIS_OLLAMA_MODEL") or None
+        self.ollama_timeout = env.get("JARVIS_OLLAMA_TIMEOUT_S", "120")
         self.ollama: OllamaBackend | None = None
+        self.retry_at = 0.0
         self.reason = "modalità offline richiesta"
-        if mode in ("auto", "ollama"):
-            url = env.get("JARVIS_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
-            model, self.reason = probe_ollama(url, env.get("JARVIS_OLLAMA_MODEL") or None)
-            if model:
-                self.ollama = OllamaBackend(url, model, float(env.get("JARVIS_OLLAMA_TIMEOUT_S", "120")))
-        self.offline = OfflineBackend(None if self.ollama or mode == "offline" else self.reason)
+        self.offline = OfflineBackend()
+        self._recover_ollama()
+
+    def _degrade(self, reason: str) -> None:
+        self.ollama = None
+        self.reason = reason
+        self.offline = OfflineBackend(reason)
+        self.retry_at = time.monotonic() + OLLAMA_RETRY_SECONDS
+
+    def _recover_ollama(self) -> None:
+        if self.ollama_url is None or self.ollama or time.monotonic() < self.retry_at:
+            return
+        model, reason = probe_ollama(self.ollama_url, self.preferred_model)
+        if model:
+            self.ollama = OllamaBackend(self.ollama_url, model, float(self.ollama_timeout))
+        else:
+            self._degrade(reason)
 
     def status(self) -> dict:
         active = self.ollama.info if self.ollama else self.offline.backend
@@ -483,11 +504,12 @@ class Gateway:
         for d in delegation.get("inputs", {}).get("tool_descriptors", []):
             if d["name"].startswith("connector.") and d["name"] not in self.catalog:
                 catalog[d["name"]] = d
+        self._recover_ollama()
         if self.ollama:
             try:
                 return self.ollama.respond(delegation, catalog)
             except (urllib.error.URLError, OSError, ValueError, KeyError) as exc:
-                return OfflineBackend(f"Ollama non disponibile durante la richiesta ({exc.__class__.__name__})").respond(delegation, catalog)
+                self._degrade(f"Ollama non disponibile durante la richiesta ({exc.__class__.__name__})")
         return self.offline.respond(delegation, catalog)
 
 

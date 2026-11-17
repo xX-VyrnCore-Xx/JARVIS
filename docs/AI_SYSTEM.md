@@ -34,7 +34,7 @@ L'AI Gateway (`ai/jarvis_ai/gateway.py`) espone due backend locali:
 - **Ollama**, con tool calling: il catalogo degli strumenti delegati viene convertito in funzioni;
 - **offline**, a regole: deterministico e sempre disponibile.
 
-Il routing `auto` usa Ollama se risponde e ha un modello installato. Se Ollama fallisce durante una richiesta, il gateway passa al modello offline e riporta il motivo in `backend.degraded_reason`.
+Il routing `auto` usa Ollama se risponde e ha un modello installato. Se Ollama fallisce durante una richiesta, il gateway passa al modello offline e riporta il motivo in `backend.degraded_reason`. Dopo 15 secondi dalla caduta o da una verifica fallita, la richiesta successiva controlla Ollama e ripristina il backend se il modello è disponibile. Anche un modello installato dopo la partenza viene rilevato con lo stesso meccanismo.
 
 L'agente propone al massimo una chiamata di strumento per turno (`jarvis.agent-result/1`); il Core decide ed esegue. È attivo solo il General Assistant. L'escalation cloud non è implementata e la delega impone sempre `allow_cloud: false`.
 

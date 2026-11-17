@@ -10,6 +10,20 @@ permissions:
   contents: read
 
 jobs:
+  ios:
+    name: iOS (client e build simulatore)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verifica il client del Core
+        run: |
+          swiftc apps/ios/Jarvis/CoreClient.swift apps/ios/tests/CoreClientTests.swift -o "$RUNNER_TEMP/core-client-tests"
+          "$RUNNER_TEMP/core-client-tests"
+      - name: Compila JARVIS per simulatore
+        run: |
+          xcodebuild -project apps/ios/JARVIS.xcodeproj -scheme JARVIS -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/jarvis-ios" CODE_SIGNING_ALLOWED=NO build
+
   validate:
     name: validate (python)
     runs-on: ubuntu-latest

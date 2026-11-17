@@ -11,6 +11,7 @@ import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "ai"))
@@ -126,6 +127,31 @@ class OllamaAdapter(unittest.TestCase):
         self.assertEqual(result["backend"]["name"], "offline")
         self.assertIn("Ollama non disponibile", result["backend"]["degraded_reason"])
         self.assertEqual(result["tool_call"]["tool"], "time.now")
+        self.assertEqual(g.status()["backend"]["name"], "offline")
+
+    def test_runtime_recovery_retries_after_cooldown(self):
+        with patch("jarvis_ai.gateway.time.monotonic", return_value=100.0) as clock:
+            g = self.gateway()
+            FakeOllama.mode = "error"
+            g.respond(delegation("che ore sono"))
+            self.assertEqual(len(FakeOllama.requests), 1)
+            FakeOllama.mode = "reply"
+            clock.return_value = 114.9
+            self.assertEqual(g.respond(delegation("che ore sono"))["backend"]["name"], "offline")
+            self.assertEqual(len(FakeOllama.requests), 1)
+            clock.return_value = 115.0
+            self.assertEqual(g.respond(delegation("ciao"))["backend"]["name"], "ollama")
+            self.assertEqual(g.status()["backend"]["name"], "ollama")
+
+    def test_model_added_after_start_is_discovered(self):
+        with patch("jarvis_ai.gateway.time.monotonic", return_value=100.0) as clock:
+            FakeOllama.models = []
+            g = self.gateway()
+            self.assertEqual(g.status()["backend"]["name"], "offline")
+            FakeOllama.models = ["qwen2.5:3b"]
+            FakeOllama.mode = "reply"
+            clock.return_value = 115.0
+            self.assertEqual(g.respond(delegation("ciao"))["backend"]["name"], "ollama")
 
     def test_missing_preferred_model_falls_back_with_reason(self):
         g = self.gateway(JARVIS_OLLAMA_MODEL="llama3.1")
