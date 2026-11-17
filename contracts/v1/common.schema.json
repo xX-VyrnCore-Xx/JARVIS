@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.local/contracts/v1/common.schema.json",
+  "title": "JARVIS common definitions v1",
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "timestamp": {
+      "description": "RFC 3339 in UTC con suffisso Z.",
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$"
+    },
+    "identifier": {
+      "description": "Nome stabile in minuscolo, punti o trattini come separatori.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*([._-][a-z0-9]+)*$",
+      "maxLength": 128
+    },
+    "actor": {
+      "description": "Identità di un mittente o destinatario. L'autenticazione avviene nel Security Engine, non nel payload.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "enum": ["owner", "client", "module", "agent", "node", "plugin"] },
+        "id": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "duration_ms": { "type": "integer", "minimum": 1, "maximum": 86400000 }
+  }
+}

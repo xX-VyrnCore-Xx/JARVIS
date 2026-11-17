@@ -18,13 +18,20 @@ La prima versione include Core, Orchestrator, agenti fondamentali, AI locale e c
 
 Il checkpoint è la sezione di ripresa versionata con Git. Ogni voce va aggiornata quando cambia lo stato verificato. Includere gli identificativi dei requisiti e percorsi alle prove.
 
-| Campo | Stato iniziale del pacchetto |
+| Campo | Stato al 2026-11-17 |
 |---|---|
-| Ultima revisione verificata | Da leggere dal checkout di destinazione |
-| Milestone effettiva | Da ricostruire con codice, Git e verifiche |
-| Risultato disponibile | Piano approvato consolidato nei 14 documenti |
-| Verifiche del software | Da registrare con comando, ambiente, esito e commit |
-| Lacune documentali | Registro storico parziale in [DECISIONS.md](DECISIONS.md) |
-| Prossima azione | Inventariare il repository e selezionare il primo lavoro incompleto della milestone effettiva |
+| Ultima revisione verificata | Base `ad1972c` sul branch `claude/cool-ramanujan-bogarl`; le modifiche di questa sessione sono nel commit successivo dello stesso branch |
+| Milestone effettiva | Fase 1 — Architettura e contratti, in corso |
+| Risultato disponibile | Contratti v1 in `contracts/v1/`: common, envelope, error, delegation, tool-descriptor (RF-03, RF-05, RNF-01, RNF-04, RNF-07). Vedi [contracts/README.md](../contracts/README.md) e ADR-0001 in [DECISIONS.md](DECISIONS.md) |
+| Verifiche del software | `python3 -m unittest discover -s tests/contracts -v` — Python 3.13.18, jsonschema 4.26.0, container Linux remoto — 4 test OK (7 fixture valide, 11 non valide, ciascuna respinta dalla sola regola prevista). Workflow CI `.github/workflows/contracts.yml`: run 44082465183 fallita senza runner assegnato (nessun log, 2 s), quindi blocco dell'account GitHub Actions e non dei test |
+| Lacune documentali | Risposte 75–80 senza fonte, lasciate vuote. Scelte aperte invariate: RPC/event bus, storage, segreti, VPN mesh, motori vocali, stack mobile, SLO |
+| Blocchi | Nessuno per la Fase 1. `origin/main` ha una cronologia non correlata (piano in inglese, `docs/PLAN.md`) senza merge base con questo branch: integrazione da decidere con il proprietario. GitHub Actions non avvia i job (verificare in Settings → Billing il limite di spesa o i minuti per i repository privati, e in Settings → Actions che siano abilitate) |
+| Prossima azione | Contratti `task` (stato e transizioni del task: RF-02) e `policy-decision` (decisione del Security Engine con audit: RNF-04), con fixture e test nello stesso schema. Poi workspace Cargo in `core/` che carica e valida i contratti v1 |
+
+### Registro delle riprese
+
+| Data | Revisione di partenza | Lavoro | Verifiche | Prossimo passo |
+|---|---|---|---|---|
+| 2026-11-17 | `ad1972c` | Inventario: solo documentazione in `docs/`. Creati contratti v1, fixture sintetiche, test, CI, `CLAUDE.md` in radice, ADR-0001 | 4 test unittest OK | Contratti `task` e `policy-decision` |
 
 Per ogni ripresa registrare data, revisione, lavoro completato, verifiche eseguite, blocchi, ipotesi e prossimo passo concreto. Conservare il checkpoint con le modifiche alle quali si riferisce.

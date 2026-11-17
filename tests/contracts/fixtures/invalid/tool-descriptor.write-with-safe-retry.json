@@ -1,0 +1,1 @@
+{"contract":"jarvis.tool/1","name":"email.send","version":"1.0.0","summary":"Invia una email","input_schema":{"type":"object"},"output_schema":{"type":"object"},"scope":"integration","effects":"write_external","risk":"medium","permissions":["integration.email:write"],"errors":[],"timeout_ms":15000,"retry":{"mode":"safe"},"confirmation":"required"}

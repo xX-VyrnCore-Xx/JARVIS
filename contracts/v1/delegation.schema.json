@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.local/contracts/v1/delegation.schema.json",
+  "title": "Delega temporanea a un agente v1",
+  "description": "AI_SYSTEM.md: obiettivo, riferimento al task, contesto minimo, strumenti, limiti, timeout e condizioni di completamento. RF-03.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "delegation_id", "task_id", "objective", "delegate", "context", "tools", "limits", "timeout_ms", "completion_conditions", "issued_at", "expires_at"],
+  "properties": {
+    "contract": { "const": "jarvis.delegation/1" },
+    "delegation_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "task_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "parent_delegation_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "objective": { "type": "string", "minLength": 1, "maxLength": 4000 },
+    "delegate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent", "temporary"],
+      "properties": {
+        "agent": { "enum": ["general_assistant", "research", "coding", "system", "automation", "planning", "memory", "vision", "voice", "monitoring", "temporary"] },
+        "temporary": { "type": "boolean" },
+        "role": { "type": "string", "maxLength": 200 }
+      },
+      "if": { "properties": { "agent": { "const": "temporary" } } },
+      "then": { "required": ["role"], "properties": { "temporary": { "const": true } } }
+    },
+    "context": {
+      "description": "Contesto minimo: solo riferimenti autorizzati, non copie di memoria.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["refs"],
+      "properties": {
+        "refs": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "pattern": "^jarvis://[a-z]+/[A-Za-z0-9._/-]+$" } },
+        "summary": { "type": "string", "maxLength": 4000 }
+      }
+    },
+    "tools": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "version"],
+        "properties": {
+          "name": { "$ref": "common.schema.json#/$defs/identifier" },
+          "version": { "$ref": "common.schema.json#/$defs/semver" }
+        }
+      }
+    },
+    "limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_steps"],
+      "properties": {
+        "max_steps": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "max_tokens": { "type": "integer", "minimum": 1 },
+        "max_subdelegations": { "type": "integer", "minimum": 0, "maximum": 16 },
+        "allow_cloud": { "type": "boolean", "default": false }
+      }
+    },
+    "timeout_ms": { "$ref": "common.schema.json#/$defs/duration_ms" },
+    "completion_conditions": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1, "maxLength": 1000 } },
+    "issued_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "expires_at": { "$ref": "common.schema.json#/$defs/timestamp" }
+  }
+}

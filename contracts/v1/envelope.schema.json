@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.local/contracts/v1/envelope.schema.json",
+  "title": "Messaggio strutturato fra moduli e agenti v1",
+  "description": "AI_SYSTEM.md: mittente, destinatario, task, payload, stato, istante e correlazione. DEVOPS_QA_OBSERVABILITY.md: identificativi condivisi per la diagnosi.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "message_id", "correlation_id", "task_id", "sender", "recipient", "type", "status", "issued_at", "payload"],
+  "properties": {
+    "contract": { "const": "jarvis.envelope/1" },
+    "message_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "correlation_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "causation_id": { "$ref": "common.schema.json#/$defs/uuid", "description": "Messaggio che ha causato questo." },
+    "task_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "sender": { "$ref": "common.schema.json#/$defs/actor" },
+    "recipient": { "$ref": "common.schema.json#/$defs/actor" },
+    "type": { "$ref": "common.schema.json#/$defs/identifier", "description": "Tipo del payload, es. delegation.request." },
+    "status": { "enum": ["proposed", "accepted", "running", "succeeded", "failed", "cancelled", "blocked"] },
+    "issued_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "payload": { "type": "object" },
+    "error": { "$ref": "error.schema.json" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "status": { "const": "failed" } } },
+      "then": { "required": ["error"] },
+      "else": { "not": { "required": ["error"] } }
+    }
+  ]
+}
