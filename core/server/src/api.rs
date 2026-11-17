@@ -20,6 +20,7 @@ use crate::orchestrator::{CoreError, Jarvis};
 const INDEX: &str = include_str!("../static/index.html");
 const APP_JS: &str = include_str!("../static/app.js");
 const APP_CSS: &str = include_str!("../static/app.css");
+const VOICE_WORKLET: &str = include_str!("../static/voice-worklet.js");
 
 pub struct AppState {
     pub core: Arc<Mutex<Jarvis>>,
@@ -42,6 +43,7 @@ impl IntoResponse for CoreError {
     fn into_response(self) -> Response {
         match self {
             CoreError::BadRequest(m) => error(StatusCode::BAD_REQUEST, "bad_request", m),
+            CoreError::Unavailable(m) => error(StatusCode::SERVICE_UNAVAILABLE, "unavailable", m),
             CoreError::NotFound(m) => error(StatusCode::NOT_FOUND, "not_found", m),
             CoreError::Gone(m) => error(StatusCode::GONE, "expired", m),
             CoreError::Internal(m) => error(StatusCode::INTERNAL_SERVER_ERROR, "internal", m),
@@ -101,7 +103,7 @@ async fn guard(State(state): State<Shared>, req: Request, next: Next) -> Respons
     h.insert("cache-control", HeaderValue::from_static("no-store"));
     h.insert(
         "content-security-policy",
-        HeaderValue::from_static("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
+        HeaderValue::from_static("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; media-src 'self' blob:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
     );
     res
 }
@@ -122,6 +124,15 @@ pub fn router(state: Shared) -> Router {
             "/app.css",
             get(|| async { ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], APP_CSS) }),
         )
+        .route(
+            "/voice-worklet.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    VOICE_WORKLET,
+                )
+            }),
+        )
         .route("/api/health", get(health))
         .route("/api/chat", post(chat))
         .route("/api/confirmations", get(confirmations))
@@ -133,6 +144,11 @@ pub fn router(state: Shared) -> Router {
         .route("/api/audit", get(audit))
         .route("/api/workspace", get(workspace))
         .route("/api/tools", get(tool_catalog))
+        .route(
+            "/api/voice/transcribe",
+            post(voice_transcribe).layer(axum::extract::DefaultBodyLimit::max(5 * 1024 * 1024)),
+        )
+        .route("/api/voice/speak", post(voice_speak))
         .route("/api/notifications", get(notifications))
         .route("/api/notifications/read-all", post(read_all))
         .route("/api/notifications/{id}/read", post(read_one))
@@ -279,6 +295,41 @@ async fn tool_catalog(State(state): State<Shared>) -> Json<Value> {
 fn reply(result: Result<Value, CoreError>) -> Response {
     match result {
         Ok(v) => Json(v).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+async fn voice_transcribe(
+    State(state): State<Shared>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+    body: axum::body::Bytes,
+) -> Response {
+    let wake = q.get("mode").is_some_and(|m| m == "wake_word");
+    let audio = body.to_vec();
+    reply(with_core(&state, move |j| j.voice_transcribe(&audio, wake)).await)
+}
+
+async fn voice_speak(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let Some(text) = body["text"].as_str().map(str::to_string) else {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "campo 'text' mancante",
+        );
+    };
+    match with_core(&state, move |j| j.voice_speak(&text)).await {
+        Ok((audio, meta)) => {
+            let engine = format!(
+                "{}/{}",
+                meta["engine"]["name"].as_str().unwrap_or("?"),
+                meta["voice"].as_str().unwrap_or("?")
+            );
+            let mut res = ([(header::CONTENT_TYPE, "audio/wav")], audio).into_response();
+            if let Ok(v) = HeaderValue::from_str(&engine) {
+                res.headers_mut().insert("x-jarvis-voice", v);
+            }
+            res
+        }
         Err(e) => e.into_response(),
     }
 }

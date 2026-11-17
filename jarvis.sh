@@ -2,6 +2,7 @@
 # Avvia il prototipo JARVIS: prepara l'ambiente Python, compila il Core e apre il server locale.
 # Uso: ./jarvis.sh            interfaccia nel browser su http://localhost:8765
 #      ./jarvis.sh desktop    app desktop (Tauri) che avvia il Core da sola
+#      ./jarvis.sh voice-setup  installa i motori vocali locali e scarica i modelli (una volta)
 #                             (variabili utili: JARVIS_PORT, JARVIS_DATA_DIR, JARVIS_AI_BACKEND,
 #                              JARVIS_OLLAMA_URL, JARVIS_OLLAMA_MODEL — vedi README.md)
 set -euo pipefail
@@ -32,6 +33,26 @@ fi
 
 export JARVIS_PYTHON="$VENV/bin/python"
 export JARVIS_HOME="$ROOT"
+
+MODELS="${JARVIS_MODELS_DIR:-$ROOT/data/models}"
+VOICE_NAME="${JARVIS_TTS_VOICE_NAME:-it_IT-paola-medium}"
+if [ "${1:-}" = "voice-setup" ]; then
+  echo "→ Motori vocali locali (faster-whisper, Piper, openWakeWord)"
+  "$VENV/bin/python" -m pip install -q --disable-pip-version-check -r "$ROOT/ai/requirements-voice.txt"
+  mkdir -p "$MODELS/piper"
+  echo "→ Modello di riconoscimento ${JARVIS_STT_MODEL:-small} (download una tantum)"
+  "$VENV/bin/python" -c "import sys; from faster_whisper import WhisperModel; WhisperModel(sys.argv[1], device='cpu', compute_type='int8', download_root=sys.argv[2])" "${JARVIS_STT_MODEL:-small}" "$MODELS"
+  echo "→ Voce di sintesi $VOICE_NAME"
+  "$VENV/bin/python" -m piper.download_voices "$VOICE_NAME" --download-dir "$MODELS/piper"
+  echo "✓ Voce pronta. Avvia ./jarvis.sh e attiva il microfono nell'interfaccia."
+  exit 0
+fi
+if [ -d "$MODELS" ]; then
+  export JARVIS_MODELS_DIR="$MODELS"
+  if [ -z "${JARVIS_TTS_VOICE:-}" ] && [ -f "$MODELS/piper/$VOICE_NAME.onnx" ]; then
+    export JARVIS_TTS_VOICE="$MODELS/piper/$VOICE_NAME.onnx"
+  fi
+fi
 
 if [ "${1:-}" = "desktop" ]; then
   shift

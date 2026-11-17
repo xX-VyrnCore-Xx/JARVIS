@@ -14,6 +14,7 @@
     <div class="status" id="status" role="status" aria-live="polite">
       <span class="pill" id="st-ai">AI: …</span>
       <span class="pill" id="st-audit">Audit: …</span>
+      <span class="pill" id="st-voice" title="Stato della voce">Voce: …</span>
       <button class="bell" id="bell" aria-haspopup="true" aria-expanded="false" aria-controls="notif-panel" title="Notifiche">
         <span aria-hidden="true">🔔</span><span class="visually-hidden">Notifiche</span><span class="count" id="notif-count" hidden>0</span>
       </button>
@@ -53,7 +54,14 @@
           <button class="chip">elenca automazioni</button>
           <button class="chip">cerca intelligenza artificiale</button>
         </div>
+        <div class="voice-bar" id="voice-bar">
+          <label class="check"><input type="checkbox" id="voice-replies"> Risposte vocali</label>
+          <label class="check"><input type="checkbox" id="voice-handsfree"> Mani libere («Ehi Jarvis»)</label>
+          <button type="button" class="ghost small" id="voice-stop" hidden>⏹ Interrompi</button>
+          <span class="mic-live" id="mic-live" hidden aria-live="polite">● Microfono attivo</span>
+        </div>
         <form class="composer" id="composer">
+          <button type="button" class="mic" id="mic" aria-pressed="false" title="Parla (clic per iniziare e per terminare)" aria-label="Parla a JARVIS">🎤</button>
           <textarea id="input" rows="1" placeholder="Scrivi a JARVIS…" title="Invio per inviare, Maiusc+Invio per andare a capo" aria-label="Messaggio (Invio per inviare, Maiusc+Invio per andare a capo)" maxlength="8000"></textarea>
           <button type="submit" id="send" class="primary">Invia</button>
         </form>

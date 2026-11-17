@@ -39,7 +39,9 @@ Per 81–83 il proprietario ha confermato l'opzione D senza precisazioni. Per 1�
 
 ## Scelte ancora aperte
 
-Valutare stack mobile, motori vocali, trasporto degli eventi e RPC, implementazioni di storage e gestione segreti, soluzione VPN mesh, modalità di aggiornamento Desktop, catalogo iniziale dettagliato e valori obiettivo SLO e recovery. La struttura delle directory in DEVELOPMENT.md è una proposta operativa. I codici dei requisiti e le verifiche rappresentative sono stati aggiunti per collegare piano e implementazione.
+I motori vocali sono stati scelti dal proprietario (ADR-0010).
+
+Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage e gestione segreti, soluzione VPN mesh, modalità di aggiornamento Desktop, catalogo iniziale dettagliato e valori obiettivo SLO e recovery. La struttura delle directory in DEVELOPMENT.md è una proposta operativa. I codici dei requisiti e le verifiche rappresentative sono stati aggiunti per collegare piano e implementazione.
 
 ## ADR registrati
 
@@ -261,6 +263,40 @@ Valutare stack mobile, motori vocali, trasporto degli eventi e RPC, implementazi
   - prova manuale con Xvfb: finestra Tauri con l'interfaccia del Core (screenshot); dopo SIGKILL dell'app i processi passano da 2 a 0;
   - CI: build e clippy dell'app su Linux, macOS e Windows.
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, TECH_STACK.md, DEVELOPMENT.md, ARCHITECTURE.md, REQUIREMENTS.md, README.md.
+
+### ADR-0010 — Voce locale: faster-whisper, Piper e openWakeWord
+
+- **Data:** 2026-11-17 · **Stato:** Accettato (RF-09). **Scelta esplicita del proprietario**: «Tutto locale», fra le opzioni locale, ibrido (sintesi del sistema operativo) e solo browser (Web Speech API, con l'audio inviato ai server del browser e quindi contrario a RNF-05). Chiude la voce «motori vocali» fra le scelte aperte.
+- **Decisione:**
+  - **Motori** (`ai/jarvis_ai/voice.py`, versioni fissate in `ai/requirements-voice.txt`):
+    - riconoscimento: faster-whisper 1.2.1, modello `small` su CPU int8, senza download a runtime;
+    - sintesi: Piper 1.8.0, voce `it_IT-paola-medium`;
+    - parola di attivazione: openWakeWord 0.4.0 con il modello `hey_jarvis` incluso nel pacchetto; se manca, si riconosce «Jarvis» all'inizio della trascrizione locale;
+    - motori `fake` deterministici per test e CI.
+  - **Contratti:** `jarvis.voice-transcription/1` e `jarvis.voice-synthesis/1`; il motore deve essere `location: local`.
+  - **API:** `POST /api/voice/transcribe` (WAV fino a 5 MiB e 60 s, `?mode=wake_word`) e `POST /api/voice/speak` (risposta `audio/wav`). Se i motori mancano rispondono 503 con il motivo, che compare anche nello stato di salute.
+  - **Interfaccia:**
+    - acquisizione con AudioWorklet e conversione in WAV a 16 kHz nel browser;
+    - pulsante microfono con stato «in ascolto» sempre visibile;
+    - risposte vocali opzionali con «Interrompi»;
+    - modalità «Mani libere» opzionale: rilevamento del parlato per energia; se l'utente parla mentre JARVIS risponde, la risposta si interrompe (full-duplex);
+    - la trascrizione diventa un normale messaggio di chat, con le stesse policy e conferme.
+  - **Privacy e sicurezza:**
+    - l'audio resta in memoria solo per la trascrizione; non viene salvato, registrato nell'audit né inviato in rete;
+    - in mani libere il parlato senza parola di attivazione viene scartato;
+    - le conferme delle azioni rischiose non si danno a voce (una voce estranea o registrata non deve poterle approvare);
+    - la CSP ammette `media-src 'self' blob:` per riprodurre la sintesi.
+- **Motivazione:** risponde a RF-09 (voce, attivazione, interruzione, stato del microfono) rispettando local-first e minimizzazione (RNF-05) e il funzionamento offline (RNF-06).
+- **Conseguenze:**
+  - circa 500 MB di modelli e più CPU;
+  - qualità e latenza dipendono dall'hardware (le soglie andranno misurate con gli SLO);
+  - i modelli non sono scaricabili nel container di sviluppo (proxy), quindi riconoscimento e sintesi reali sono da verificare sul computer del proprietario; openWakeWord reale è stato provato sul non parlato;
+  - l'accesso al microfono nel WebView dell'app desktop va verificato per piattaforma.
+- **Evidenza:**
+  - `core/server/tests/voice.rs`: 6 test;
+  - `tests/ai/test_voice.py`: 10 test, compreso openWakeWord reale (punteggi 0,0001–0,04 su silenzio, tono e rumore, con soglia 0,5);
+  - E2E con microfono finto di Chromium: 8 verifiche vocali. Una di queste ha scoperto la CSP che bloccava l'audio, poi corretta.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, SECURITY_AND_PRIVACY.md, AI_SYSTEM.md, ARCHITECTURE.md, TECH_STACK.md, REQUIREMENTS.md, README.md.
 
 ### Decisione operativa — Merge automatico con CI verde
 

@@ -113,7 +113,19 @@ button.small { font-size: .78rem; padding: .2rem .5rem; }
 .sources a { color: var(--accent); overflow-wrap: anywhere; }
 .src-meta { color: var(--muted); font-size: .78rem; }
 
+.voice-bar { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; padding: 0 1.2rem .5rem; font-size: .82rem; color: var(--muted); }
+.voice-bar label.check { display: flex; gap: .35rem; align-items: center; cursor: pointer; }
+.mic { font-size: 1.15rem; padding: .35rem .7rem; border-radius: 10px; }
+.mic[aria-pressed="true"] { background: var(--bad); border-color: var(--bad); animation: rec 1.2s ease-in-out infinite; }
+.mic:disabled { opacity: .45; cursor: not-allowed; }
+@keyframes rec { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--bad) 30%, transparent); } }
+.mic-live { color: var(--bad); font-weight: 600; }
+#st-voice.listening { color: var(--bad); border-color: var(--bad); }
+#st-voice.speaking { color: var(--accent); border-color: var(--accent); }
+@media (prefers-reduced-motion: reduce) { .mic[aria-pressed="true"] { animation: none; } }
+
 @media (max-width: 720px) {
+  .voice-bar { padding-left: 16px; padding-right: 16px; }
   .layout { flex-direction: column; }
   .nav { width: auto; flex: none; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: .4rem .6rem; }
   .topbar { padding: .55rem 16px; }

@@ -1,0 +1,4 @@
+# Voce locale (RF-09, ADR-0010). Versioni provate con Python 3.13 nel container di sviluppo.
+faster-whisper==1.2.1
+piper-tts==1.8.0
+openwakeword==0.4.0

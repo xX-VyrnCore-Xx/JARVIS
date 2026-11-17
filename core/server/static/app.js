@@ -45,6 +45,8 @@ async function refreshStatus() {
       ai.className = "pill bad";
       ai.title = (h.ai && h.ai.error && h.ai.error.message) || "";
     }
+    voiceStatus = (h.ai && h.ai.gateway && h.ai.gateway.voice) || null;
+    renderVoiceState();
     const au = $("#st-audit");
     if (h.audit) {
       au.textContent = `Audit: ${h.audit.events} eventi ${h.audit.chain_valid ? "✓ integro" : "✗ alterato"}`;
@@ -132,6 +134,7 @@ async function send(text) {
     typing.remove();
     addMessage("assistant", out.reply || "(nessuna risposta)", { steps: out.steps, sources: out.sources, error: out.task && out.task.state === "failed" });
     if (out.confirmation) addConfirmation(out.confirmation);
+    if (out.reply) speakReply(out.reply);
   } catch (e) {
     typing.remove();
     addMessage("assistant", `Errore: ${e.message}`, { error: true });
@@ -431,6 +434,186 @@ if ("Notification" in window && Notification.permission === "default") {
   $("#notif-browser").hidden = false;
   $("#notif-browser").addEventListener("click", async () => { await Notification.requestPermission(); $("#notif-browser").hidden = true; });
 }
+
+// ------------------------------------------------------------------ voce (RF-09)
+// Audio catturato nel browser, convertito in WAV 16 kHz e trascritto dal Core con motori locali.
+// Le conferme non si danno a voce: restano un clic esplicito.
+
+let voiceStatus = null;
+let voiceState = "idle"; // idle | listening | transcribing | speaking
+let audioCtx = null;
+let micStream = null;
+let micNode = null;
+let pushChunks = null;
+let player = null;
+const vad = { speaking: false, chunks: [], loud: 0, quiet: 0, awaitingCommand: false };
+const SR_TARGET = 16000;
+
+const pref = (k, v) => { try { if (v === undefined) return localStorage.getItem(k) === "1"; localStorage.setItem(k, v ? "1" : "0"); } catch { return false; } };
+
+function setVoiceState(state) { voiceState = state; renderVoiceState(); }
+
+function renderVoiceState() {
+  const pill = $("#st-voice");
+  const mic = $("#mic");
+  const available = voiceStatus && voiceStatus.available;
+  const labels = { idle: "pronta", listening: "in ascolto", transcribing: "trascrizione…", speaking: "risposta vocale" };
+  if (!voiceStatus) { pill.textContent = "Voce: …"; return; }
+  pill.textContent = available ? `Voce: ${labels[voiceState]}` : "Voce: non disponibile";
+  pill.className = `pill ${!available ? "" : voiceState === "listening" ? "listening" : voiceState === "speaking" ? "speaking" : "ok"}`;
+  pill.title = available ? `STT ${voiceStatus.stt.name}/${voiceStatus.stt.model} · TTS ${voiceStatus.tts ? voiceStatus.tts.name + "/" + voiceStatus.tts.voice : "assente"} · attivazione: ${voiceStatus.wake || "—"}` : (voiceStatus.reasons || []).join("; ");
+  mic.disabled = !available;
+  mic.title = available ? "Parla (clic per iniziare e per terminare)" : `Voce non disponibile: ${(voiceStatus.reasons || []).join("; ")}`;
+  mic.setAttribute("aria-pressed", String(voiceState === "listening" && !!pushChunks));
+  $("#voice-stop").hidden = voiceState !== "speaking";
+  $("#mic-live").hidden = !micStream;
+  $("#voice-replies").disabled = !(available && voiceStatus.tts);
+  $("#voice-handsfree").disabled = !available;
+}
+
+function encodeWav(float32, rate) {
+  const ratio = rate / SR_TARGET;
+  const n = Math.floor(float32.length / ratio);
+  const buf = new ArrayBuffer(44 + n * 2);
+  const v = new DataView(buf);
+  const str = (o, t) => { for (let i = 0; i < t.length; i++) v.setUint8(o + i, t.charCodeAt(i)); };
+  str(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); str(8, "WAVEfmt "); v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true); v.setUint16(22, 1, true); v.setUint32(24, SR_TARGET, true); v.setUint32(28, SR_TARGET * 2, true);
+  v.setUint16(32, 2, true); v.setUint16(34, 16, true); str(36, "data"); v.setUint32(40, n * 2, true);
+  for (let i = 0; i < n; i++) {
+    const x = Math.max(-1, Math.min(1, float32[Math.floor(i * ratio)]));
+    v.setInt16(44 + i * 2, x < 0 ? x * 0x8000 : x * 0x7fff, true);
+  }
+  return new Blob([buf], { type: "audio/wav" });
+}
+
+const concat = (chunks) => { const out = new Float32Array(chunks.reduce((a, c) => a + c.length, 0)); let o = 0; for (const c of chunks) { out.set(c, o); o += c.length; } return out; };
+const level = (frame) => Math.sqrt(frame.reduce((a, x) => a + x * x, 0) / frame.length);
+
+async function openMic() {
+  if (micStream) return;
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+  audioCtx = new AudioContext();
+  await audioCtx.audioWorklet.addModule("/voice-worklet.js");
+  const source = audioCtx.createMediaStreamSource(micStream);
+  micNode = new AudioWorkletNode(audioCtx, "jarvis-capture");
+  micNode.port.onmessage = (e) => onFrame(e.data);
+  source.connect(micNode);
+  renderVoiceState();
+}
+
+function closeMic() {
+  if (micStream) micStream.getTracks().forEach((t) => t.stop());
+  if (audioCtx) audioCtx.close().catch(() => {});
+  micStream = audioCtx = micNode = null;
+  renderVoiceState();
+}
+
+function onFrame(frame) {
+  if (pushChunks) { pushChunks.push(frame); return; }
+  if (!$("#voice-handsfree").checked) return;
+  // Rilevamento del parlato per energia: inizio dopo ~170 ms sopra soglia, fine dopo ~0,8 s di silenzio.
+  const loud = level(frame) > 0.02;
+  if (loud && voiceState === "speaking") stopSpeaking(); // interruzione della risposta (barge-in)
+  if (!vad.speaking) {
+    vad.loud = loud ? vad.loud + 1 : 0;
+    vad.chunks.push(frame);
+    if (vad.chunks.length > 4) vad.chunks.shift();
+    if (vad.loud >= 2) { vad.speaking = true; vad.quiet = 0; setVoiceState("listening"); }
+  } else {
+    vad.chunks.push(frame);
+    vad.quiet = loud ? 0 : vad.quiet + 1;
+    const seconds = vad.chunks.reduce((a, c) => a + c.length, 0) / audioCtx.sampleRate;
+    if (vad.quiet >= 9 || seconds > 15) {
+      const audio = encodeWav(concat(vad.chunks), audioCtx.sampleRate);
+      vad.speaking = false; vad.chunks = []; vad.loud = 0;
+      handleUtterance(audio);
+    }
+  }
+}
+
+async function transcribe(blob, wakeWord) {
+  setVoiceState("transcribing");
+  const res = await fetch(`/api/voice/transcribe${wakeWord ? "?mode=wake_word" : ""}`, { method: "POST", headers: { "Content-Type": "audio/wav", "X-Jarvis-Token": TOKEN }, body: blob });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error ? data.error.message : `HTTP ${res.status}`);
+  return data;
+}
+
+async function handleUtterance(blob) {
+  try {
+    const t = await transcribe(blob, !vad.awaitingCommand);
+    setVoiceState("idle");
+    if (vad.awaitingCommand) { vad.awaitingCommand = false; if (t.text) send(t.text); return; }
+    if (!t.wake.detected) return; // parlato senza «Jarvis»: ignorato e non conservato
+    if (t.wake.command) send(t.wake.command);
+    else { vad.awaitingCommand = true; setVoiceState("listening"); }
+  } catch (e) {
+    setVoiceState("idle");
+    addMessage("assistant", `Voce: ${e.message}`, { error: true });
+  }
+}
+
+async function togglePushToTalk() {
+  if (pushChunks) {
+    const chunks = pushChunks; pushChunks = null;
+    const audio = encodeWav(concat(chunks), audioCtx.sampleRate);
+    if (!$("#voice-handsfree").checked) closeMic();
+    try {
+      const t = await transcribe(audio, false);
+      setVoiceState("idle");
+      if (t.text) send(t.text); else addMessage("assistant", "Non ho sentito nulla: riprova parlando più vicino al microfono.");
+    } catch (e) { setVoiceState("idle"); addMessage("assistant", `Voce: ${e.message}`, { error: true }); }
+    return;
+  }
+  stopSpeaking();
+  try {
+    await openMic();
+    pushChunks = [];
+    setVoiceState("listening");
+  } catch (e) {
+    closeMic();
+    addMessage("assistant", `Microfono non disponibile: ${e.message}`, { error: true });
+  }
+}
+
+async function speakReply(text) {
+  if (!$("#voice-replies").checked || !voiceStatus || !voiceStatus.tts) return;
+  stopSpeaking();
+  const clean = text.replace(/https?:\/\/\S+/g, "").slice(0, 1500).trim();
+  if (!clean) return;
+  try {
+    const res = await fetch("/api/voice/speak", { method: "POST", headers: { "Content-Type": "application/json", "X-Jarvis-Token": TOKEN }, body: JSON.stringify({ text: clean }) });
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error?.message || `HTTP ${res.status}`);
+    const url = URL.createObjectURL(await res.blob());
+    player = new Audio(url);
+    player.onended = () => { URL.revokeObjectURL(url); player = null; setVoiceState("idle"); };
+    setVoiceState("speaking");
+    await player.play().catch(() => {});
+  } catch (e) {
+    setVoiceState("idle");
+    addMessage("assistant", `Risposta vocale non disponibile: ${e.message}`, { error: true });
+  }
+}
+
+function stopSpeaking() {
+  if (player) { player.pause(); player = null; }
+  if (voiceState === "speaking") setVoiceState("idle");
+}
+
+$("#mic").addEventListener("click", togglePushToTalk);
+$("#voice-stop").addEventListener("click", stopSpeaking);
+$("#voice-replies").checked = pref("jarvis.voice.replies");
+$("#voice-replies").addEventListener("change", (e) => { pref("jarvis.voice.replies", e.target.checked); if (!e.target.checked) stopSpeaking(); });
+$("#voice-handsfree").addEventListener("change", async (e) => {
+  if (e.target.checked) {
+    try { await openMic(); } catch (err) { e.target.checked = false; addMessage("assistant", `Microfono non disponibile: ${err.message}`, { error: true }); }
+  } else if (!pushChunks) {
+    vad.speaking = false; vad.chunks = []; vad.awaitingCommand = false;
+    closeMic(); setVoiceState("idle");
+  }
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") stopSpeaking(); });
 
 loadConversation();
 refreshStatus();

@@ -1,0 +1,15 @@
+{
+ "contract": "jarvis.voice-transcription/1",
+ "text": "che ore sono",
+ "language": "it",
+ "duration_ms": 1400,
+ "engine": {
+  "name": "faster-whisper",
+  "model": "small",
+  "location": "local"
+ },
+ "wake": {
+  "mode": "push_to_talk",
+  "detected": false
+ }
+}

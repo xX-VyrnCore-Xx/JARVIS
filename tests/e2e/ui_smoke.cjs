@@ -6,6 +6,8 @@
 // Ricerca Web (RF-06): lo script avvia un server locale su JARVIS_E2E_WEB_PORT (8799) che imita Wikipedia.
 // Avviare il Core con JARVIS_WEB_ALLOW_PRIVATE=1, JARVIS_WIKIPEDIA_URL=http://127.0.0.1:8799 e
 // JARVIS_WEB_DENY=vietato.localhost (come nella CI).
+// Voce (RF-09): avviare il Core con JARVIS_VOICE_ENGINE=fake e JARVIS_FAKE_STT_TEXT="che ore sono";
+// Chromium usa un microfono finto che emette un tono.
 const { chromium } = require("playwright");
 const http = require("http");
 
@@ -32,7 +34,7 @@ function check(cond, msg) {
 
 (async () => {
   await new Promise((ok) => webServer.listen(WEB_PORT, "127.0.0.1", ok));
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required"] });
   const page = await browser.newPage({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: shots ? 2 : 1 });
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -50,6 +52,32 @@ function check(cond, msg) {
   check((await page.locator("#st-ai").innerText()).includes("offline"), "stato AI visibile nell'intestazione");
   check((await send("ciao")).includes("JARVIS"), "risposta al saluto");
   check((await send("che ore sono")).startsWith("Sono le"), "strumento time.now eseguito senza conferma");
+
+  // Voce: pulsante microfono, trascrizione locale, risposta vocale e interruzione.
+  await page.waitForFunction(() => /Voce: pronta/.test(document.querySelector("#st-voice").textContent));
+  check(true, "stato della voce visibile: pronta");
+  await page.check("#voice-replies");
+  const beforeVoice = await page.locator(".msg.assistant").count();
+  await page.click("#mic");
+  await page.waitForFunction(() => /in ascolto/.test(document.querySelector("#st-voice").textContent));
+  check((await page.getAttribute("#mic", "aria-pressed")) === "true", "microfono attivo e visibile durante l'ascolto");
+  await page.waitForTimeout(1500);
+  await page.click("#mic");
+  await page.waitForFunction((n) => document.querySelectorAll(".msg.assistant").length > n, beforeVoice, { timeout: 30000 });
+  check((await page.locator(".msg.user").last().innerText()).trim() === "che ore sono", "comando vocale trascritto e inviato");
+  check((await page.locator(".msg.assistant").last().innerText()).startsWith("Sono le"), "risposta al comando vocale");
+  await page.waitForSelector("#voice-stop:not([hidden])", { timeout: 15000 });
+  check(/risposta vocale/.test(await page.textContent("#st-voice")), "risposta letta ad alta voce");
+  await page.click("#voice-stop");
+  await page.waitForFunction(() => /Voce: pronta/.test(document.querySelector("#st-voice").textContent));
+  check(await page.isHidden("#voice-stop"), "risposta vocale interrotta dall'utente");
+  await page.uncheck("#voice-replies");
+  await page.check("#voice-handsfree");
+  await page.waitForSelector("#mic-live:not([hidden])");
+  check(true, "mani libere: indicatore del microfono sempre visibile");
+  await page.uncheck("#voice-handsfree");
+  await page.waitForSelector("#mic-live", { state: "hidden" });
+  check(true, "mani libere disattivato: microfono chiuso");
 
   await send("scrivi diario.txt: nota creata dal test E2E");
   await page.waitForSelector(".confirm button.primary");

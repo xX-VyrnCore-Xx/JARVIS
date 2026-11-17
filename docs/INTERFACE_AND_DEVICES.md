@@ -29,3 +29,12 @@ La campanella nell'intestazione mostra le notifiche non lette. Il pannello elenc
 **App desktop (ADR-0009):** `./jarvis.sh desktop` apre JARVIS in una finestra Tauri per Windows, macOS e Linux. L'app avvia il Core in automatico, tiene i dati nella cartella dell'applicazione dell'utente, apre i link esterni nel browser di sistema e alla chiusura arresta Core e worker, anche in caso di crash.
 
 Si adatta al tema chiaro e scuro e allo schermo dello smartphone (verificata a 390 px). Restano da sviluppare: installatori autonomi del desktop, voce, avatar e mobile nativo.
+
+## Voce (RF-09, ADR-0010)
+
+- **Push-to-talk:** il pulsante 🎤 avvia e chiude la registrazione e diventa rosso finché il microfono ascolta.
+- **Stato visibile:** l'intestazione mostra lo stato della voce (pronta, in ascolto, trascrizione, risposta vocale, non disponibile con il motivo).
+- **Risposte vocali** (opzionali): l'utente le interrompe con «Interrompi», con Esc o premendo il microfono.
+- **Mani libere** (opzionale): mostra «● Microfono attivo» per tutto il tempo in cui il microfono è aperto. Si attiva con «Ehi Jarvis» e si interrompe parlando sopra la risposta.
+
+Le conferme restano un clic.

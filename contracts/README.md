@@ -16,6 +16,7 @@ Contratti condivisi fra Core Rust, AI Python, applicazioni e integrazioni (RNF-0
 | `v1/workflow.schema.json` | `jarvis.workflow/1` — automazione pianificata (intervallo, giornaliera, singola) con passi dal catalogo e approvazione del proprietario legata al digest dei passi | AUTONOMY_AND_TOOLS.md | RF-07 |
 | `v1/workflow-run.schema.json` | `jarvis.workflow-run/1` — esecuzione con trigger, istanti, decisione ed esito per passo | AUTONOMY_AND_TOOLS.md | RF-07, RNF-07 |
 | `v1/notification.schema.json` | `jarvis.notification/1` — notifica con gravità, categoria, sorgente, correlazione al task o al workflow, chiave di deduplicazione e collegamento a una vista interna | DEVOPS_QA_OBSERVABILITY.md | RF-13, RNF-07 |
+| `v1/voice-transcription.schema.json`, `v1/voice-synthesis.schema.json` | `jarvis.voice-transcription/1` e `jarvis.voice-synthesis/1` — testo e metadati della voce; motori solo locali; l'audio non fa parte della trascrizione | INTERFACE_AND_DEVICES.md | RF-09, RNF-05 |
 | `catalog/tools/*.json` | Catalogo degli strumenti (`jarvis.tool/1`, 15 voci comprese `web.search`, `web.fetch` e `workflow.update`), con `input_schema` chiuso | AUTONOMY_AND_TOOLS.md | RF-05, RF-06 |
 
 La delega v1 accetta il campo facoltativo `inputs`: turni recenti (`user` o `assistant`), memoria autorizzata e `tool_result`. È un'aggiunta compatibile: i documenti senza `inputs` restano validi.

@@ -50,12 +50,14 @@ pub enum Contract {
     PolicyDecision,
     Task,
     ToolDescriptor,
+    VoiceSynthesis,
+    VoiceTranscription,
     Workflow,
     WorkflowRun,
 }
 
 impl Contract {
-    pub const ALL: [Contract; 11] = [
+    pub const ALL: [Contract; 13] = [
         Contract::AgentResult,
         Contract::AuditEvent,
         Contract::Delegation,
@@ -65,6 +67,8 @@ impl Contract {
         Contract::PolicyDecision,
         Contract::Task,
         Contract::ToolDescriptor,
+        Contract::VoiceSynthesis,
+        Contract::VoiceTranscription,
         Contract::Workflow,
         Contract::WorkflowRun,
     ];
@@ -81,6 +85,8 @@ impl Contract {
             Contract::PolicyDecision => "policy-decision",
             Contract::Task => "task",
             Contract::ToolDescriptor => "tool-descriptor",
+            Contract::VoiceSynthesis => "voice-synthesis",
+            Contract::VoiceTranscription => "voice-transcription",
             Contract::Workflow => "workflow",
             Contract::WorkflowRun => "workflow-run",
         }
@@ -101,13 +107,15 @@ impl Contract {
             Contract::PolicyDecision => schema_file!("policy-decision.schema.json"),
             Contract::Task => schema_file!("task.schema.json"),
             Contract::ToolDescriptor => schema_file!("tool-descriptor.schema.json"),
+            Contract::VoiceSynthesis => schema_file!("voice-synthesis.schema.json"),
+            Contract::VoiceTranscription => schema_file!("voice-transcription.schema.json"),
             Contract::Workflow => schema_file!("workflow.schema.json"),
             Contract::WorkflowRun => schema_file!("workflow-run.schema.json"),
         }
     }
 
     fn validator(self) -> &'static Validator {
-        static CELLS: [OnceLock<Validator>; 11] = [const { OnceLock::new() }; 11];
+        static CELLS: [OnceLock<Validator>; 13] = [const { OnceLock::new() }; 13];
         let index = Self::ALL
             .iter()
             .position(|c| *c == self)
@@ -121,12 +129,19 @@ fn parse(source: &str) -> Value {
 }
 
 fn build_validator(contract: Contract) -> Validator {
-    let resources = [("common.schema.json", COMMON), ("error.schema.json", ERROR)]
-        .into_iter()
-        .map(|(file, src)| {
-            let resource = Resource::from_contents(parse(src)).expect("risorsa dello schema");
-            (format!("{BASE}{file}"), resource)
-        });
+    let resources = [
+        ("common.schema.json", COMMON),
+        ("error.schema.json", ERROR),
+        (
+            "voice-transcription.schema.json",
+            schema_file!("voice-transcription.schema.json"),
+        ),
+    ]
+    .into_iter()
+    .map(|(file, src)| {
+        let resource = Resource::from_contents(parse(src)).expect("risorsa dello schema");
+        (format!("{BASE}{file}"), resource)
+    });
     jsonschema::options()
         .with_resources(resources)
         .build(&parse(contract.source()))
@@ -234,7 +249,9 @@ pub fn semantic_errors(contract: Contract, doc: &Value) -> Vec<String> {
         | Contract::Error
         | Contract::ToolDescriptor
         | Contract::Workflow
-        | Contract::Notification => {}
+        | Contract::Notification
+        | Contract::VoiceSynthesis
+        | Contract::VoiceTranscription => {}
     }
     errors
 }
