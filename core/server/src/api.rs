@@ -137,7 +137,11 @@ pub fn router(state: Shared) -> Router {
         .route("/api/notifications/read-all", post(read_all))
         .route("/api/notifications/{id}/read", post(read_one))
         .route("/api/workflows", get(workflows).post(create_workflow))
-        .route("/api/workflows/{id}", delete(delete_workflow))
+        .route(
+            "/api/workflows/{id}",
+            delete(delete_workflow).put(update_workflow),
+        )
+        .route("/api/workflows/{id}/versions", get(workflow_versions))
         .route("/api/workflows/{id}/enabled", post(set_enabled))
         .route("/api/workflows/{id}/run", post(run_now))
         .route("/api/workflows/{id}/runs", get(workflow_runs))
@@ -313,6 +317,24 @@ async fn workflows(State(state): State<Shared>) -> Response {
 
 async fn create_workflow(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
     reply(with_core(&state, move |j| j.create_workflow(&body)).await)
+}
+
+async fn update_workflow(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    reply(with_core(&state, move |j| j.update_workflow(&id, &body)).await)
+}
+
+async fn workflow_versions(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    reply(
+        with_core(&state, move |j| {
+            j.workflow_versions(&id)
+                .map(|items| json!({"items": items}))
+        })
+        .await,
+    )
 }
 
 async fn delete_workflow(State(state): State<Shared>, Path(id): Path<String>) -> Response {

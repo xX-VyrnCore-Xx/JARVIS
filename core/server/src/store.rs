@@ -25,6 +25,8 @@ impl Store {
              CREATE TABLE IF NOT EXISTS workflow_runs (run_id TEXT PRIMARY KEY, workflow_id TEXT NOT NULL,
                  started_at TEXT NOT NULL, doc TEXT NOT NULL);
              CREATE INDEX IF NOT EXISTS workflow_runs_by_workflow ON workflow_runs (workflow_id, started_at);
+             CREATE TABLE IF NOT EXISTS workflow_versions (workflow_id TEXT NOT NULL, version INTEGER NOT NULL,
+                 saved_at TEXT NOT NULL, doc TEXT NOT NULL, PRIMARY KEY (workflow_id, version));
              CREATE TABLE IF NOT EXISTS notifications (notification_id TEXT PRIMARY KEY, created_at TEXT NOT NULL,
                  dedupe_key TEXT, read_at TEXT, doc TEXT NOT NULL);
              CREATE INDEX IF NOT EXISTS notifications_unread ON notifications (read_at, dedupe_key);",
@@ -161,6 +163,24 @@ impl Store {
             Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
         })?;
         rows.map(|r| r.map(|(d, n)| (serde_json::from_str(&d).unwrap_or(Value::Null), n)))
+            .collect()
+    }
+
+    /// Conserva ogni versione approvata (la cronologia resta anche dopo l'eliminazione del workflow).
+    pub fn workflow_version_put(&self, doc: &Value) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO workflow_versions (workflow_id, version, saved_at, doc) VALUES (?1, ?2, ?3, ?4)",
+            params![doc["workflow_id"].as_str(), doc["version"].as_i64(), crate::now(), doc.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn workflow_versions(&self, id: &str) -> StoreResult<Vec<Value>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT doc FROM workflow_versions WHERE workflow_id = ?1 ORDER BY version DESC",
+        )?;
+        let rows = stmt.query_map([id], |r| r.get::<_, String>(0))?;
+        rows.map(|r| r.map(|s| serde_json::from_str(&s).unwrap_or(Value::Null)))
             .collect()
     }
 

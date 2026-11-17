@@ -108,6 +108,33 @@ fn expected_effect(tool: &str, args: &Value) -> String {
                 steps.join(" → ")
             )
         }
+        "workflow.update" => {
+            let mut parts = Vec::new();
+            if let Some(n) = args["name"].as_str() {
+                parts.push(format!("nome «{n}»"));
+            }
+            if args["trigger"].is_object() {
+                parts.push(format!(
+                    "frequenza {}",
+                    crate::automation::describe(&args["trigger"])
+                ));
+            }
+            if let Some(steps) = args["steps"].as_array() {
+                let list: Vec<String> = steps
+                    .iter()
+                    .map(|x| format!("{} {}", x["tool"].as_str().unwrap_or("?"), x["arguments"]))
+                    .collect();
+                parts.push(format!("passi {}", list.join(" → ")));
+            }
+            if let Some(f) = args["on_failure"].as_str() {
+                parts.push(format!("in caso di errore {f}"));
+            }
+            format!(
+                "Modificare l'automazione {} (nuova versione, approvata ora e poi eseguita in background senza altre conferme): {}",
+                args["id"].as_str().unwrap_or("?"),
+                parts.join("; ")
+            )
+        }
         "workflow.delete" => format!(
             "Eliminare definitivamente l'automazione {}",
             args["id"].as_str().unwrap_or("?")

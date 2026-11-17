@@ -126,6 +126,10 @@ def _describe_tool_result(result: dict) -> str:
     if tool == "workflow.run":
         steps = ", ".join(f"{s['tool']}: {s['status']}" for s in output.get("steps", []))
         return f"Ho eseguito «{output.get('name')}»: esito {output.get('status')} ({steps})."
+    if tool == "workflow.update":
+        changes = "\n".join(f"• {c}" for c in output.get("changes", []))
+        return (f"Automazione [{output.get('id')}] «{output.get('name')}» aggiornata alla versione {output.get('version')}:\n{changes}\n"
+                f"Prossima esecuzione: {output.get('next_run') or 'nessuna'}.")
     if tool == "workflow.delete":
         return f"Automazione [{output.get('id')}] «{output.get('name')}» eliminata."
     return f"Risultato di {tool}: {json.dumps(output, ensure_ascii=False)}"
@@ -176,6 +180,58 @@ def _unit_seconds(unit: str) -> int:
     return 60
 
 
+_TRIGGER_ONLY = [
+    (re.compile(r"^\s*ogni giorno alle(?: ore)?\s+(\d{1,2})[:.](\d{2})\s*$", re.I), "daily"),
+    (re.compile(r"^\s*(?:ogni|every)\s+(?:(\d+)\s+)?(second[oi]|seconds?|minut[oi]|or[ae]|giorn[oi]|minutes?|hours?|days?)\s*$", re.I), "interval"),
+    (re.compile(r"^\s*(?:tra|fra|in)\s+(\d+)\s+(minut[oi]|or[ae]|minutes?|hours?)\s*$", re.I), "once"),
+]
+_UPDATE = re.compile(r"^\s*(?:modifica|cambia|aggiorna) (?:l')?automazione\s+([0-9a-f-]{4,})\s*(?::\s*(.+)|\s+(.+))$", re.I | re.S)
+_RENAME = re.compile(r"^\s*rinomina (?:l')?automazione\s+([0-9a-f-]{4,})\s+(?:in|come)\s+(.+)$", re.I | re.S)
+
+
+def _parse_trigger(text: str) -> tuple[dict | None, str | None]:
+    for pattern, kind in _TRIGGER_ONLY:
+        m = pattern.search(text)
+        if not m:
+            continue
+        if kind == "daily":
+            hour, minute = int(m.group(1)), m.group(2)
+            if hour > 23 or int(minute) > 59:
+                return None, "Orario non valido."
+            return {"kind": "daily", "at": f"{hour:02d}:{minute}"}, None
+        if kind == "interval":
+            every = int(m.group(1) or 1) * _unit_seconds(m.group(2))
+            if every < 60:
+                return None, "L'intervallo minimo è un minuto."
+            return {"kind": "interval", "every_seconds": every}, None
+        at = (datetime.now(timezone.utc) + timedelta(seconds=int(m.group(1)) * _unit_seconds(m.group(2)))).replace(microsecond=0)
+        return {"kind": "once", "at": at.isoformat().replace("+00:00", "Z")}, None
+    return None, None
+
+
+def _parse_update(message: str, catalog: dict[str, dict]) -> tuple[dict | None, str | None]:
+    """Argomenti per workflow.update, oppure un messaggio d'errore."""
+    m = _RENAME.search(message)
+    if m:
+        return {"id": m.group(1), "name": m.group(2).strip()[:200]}, None
+    m = _UPDATE.search(message)
+    if not m:
+        return None, None
+    wid, after_colon, rest = m.group(1), m.group(2), m.group(3)
+    if rest:
+        trigger, problem = _parse_trigger(rest)
+        if problem:
+            return None, problem
+        if trigger:
+            return {"id": wid, "trigger": trigger}, None
+        after_colon = rest
+    step = _parse_step(after_colon.strip(), catalog)
+    if not step:
+        return None, (f"Non so cosa cambiare in «{after_colon.strip()}». Esempi: «modifica automazione {wid} ogni 2 ore» "
+                      f"oppure «modifica automazione {wid}: info sistema».")
+    return {"id": wid, "steps": [step]}, None
+
+
 def _parse_step(command: str, catalog: dict[str, dict]) -> dict | None:
     for pattern, tool, args in _RULES:
         match = pattern.search(command)
@@ -222,6 +278,7 @@ Prova con:
 • "ricorda che preferisco risposte brevi" · "cosa ricordi" · "dimentica <id>"
 • "ogni ora info sistema" · "ogni giorno alle 08:00 scrivi buongiorno.txt: ciao" · "tra 5 minuti che ore sono"
 • "elenca automazioni" · "esegui automazione <id>" · "elimina automazione <id>"
+• "modifica automazione <id> ogni 2 ore" · "modifica automazione <id>: info sistema" · "rinomina automazione <id> in Report"
 • "cerca intelligenza artificiale" · "apri https://it.wikipedia.org/wiki/Rust"
 Con Ollama attivo sul tuo computer posso conversare liberamente."""
 
@@ -248,6 +305,13 @@ class OfflineBackend:
             if created:
                 return _result("tool_call", self.backend, tool="workflow.create", arguments=created, catalog=catalog,
                                rationale="Pianificazione riconosciuta dal modello offline")
+        if "workflow.update" in catalog:
+            update, problem = _parse_update(message, catalog)
+            if problem:
+                return _result("reply", self.backend, text=problem)
+            if update:
+                return _result("tool_call", self.backend, tool="workflow.update", arguments=update, catalog=catalog,
+                               rationale="Modifica riconosciuta dal modello offline")
         for pattern, tool, args in _WORKFLOW_RULES:
             match = pattern.search(message)
             if match and tool in catalog:
