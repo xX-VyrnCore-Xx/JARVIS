@@ -138,6 +138,9 @@ pub struct Jarvis {
     secrets: crate::secrets::SecretStore,
     /// Ultima istantanea delle metriche salvata (RNF-07).
     metrics_saved: Option<std::time::Instant>,
+    /// Codici di associazione monouso in attesa (RF-11): codice -> (scadenza, permessi).
+    pairings: HashMap<String, (std::time::Instant, Vec<String>)>,
+    pair_failures: u32,
     /// Blocco esclusivo sulla cartella dati: un solo Core per volta (rilasciato alla chiusura).
     _lock: std::fs::File,
 }
@@ -191,6 +194,8 @@ impl Jarvis {
             obs: std::sync::Arc::new(Observability::new(Some(&cfg_logs))),
             secrets,
             metrics_saved: None,
+            pairings: HashMap::new(),
+            pair_failures: 0,
             _lock: lock,
         };
         jarvis.register_authorized_connectors()?;
@@ -1842,6 +1847,169 @@ impl Jarvis {
             - chrono::Duration::hours(i64::from(hours.clamp(1, 24 * 7))))
         .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         self.store.metrics_since(&since).map_err(internal)
+    }
+}
+
+// ---------------------------------------------------------------------- Dispositivi associati (RF-11)
+
+const PAIRING_TTL: std::time::Duration = std::time::Duration::from_secs(600);
+const PAIRING_MAX_FAILURES: u32 = 5;
+/// Alfabeto senza caratteri ambigui (0/O, 1/I/L): 8 caratteri = 40 bit.
+const PAIRING_ALPHABET: &[u8] = b"ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+fn sha256_hex(s: &str) -> String {
+    use sha2::Digest;
+    hex::encode(sha2::Sha256::digest(s.as_bytes()))
+}
+
+impl Jarvis {
+    fn device_audit(
+        &mut self,
+        action: &str,
+        device_id: &str,
+        outcome: &str,
+    ) -> Result<(), CoreError> {
+        self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "owner", "id": "owner"},
+                          "node": "core-local", "action": action, "resource": format!("jarvis://device/{device_id}"),
+                          "outcome": outcome, "effect": "applied"}))?;
+        Ok(())
+    }
+
+    /// Crea un codice monouso valido 10 minuti. Solo il proprietario, dal computer del Core.
+    pub fn create_pairing(&mut self, scopes: &[String]) -> Result<Value, CoreError> {
+        let mut scopes: Vec<String> = scopes
+            .iter()
+            .filter(|s| matches!(s.as_str(), "chat" | "confirm"))
+            .cloned()
+            .collect();
+        if !scopes.iter().any(|s| s == "chat") {
+            scopes.insert(0, "chat".into());
+        }
+        scopes.dedup();
+        let now_i = std::time::Instant::now();
+        self.pairings.retain(|_, (exp, _)| *exp > now_i);
+        let mut bytes = [0u8; 8];
+        getrandom::getrandom(&mut bytes).map_err(internal)?;
+        let code: String = bytes
+            .iter()
+            .map(|b| PAIRING_ALPHABET[*b as usize % PAIRING_ALPHABET.len()] as char)
+            .collect();
+        self.pairings
+            .insert(code.clone(), (now_i + PAIRING_TTL, scopes.clone()));
+        self.pair_failures = 0;
+        let expires = chrono::Utc::now() + chrono::Duration::seconds(PAIRING_TTL.as_secs() as i64);
+        Ok(
+            json!({"code": code, "scopes": scopes, "expires_at": expires.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)}),
+        )
+    }
+
+    /// Associa un dispositivo con un codice valido. Il token è restituito una sola volta; il Core ne
+    /// conserva solo l'impronta SHA-256. Dopo 5 codici errati tutti i codici in attesa vengono annullati.
+    pub fn pair_device(
+        &mut self,
+        code: &str,
+        name: &str,
+        platform: &str,
+    ) -> Result<Value, CoreError> {
+        let code = code.trim().to_ascii_uppercase().replace(['-', ' '], "");
+        let now_i = std::time::Instant::now();
+        let entry = self.pairings.remove(&code).filter(|(exp, _)| *exp > now_i);
+        let Some((_, scopes)) = entry else {
+            self.pair_failures += 1;
+            self.obs.count("device.pair_rejected");
+            if self.pair_failures >= PAIRING_MAX_FAILURES {
+                self.pairings.clear();
+                self.pair_failures = 0;
+                self.notify(json!({"severity": "warning", "category": "security", "title": "Associazione bloccata",
+                    "body": "Troppi codici di associazione errati: i codici in attesa sono stati annullati.",
+                    "source": {"kind": "module", "id": "devices"}, "dedupe_key": "pairing-blocked"}))?;
+            }
+            return Err(CoreError::Unauthorized(
+                "codice di associazione errato o scaduto".into(),
+            ));
+        };
+        let name: String = name
+            .trim()
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(80)
+            .collect();
+        let platform = if matches!(platform, "android" | "ios" | "desktop" | "web") {
+            platform
+        } else {
+            "other"
+        };
+        let mut raw = [0u8; 32];
+        getrandom::getrandom(&mut raw).map_err(internal)?;
+        let token = hex::encode(raw);
+        let doc = json!({
+            "contract": "jarvis.device/1", "device_id": uuid::Uuid::new_v4().to_string(),
+            "name": if name.is_empty() { "Dispositivo".to_string() } else { name },
+            "platform": platform, "scopes": scopes, "enrolled_at": now(),
+        });
+        let report = validate(Contract::Device, &doc);
+        if !report.is_valid() {
+            return Err(CoreError::Internal(format!(
+                "dispositivo non conforme: {report:?}"
+            )));
+        }
+        self.store
+            .device_put(&doc, &sha256_hex(&token))
+            .map_err(internal)?;
+        let id = doc["device_id"].as_str().unwrap_or_default().to_string();
+        self.device_audit("device.pair", &id, "succeeded")?;
+        self.notify(json!({"severity": "info", "category": "security", "title": format!("Nuovo dispositivo associato: {}", doc["name"].as_str().unwrap_or("")),
+            "body": format!("Permessi: {}. Puoi revocarlo dalla sezione Dispositivi.", scopes.join(", ")),
+            "source": {"kind": "module", "id": "devices"}}))?;
+        Ok(json!({"device": doc, "token": token}))
+    }
+
+    /// Dispositivo attivo per un token (None se sconosciuto o revocato); aggiorna `last_seen_at` al massimo ogni minuto.
+    pub fn device_for_token(&mut self, token: &str) -> Result<Option<Value>, CoreError> {
+        if token.len() != 64 {
+            return Ok(None);
+        }
+        let hash = sha256_hex(token);
+        let Some(mut doc) = self.store.device_by_token(&hash).map_err(internal)? else {
+            return Ok(None);
+        };
+        if doc.get("revoked_at").is_some() {
+            return Ok(None);
+        }
+        let stale = doc["last_seen_at"]
+            .as_str()
+            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+            .is_none_or(|t| {
+                chrono::Utc::now().signed_duration_since(t) > chrono::Duration::seconds(60)
+            });
+        if stale {
+            doc["last_seen_at"] = now().into();
+            self.store.device_put(&doc, &hash).map_err(internal)?;
+        }
+        Ok(Some(doc))
+    }
+
+    pub fn devices(&self) -> Result<Vec<Value>, CoreError> {
+        self.store.devices().map_err(internal)
+    }
+
+    /// Revoca immediata: il token smette di funzionare alla richiesta successiva.
+    pub fn revoke_device(&mut self, id: &str) -> Result<Value, CoreError> {
+        let mut doc = self
+            .store
+            .devices()
+            .map_err(internal)?
+            .into_iter()
+            .find(|d| d["device_id"] == id)
+            .ok_or_else(|| CoreError::NotFound(format!("nessun dispositivo {id}")))?;
+        if doc.get("revoked_at").is_none() {
+            doc["revoked_at"] = now().into();
+            self.store.device_put(&doc, "").map_err(internal)?;
+            // L'impronta viene cancellata: il vecchio token non trova più alcun dispositivo.
+            self.store.device_retire_token(id).map_err(internal)?;
+            self.device_audit("device.revoke", id, "revoked")?;
+        }
+        Ok(doc)
     }
 }
 

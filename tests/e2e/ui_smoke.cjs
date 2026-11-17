@@ -39,7 +39,7 @@ function check(cond, msg) {
 
 (async () => {
   await new Promise((ok) => webServer.listen(WEB_PORT, "127.0.0.1", ok));
-  const browser = await chromium.launch({ args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required"] });
+  const browser = await chromium.launch({ args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream", "--autoplay-policy=no-user-gesture-required", "--host-resolver-rules=MAP jarvis.test 127.0.0.1"] });
   const page = await browser.newPage({ viewport: { width: 1280, height: 860 }, deviceScaleFactor: shots ? 2 : 1 });
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -185,6 +185,41 @@ function check(cond, msg) {
   if (shots) await page.screenshot({ path: `${shots}/jarvis-connettori.png` });
   await page.click('[data-view="chat"]');
   check((await send("connettore stato leggi nome=posta")).includes("operativo"), "chiamata al connettore dalla chat");
+
+  // Dispositivi (RF-11): un secondo contesto fa da telefono su un host remoto ammesso (JARVIS_ALLOWED_HOSTS=jarvis.test).
+  await page.click('[data-view="devices"]');
+  await page.click('#pairing-form button[type="submit"]');
+  const code = (await page.locator("#pairing-code strong").innerText()).trim();
+  const phoneCtx = await browser.newContext({ viewport: { width: 390, height: 800 } });
+  const phone = await phoneCtx.newPage();
+  phone.on("pageerror", (e) => errors.push("telefono: " + e.message));
+  const port = new (require("url").URL)(URL).port || "8765";
+  await phone.goto(`http://jarvis.test:${port}/`);
+  await phone.waitForURL(/\/pair$/);
+  check(true, "dispositivo non associato rimandato all'associazione");
+  await phone.fill('#pair-form input[name="code"]', code);
+  await phone.click('#pair-form button[type="submit"]');
+  await phone.waitForURL(/\/$/);
+  await phone.waitForSelector("#input");
+  check((await phone.locator('[data-view="audit"]').count()) === 0, "sezioni del proprietario nascoste sul dispositivo");
+  await phone.fill("#input", "che ore sono");
+  await phone.keyboard.press("Enter");
+  await phone.waitForFunction(() => document.querySelectorAll(".msg.assistant").length > 0, null, { timeout: 30000 });
+  check(true, "chat dal dispositivo associato");
+  if (shots) await phone.screenshot({ path: `${shots}/jarvis-telefono.png` });
+  await page.click('[data-refresh="devices"]');
+  await page.waitForSelector("#devices .card button.danger");
+  page.once("dialog", (d) => d.accept());
+  await page.click("#devices .card button.danger");
+  await page.waitForSelector("#devices .badge.denied");
+  await phone.fill("#input", "che ore sono");
+  await phone.keyboard.press("Enter");
+  // Più richieste possono fallire insieme: si attende l'URL finale senza dipendere da una singola navigazione.
+  for (let i = 0; i < 60 && !phone.url().endsWith("/pair"); i++) await new Promise((r) => setTimeout(r, 250));
+  await phone.waitForSelector("#pair-form");
+  check(phone.url().endsWith("/pair"), "dispositivo revocato: accesso perso subito");
+  await phoneCtx.close();
+  if (shots) await page.screenshot({ path: `${shots}/jarvis-dispositivi.png` });
 
   await page.click('[data-view="audit"]');
   await page.waitForFunction(() => document.querySelector("#audit-summary").textContent.includes("integra"));

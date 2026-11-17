@@ -32,7 +32,9 @@ impl Store {
              CREATE INDEX IF NOT EXISTS notifications_unread ON notifications (read_at, dedupe_key);
              CREATE TABLE IF NOT EXISTS connectors (connector_id TEXT PRIMARY KEY, manifest TEXT NOT NULL,
                  installed_at TEXT NOT NULL, authorized_at TEXT);
-             CREATE TABLE IF NOT EXISTS metrics_snapshots (at TEXT PRIMARY KEY, doc TEXT NOT NULL);",
+             CREATE TABLE IF NOT EXISTS metrics_snapshots (at TEXT PRIMARY KEY, doc TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS devices (device_id TEXT PRIMARY KEY, token_sha256 TEXT NOT NULL UNIQUE,
+                 doc TEXT NOT NULL);",
         )?;
         // Migrazione additiva: database creati prima delle fonti Web (RF-06).
         let has_sources = conn.prepare("SELECT sources FROM messages LIMIT 0").is_ok();
@@ -344,6 +346,44 @@ impl Store {
             .conn
             .prepare("SELECT doc FROM metrics_snapshots WHERE at >= ?1 ORDER BY at LIMIT 5000")?;
         let rows = stmt.query_map([since], |r| {
+            Ok(serde_json::from_str(&r.get::<_, String>(0)?).unwrap_or(Value::Null))
+        })?;
+        rows.collect()
+    }
+
+    pub fn device_put(&self, doc: &Value, token_sha256: &str) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT INTO devices (device_id, token_sha256, doc) VALUES (?1, ?2, ?3)
+             ON CONFLICT(device_id) DO UPDATE SET doc = excluded.doc",
+            params![doc["device_id"].as_str(), token_sha256, doc.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn device_by_token(&self, token_sha256: &str) -> StoreResult<Option<Value>> {
+        self.conn
+            .query_row(
+                "SELECT doc FROM devices WHERE token_sha256 = ?1",
+                [token_sha256],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+            .map(|d| d.and_then(|d| serde_json::from_str(&d).ok()))
+    }
+
+    pub fn device_retire_token(&self, id: &str) -> StoreResult<()> {
+        self.conn.execute(
+            "UPDATE devices SET token_sha256 = 'revocato:' || device_id WHERE device_id = ?1",
+            [id],
+        )?;
+        Ok(())
+    }
+
+    pub fn devices(&self) -> StoreResult<Vec<Value>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT doc FROM devices ORDER BY device_id")?;
+        let rows = stmt.query_map([], |r| {
             Ok(serde_json::from_str(&r.get::<_, String>(0)?).unwrap_or(Value::Null))
         })?;
         rows.collect()

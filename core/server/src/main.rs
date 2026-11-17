@@ -120,7 +120,27 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    let state = api::state(core, token, port);
+    // Dispositivi associati (RF-11): host pubblicati da un proxy fidato verso 127.0.0.1, es. `tailscale serve`.
+    let remote_hosts: Vec<String> = std::env::var("JARVIS_ALLOWED_HOSTS")
+        .unwrap_or_default()
+        .split(',')
+        .map(|h| h.trim().to_ascii_lowercase())
+        .filter(|h| !h.is_empty())
+        .filter(|h| {
+            let ok = h.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') && h.contains('.');
+            if !ok {
+                eprintln!("JARVIS_ALLOWED_HOSTS: host ignorato «{h}» (servono nomi completi, senza caratteri jolly)");
+            }
+            ok
+        })
+        .collect();
+    if !remote_hosts.is_empty() {
+        println!(
+            "  Dispositivi : accesso associato da {}",
+            remote_hosts.join(", ")
+        );
+    }
+    let state = api::state_with_remote(core, token, port, remote_hosts);
     let warm = state.core.clone();
     let health = tokio::task::spawn_blocking(move || {
         warm.lock().map(|mut j| j.health()).unwrap_or_default()

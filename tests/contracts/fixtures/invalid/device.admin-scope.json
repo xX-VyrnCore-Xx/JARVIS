@@ -1,0 +1,8 @@
+{
+  "contract": "jarvis.device/1",
+  "device_id": "6f1c2d3e-4b5a-4c6d-8e7f-901234567890",
+  "name": "Telefono",
+  "platform": "android",
+  "scopes": ["chat", "admin"],
+  "enrolled_at": "2026-11-17T18:00:00.000Z"
+}
