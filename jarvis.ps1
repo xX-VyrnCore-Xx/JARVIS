@@ -7,6 +7,8 @@
 #      .\jarvis.ps1 doctor        controlla i prerequisiti
 #      .\jarvis.ps1 backup        backup cifrato dei dati
 #      .\jarvis.ps1 restore FILE  ripristina un backup (con JARVIS chiuso)
+#      .\jarvis.ps1 rollback      riporta i dati alla copia fatta prima dell'ultimo aggiornamento
+# In una release scaricata il Core e' gia' compilato (bin\jarvis.exe) e Rust non serve.
 # Se PowerShell blocca gli script, usa jarvis.cmd (doppio clic) che lo avvia con -ExecutionPolicy Bypass.
 
 param([string]$Command = "", [string]$Target = "")
@@ -15,6 +17,8 @@ $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Port = if ($env:JARVIS_PORT) { $env:JARVIS_PORT } else { "8765" }
 $Venv = Join-Path $Root ".venv"
 $VenvPython = Join-Path $Venv "Scripts\python.exe"
+$Prebuilt = (Test-Path (Join-Path $Root "bin\jarvis.exe")) -and -not (Test-Path (Join-Path $Root "core\Cargo.toml"))
+$CoreExe = if ($Prebuilt) { Join-Path $Root "bin\jarvis.exe" } else { Join-Path $Root "core\target\release\jarvis.exe" }
 
 function Fail($msg) { Write-Host "[x] $msg" -ForegroundColor Red; exit 1 }
 function Ok($msg) { Write-Host "[ok] $msg" -ForegroundColor Green }
@@ -38,7 +42,8 @@ function Invoke-Doctor {
     Write-Host "JARVIS - controllo dei prerequisiti (Windows)"
     $py = Find-Python
     if ($py) { Ok "Python 3.10+ ($($py -join ' '))" } else { Warn "Python 3.10+ mancante: https://www.python.org/downloads/ (spunta 'Add to PATH')"; $problems++ }
-    if (Get-Command cargo -ErrorAction SilentlyContinue) { Ok "Rust $((cargo --version).Split(' ')[1])" } else { Warn "Rust mancante: https://rustup.rs/ (installa anche 'Desktop development with C++' se richiesto)"; $problems++ }
+    if ($Prebuilt) { Ok "Core precompilato (release): Rust non serve" }
+    elseif (Get-Command cargo -ErrorAction SilentlyContinue) { Ok "Rust $((cargo --version).Split(' ')[1])" } else { Warn "Rust mancante: https://rustup.rs/ (installa anche 'Desktop development with C++' se richiesto)"; $problems++ }
     if (Test-Path (Join-Path $Root "core\target\release\jarvis.exe")) { Ok "Core gia' compilato" } else { Write-Host "- Core non ancora compilato (succede al primo avvio)" }
     $busy = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue
     if ($busy) { Warn "La porta $Port e' occupata: imposta `$env:JARVIS_PORT=8766"; $problems++ } else { Ok "Porta $Port libera" }
@@ -50,7 +55,7 @@ if ($Command -eq "doctor") { exit (Invoke-Doctor) }
 
 $py = Find-Python
 if (-not $py) { Invoke-Doctor | Out-Null; Fail "Serve Python 3.10 o successivo" }
-if (-not (Get-Command cargo -ErrorAction SilentlyContinue)) { Invoke-Doctor | Out-Null; Fail "Rust non trovato: installalo da https://rustup.rs/ e riapri il terminale" }
+if (-not $Prebuilt -and -not (Get-Command cargo -ErrorAction SilentlyContinue)) { Invoke-Doctor | Out-Null; Fail "Rust non trovato: installalo da https://rustup.rs/ e riapri il terminale" }
 
 if ((Test-Path $Venv) -and -not (Test-Path $VenvPython)) { Warn "Ambiente .venv incompleto: lo ricreo"; Remove-Item -Recurse -Force $Venv }
 if (-not (Test-Path $VenvPython)) {
@@ -63,13 +68,14 @@ Write-Host "-> Dipendenze Python"
 & $VenvPython -m pip install -q --disable-pip-version-check -r (Join-Path $Root "tests\contracts\requirements.txt")
 if ($LASTEXITCODE -ne 0) { Fail "Installazione delle dipendenze Python non riuscita (serve la rete la prima volta)" }
 
-$CoreExe = Join-Path $Root "core\target\release\jarvis.exe"
+if ($Prebuilt) { Write-Host "-> Core precompilato" } else {
 Push-Location (Join-Path $Root "core")
 try {
     if (-not (Test-Path $CoreExe)) { Write-Host "-> Compilo il Core: la prima volta richiede alcuni minuti"; cargo build --release --locked -p jarvis-core }
     else { Write-Host "-> Aggiorno il Core"; cargo build --release --locked -q -p jarvis-core }
     if ($LASTEXITCODE -ne 0) { Fail "Compilazione non riuscita: esegui .\jarvis.ps1 doctor" }
 } finally { Pop-Location }
+}
 
 $env:JARVIS_PYTHON = $VenvPython
 $env:JARVIS_HOME = $Root
@@ -93,6 +99,7 @@ if (Test-Path $Models) {
 }
 
 if ($Command -eq "desktop") {
+    if ($Prebuilt) { Fail "La release non include l'app desktop: usa .\jarvis.ps1 (interfaccia nel browser) oppure i sorgenti" }
     Push-Location (Join-Path $Root "apps\desktop\src-tauri")
     try { cargo build --release --locked; if ($LASTEXITCODE -ne 0) { Fail "Compilazione dell'app desktop non riuscita" } } finally { Pop-Location }
     & (Join-Path $Root "apps\desktop\src-tauri\target\release\jarvis-desktop.exe")
@@ -101,6 +108,7 @@ if ($Command -eq "desktop") {
 
 if ($Command -eq "backup") { & $CoreExe backup; exit $LASTEXITCODE }
 if ($Command -eq "restore") { & $CoreExe restore $Target; exit $LASTEXITCODE }
+if ($Command -eq "rollback") { if ($Target) { & $CoreExe rollback $Target } else { & $CoreExe rollback }; exit $LASTEXITCODE }
 if ($env:JARVIS_NO_BROWSER -ne "1") {
     Start-Job -ArgumentList $Port -ScriptBlock {
         param($p)

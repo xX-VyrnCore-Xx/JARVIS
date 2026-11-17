@@ -14,6 +14,7 @@ pub mod connectors;
 pub mod observability;
 pub mod orchestrator;
 pub mod policy;
+pub mod rollback;
 pub mod secrets;
 pub mod store;
 pub mod tools;

@@ -88,3 +88,10 @@ curl -H "X-Jarvis-Token: <token>" "http://127.0.0.1:8765/api/metrics/export?form
 | chat con strumento | 1500 ms | 15,3 ms |
 
 Gli obiettivi sono volutamente larghi per i runner CI: servono a rilevare regressioni gravi. Quelli con modelli reali si fissano dopo le misure sull'hardware del proprietario.
+
+## Release e rollback (ADR-0015)
+
+- `python scripts/package.py --binary core/target/release/jarvis --target linux-x86_64 --out dist` crea l'archivio e il file `.sha256`.
+- `.github/workflows/release.yml` costruisce e prova gli archivi sui 3 sistemi; con un tag `vX.Y.Z` prepara una bozza di release.
+- All'avvio di una versione diversa il Core copia i dati in `<dati>-rollback/`; `./jarvis.sh rollback` ripristina l'ultima copia.
+- Checklist di accettazione e criteri di rilascio: [ACCEPTANCE.md](ACCEPTANCE.md).

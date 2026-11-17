@@ -21,6 +21,10 @@ fn passphrase() -> String {
 /// `jarvis backup` e `jarvis restore <file>` (RNF-08). Restituisce il codice di uscita.
 fn maintenance(cfg: &Config, args: &[String]) -> Option<i32> {
     match args.first().map(String::as_str) {
+        Some("--version") => {
+            println!("jarvis {}", env!("CARGO_PKG_VERSION"));
+            Some(0)
+        }
         Some("backup") => {
             let mut core = match Jarvis::new(cfg.clone()) {
                 Ok(c) => c,
@@ -89,8 +93,60 @@ fn maintenance(cfg: &Config, args: &[String]) -> Option<i32> {
                 },
             )
         }
+        Some("rollback") => {
+            if core_running(cfg) {
+                eprintln!(
+                    "✗ JARVIS è in esecuzione su {}: chiudilo prima del rollback.",
+                    cfg.data_dir.display()
+                );
+                return Some(1);
+            }
+            let snapshots = jarvis_core::rollback::list(&cfg.data_dir);
+            if args.get(1).map(String::as_str) == Some("--list") || snapshots.is_empty() {
+                if snapshots.is_empty() {
+                    println!(
+                        "Nessuna copia per il rollback in {}",
+                        jarvis_core::rollback::rollback_dir(&cfg.data_dir).display()
+                    );
+                }
+                for s in &snapshots {
+                    println!("  {}", s.display());
+                }
+                return Some(if snapshots.is_empty() { 1 } else { 0 });
+            }
+            let which = args.get(1).map(std::path::PathBuf::from);
+            Some(
+                match jarvis_core::rollback::restore(&cfg.data_dir, which.as_deref()) {
+                    Ok(s) => {
+                        println!(
+                            "✓ Dati riportati alla versione {} da {}",
+                            s["version"].as_str().unwrap_or("?"),
+                            s["restored_from"].as_str().unwrap_or("?")
+                        );
+                        println!(
+                            "  I dati sostituiti sono conservati in {}",
+                            s["previous_data"].as_str().unwrap_or("?")
+                        );
+                        println!("  Avvia ora la release di quella versione.");
+                        0
+                    }
+                    Err(e) => {
+                        eprintln!("✗ Rollback non riuscito: {e}");
+                        1
+                    }
+                },
+            )
+        }
         _ => None,
     }
+}
+
+/// Vero se un Core detiene il blocco della cartella dati.
+fn core_running(cfg: &Config) -> bool {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(cfg.data_dir.join(".lock"))
+        .is_ok_and(|f| f.try_lock().is_err())
 }
 
 #[tokio::main]
