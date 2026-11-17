@@ -310,13 +310,20 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - **Primi obiettivi di latenza** (`tests/perf/slo.json`, misurati da `tests/perf/latency.py` nella CI) per il percorso offline.
 - **Motivazione:** ogni guasto simulato deve essere rilevabile, correlato al task, isolato e seguito da un recupero automatico. Le soglie si fissano solo dopo averle misurate.
 - **Conseguenze:**
-  - le metriche si azzerano al riavvio: per la persistenza storica servirà l'Observability Engine completo (trace distribuite, esportazione);
+  - le metriche in memoria si azzerano al riavvio; dal 2026-11-17 lo storico è persistito ed esportabile (aggiornamento sotto); restano da fare le trace distribuite;
   - gli SLO con modelli reali (Ollama, faster-whisper, Piper) vanno misurati sul computer del proprietario.
 - **Evidenza:**
   - `resilience.rs`: 9 test (hang, crash e output non JSON con recupero; lentezza misurata; log correlati senza contenuti; audit cancellato rilevato; workspace rimossa; 20 richieste concorrenti; metriche protette);
   - misura locale p95: health 3,4 ms, elenco task 1,7 ms, chat 9,1 ms, chat con strumento 15,3 ms;
   - E2E: pannello Sistema.
 - **Documenti interessati:** DEVOPS_QA_OBSERVABILITY.md, ARCHITECTURE.md, REQUIREMENTS.md, INTERFACE_AND_DEVICES.md, README.md.
+
+- **Aggiornamento 2026-11-17 — persistenza ed esportazione:**
+  - un'istantanea compatta (conteggi, errori, p50/p95/max per serie, contatori) è salvata in SQLite (`metrics_snapshots`) ogni 5 minuti dal pianificatore e all'arresto ordinato; conservazione di 7 giorni;
+  - `GET /api/metrics/history?hours=` (fino a 168), `GET /api/metrics/export` (JSON `jarvis-metrics/1` con stato attuale e storico) e `GET /api/metrics/export?format=prometheus` (testo 0.0.4); tutte con token di sessione;
+  - sezione Sistema: storico delle ultime 24 ore e pulsanti di esportazione;
+  - le istantanee entrano nel backup cifrato con il database e non contengono contenuti dell'utente;
+  - evidenza: `metrics_survive_restart_and_export_in_prometheus_format`, unitario `prometheus_text_format`, E2E (download Prometheus).
 
 ### ADR-0012 — Backup cifrato e ripristino verificato
 

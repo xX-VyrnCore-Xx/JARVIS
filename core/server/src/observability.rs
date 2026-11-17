@@ -143,6 +143,79 @@ impl Observability {
     }
 }
 
+fn label(v: &str) -> String {
+    v.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+}
+
+/// Esposizione nel formato testuale di Prometheus (0.0.4) di un'istantanea di [`Observability::snapshot`].
+pub fn prometheus(snapshot: &Value) -> String {
+    let mut out = String::new();
+    out.push_str("# HELP jarvis_uptime_seconds Secondi dall'avvio del Core.\n# TYPE jarvis_uptime_seconds gauge\n");
+    out.push_str(&format!(
+        "jarvis_uptime_seconds {}\n",
+        snapshot["uptime_s"].as_u64().unwrap_or(0)
+    ));
+    let series = snapshot["series"].as_object().cloned().unwrap_or_default();
+    let rows: Vec<(String, String, &Value)> = series
+        .iter()
+        .flat_map(|(g, m)| {
+            m.as_object()
+                .into_iter()
+                .flatten()
+                .map(move |(n, v)| (label(g), label(n), v))
+        })
+        .collect();
+    let metric = |out: &mut String,
+                  name: &str,
+                  kind: &str,
+                  help: &str,
+                  f: &dyn Fn(&Value) -> String,
+                  extra: &str| {
+        out.push_str(&format!("# HELP {name} {help}\n# TYPE {name} {kind}\n"));
+        for (g, n, v) in &rows {
+            out.push_str(&format!(
+                "{name}{{group=\"{g}\",name=\"{n}\"{extra}}} {}\n",
+                f(v)
+            ));
+        }
+    };
+    metric(
+        &mut out,
+        "jarvis_requests_total",
+        "counter",
+        "Operazioni misurate.",
+        &|v| v["count"].to_string(),
+        "",
+    );
+    metric(
+        &mut out,
+        "jarvis_errors_total",
+        "counter",
+        "Operazioni non riuscite.",
+        &|v| v["errors"].to_string(),
+        "",
+    );
+    out.push_str("# HELP jarvis_latency_ms Latenza sugli ultimi 512 campioni, in millisecondi.\n# TYPE jarvis_latency_ms gauge\n");
+    for (g, n, v) in &rows {
+        for (q, k) in [("0.5", "p50_ms"), ("0.95", "p95_ms"), ("1", "max_ms")] {
+            out.push_str(&format!(
+                "jarvis_latency_ms{{group=\"{g}\",name=\"{n}\",quantile=\"{q}\"}} {}\n",
+                v[k]
+            ));
+        }
+    }
+    out.push_str("# HELP jarvis_events_total Eventi contati (worker, notifiche, webhook).\n# TYPE jarvis_events_total counter\n");
+    for (k, v) in snapshot["counters"].as_object().into_iter().flatten() {
+        out.push_str(&format!(
+            "jarvis_events_total{{name=\"{}\"}} {v}\n",
+            label(k)
+        ));
+    }
+    out
+}
+
 /// Cronometro per misurare una sezione di codice.
 pub struct Timer(Instant);
 
@@ -174,6 +247,31 @@ mod tests {
         assert_eq!(t["p50_ms"], 50.0);
         assert_eq!(t["p95_ms"], 95.0);
         assert_eq!(t["max_ms"], 100.0);
+    }
+
+    #[test]
+    fn prometheus_text_format() {
+        let o = Observability::new(None);
+        o.observe("http GET /api/health", 2.0, false);
+        o.observe("tool fs.\"read", 4.0, true);
+        o.count("worker.spawned");
+        let text = prometheus(&o.snapshot());
+        assert!(
+            text.contains("jarvis_requests_total{group=\"http\",name=\"GET /api/health\"} 1"),
+            "{text}"
+        );
+        assert!(
+            text.contains("jarvis_errors_total{group=\"tool\",name=\"fs.\\\"read\"} 1"),
+            "{text}"
+        );
+        assert!(text.contains("quantile=\"0.95\"} 2"), "{text}");
+        assert!(text.contains("jarvis_events_total{name=\"worker.spawned\"} 1"));
+        for line in text.lines().filter(|l| !l.starts_with('#')) {
+            assert!(
+                line.rsplit_once(' ').unwrap().1.parse::<f64>().is_ok(),
+                "{line}"
+            );
+        }
     }
 
     #[test]

@@ -31,7 +31,8 @@ impl Store {
                  dedupe_key TEXT, read_at TEXT, doc TEXT NOT NULL);
              CREATE INDEX IF NOT EXISTS notifications_unread ON notifications (read_at, dedupe_key);
              CREATE TABLE IF NOT EXISTS connectors (connector_id TEXT PRIMARY KEY, manifest TEXT NOT NULL,
-                 installed_at TEXT NOT NULL, authorized_at TEXT);",
+                 installed_at TEXT NOT NULL, authorized_at TEXT);
+             CREATE TABLE IF NOT EXISTS metrics_snapshots (at TEXT PRIMARY KEY, doc TEXT NOT NULL);",
         )?;
         // Migrazione additiva: database creati prima delle fonti Web (RF-06).
         let has_sources = conn.prepare("SELECT sources FROM messages LIMIT 0").is_ok();
@@ -325,6 +326,27 @@ impl Store {
             .conn
             .execute("DELETE FROM connectors WHERE connector_id = ?1", [id])?
             > 0)
+    }
+
+    /// Salva un'istantanea delle metriche e cancella quelle più vecchie di `keep_since`.
+    pub fn metrics_put(&self, at: &str, doc: &Value, keep_since: &str) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO metrics_snapshots (at, doc) VALUES (?1, ?2)",
+            params![at, doc.to_string()],
+        )?;
+        self.conn
+            .execute("DELETE FROM metrics_snapshots WHERE at < ?1", [keep_since])?;
+        Ok(())
+    }
+
+    pub fn metrics_since(&self, since: &str) -> StoreResult<Vec<Value>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT doc FROM metrics_snapshots WHERE at >= ?1 ORDER BY at LIMIT 5000")?;
+        let rows = stmt.query_map([since], |r| {
+            Ok(serde_json::from_str(&r.get::<_, String>(0)?).unwrap_or(Value::Null))
+        })?;
+        rows.collect()
     }
 
     pub fn snapshot_to(&self, path: &Path) -> StoreResult<()> {

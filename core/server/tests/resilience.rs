@@ -255,3 +255,80 @@ async fn metrics_require_the_session_token() {
         StatusCode::UNAUTHORIZED
     );
 }
+
+#[tokio::test]
+async fn metrics_survive_restart_and_export_in_prometheus_format() {
+    let data = temp();
+    {
+        let mut j = Jarvis::new(config(&data, 30_000, vec![])).unwrap();
+        j.chat("che ore sono").unwrap();
+        let saved = j
+            .persist_metrics(true)
+            .unwrap()
+            .expect("istantanea forzata");
+        assert!(saved["series"]["tool"]["time.now"]["count"] == 1, "{saved}");
+        assert!(
+            j.persist_metrics(false).unwrap().is_none(),
+            "al massimo un'istantanea ogni 5 minuti"
+        );
+        let text = saved.to_string();
+        assert!(
+            !text.contains("che ore sono"),
+            "nessun contenuto dell'utente"
+        );
+    }
+    // Dopo il riavvio lo storico resta e le nuove metriche ripartono da zero.
+    let j = Jarvis::new(config(&data, 30_000, vec![])).unwrap();
+    let history = j.metrics_history(24).unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0]["series"]["tool"]["time.now"]["count"], 1);
+
+    let app = api::router(api::state(j, "t".into(), 18770));
+    let get = |uri: &str, token: bool| {
+        let mut b = Request::builder()
+            .uri(uri)
+            .header("host", "127.0.0.1:18770");
+        if token {
+            b = b.header("x-jarvis-token", "t");
+        }
+        b.body(Body::empty()).unwrap()
+    };
+    let res = app
+        .clone()
+        .oneshot(get("/api/metrics/export?format=prometheus", false))
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+    let res = app
+        .clone()
+        .oneshot(get("/api/metrics/export?format=prometheus", true))
+        .await
+        .unwrap();
+    assert!(res.headers()["content-type"]
+        .to_str()
+        .unwrap()
+        .starts_with("text/plain; version=0.0.4"));
+    let body =
+        String::from_utf8(res.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap();
+    assert!(
+        body.contains("# TYPE jarvis_requests_total counter"),
+        "{body}"
+    );
+    assert!(body.contains("jarvis_uptime_seconds"));
+    let res = app
+        .clone()
+        .oneshot(get("/api/metrics/export", true))
+        .await
+        .unwrap();
+    let doc: Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(doc["format"], "jarvis-metrics/1");
+    assert_eq!(doc["history"].as_array().unwrap().len(), 1);
+    let res = app
+        .oneshot(get("/api/metrics/history?hours=48", true))
+        .await
+        .unwrap();
+    let doc: Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(doc["items"].as_array().unwrap().len(), 1);
+}

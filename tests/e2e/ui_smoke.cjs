@@ -196,6 +196,9 @@ function check(cond, msg) {
   await page.waitForSelector("#metrics-table tbody tr td");
   check((await page.locator("#system-cards").innerText()).includes("catena integra"), "pannello Sistema con stato dei componenti");
   check((await page.locator("#metrics-table").innerText()).includes("POST /api/chat"), "latenze misurate per endpoint");
+  const [dl] = await Promise.all([page.waitForEvent("download"), page.click("#export-prom")]);
+  const prom = require("fs").readFileSync(await dl.path(), "utf8");
+  check(prom.includes("# TYPE jarvis_requests_total counter"), "metriche esportate in formato Prometheus");
   await page.fill('#backup-form input[name="pass"]', "passphrase del test e2e");
   await page.fill('#backup-form input[name="again"]', "passphrase del test e2e");
   page.once("dialog", (d) => d.accept());

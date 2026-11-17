@@ -59,6 +59,12 @@ Il job CI `avvio` esegue i lanciatori reali (`jarvis.sh` su Linux e macOS, `jarv
 
 **Metriche:** `GET /api/metrics` riporta conteggio, errori e latenze p50, p95 e max per endpoint, strumento, delega, task e automazione, più i contatori del worker. La sezione «Sistema» dell'interfaccia le mostra in tabella.
 
+**Storico ed esportazione:** un'istantanea ogni 5 minuti e all'arresto ordinato, conservata 7 giorni in SQLite. `GET /api/metrics/history?hours=24` restituisce lo storico; `GET /api/metrics/export` lo scarica in JSON (`jarvis-metrics/1`) e `?format=prometheus` nel formato testuale di Prometheus. Le richieste vogliono l'header `X-Jarvis-Token`, il token stampato nella pagina dell'interfaccia: per uno scraper Prometheus locale va configurato come header della richiesta. Esempio:
+
+```bash
+curl -H "X-Jarvis-Token: <token>" "http://127.0.0.1:8765/api/metrics/export?format=prometheus"
+```
+
 **Log:** `data/logs/core.jsonl` (JSON Lines, rotazione a 5 MiB) contiene eventi correlati (`task_id`, `correlation_id`, durata, codice d'errore) e non contiene messaggi, file né audio dell'utente.
 
 **Iniezione di guasti** (solo con `JARVIS_FAULT_INJECTION=1`):
