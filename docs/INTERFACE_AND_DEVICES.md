@@ -28,6 +28,8 @@ La campanella nell'intestazione mostra le notifiche non lette. Il pannello elenc
 
 **App desktop (ADR-0009):** `./jarvis.sh desktop` apre JARVIS in una finestra Tauri per Windows, macOS e Linux. L'app avvia il Core in automatico, tiene i dati nella cartella dell'applicazione dell'utente, apre i link esterni nel browser di sistema e alla chiusura arresta Core e worker, anche in caso di crash.
 
+La sezione **Sistema** mostra lo stato di Core, AI, voce, Web, audit e worker, e la tabella delle latenze (p50, p95, max, errori) per endpoint, strumento e delega.
+
 Si adatta al tema chiaro e scuro e allo schermo dello smartphone (verificata a 390 px). Restano da sviluppare: installatori autonomi del desktop, voce, avatar e mobile nativo.
 
 ## Voce (RF-09, ADR-0010)

@@ -72,7 +72,7 @@ main { flex: 1; min-width: 0; min-height: 0; display: flex; }
 .badge { font-size: .75rem; padding: .1rem .5rem; border-radius: 6px; border: 1px solid var(--border); white-space: nowrap; }
 .badge.succeeded, .badge.allowed, .badge.confirmed { color: var(--ok); }
 .badge.failed, .badge.denied { color: var(--bad); }
-.badge.cancelled, .badge.waiting_confirmation { color: var(--warn); }
+.badge.cancelled, .badge.waiting_confirmation, .badge.pending { color: var(--warn); }
 .empty { color: var(--muted); font-style: italic; }
 .history { margin: .4rem 0 0; padding-left: 1.1rem; color: var(--muted); font-size: .82rem; }
 
@@ -123,6 +123,19 @@ button.small { font-size: .78rem; padding: .2rem .5rem; }
 #st-voice.listening { color: var(--bad); border-color: var(--bad); }
 #st-voice.speaking { color: var(--accent); border-color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { .mic[aria-pressed="true"] { animation: none; } }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: .6rem; }
+.stat { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: .7rem .9rem; }
+.stat .k { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
+.stat .v { font-weight: 600; margin-top: .2rem; overflow-wrap: anywhere; }
+.stat .d { color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
+.backup-form { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: .4rem .9rem .8rem; }
+.sub-head { font-size: 1rem; margin: 1.2rem 0 .5rem; }
+.table-wrap { overflow-x: auto; }
+table.metrics { width: 100%; border-collapse: collapse; font-size: .85rem; }
+table.metrics th, table.metrics td { text-align: right; padding: .35rem .6rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+table.metrics th:first-child, table.metrics td:first-child { text-align: left; font-family: var(--mono); white-space: normal; }
+table.metrics td.bad { color: var(--bad); font-weight: 600; }
 
 @media (max-width: 720px) {
   .voice-bar { padding-left: 16px; padding-right: 16px; }

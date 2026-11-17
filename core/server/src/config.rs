@@ -13,6 +13,8 @@ pub struct Config {
     /// Override di `JARVIS_AI_BACKEND` per il worker (`auto`, `ollama`, `offline`).
     pub ai_backend: Option<String>,
     pub delegation_timeout_ms: u64,
+    /// Variabili aggiuntive per il worker (es. iniezione di guasti nei test, `JARVIS_FAULT_INJECTION`).
+    pub worker_env: Vec<(String, String)>,
     /// Override di `JARVIS_VOICE_ENGINE` per il worker (`auto`, `local`, `fake`, `off`).
     pub voice_engine: Option<String>,
     /// Intervallo del pianificatore in secondi.
@@ -77,6 +79,7 @@ impl Config {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(180_000),
             voice_engine: var("JARVIS_VOICE_ENGINE"),
+            worker_env: Vec::new(),
             scheduler_tick_s: var("JARVIS_SCHEDULER_TICK_S")
                 .and_then(|v| v.parse().ok())
                 .filter(|v| *v >= 1)
@@ -88,5 +91,15 @@ impl Config {
 
     pub fn workspace(&self) -> PathBuf {
         self.data_dir.join("workspace")
+    }
+
+    /// Cartella dei backup, accanto ai dati (un ripristino sposta i dati, non i backup).
+    pub fn backups_dir(&self) -> PathBuf {
+        let name = self
+            .data_dir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "data".into());
+        self.data_dir.with_file_name(format!("{name}-backups"))
     }
 }

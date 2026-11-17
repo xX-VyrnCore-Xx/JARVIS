@@ -52,7 +52,7 @@ La disposizione proposta dei moduli nel repository è descritta in [DEVELOPMENT.
 | Memory e Data & Storage | Memoria, task e conversazione in SQLite | `core/server/src/store.rs` |
 
 | Automation Engine | Workflow pianificati, pianificatore nel Core, cronologia, approvazione legata ai passi | `core/server/src/automation.rs`, `orchestrator.rs` |
-| Observability (parziale) | Notifiche correlate e monitor delle anomalie (audit, worker, AI, automazioni) | `orchestrator.rs` (sezione Notifiche e monitor), `store.rs` |
+| Observability (parziale) | Notifiche correlate, monitor delle anomalie, metriche di latenza ed errori, log strutturati correlati | `observability.rs`, `orchestrator.rs`, `/api/metrics` |
 | Web Agent (parziale) | Ricerca (Wikipedia o SearXNG) e lettura di pagine con provenienza, difese SSRF e iniezione | `core/server/src/web.rs` |
 
 Non ancora implementati: navigazione interattiva con Playwright, Integration Engine, nodi distribuiti, sincronizzazione, metriche e trace.

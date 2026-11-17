@@ -18,6 +18,7 @@ fn config(data: &Path, python: &str) -> Config {
         ai_backend: Some("offline".into()),
         delegation_timeout_ms: 30_000,
         voice_engine: Some("fake".into()),
+        worker_env: vec![],
         scheduler_tick_s: 20,
         token: "t".into(),
         web: jarvis_core::web::WebConfig::default(),

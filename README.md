@@ -8,17 +8,19 @@ L'inferenza e la persistenza privilegiano l'ambiente locale. Il cloud interviene
 
 Il prototipo funziona sul tuo computer, senza cloud. Comprende chat, strumenti con permessi, conferme, memoria, workspace e audit.
 
-**Requisiti:** Linux o macOS (su Windows usa WSL2), [Python 3.10+](https://www.python.org/), [Rust](https://rustup.rs/) e Git. Opzionale: [Ollama](https://ollama.com) per la conversazione libera con un modello locale.
+**Requisiti:** Windows, macOS o Linux con [Python 3.10+](https://www.python.org/) (su Windows spunta «Add to PATH»), [Rust](https://rustup.rs/) e Git. Opzionale: [Ollama](https://ollama.com) per la conversazione libera con un modello locale.
 
 ```bash
 git clone https://github.com/xX-VyrnCore-Xx/JARVIS.git
 ```
 
-```bash
-cd JARVIS && ./jarvis.sh
-```
+Avvio:
+- **Linux e macOS:** nel terminale, `cd JARVIS && ./jarvis.sh`. Se compare «Permission denied», per esempio dopo aver scaricato lo ZIP, usa `bash jarvis.sh`.
+- **Windows:** doppio clic su **`jarvis.cmd`**, oppure in PowerShell `.\jarvis.ps1`.
 
-Poi apri **http://localhost:8765**. La prima compilazione richiede qualche minuto.
+Al primo avvio vengono compilati i componenti: richiede alcuni minuti e l'avanzamento compare nel terminale. Poi il browser si apre da solo su **http://localhost:8765**. Il terminale deve restare aperto finché usi JARVIS; per chiuderlo premi Ctrl+C.
+
+**Se non parte:** `./jarvis.sh doctor` (Windows: `jarvis.cmd doctor`) controlla Python, Rust, compilatore C e porta, e indica cosa installare. Se la porta 8765 è occupata, avvia con `JARVIS_PORT=8766 ./jarvis.sh`.
 
 **App desktop (Tauri):** con `./jarvis.sh desktop` JARVIS si apre in una finestra sua. L'app avvia il Core da sola, tiene i dati nella cartella dell'applicazione dell'utente e alla chiusura spegne tutto. Su Linux servono le librerie WebKitGTK:
 
@@ -39,6 +41,10 @@ sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev
 
   L'audio non lascia il computer e non viene salvato. Le conferme restano un clic.
 - **Notifiche**: la campanella in alto segnala conferme in attesa, automazioni fallite e anomalie (agente AI non disponibile, audit alterato). Ogni notifica è collegata al task che l'ha generata.
+
+- **Backup**: dalla sezione Sistema o con `./jarvis.sh backup` crei una copia cifrata dei tuoi dati, protetta da una passphrase che scegli tu (senza passphrase la copia non si apre). Per ripristinarla, con JARVIS chiuso: `./jarvis.sh restore data-backups/<file>.jbak`.
+- **Connettori**: nella sezione Connettori incolli il manifest JSON di un servizio esterno (esempio in `tests/contracts/fixtures/valid/connector.meteo.json`), lo autorizzi con il suo token e lo usi in chat con «connettore <id> <operazione> chiave=valore». Il token resta cifrato nel Core e non viene mai mostrato. Le operazioni che scrivono verso l'esterno chiedono sempre conferma. «Revoca» cancella il token e blocca subito le chiamate.
+- **Sistema**: la sezione omonima mostra stato dei componenti e latenze misurate. I log diagnostici sono in `data/logs/core.jsonl` e non contengono i tuoi messaggi.
 
 Cosa osservare:
 - ogni azione mostra agente, strumento, decisione di policy ed esito;
@@ -64,7 +70,7 @@ Cosa osservare:
 
 Limiti noti della v0.1:
 - un solo utente locale e una richiesta alla volta;
-- nessuna voce, nessun client desktop o mobile, nessun Web Agent;
+- nessun client mobile; connettori solo HTTP dichiarativi (niente OAuth né plugin con codice);
 - con Ollama la qualità degli strumenti dipende dal modello scelto.
 
 Dettagli in [docs/ROADMAP.md](docs/ROADMAP.md) e nell'ADR-0004 in [docs/DECISIONS.md](docs/DECISIONS.md).

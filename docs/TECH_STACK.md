@@ -26,7 +26,7 @@ Versionare dipendenze e contratti alla loro introduzione. Per Rust/Python, descr
 | JSON Schema | draft 2020-12 | Contratti `contracts/v1/` | ADR-0001 |
 | Python | 3.13 (CI), 3.13.18 (container di sviluppo) | Test dei contratti | `.github/workflows/contracts.yml` |
 | `jsonschema` (Python) | 4.26.0 | Validazione dei contratti | `tests/contracts/requirements.txt` |
-| Rust | MSRV dichiarata 1.82, verificata solo con 1.97.0 | Workspace `core/` | `core/Cargo.toml` |
+| Rust | MSRV dichiarata 1.89 (`File::try_lock`), verificata solo con 1.97.0 | Workspace `core/` | `core/Cargo.toml` |
 | `jsonschema` (Rust) | 0.30, senza feature predefinite | Validazione dei contratti nel Core | `core/Cargo.lock` |
 | `sha2`, `hex`, `chrono`, `serde_json` | Vedi `core/Cargo.lock` | Catena di audit e timestamp | ADR-0002 |
 | `uuid` (Rust) | 1, feature `v4` | Identificativi dei messaggi del bridge | ADR-0003 |
@@ -38,5 +38,6 @@ Versionare dipendenze e contratti alla loro introduzione. Per Rust/Python, descr
 | Interfaccia Web | HTML, CSS e JavaScript senza dipendenze | Deviazione temporanea da React (Tauri adottato per il desktop) | ADR-0004, ADR-0009 |
 | Pianificatore | `tokio::time::interval` nel Core | Automazioni (RF-07) | ADR-0005 |
 | faster-whisper / Piper / openWakeWord | 1.2.1 / 1.8.0 / 0.4.0 (opzionali) | Voce locale | ADR-0010 |
+| argon2 / chacha20poly1305 / tar (Rust) | 0.5 / 0.10 / 0.4 | Backup cifrato | ADR-0012 |
 | Tauri | 2.12 (WebKitGTK 4.1 su Linux, WebView2 su Windows, WKWebView su macOS) | App desktop `apps/desktop/src-tauri` | ADR-0009 |
 | `ureq` / `url` (Rust) | 2.12 / 2.5 | Client HTTP del Web Agent con risolutore vincolato | ADR-0007 |

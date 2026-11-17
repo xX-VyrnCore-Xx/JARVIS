@@ -29,7 +29,9 @@ impl Store {
                  saved_at TEXT NOT NULL, doc TEXT NOT NULL, PRIMARY KEY (workflow_id, version));
              CREATE TABLE IF NOT EXISTS notifications (notification_id TEXT PRIMARY KEY, created_at TEXT NOT NULL,
                  dedupe_key TEXT, read_at TEXT, doc TEXT NOT NULL);
-             CREATE INDEX IF NOT EXISTS notifications_unread ON notifications (read_at, dedupe_key);",
+             CREATE INDEX IF NOT EXISTS notifications_unread ON notifications (read_at, dedupe_key);
+             CREATE TABLE IF NOT EXISTS connectors (connector_id TEXT PRIMARY KEY, manifest TEXT NOT NULL,
+                 installed_at TEXT NOT NULL, authorized_at TEXT);",
         )?;
         // Migrazione additiva: database creati prima delle fonti Web (RF-06).
         let has_sources = conn.prepare("SELECT sources FROM messages LIMIT 0").is_ok();
@@ -284,5 +286,50 @@ impl Store {
             "UPDATE notifications SET read_at = ?1 WHERE read_at IS NULL",
             [at],
         )
+    }
+
+    /// Istantanea coerente del database in un nuovo file (per i backup).
+    pub fn connector_put(&self, manifest: &Value, at: &str) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT INTO connectors (connector_id, manifest, installed_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(connector_id) DO UPDATE SET manifest = excluded.manifest",
+            params![manifest["id"].as_str(), manifest.to_string(), at],
+        )?;
+        Ok(())
+    }
+
+    pub fn connector_set_authorized(&self, id: &str, at: Option<&str>) -> StoreResult<bool> {
+        Ok(self.conn.execute(
+            "UPDATE connectors SET authorized_at = ?2 WHERE connector_id = ?1",
+            params![id, at],
+        )? > 0)
+    }
+
+    /// (manifest, installato il, autorizzato il)
+    pub fn connectors(&self) -> StoreResult<Vec<(Value, String, Option<String>)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT manifest, installed_at, authorized_at FROM connectors ORDER BY connector_id",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                serde_json::from_str(&r.get::<_, String>(0)?).unwrap_or(Value::Null),
+                r.get(1)?,
+                r.get(2)?,
+            ))
+        })?;
+        rows.collect()
+    }
+
+    pub fn connector_delete(&self, id: &str) -> StoreResult<bool> {
+        Ok(self
+            .conn
+            .execute("DELETE FROM connectors WHERE connector_id = ?1", [id])?
+            > 0)
+    }
+
+    pub fn snapshot_to(&self, path: &Path) -> StoreResult<()> {
+        self.conn
+            .execute("VACUUM INTO ?1", [path.to_string_lossy()])?;
+        Ok(())
     }
 }

@@ -43,6 +43,7 @@ pub const GENESIS_HASH: &str = "000000000000000000000000000000000000000000000000
 pub enum Contract {
     AgentResult,
     AuditEvent,
+    Connector,
     Delegation,
     Envelope,
     Error,
@@ -57,9 +58,10 @@ pub enum Contract {
 }
 
 impl Contract {
-    pub const ALL: [Contract; 13] = [
+    pub const ALL: [Contract; 14] = [
         Contract::AgentResult,
         Contract::AuditEvent,
+        Contract::Connector,
         Contract::Delegation,
         Contract::Envelope,
         Contract::Error,
@@ -78,6 +80,7 @@ impl Contract {
         match self {
             Contract::AgentResult => "agent-result",
             Contract::AuditEvent => "audit-event",
+            Contract::Connector => "connector",
             Contract::Delegation => "delegation",
             Contract::Envelope => "envelope",
             Contract::Error => "error",
@@ -100,6 +103,7 @@ impl Contract {
         match self {
             Contract::AgentResult => schema_file!("agent-result.schema.json"),
             Contract::AuditEvent => schema_file!("audit-event.schema.json"),
+            Contract::Connector => schema_file!("connector.schema.json"),
             Contract::Delegation => schema_file!("delegation.schema.json"),
             Contract::Envelope => schema_file!("envelope.schema.json"),
             Contract::Error => ERROR,
@@ -115,7 +119,7 @@ impl Contract {
     }
 
     fn validator(self) -> &'static Validator {
-        static CELLS: [OnceLock<Validator>; 13] = [const { OnceLock::new() }; 13];
+        static CELLS: [OnceLock<Validator>; 14] = [const { OnceLock::new() }; 14];
         let index = Self::ALL
             .iter()
             .position(|c| *c == self)
@@ -251,7 +255,8 @@ pub fn semantic_errors(contract: Contract, doc: &Value) -> Vec<String> {
         | Contract::Workflow
         | Contract::Notification
         | Contract::VoiceSynthesis
-        | Contract::VoiceTranscription => {}
+        | Contract::VoiceTranscription
+        | Contract::Connector => {}
     }
     errors
 }

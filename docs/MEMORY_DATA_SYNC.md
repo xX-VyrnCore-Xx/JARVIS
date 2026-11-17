@@ -27,3 +27,11 @@ Verificare ripetizione della stessa operazione, crash durante la sincronizzazion
 - **Task e conversazione:** persistono dopo un riavvio.
 - **Automazioni:** le tabelle `workflows` (documento e prossima esecuzione) e `workflow_runs` (cronologia) persistono in SQLite.
 - **Non ancora implementati:** memoria semantica (pgvector o Qdrant), knowledge graph, sincronizzazione fra nodi e backup cifrati.
+
+## Backup e ripristino (RNF-08, ADR-0012)
+
+`./jarvis.sh backup`, oppure la sezione Sistema, crea un file `.jbak` cifrato con la passphrase del proprietario in `<dati>-backups`. Il file contiene un'istantanea coerente del database, il registro di audit, la workspace e un manifest con le impronte.
+
+`./jarvis.sh restore <file>`, eseguito a JARVIS chiuso, verifica cifratura, impronte, catena di audit e integrità del database prima di sostituire i dati; i dati precedenti restano in `<dati>.before-restore-<istante>`.
+
+Una cancellazione eseguita in JARVIS non modifica i backup già creati: per renderla definitiva bisogna eliminare anche i file `.jbak` precedenti.

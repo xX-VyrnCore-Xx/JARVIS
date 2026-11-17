@@ -4,6 +4,6 @@ members = ["bridge", "contracts", "server", "../apps/desktop/launcher"]
 
 [workspace.package]
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.89"
 license = "LicenseRef-Proprietary"
 publish = false

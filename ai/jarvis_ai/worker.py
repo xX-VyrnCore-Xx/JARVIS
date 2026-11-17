@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 import uuid
@@ -74,8 +75,37 @@ def voice_service():
     return _VOICE
 
 
+def _inject_fault() -> None:
+    """Guasti simulati per i test di robustezza (RNF-02). Attivi solo con JARVIS_FAULT_INJECTION=1.
+
+    JARVIS_FAULT: hang | crash | garbage | slow:<ms>, con suffisso facoltativo «-once»: il guasto si verifica
+    solo se il file JARVIS_FAULT_MARKER non esiste ancora (che viene creato), per provare il recupero.
+    """
+    if os.environ.get("JARVIS_FAULT_INJECTION") != "1":
+        return
+    fault = os.environ.get("JARVIS_FAULT", "")
+    if fault.endswith("-once"):
+        marker = os.environ.get("JARVIS_FAULT_MARKER", "")
+        if not marker or os.path.exists(marker):
+            return
+        with open(marker, "w", encoding="utf-8") as fh:
+            fh.write("guasto iniettato")
+        fault = fault[: -len("-once")]
+    if fault == "hang":
+        time.sleep(3600)
+    elif fault == "crash":
+        os._exit(7)
+    elif fault == "garbage":
+        sys.stdout.write("questa riga non è JSON\n")
+        sys.stdout.flush()
+        time.sleep(3600)
+    elif fault.startswith("slow:"):
+        time.sleep(int(fault.split(":", 1)[1]) / 1000)
+
+
 def assistant_handler(delegation: dict) -> dict:
     """Agente General Assistant: delega all'AI Gateway e valida l'esito (jarvis.agent-result/1)."""
+    _inject_fault()
     global _GATEWAY
     if _GATEWAY is None:
         from jarvis_ai.gateway import Gateway
@@ -183,6 +213,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--handler", choices=sorted(HANDLERS), default="echo")
     args = parser.parse_args(argv)
     handler = HANDLERS[args.handler]
+    # Protocollo in UTF-8 con righe '\n' su ogni sistema: su Windows le pipe userebbero cp1252 e '\r\n'.
+    for stream in (sys.stdin, sys.stdout):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", newline="\n" if stream is sys.stdout else None)
     for line in sys.stdin:
         if not line.strip():
             continue

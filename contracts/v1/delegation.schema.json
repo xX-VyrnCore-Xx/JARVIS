@@ -232,6 +232,36 @@
             },
             "output": {}
           }
+        },
+        "tool_descriptors": {
+          "description": "Descrittori degli strumenti dinamici (connettori RF-14) non presenti nel catalogo statico dell'agente. Aggiunta compatibile (facoltativa) della v1.",
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "version",
+              "summary",
+              "input_schema"
+            ],
+            "properties": {
+              "name": {
+                "$ref": "common.schema.json#/$defs/identifier"
+              },
+              "version": {
+                "$ref": "common.schema.json#/$defs/semver"
+              },
+              "summary": {
+                "type": "string",
+                "maxLength": 500
+              },
+              "input_schema": {
+                "type": "object"
+              }
+            }
+          }
         }
       }
     }

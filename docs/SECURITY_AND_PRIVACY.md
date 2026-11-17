@@ -33,11 +33,17 @@ Documentare insieme ai contratti la classificazione dei dati, i flussi egress, l
 | SSRF (Web) | Solo http e https pubblici; niente loopback, LAN o link-local (metadati cloud); DNS verificato e controllo ripetuto a ogni redirect | `ssrf_targets_are_denied_by_default`, `redirect_to_blocked_domain_is_stopped_at_each_hop` |
 | Prompt injection (Web) | Contenuto marcato non attendibile; dopo un risultato di strumento sono accettate solo risposte testuali | `page_instructions_are_never_executed`, `test_web_tool_result_is_wrapped_as_untrusted_for_the_model` |
 | Voce | Motori solo locali; audio non salvato né registrato nell'audit; parlato senza «Jarvis» scartato; microfono sempre segnalato; nessuna conferma a voce | `tests/ai/test_voice.py`, `core/server/tests/voice.rs`, E2E |
+| Backup | XChaCha20-Poly1305 con chiave Argon2id dalla passphrase, nessuna chiave salvata, ripristino verificato prima della sostituzione | `core/server/tests/backup.rs` |
+| Cartella dati | Blocco esclusivo: un solo Core per volta, nessun ripristino a Core attivo | `short_passphrase_is_refused_and_data_dir_is_locked` |
+| Segreti dei connettori | Cifrati per valore (XChaCha20-Poly1305), chiave in `data/.secrets.key` con permessi 0600; mai restituiti da API, audit, log o agente | `install_authorize_call_and_secret_never_leaks` |
+| Connettori | Host dichiarati e policy SSRF, nessun redirect; strumenti presenti solo se autorizzati; scritture esterne sempre con conferma; revoca immediata | `writes_need_confirmation_and_revoke_denies_immediately` |
+| Webhook | HMAC-SHA256 del corpo con segreto mostrato una volta; solo notifiche, nessuna azione; firme non valide nell'audit | `webhooks_require_a_valid_signature` |
 | Dati in uscita (Web) | Interruttore `JARVIS_WEB`, domini consentiti e vietati, audit di ogni chiamata | `web_can_be_disabled_or_restricted_to_an_allowlist` |
 
 Da completare:
 - identità con passkey o WebAuthn e MFA;
 - identità dei nodi e mTLS;
-- isolamento dei plugin;
+- isolamento dei plugin con codice;
+- chiave dei segreti nel portachiavi del sistema operativo;
 - cifratura dei dati a riposo e dei backup;
 - firma o ancoraggio esterno dell'audit.

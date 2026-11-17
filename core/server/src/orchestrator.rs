@@ -17,6 +17,7 @@ use serde_json::{json, Map, Value};
 use crate::audit::AuditLog;
 use crate::catalog::Catalog;
 use crate::config::Config;
+use crate::observability::{Observability, Timer};
 use crate::store::Store;
 use crate::{automation, now, policy, tools};
 
@@ -30,6 +31,8 @@ pub enum CoreError {
     Unavailable(String),
     NotFound(String),
     Gone(String),
+    /// Credenziale o firma non valida (es. webhook dei connettori).
+    Unauthorized(String),
     Internal(String),
 }
 
@@ -131,6 +134,10 @@ pub struct Jarvis {
     catalog: Catalog,
     worker: Option<Worker>,
     pending: HashMap<String, Pending>,
+    obs: std::sync::Arc<Observability>,
+    secrets: crate::secrets::SecretStore,
+    /// Blocco esclusivo sulla cartella dati: un solo Core per volta (rilasciato alla chiusura).
+    _lock: std::fs::File,
 }
 
 fn obj(v: Value) -> Map<String, Value> {
@@ -143,6 +150,18 @@ fn obj(v: Value) -> Map<String, Value> {
 impl Jarvis {
     pub fn new(cfg: Config) -> Result<Self, String> {
         std::fs::create_dir_all(cfg.workspace()).map_err(|e| format!("workspace: {e}"))?;
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(cfg.data_dir.join(".lock"))
+            .map_err(|e| format!("blocco della cartella dati: {e}"))?;
+        lock.try_lock().map_err(|_| {
+            format!(
+                "un altro Core JARVIS sta già usando la cartella dati {}",
+                cfg.data_dir.display()
+            )
+        })?;
         std::fs::create_dir_all(cfg.data_dir.join("audit")).map_err(|e| format!("audit: {e}"))?;
         let store = Store::open(&cfg.data_dir.join("jarvis.sqlite3"))
             .map_err(|e| format!("database: {e}"))?;
@@ -152,18 +171,29 @@ impl Jarvis {
         )
         .map_err(|e| format!("audit: {e}"))?;
         let catalog = Catalog::load()?;
-        Ok(Self {
+        let secrets = crate::secrets::SecretStore::open(&cfg.data_dir)?;
+        let cfg_logs = cfg.data_dir.join("logs");
+        let mut jarvis = Self {
             cfg,
             store,
             audit,
             catalog,
             worker: None,
             pending: HashMap::new(),
-        })
+            obs: std::sync::Arc::new(Observability::new(Some(&cfg_logs))),
+            secrets,
+            _lock: lock,
+        };
+        jarvis.register_authorized_connectors()?;
+        Ok(jarvis)
     }
 
     pub fn config(&self) -> &Config {
         &self.cfg
+    }
+
+    pub fn observability(&self) -> std::sync::Arc<Observability> {
+        self.obs.clone()
     }
 
     // ------------------------------------------------------------------ worker
@@ -182,7 +212,21 @@ impl Jarvis {
             if let Some(engine) = &self.cfg.voice_engine {
                 cmd.env("JARVIS_VOICE_ENGINE", engine);
             }
-            self.worker = Some(Worker::spawn(cmd).map_err(|e| e.to_contract())?);
+            for (k, v) in &self.cfg.worker_env {
+                cmd.env(k, v);
+            }
+            let spawned = Worker::spawn(cmd).map_err(|e| e.to_contract());
+            self.obs.count(if spawned.is_ok() {
+                "worker.spawned"
+            } else {
+                "worker.spawn_failed"
+            });
+            self.obs.log(
+                if spawned.is_ok() { "info" } else { "error" },
+                "worker.spawn",
+                json!({"ok": spawned.is_ok()}),
+            );
+            self.worker = Some(spawned?);
         }
         Ok(self.worker.as_mut().expect("worker presente"))
     }
@@ -248,18 +292,61 @@ impl Jarvis {
             "objective": task.doc["objective"],
             "delegate": {"agent": "general_assistant", "temporary": false},
             "context": {"refs": [format!("jarvis://task/{}", task.id())]},
-            "tools": self.catalog.iter().map(|t| json!({"name": t.name(), "version": t.version()})).collect::<Vec<_>>(),
+            "tools": self.delegated_tools().map(|t| json!({"name": t.name(), "version": t.version()})).collect::<Vec<_>>(),
             "limits": {"max_steps": 4, "max_subdelegations": 0, "allow_cloud": false},
             "timeout_ms": self.cfg.delegation_timeout_ms,
             "completion_conditions": ["Esito jarvis.agent-result/1 valido"],
             "issued_at": ts(issued),
             "expires_at": ts(expires),
-            "inputs": inputs,
+            "inputs": self.with_dynamic_tools(inputs),
         })
+    }
+
+    /// Strumenti delegati all'agente: prima il catalogo statico, poi al massimo 16 strumenti dei connettori
+    /// (limite di 32 del contratto di delega).
+    fn delegated_tools(&self) -> impl Iterator<Item = &crate::catalog::Tool> {
+        fn dynamic(t: &&crate::catalog::Tool) -> bool {
+            t.name().starts_with("connector.")
+        }
+        self.catalog
+            .iter()
+            .filter(|t| !dynamic(t))
+            .chain(self.catalog.iter().filter(dynamic).take(16))
+            .take(32)
+    }
+
+    /// Aggiunge agli input i descrittori dei connettori autorizzati, che il catalogo statico dell'agente non conosce.
+    fn with_dynamic_tools(&self, inputs: &Value) -> Value {
+        let dynamic: Vec<Value> = self
+            .delegated_tools()
+            .filter(|t| t.name().starts_with("connector."))
+            .map(|t| json!({"name": t.name(), "version": t.version(), "summary": t.descriptor["summary"], "input_schema": t.descriptor["input_schema"]}))
+            .collect();
+        if dynamic.is_empty() || !inputs.is_object() {
+            return inputs.clone();
+        }
+        merge(inputs, json!({"tool_descriptors": dynamic}))
     }
 
     /// Delega all'agente; restituisce l'esito `jarvis.agent-result/1` o un errore v1.
     fn call_agent(&mut self, task: &Task, inputs: &Value) -> Result<Value, Value> {
+        let timer = Timer::start();
+        let result = self.call_agent_inner(task, inputs);
+        self.obs
+            .observe("delegation general_assistant", timer.ms(), result.is_err());
+        if let Err(e) = &result {
+            self.obs.count("delegation.failed");
+            self.obs.log(
+                "warn",
+                "delegation.failed",
+                json!({"task_id": task.id(), "correlation_id": task.correlation(),
+                "code": e["code"], "duration_ms": timer.ms()}),
+            );
+        }
+        result
+    }
+
+    fn call_agent_inner(&mut self, task: &Task, inputs: &Value) -> Result<Value, Value> {
         let delegation = self.delegation(task, inputs);
         let (id, corr) = (task.id(), task.correlation());
         let worker = self.worker()?;
@@ -318,6 +405,45 @@ impl Jarvis {
     // ------------------------------------------------------------------ chat
 
     pub fn chat(&mut self, message: &str) -> Result<Outcome, CoreError> {
+        let timer = Timer::start();
+        let out = self.chat_inner(message);
+        self.record_task("chat", &timer, &out);
+        out
+    }
+
+    /// Metriche e log di fine richiesta: identificativi, stato e durata, mai il contenuto.
+    fn record_task(&self, kind: &str, timer: &Timer, out: &Result<Outcome, CoreError>) {
+        let ms = timer.ms();
+        match out {
+            Ok(o) => {
+                let state = o.task["state"].as_str().unwrap_or("unknown");
+                self.obs
+                    .observe(&format!("task {kind}"), ms, state == "failed");
+                self.obs.log(if state == "failed" { "warn" } else { "info" }, "task.finished", json!({
+                    "kind": kind, "task_id": o.task["task_id"], "correlation_id": o.task["correlation_id"], "state": state,
+                    "steps": o.steps.len(), "error_code": o.task["error"]["code"], "duration_ms": (ms * 10.0).round() / 10.0,
+                }));
+            }
+            Err(e) => {
+                self.obs.observe(&format!("task {kind}"), ms, true);
+                let kind_of = match e {
+                    CoreError::BadRequest(_) => "bad_request",
+                    CoreError::NotFound(_) => "not_found",
+                    CoreError::Gone(_) => "gone",
+                    CoreError::Unauthorized(_) => "unauthorized",
+                    CoreError::Unavailable(_) => "unavailable",
+                    CoreError::Internal(_) => "internal",
+                };
+                self.obs.log(
+                    "warn",
+                    "task.rejected",
+                    json!({"kind": kind, "reason": kind_of}),
+                );
+            }
+        }
+    }
+
+    fn chat_inner(&mut self, message: &str) -> Result<Outcome, CoreError> {
         let message = message.trim();
         if message.is_empty() || message.chars().count() > MAX_MESSAGE {
             return Err(CoreError::BadRequest(format!(
@@ -456,6 +582,17 @@ impl Jarvis {
     }
 
     pub fn confirm(&mut self, confirmation_id: &str, approve: bool) -> Result<Outcome, CoreError> {
+        let timer = Timer::start();
+        let out = self.confirm_inner(confirmation_id, approve);
+        self.record_task("confirm", &timer, &out);
+        out
+    }
+
+    fn confirm_inner(
+        &mut self,
+        confirmation_id: &str,
+        approve: bool,
+    ) -> Result<Outcome, CoreError> {
         let Pending {
             mut task,
             decision,
@@ -708,6 +845,22 @@ impl Jarvis {
         arguments: &Value,
         confirmed: bool,
     ) -> Result<Value, tools::ToolError> {
+        let timer = Timer::start();
+        let result = self.execute_tool_inner(tool, arguments, confirmed);
+        self.obs
+            .observe(&format!("tool {tool}"), timer.ms(), result.is_err());
+        if let Err(e) = &result {
+            self.obs.log("warn", "tool.failed", json!({"tool": tool, "code": e.code, "duration_ms": (timer.ms() * 10.0).round() / 10.0}));
+        }
+        result
+    }
+
+    fn execute_tool_inner(
+        &mut self,
+        tool: &str,
+        arguments: &Value,
+        confirmed: bool,
+    ) -> Result<Value, tools::ToolError> {
         match tool {
             "workflow.create" => {
                 if !confirmed {
@@ -747,6 +900,7 @@ impl Jarvis {
                     .map_err(|e| tool_error("workflow.unavailable", e.to_string()))?;
                 Ok(json!({"id": short(&doc), "name": doc["name"]}))
             }
+            t if t.starts_with("connector.") => self.call_connector(t, arguments, confirmed),
             _ => {
                 let workspace = self.cfg.workspace();
                 tools::execute(
@@ -884,6 +1038,30 @@ impl Jarvis {
     /// Esegue un workflow con la policy vigente. I passi a rischio alto passano solo se coperti
     /// dall'approvazione del proprietario, verificata ricalcolando il digest dei passi.
     pub fn run_workflow(
+        &mut self,
+        doc: &Value,
+        kind: &str,
+        scheduled_for: Option<&str>,
+    ) -> Result<Value, CoreError> {
+        let timer = Timer::start();
+        let run = self.run_workflow_inner(doc, kind, scheduled_for);
+        let status = run
+            .as_ref()
+            .map(|r| r["status"].as_str().unwrap_or("unknown").to_string())
+            .unwrap_or_else(|_| "error".into());
+        self.obs.observe(
+            &format!("workflow {kind}"),
+            timer.ms(),
+            status != "succeeded",
+        );
+        self.obs.log(if status == "succeeded" { "info" } else { "warn" }, "workflow.run", json!({
+            "workflow_id": doc["workflow_id"], "version": doc["version"], "trigger": kind, "status": status,
+            "task_id": run.as_ref().ok().map(|r| r["task_id"].clone()), "duration_ms": (timer.ms() * 10.0).round() / 10.0,
+        }));
+        run
+    }
+
+    fn run_workflow_inner(
         &mut self,
         doc: &Value,
         kind: &str,
@@ -1247,6 +1425,12 @@ impl Jarvis {
             )));
         }
         self.store.notification_put(&doc, 500).map_err(internal)?;
+        self.obs.count(&format!(
+            "notification.{}",
+            doc["severity"].as_str().unwrap_or("info")
+        ));
+        self.obs.log("info", "notification", json!({"severity": doc["severity"], "category": doc["category"],
+            "task_id": doc["task_id"], "workflow_id": doc["workflow_id"], "correlation_id": doc["correlation_id"]}));
         Ok(Some(doc))
     }
 
@@ -1315,6 +1499,7 @@ impl Jarvis {
         self.check_audit();
         if self.worker.as_mut().is_some_and(|w| w.has_exited()) {
             self.worker = None;
+            self.obs.count("worker.crashed");
             self.notify(json!({
                 "severity": "warning", "category": "system", "title": "Worker AI terminato",
                 "body": "Il processo dell'agente si è chiuso; verrà riavviato alla prossima richiesta.",
@@ -1607,6 +1792,341 @@ impl Jarvis {
             map.remove("audio_b64");
         }
         Ok((audio, out))
+    }
+}
+
+// ---------------------------------------------------------------------- Connettori (RF-14)
+
+fn token_name(id: &str) -> String {
+    format!("connector:{id}:credential")
+}
+
+fn webhook_name(id: &str) -> String {
+    format!("connector:{id}:webhook")
+}
+
+fn random_secret() -> String {
+    let mut b = [0u8; 32];
+    getrandom::getrandom(&mut b).expect("generatore casuale del sistema");
+    hex::encode(b)
+}
+
+impl Jarvis {
+    fn register_authorized_connectors(&mut self) -> Result<(), String> {
+        for (manifest, _, authorized) in self.store.connectors().map_err(|e| e.to_string())? {
+            if authorized.is_some() {
+                for d in crate::connectors::tool_descriptors(&manifest) {
+                    self.catalog.insert_dynamic(d)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn connector_manifest(&self, id: &str) -> Result<(Value, Option<String>), CoreError> {
+        self.store
+            .connectors()
+            .map_err(internal)?
+            .into_iter()
+            .find(|(m, _, _)| m["id"] == id)
+            .map(|(m, _, a)| (m, a))
+            .ok_or_else(|| CoreError::NotFound(format!("nessun connettore {id}")))
+    }
+
+    fn connector_audit(&mut self, action: &str, id: &str, outcome: &str) -> Result<(), CoreError> {
+        self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "owner", "id": "owner"},
+                          "node": "core-local", "action": action, "resource": format!("jarvis://connector/{id}"),
+                          "outcome": outcome, "effect": "applied"}))?;
+        Ok(())
+    }
+
+    fn connector_view(&self, manifest: &Value, installed: &str, authorized: Option<&str>) -> Value {
+        let id = manifest["id"].as_str().unwrap_or_default();
+        let has = |n: String| self.secrets.get(&n).ok().flatten().is_some();
+        json!({
+            "id": id, "name": manifest["name"], "version": manifest["version"], "description": manifest["description"],
+            "base_url": manifest["base_url"], "auth": manifest["auth"]["type"],
+            "installed_at": installed, "authorized_at": authorized, "authorized": authorized.is_some(),
+            "has_credential": has(token_name(id)),
+            "webhook": manifest["webhook"]["enabled"] == true, "webhook_path": format!("/api/hooks/{id}"),
+            "operations": manifest["operations"].as_array().map(|ops| ops.iter().map(|o| json!({
+                "tool": crate::connectors::tool_name(id, o["name"].as_str().unwrap_or_default()),
+                "summary": o["summary"], "method": o["method"], "effects": o["effects"], "risk": o["risk"],
+            })).collect::<Vec<_>>()),
+        })
+    }
+
+    pub fn connectors(&self) -> Result<Vec<Value>, CoreError> {
+        Ok(self
+            .store
+            .connectors()
+            .map_err(internal)?
+            .iter()
+            .map(|(m, i, a)| self.connector_view(m, i, a.as_deref()))
+            .collect())
+    }
+
+    /// Installa (o aggiorna) un connettore dal manifest. Gli strumenti diventano disponibili solo dopo
+    /// l'autorizzazione; un connettore senza autenticazione è autorizzato dall'installazione stessa,
+    /// che è un'azione esplicita del proprietario. Il segreto del webhook è mostrato una sola volta.
+    pub fn install_connector(&mut self, manifest: &Value) -> Result<Value, CoreError> {
+        let normalized = crate::connectors::validate_manifest(manifest, &self.cfg.web)
+            .map_err(CoreError::BadRequest)?;
+        let id = normalized["id"].as_str().unwrap_or_default().to_string();
+        for d in crate::connectors::tool_descriptors(&normalized) {
+            if validate(Contract::ToolDescriptor, &d).is_valid() {
+                continue;
+            }
+            return Err(CoreError::BadRequest(format!(
+                "operazione con nome non ammesso: {}",
+                d["name"]
+            )));
+        }
+        let at = now();
+        self.catalog.remove_connector(&id);
+        self.store
+            .connector_put(&normalized, &at)
+            .map_err(internal)?;
+        let open = normalized["auth"]["type"] == "none";
+        self.store
+            .connector_set_authorized(&id, open.then_some(at.as_str()))
+            .map_err(internal)?;
+        if !open {
+            self.secrets
+                .delete(&token_name(&id))
+                .map_err(CoreError::Internal)?;
+        }
+        if open {
+            for d in crate::connectors::tool_descriptors(&normalized) {
+                self.catalog
+                    .insert_dynamic(d)
+                    .map_err(CoreError::BadRequest)?;
+            }
+        }
+        let webhook_secret = if normalized["webhook"]["enabled"] == true {
+            let s = random_secret();
+            self.secrets
+                .put(&webhook_name(&id), &s)
+                .map_err(CoreError::Internal)?;
+            Some(s)
+        } else {
+            self.secrets
+                .delete(&webhook_name(&id))
+                .map_err(CoreError::Internal)?;
+            None
+        };
+        self.connector_audit("connector.install", &id, "succeeded")?;
+        self.obs
+            .log("info", "connector.install", json!({"connector": id}));
+        let (m, a) = self.connector_manifest(&id)?;
+        let mut view = self.connector_view(&m, &at, a.as_deref());
+        if let Some(s) = webhook_secret {
+            view["webhook_secret"] = s.into();
+        }
+        Ok(view)
+    }
+
+    /// Salva la credenziale cifrata e registra gli strumenti del connettore.
+    pub fn authorize_connector(&mut self, id: &str, credential: &str) -> Result<Value, CoreError> {
+        let (manifest, _) = self.connector_manifest(id)?;
+        let credential = credential.trim();
+        if manifest["auth"]["type"] != "none" {
+            if credential.is_empty()
+                || credential.len() > 4096
+                || credential.chars().any(char::is_control)
+            {
+                return Err(CoreError::BadRequest(
+                    "credenziale vuota o non valida".into(),
+                ));
+            }
+            self.secrets
+                .put(&token_name(id), credential)
+                .map_err(CoreError::Internal)?;
+        }
+        let at = now();
+        self.store
+            .connector_set_authorized(id, Some(&at))
+            .map_err(internal)?;
+        self.catalog.remove_connector(id);
+        for d in crate::connectors::tool_descriptors(&manifest) {
+            self.catalog
+                .insert_dynamic(d)
+                .map_err(CoreError::BadRequest)?;
+        }
+        self.connector_audit("connector.authorize", id, "succeeded")?;
+        self.obs
+            .log("info", "connector.authorize", json!({"connector": id}));
+        let (m, a) = self.connector_manifest(id)?;
+        let installed = self
+            .store
+            .connectors()
+            .map_err(internal)?
+            .into_iter()
+            .find(|(x, _, _)| x["id"] == id)
+            .map(|(_, i, _)| i)
+            .unwrap_or_default();
+        Ok(self.connector_view(&m, &installed, a.as_deref()))
+    }
+
+    /// Revoca: credenziale cancellata e strumenti rimossi dal catalogo (la policy li nega da subito).
+    /// Con `uninstall` elimina anche manifest e segreto del webhook.
+    pub fn revoke_connector(&mut self, id: &str, uninstall: bool) -> Result<Value, CoreError> {
+        self.connector_manifest(id)?;
+        self.secrets
+            .delete(&token_name(id))
+            .map_err(CoreError::Internal)?;
+        let removed = self.catalog.remove_connector(id);
+        self.store
+            .connector_set_authorized(id, None)
+            .map_err(internal)?;
+        if uninstall {
+            self.secrets
+                .delete(&webhook_name(id))
+                .map_err(CoreError::Internal)?;
+            self.store.connector_delete(id).map_err(internal)?;
+        }
+        self.connector_audit(
+            if uninstall {
+                "connector.uninstall"
+            } else {
+                "connector.revoke"
+            },
+            id,
+            "revoked",
+        )?;
+        self.obs.log(
+            "info",
+            "connector.revoke",
+            json!({"connector": id, "uninstall": uninstall}),
+        );
+        Ok(json!({"id": id, "tools_removed": removed, "uninstalled": uninstall}))
+    }
+
+    fn call_connector(
+        &mut self,
+        tool: &str,
+        arguments: &Value,
+        confirmed: bool,
+    ) -> Result<Value, tools::ToolError> {
+        let mut parts = tool.splitn(3, '.');
+        let (_, id, op) = (
+            parts.next(),
+            parts.next().unwrap_or_default(),
+            parts.next().unwrap_or_default(),
+        );
+        let descriptor = self
+            .catalog
+            .get(tool)
+            .ok_or_else(|| tool_error("connector.not_authorized", "connettore non autorizzato"))?;
+        if descriptor.needs_confirmation() && !confirmed {
+            return Err(tool_error(
+                "connector.not_confirmed",
+                "la scrittura verso l'esterno richiede la conferma del proprietario",
+            ));
+        }
+        let (manifest, authorized) = self
+            .connector_manifest(id)
+            .map_err(|_| tool_error("connector.not_authorized", "connettore non installato"))?;
+        if authorized.is_none() {
+            return Err(tool_error(
+                "connector.not_authorized",
+                "connettore revocato",
+            ));
+        }
+        let secret = self
+            .secrets
+            .get(&token_name(id))
+            .map_err(|e| tool_error("connector.unavailable", e))?;
+        let timer = Timer::start();
+        let result =
+            crate::connectors::call(&manifest, op, arguments, secret.as_deref(), &self.cfg.web);
+        self.obs
+            .observe(&format!("connector {id}"), timer.ms(), result.is_err());
+        result
+    }
+
+    /// Webhook in ingresso: firma HMAC-SHA256 obbligatoria. Il contenuto è trattato come non attendibile e
+    /// diventa solo una notifica; non avvia strumenti né automazioni.
+    pub fn connector_webhook(
+        &mut self,
+        id: &str,
+        body: &[u8],
+        signature: Option<&str>,
+    ) -> Result<Value, CoreError> {
+        let secret = self
+            .secrets
+            .get(&webhook_name(id))
+            .map_err(CoreError::Internal)?
+            .filter(|_| {
+                self.store
+                    .connectors()
+                    .map(|c| c.iter().any(|(m, _, _)| m["id"] == id))
+                    .unwrap_or(false)
+            });
+        let Some(secret) = secret else {
+            return Err(CoreError::NotFound(format!(
+                "nessun webhook attivo per {id}"
+            )));
+        };
+        if !crate::connectors::verify_signature(&secret, body, signature) {
+            self.obs.count("connector.webhook_rejected");
+            self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "plugin", "id": format!("connector.{id}")},
+                              "node": "core-local", "action": "connector.webhook", "resource": format!("jarvis://connector/{id}"),
+                              "outcome": "failed", "error_code": "connector.bad_signature", "effect": "not_applied"}))?;
+            return Err(CoreError::Unauthorized(
+                "firma del webhook non valida".into(),
+            ));
+        }
+        let (manifest, _) = self.connector_manifest(id)?;
+        let parsed: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
+        let text = parsed["text"]
+            .as_str()
+            .or(parsed["message"].as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| String::from_utf8_lossy(body).chars().take(500).collect());
+        let note = self.notify(json!({
+            "severity": "info", "category": "integration",
+            "title": format!("Evento da {}", manifest["name"].as_str().unwrap_or(id)),
+            "body": text.chars().take(500).collect::<String>(),
+            "source": {"kind": "plugin", "id": format!("connector.{id}")}, "link": {"view": "connectors", "ref": id},
+        }))?;
+        self.obs.count("connector.webhook_accepted");
+        Ok(json!({"accepted": true, "notification_id": note.map(|n| n["notification_id"].clone())}))
+    }
+}
+
+// ---------------------------------------------------------------------- Backup (RNF-08)
+
+impl Jarvis {
+    /// Backup cifrato con la passphrase del proprietario; istantanea coerente presa sotto il blocco del Core.
+    pub fn create_backup(&mut self, passphrase: &str) -> Result<Value, CoreError> {
+        let timer = Timer::start();
+        let out_dir = self.cfg.backups_dir();
+        let store = &self.store;
+        let summary = crate::backup::create(&self.cfg.data_dir, &out_dir, passphrase, |p| {
+            store.snapshot_to(p).map_err(|e| e.to_string())
+        })
+        .map_err(|e| {
+            if e.contains("passphrase") {
+                CoreError::BadRequest(e)
+            } else {
+                CoreError::Internal(e)
+            }
+        })?;
+        self.obs.observe("backup create", timer.ms(), false);
+        self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "owner", "id": "owner"},
+                          "node": "core-local", "action": "backup.create", "outcome": "succeeded", "effect": "applied"}))?;
+        self.notify(json!({"severity": "success", "category": "system", "title": "Backup creato",
+            "body": format!("{} · {} file cifrati", summary["file"].as_str().unwrap_or(""), summary["files"]), "source": {"kind": "module", "id": "backup"}}))?;
+        let mut view = summary;
+        if let Some(m) = view.as_object_mut() {
+            m.remove("path");
+        }
+        Ok(view)
+    }
+
+    pub fn backups(&self) -> Value {
+        json!({"dir": self.cfg.backups_dir().to_string_lossy(), "items": crate::backup::list(&self.cfg.backups_dir())})
     }
 }
 

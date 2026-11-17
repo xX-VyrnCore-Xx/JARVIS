@@ -1,0 +1,9 @@
+{
+  "description": "Obiettivi iniziali di latenza (p95, ms) per il percorso offline senza modello reale. Le misure con Ollama dipendono dall'hardware e vanno raccolte sul computer del proprietario prima di fissarne gli obiettivi (DEVOPS_QA_OBSERVABILITY.md).",
+  "scenarios": {
+    "health": {"method": "GET", "path": "/api/health", "p95_ms": 500},
+    "tasks": {"method": "GET", "path": "/api/tasks?limit=50", "p95_ms": 200},
+    "chat_reply": {"method": "POST", "path": "/api/chat", "body": {"message": "ciao"}, "p95_ms": 1000},
+    "chat_tool": {"method": "POST", "path": "/api/chat", "body": {"message": "che ore sono"}, "p95_ms": 1500}
+  }
+}

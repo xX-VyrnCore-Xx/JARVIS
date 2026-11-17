@@ -50,3 +50,35 @@ Il Core trasforma eventi e anomalie in notifiche `jarvis.notification/1`, correl
 | Worker AI terminato | warning | finché non letta |
 
 Il monitor gira a ogni intervallo del pianificatore. Le notifiche si consultano da `GET /api/notifications` e si segnano come lette con `POST /api/notifications/{id}/read` o `POST /api/notifications/read-all`.
+
+## Avvio verificato per sistema operativo
+
+Il job CI `avvio` esegue i lanciatori reali (`jarvis.sh` su Linux e macOS, `jarvis.ps1` su Windows) da un checkout pulito. Poi `tests/smoke/start_smoke.py` attende il Core e verifica health, chat con caratteri accentati e uno strumento eseguito tramite policy. I lanciatori offrono `doctor` per la diagnosi dei prerequisiti.
+
+## Osservabilità e robustezza (Fase 4, ADR-0011)
+
+**Metriche:** `GET /api/metrics` riporta conteggio, errori e latenze p50, p95 e max per endpoint, strumento, delega, task e automazione, più i contatori del worker. La sezione «Sistema» dell'interfaccia le mostra in tabella.
+
+**Log:** `data/logs/core.jsonl` (JSON Lines, rotazione a 5 MiB) contiene eventi correlati (`task_id`, `correlation_id`, durata, codice d'errore) e non contiene messaggi, file né audio dell'utente.
+
+**Iniezione di guasti** (solo con `JARVIS_FAULT_INJECTION=1`):
+
+| Guasto | Effetto atteso | Verifica |
+|---|---|---|
+| `hang` | Task `failed` con `bridge.timeout`, effetto `unknown`, notifica correlata; worker riavviato alla richiesta successiva | `worker_hang_times_out_and_recovers` |
+| `crash` | `bridge.worker_unavailable`, poi recupero | `worker_crash_is_isolated_and_recovers` |
+| `garbage` | `bridge.invalid_response`, poi recupero | `worker_garbage_output_is_rejected_and_recovers` |
+| `slow:<ms>` | Successo, latenza registrata | `slow_worker_within_timeout_is_measured_not_failed` |
+| Audit cancellato | Catena non valida e notifica di sicurezza | `deleted_audit_log_is_detected_and_core_keeps_working` |
+| Workspace rimossa | Errore dello strumento; il resto continua | `removed_workspace_degrades_to_a_tool_error` |
+
+**Obiettivi di latenza iniziali** (`tests/perf/slo.json`, percorso offline, p95):
+
+| Scenario | Obiettivo | Misura locale |
+|---|---|---|
+| health | 500 ms | 3,4 ms |
+| elenco task | 200 ms | 1,7 ms |
+| chat senza strumenti | 1000 ms | 9,1 ms |
+| chat con strumento | 1500 ms | 15,3 ms |
+
+Gli obiettivi sono volutamente larghi per i runner CI: servono a rilevare regressioni gravi. Quelli con modelli reali si fissano dopo le misure sull'hardware del proprietario.

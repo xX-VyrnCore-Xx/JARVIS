@@ -17,6 +17,7 @@
     "actor": { "$ref": "common.schema.json#/$defs/actor" },
     "node": { "$ref": "common.schema.json#/$defs/identifier" },
     "action": { "$ref": "common.schema.json#/$defs/identifier" },
+    "resource": { "description": "Risorsa interessata (URI jarvis://). Aggiunta compatibile della v1.", "type": "string", "pattern": "^jarvis://", "maxLength": 512 },
     "decision_id": { "$ref": "common.schema.json#/$defs/uuid" },
     "outcome": { "enum": ["allowed", "denied", "confirmed", "succeeded", "failed", "cancelled", "revoked"] },
     "effect": { "enum": ["not_applied", "applied", "partial", "unknown"] },

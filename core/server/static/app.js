@@ -174,6 +174,27 @@ async function loadConversation() {
 // ------------------------------------------------------------------ altre viste
 
 const views = {
+  async connectors() {
+    const { items } = await api("/api/connectors");
+    const box = $("#connectors");
+    box.replaceChildren(...(items.length ? items.map((c) => {
+      const cred = el("input", { type: "password", autocomplete: "off", placeholder: c.auth === "none" ? "nessuna credenziale" : "token o chiave API", "aria-label": `Credenziale per ${c.name}` });
+      const act = (path, method, body) => async () => {
+        try { await api(path, { method, body: body ? JSON.stringify(body()) : undefined }); views.connectors(); } catch (e) { alert(e.message); }
+      };
+      return el("div", { class: "card" },
+        el("div", { class: "body" },
+          el("div", { class: "title" }, `${c.name} `, el("span", { class: "sub" }, `${c.id} · v${c.version}`)),
+          el("div", { class: "sub" }, `${c.base_url} · autenticazione ${c.auth}${c.webhook ? ` · webhook ${c.webhook_path}` : ""}`),
+          el("ul", { class: "history" }, (c.operations || []).map((o) => el("li", {}, `${o.tool} — ${o.summary} (${o.method}, rischio ${o.risk}${o.effects === "write_external" ? ", con conferma" : ""})`))),
+          el("div", { class: "row" },
+            c.auth === "none" ? null : cred,
+            el("button", { class: "primary", onclick: act(`/api/connectors/${encodeURIComponent(c.id)}/authorize`, "POST", () => ({ credential: cred.value })) }, c.authorized ? "Aggiorna credenziale" : "Autorizza"),
+            c.authorized ? el("button", { class: "ghost", onclick: act(`/api/connectors/${encodeURIComponent(c.id)}/revoke`, "POST") }, "Revoca") : null,
+            el("button", { class: "danger", onclick: async () => { if (confirm(`Disinstallare ${c.name}? Credenziale e webhook verranno cancellati.`)) await act(`/api/connectors/${encodeURIComponent(c.id)}`, "DELETE")(); } }, "Disinstalla"))),
+        el("span", { class: `badge ${c.authorized ? "succeeded" : "pending"}` }, c.authorized ? "autorizzato" : "da autorizzare"));
+    }) : [el("p", { class: "empty" }, "Nessun connettore installato.")]));
+  },
   async tasks() {
     const { items } = await api("/api/tasks?limit=50");
     const box = $("#tasks");
@@ -354,6 +375,65 @@ views.automations = async () => {
   }) : [el("p", { class: "empty" }, "Nessuna automazione. Creane una qui sopra o scrivi in chat: \"ogni ora info sistema\".")]));
 };
 
+views.system = async () => {
+  const [h, m] = await Promise.all([fetch("/api/health").then((r) => r.json()), api("/api/metrics")]);
+  const fmtUptime = (s) => s < 3600 ? `${Math.floor(s / 60)} min` : `${Math.floor(s / 3600)} h ${Math.floor((s % 3600) / 60)} min`;
+  const b = h.ai && h.ai.gateway && h.ai.gateway.backend;
+  const v = h.ai && h.ai.gateway && h.ai.gateway.voice;
+  const c = m.counters || {};
+  const card = (k, val, detail) => el("div", { class: "stat" }, el("div", { class: "k" }, k), el("div", { class: "v" }, val), detail ? el("div", { class: "d" }, detail) : null);
+  $("#system-cards").replaceChildren(
+    card("Core", `v${h.core.version} · attivo da ${fmtUptime(m.uptime_s)}`),
+    card("AI", b ? `${b.name} · ${b.model}` : "non disponibile", b && b.degraded_reason ? b.degraded_reason : (h.ai.status === "up" ? "worker attivo" : (h.ai.error || {}).message)),
+    card("Voce", v && v.available ? `${v.stt.name} · ${v.tts ? v.tts.name : "senza sintesi"}` : "non disponibile", v ? (v.available ? `attivazione: ${v.wake}` : (v.reasons || []).join("; ")) : ""),
+    card("Web", h.web && h.web.enabled ? `attivo · ${h.web.provider}` : "disattivato", h.web ? h.web.provider_url : ""),
+    card("Audit", `${h.audit.events} eventi`, h.audit.chain_valid ? "catena integra ✓" : "catena ALTERATA ✗"),
+    card("Worker", `${c["worker.spawned"] || 0} avvii · ${c["worker.crashed"] || 0} arresti anomali`, `${c["delegation.failed"] || 0} deleghe fallite`),
+  );
+  const rows = [];
+  for (const [group, series] of Object.entries(m.series || {})) {
+    for (const [name, x] of Object.entries(series)) {
+      rows.push(el("tr", {},
+        el("td", {}, `${group} · ${name}`), el("td", {}, String(x.count)),
+        el("td", { class: x.errors ? "bad" : "" }, String(x.errors)),
+        el("td", {}, `${x.p50_ms} ms`), el("td", {}, `${x.p95_ms} ms`), el("td", {}, `${x.max_ms} ms`)));
+    }
+  }
+  const bk = await api("/api/backups");
+  $("#backup-list").replaceChildren(...(bk.items.length ? bk.items.slice(0, 5).map((b) => el("div", { class: "sub" }, `${b.file} · ${(b.bytes / 1024).toFixed(1)} KiB`)) : [el("div", { class: "sub" }, `Nessun backup in ${bk.dir}`)]));
+  $("#metrics-table tbody").replaceChildren(...(rows.length ? rows : [el("tr", {}, el("td", { colspan: "6" }, "Nessuna misura ancora."))]));
+};
+
+$("#backup-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  if (f.pass.value !== f.again.value) return alert("Le due passphrase non coincidono.");
+  const button = f.querySelector("button");
+  button.disabled = true;
+  button.textContent = "Cifratura…";
+  try {
+    const out = await api("/api/backup", { method: "POST", body: JSON.stringify({ passphrase: f.pass.value }) });
+    f.reset();
+    alert(`Backup creato: ${out.file} (${out.files} file, audit ${out.audit.chain_valid ? "integro" : "da verificare"}).`);
+    views.system();
+  } catch (err) { alert(err.message); } finally { button.disabled = false; button.textContent = "Crea backup"; }
+});
+
+$("#connector-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  let manifest;
+  try { manifest = JSON.parse(f.manifest.value); } catch { alert("Il manifest non è JSON valido"); return; }
+  try {
+    const out = await api("/api/connectors", { method: "POST", body: JSON.stringify(manifest) });
+    f.reset();
+    const note = $("#connector-secret");
+    note.hidden = !out.webhook_secret;
+    note.textContent = out.webhook_secret ? `Segreto del webhook (mostrato una sola volta, usalo per firmare X-Jarvis-Signature con HMAC-SHA256): ${out.webhook_secret}` : "";
+    views.connectors();
+  } catch (err) { alert(err.message); }
+});
+
 function show(view) {
   document.querySelectorAll(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
   document.querySelectorAll(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${view}`));
@@ -366,7 +446,7 @@ document.querySelectorAll("[data-refresh]").forEach((b) => b.addEventListener("c
 
 // ------------------------------------------------------------------ notifiche (RF-13)
 
-const CATEGORY = { automation: "automazione", confirmation: "conferma", system: "sistema", security: "sicurezza" };
+const CATEGORY = { automation: "automazione", confirmation: "conferma", system: "sistema", security: "sicurezza", integration: "integrazione" };
 let notifSince = null;
 let notifPrimed = false;
 

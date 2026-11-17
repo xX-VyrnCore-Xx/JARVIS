@@ -84,4 +84,34 @@ impl Catalog {
     pub fn iter(&self) -> impl Iterator<Item = &Tool> {
         self.tools.values()
     }
+
+    /// Registra uno strumento dinamico (connettori RF-14). Solo il prefisso `connector.` è ammesso,
+    /// così un manifest non può sostituire uno strumento statico.
+    pub fn insert_dynamic(&mut self, descriptor: Value) -> Result<(), String> {
+        let name = descriptor["name"].as_str().unwrap_or_default().to_string();
+        if !name.starts_with("connector.") {
+            return Err(format!(
+                "strumento dinamico fuori dallo spazio dei connettori: {name}"
+            ));
+        }
+        let report = validate(Contract::ToolDescriptor, &descriptor);
+        if !report.is_valid() {
+            return Err(format!(
+                "descrittore non conforme: {}",
+                report.schema.join("; ")
+            ));
+        }
+        let input = jsonschema::validator_for(&descriptor["input_schema"])
+            .map_err(|e| format!("input_schema non valido: {e}"))?;
+        self.tools.insert(name, Tool { descriptor, input });
+        Ok(())
+    }
+
+    /// Rimuove gli strumenti di un connettore; restituisce quanti ne ha tolti.
+    pub fn remove_connector(&mut self, id: &str) -> usize {
+        let prefix = format!("connector.{id}.");
+        let before = self.tools.len();
+        self.tools.retain(|name, _| !name.starts_with(&prefix));
+        before - self.tools.len()
+    }
 }

@@ -41,7 +41,7 @@ Per 81–83 il proprietario ha confermato l'opzione D senza precisazioni. Per 1�
 
 I motori vocali sono stati scelti dal proprietario (ADR-0010).
 
-Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage e gestione segreti, soluzione VPN mesh, modalità di aggiornamento Desktop, catalogo iniziale dettagliato e valori obiettivo SLO e recovery. La struttura delle directory in DEVELOPMENT.md è una proposta operativa. I codici dei requisiti e le verifiche rappresentative sono stati aggiunti per collegare piano e implementazione.
+Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage, custodia della chiave dei segreti nel portachiavi del sistema (ADR-0013), soluzione VPN mesh, modalità di aggiornamento Desktop, catalogo iniziale dettagliato e valori obiettivo SLO e recovery. La struttura delle directory in DEVELOPMENT.md è una proposta operativa. I codici dei requisiti e le verifiche rappresentative sono stati aggiunti per collegare piano e implementazione.
 
 ## ADR registrati
 
@@ -297,6 +297,93 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage 
   - `tests/ai/test_voice.py`: 10 test, compreso openWakeWord reale (punteggi 0,0001–0,04 su silenzio, tono e rumore, con soglia 0,5);
   - E2E con microfono finto di Chromium: 8 verifiche vocali. Una di queste ha scoperto la CSP che bloccava l'audio, poi corretta.
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, SECURITY_AND_PRIVACY.md, AI_SYSTEM.md, ARCHITECTURE.md, TECH_STACK.md, REQUIREMENTS.md, README.md.
+
+### ADR-0011 — Fase 4: osservabilità, iniezione di guasti e primi SLO
+
+- **Data:** 2026-11-17 · **Stato:** Accettato (Fase 4 «Integrazione», RNF-02, RNF-07)
+- **Contesto:** la condizione di uscita della Fase 4 chiede interazioni fra moduli e gestione degli errori verificate. DEVOPS_QA_OBSERVABILITY.md chiede di correlare richiesta, task, agente, strumento e nodo, e di definire soglie con misure riproducibili.
+- **Decisione:**
+  - **Metriche** in memoria (`core/server/src/observability.rs`): conteggio, errori, p50, p95 e max sugli ultimi 512 campioni per endpoint (modello di rotta), strumento, delega, task e automazione. Contatori di avvii e arresti anomali del worker, deleghe fallite e notifiche. Esposte da `GET /api/metrics` (con token) e dalla sezione «Sistema» dell'interfaccia.
+  - **Log strutturati** JSON Lines in `data/logs/core.jsonl`, con rotazione a 5 MiB. Eventi: `task.finished`, `delegation.failed`, `tool.failed`, `workflow.run`, `worker.spawn`, `notification`, `http.error`. Ogni riga porta `task_id`, `correlation_id` e durata, mai contenuti dell'utente.
+  - **Iniezione di guasti** nel worker (`JARVIS_FAULT_INJECTION=1`, `JARVIS_FAULT=hang|crash|garbage|slow:<ms>[-once]`), attiva solo in modo esplicito e usata dai test di sistema (`core/server/tests/resilience.rs`).
+  - **Avvio verificato** sui tre sistemi operativi (job CI `avvio`, `tests/smoke/start_smoke.py`).
+  - **Primi obiettivi di latenza** (`tests/perf/slo.json`, misurati da `tests/perf/latency.py` nella CI) per il percorso offline.
+- **Motivazione:** ogni guasto simulato deve essere rilevabile, correlato al task, isolato e seguito da un recupero automatico. Le soglie si fissano solo dopo averle misurate.
+- **Conseguenze:**
+  - le metriche si azzerano al riavvio: per la persistenza storica servirà l'Observability Engine completo (trace distribuite, esportazione);
+  - gli SLO con modelli reali (Ollama, faster-whisper, Piper) vanno misurati sul computer del proprietario.
+- **Evidenza:**
+  - `resilience.rs`: 9 test (hang, crash e output non JSON con recupero; lentezza misurata; log correlati senza contenuti; audit cancellato rilevato; workspace rimossa; 20 richieste concorrenti; metriche protette);
+  - misura locale p95: health 3,4 ms, elenco task 1,7 ms, chat 9,1 ms, chat con strumento 15,3 ms;
+  - E2E: pannello Sistema.
+- **Documenti interessati:** DEVOPS_QA_OBSERVABILITY.md, ARCHITECTURE.md, REQUIREMENTS.md, INTERFACE_AND_DEVICES.md, README.md.
+
+### ADR-0012 — Backup cifrato e ripristino verificato
+
+- **Data:** 2026-11-17 · **Stato:** Accettato (Fase 4, RNF-08). La gestione dei segreti resta aperta: la chiave non viene conservata, deriva ogni volta dalla passphrase del proprietario.
+- **Contesto:** RNF-08 chiede il ripristino su un ambiente pulito. MEMORY_DATA_SYNC.md chiede backup cifrati e la convalida di dati, metadati e permessi dopo il ripristino. SECURITY_AND_PRIVACY.md chiede la protezione dei backup.
+- **Decisione:**
+  - **Formato** `jarvis-backup/1` (`.jbak`):
+    - intestazione `JARVISB1`, sale, nonce;
+    - archivio tar cifrato con XChaCha20-Poly1305 e chiave derivata con Argon2id (64 MiB, 3 passaggi);
+    - passphrase di almeno 12 caratteri.
+  - **Contenuto:**
+    - `manifest.json` con l'impronta SHA-256 di ogni file, lo stato della catena di audit e la sua testa;
+    - istantanea coerente del database (`VACUUM INTO`, presa con il Core bloccato);
+    - registro di audit;
+    - workspace, esclusi i link simbolici.
+  - **Ripristino:**
+    - decifratura autenticata;
+    - percorsi dell'archivio solo relativi;
+    - confronto delle impronte;
+    - catena di audit e `PRAGMA integrity_check`, entrambi verificati in una cartella di appoggio;
+    - solo dopo, i dati attuali vengono spostati in `<dati>.before-restore-<istante>` e sostituiti.
+
+    Qualsiasi errore lascia i dati intatti e rimuove la cartella di appoggio.
+  - **Blocco esclusivo** `data/.lock`: un solo Core per cartella dati. Il ripristino da riga di comando lo rifiuta se JARVIS è in esecuzione.
+  - **Accessi:**
+    - interfaccia: `POST /api/backup`, con token, audit e notifica; l'API non espone percorsi assoluti;
+    - riga di comando: `./jarvis.sh backup` e `./jarvis.sh restore <file>`;
+    - i backup si trovano in `<dati>-backups`, accanto ai dati.
+- **Motivazione:** un backup senza ripristino verificato non è una garanzia. La cifratura autenticata rileva sia la passphrase sbagliata sia le alterazioni. Conservare i dati sostituiti rende reversibile anche il ripristino.
+- **Conseguenze:**
+  - nessuna rotazione o conservazione automatica dei backup;
+  - non esiste ancora un backup pianificato;
+  - limite di 1 GiB nel formato del prototipo;
+  - la cancellazione di dati dal sistema non si propaga ai backup già creati (MEMORY_DATA_SYNC.md richiede di documentarlo).
+- **Evidenza:**
+  - `core/server/tests/backup.rs`: 5 test (ripristino completo su ambiente pulito con memoria, file, automazioni, conversazione e catena di audit estesa dopo il ripristino; passphrase errata, file alterato o non valido senza effetti sui dati; dati precedenti conservati; passphrase corta; blocco della cartella; API protetta e registrata nell'audit);
+  - prova da riga di comando: backup, ripristino rifiutato con passphrase errata, ripristino rifiutato con JARVIS attivo, ripristino riuscito;
+  - E2E: backup dall'interfaccia.
+- **Documenti interessati:** MEMORY_DATA_SYNC.md, SECURITY_AND_PRIVACY.md, DEVOPS_QA_OBSERVABILITY.md, REQUIREMENTS.md, README.md.
+
+### ADR-0013 — Integration Engine: connettori dichiarativi e archivio dei segreti
+
+- **Data:** 2026-11-17 · **Stato:** Accettato (Fase 4, RF-14). Resta aperta la custodia della chiave nel portachiavi del sistema operativo.
+- **Contesto:** RF-14 chiede che un connettore possa essere installato, autorizzato e revocato. SECURITY_AND_PRIVACY.md chiede segreti centralizzati e fuori da telemetria e checkpoint. AUTONOMY_AND_TOOLS.md chiede che ogni capacità passi da catalogo, policy e conferma.
+- **Opzioni:** plugin con codice eseguibile (richiede un sandbox non ancora disponibile); connettori dichiarativi HTTP senza codice; solo strumenti statici nel catalogo.
+- **Decisione:**
+  - **Manifest** `jarvis.connector/1` (`contracts/v1/connector.schema.json`): `id`, `base_url`, `allowed_hosts`, autenticazione `none`, `bearer` o `header`, webhook facoltativo e operazioni `GET`/`POST` con `input_schema` chiuso. Nessun campo per i segreti: un manifest con un token viene rifiutato dallo schema.
+  - **Validazione all'installazione:** l'host di `base_url` deve essere in `allowed_hosts` e superare la policy Web (niente indirizzi privati salvo `JARVIS_WEB_ALLOW_PRIVATE`). I parametri di percorso devono essere obbligatori. I nomi delle operazioni devono produrre identificatori validi.
+  - **Strumenti dinamici** `connector.<id>.<operazione>` (contratto `jarvis.tool/1`, ambito `integration`). Il catalogo li accetta solo con questo prefisso, quindi non possono sostituire strumenti statici. Sono registrati solo finché il connettore è autorizzato; un connettore revocato viene negato dalla policy come strumento sconosciuto.
+  - **Rischio:** le scritture verso l'esterno (`write_external`) sono sempre almeno `high`, quindi con conferma monouso, anche se il manifest dichiara meno.
+  - **Delega:** il Core passa all'agente al massimo 16 strumenti dei connettori, dopo quelli statici (limite di 32 della delega), con i descrittori in `inputs.tool_descriptors` (aggiunta compatibile della v1). Il gateway non li accetta dal catalogo statico. Comando offline: «connettore <id> <operazione> chiave=valore».
+  - **Esecuzione:** richiesta HTTP dal Core con DNS verificato e fissato, solo host dichiarati, nessun redirect, 1 MiB al massimo, credenziale aggiunta solo in quel momento. La risposta è marcata non attendibile come i contenuti Web.
+  - **Segreti** (`secrets.rs`): tabella `secrets` cifrata per valore con XChaCha20-Poly1305; chiave casuale in `data/.secrets.key` (permessi 0600 su Unix). Le credenziali non tornano mai da API, audit, log, conversazione o agente. Il backup cifrato include la chiave, altrimenti i segreti ripristinati sarebbero illeggibili.
+  - **Webhook** `POST /api/hooks/{id}`: firma `X-Jarvis-Signature: sha256=<HMAC-SHA256 del corpo>` con un segreto generato all'installazione e mostrato una sola volta. Esente dal token di sessione ma soggetto al controllo dell'host di loopback. Un evento valido diventa solo una notifica (categoria `integration`, aggiunta compatibile); non avvia strumenti né automazioni. Le firme non valide sono registrate nell'audit.
+  - **Audit:** `connector.install`, `connector.authorize`, `connector.revoke`, `connector.uninstall`, con il campo facoltativo `resource` (aggiunta compatibile di `jarvis.audit-event/1`).
+- **Motivazione:** i connettori dichiarativi coprono le API HTTP comuni senza eseguire codice di terzi. Restano dentro gli stessi controlli di policy, conferma, SSRF e audit degli strumenti statici. La revoca è immediata perché toglie lo strumento dal catalogo.
+- **Conseguenze:**
+  - nessun OAuth, nessuna paginazione, nessun metodo oltre `GET` e `POST`;
+  - la chiave dei segreti sta sul disco accanto ai dati: protegge da letture del database, non da chi legge l'intera cartella. Da spostare nel portachiavi del sistema (decisione aperta);
+  - i webhook arrivano solo da processi locali o da un tunnel scelto dal proprietario;
+  - nessun SDK o plugin con codice.
+- **Evidenza:**
+  - `core/server/tests/connectors.rs`: 4 test con un servizio HTTP locale (installazione senza strumenti fino all'autorizzazione; chiamata con credenziale iniettata; credenziale assente da API, audit, conversazione e da ogni file della cartella dati; ripresa dopo il riavvio; conferma delle scritture; revoca immediata anche su una conferma già emessa; webhook valido, alterato, senza firma o sconosciuto; manifest non validi);
+  - unitari in `connectors.rs` (3) e `secrets.rs` (1);
+  - fixture del contratto (1 valida, 5 non valide);
+  - E2E: installazione dall'interfaccia, autorizzazione e chiamata dalla chat.
+- **Documenti interessati:** REQUIREMENTS.md, SECURITY_AND_PRIVACY.md, AUTONOMY_AND_TOOLS.md, README.md.
 
 ### Decisione operativa — Merge automatico con CI verde
 

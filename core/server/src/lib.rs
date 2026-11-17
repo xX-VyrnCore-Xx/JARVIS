@@ -7,10 +7,14 @@
 pub mod api;
 pub mod audit;
 pub mod automation;
+pub mod backup;
 pub mod catalog;
 pub mod config;
+pub mod connectors;
+pub mod observability;
 pub mod orchestrator;
 pub mod policy;
+pub mod secrets;
 pub mod store;
 pub mod tools;
 pub mod web;

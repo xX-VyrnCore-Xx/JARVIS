@@ -1,0 +1,60 @@
+{
+ "contract": "jarvis.connector/1",
+ "id": "Meteo Locale",
+ "name": "Meteo locale",
+ "version": "1.0.0",
+ "description": "Previsioni da un servizio meteo",
+ "base_url": "https://api.meteo.example/v1",
+ "allowed_hosts": [
+  "api.meteo.example"
+ ],
+ "auth": {
+  "type": "bearer"
+ },
+ "webhook": {
+  "enabled": true
+ },
+ "operations": [
+  {
+   "name": "previsioni",
+   "summary": "Previsioni per una città",
+   "method": "GET",
+   "path": "/forecast/{citta}",
+   "effects": "read",
+   "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "citta"
+    ],
+    "properties": {
+     "citta": {
+      "type": "string",
+      "maxLength": 80
+     }
+    }
+   }
+  },
+  {
+   "name": "segnala",
+   "summary": "Invia una segnalazione",
+   "method": "POST",
+   "path": "/reports",
+   "effects": "write_external",
+   "risk": "high",
+   "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "testo"
+    ],
+    "properties": {
+     "testo": {
+      "type": "string",
+      "maxLength": 500
+     }
+    }
+   }
+  }
+ ]
+}
