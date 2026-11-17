@@ -156,6 +156,24 @@ class OfflineBackend(unittest.TestCase):
                 r = self.call(message)
                 self.assertEqual((r["tool_call"]["tool"], r["tool_call"]["arguments"]), (tool, args))
 
+    def test_scheduling_intents(self):
+        r = self.call("ogni minuto scrivi battito.txt: vivo")["tool_call"]
+        self.assertEqual(r["tool"], "workflow.create")
+        self.assertEqual(r["arguments"]["trigger"], {"kind": "interval", "every_seconds": 60})
+        self.assertEqual(r["arguments"]["steps"], [{"tool": "fs.write", "arguments": {"path": "battito.txt", "content": "vivo"}}])
+        self.assertEqual(self.call("ogni 2 ore info sistema")["tool_call"]["arguments"]["trigger"]["every_seconds"], 7200)
+        self.assertEqual(self.call("ogni giorno alle 7:30 che ore sono")["tool_call"]["arguments"]["trigger"], {"kind": "daily", "at": "07:30"})
+        once = self.call("tra 5 minuti cosa ricordi")["tool_call"]["arguments"]
+        self.assertEqual((once["trigger"]["kind"], once["steps"][0]["tool"]), ("once", "memory.list"))
+        self.assertEqual(self.call("elenca automazioni")["tool_call"]["tool"], "workflow.list")
+        self.assertEqual(self.call("esegui automazione 1a2b3c4d")["tool_call"]["arguments"], {"id": "1a2b3c4d"})
+        self.assertEqual(self.call("elimina automazione 1a2b3c4d")["tool_call"]["tool"], "workflow.delete")
+
+    def test_scheduling_errors_are_explained(self):
+        self.assertIn("minimo", self.call("ogni 30 secondi info sistema")["text"])
+        self.assertIn("Non so pianificare", self.call("ogni ora fai qualcosa di strano")["text"])
+        self.assertIn("Orario non valido", self.call("ogni giorno alle 25:00 che ore sono")["text"])
+
     def test_offline_mode_has_no_degraded_reason(self):
         self.assertNotIn("degraded_reason", self.g.status()["backend"])
 

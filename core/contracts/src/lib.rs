@@ -49,10 +49,12 @@ pub enum Contract {
     PolicyDecision,
     Task,
     ToolDescriptor,
+    Workflow,
+    WorkflowRun,
 }
 
 impl Contract {
-    pub const ALL: [Contract; 8] = [
+    pub const ALL: [Contract; 10] = [
         Contract::AgentResult,
         Contract::AuditEvent,
         Contract::Delegation,
@@ -61,6 +63,8 @@ impl Contract {
         Contract::PolicyDecision,
         Contract::Task,
         Contract::ToolDescriptor,
+        Contract::Workflow,
+        Contract::WorkflowRun,
     ];
 
     /// Nome usato nei file `<nome>.schema.json` e nelle fixture.
@@ -74,6 +78,8 @@ impl Contract {
             Contract::PolicyDecision => "policy-decision",
             Contract::Task => "task",
             Contract::ToolDescriptor => "tool-descriptor",
+            Contract::Workflow => "workflow",
+            Contract::WorkflowRun => "workflow-run",
         }
     }
 
@@ -91,11 +97,13 @@ impl Contract {
             Contract::PolicyDecision => schema_file!("policy-decision.schema.json"),
             Contract::Task => schema_file!("task.schema.json"),
             Contract::ToolDescriptor => schema_file!("tool-descriptor.schema.json"),
+            Contract::Workflow => schema_file!("workflow.schema.json"),
+            Contract::WorkflowRun => schema_file!("workflow-run.schema.json"),
         }
     }
 
     fn validator(self) -> &'static Validator {
-        static CELLS: [OnceLock<Validator>; 8] = [const { OnceLock::new() }; 8];
+        static CELLS: [OnceLock<Validator>; 10] = [const { OnceLock::new() }; 10];
         let index = Self::ALL
             .iter()
             .position(|c| *c == self)
@@ -201,10 +209,27 @@ pub fn semantic_errors(contract: Contract, doc: &Value) -> Vec<String> {
                 }
             }
         }
+        Contract::WorkflowRun => {
+            if ts(&doc["finished_at"]) < ts(&doc["started_at"]) {
+                errors.push("finished_at precede started_at".into());
+            }
+            let steps = doc["steps"]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_default();
+            if steps
+                .iter()
+                .enumerate()
+                .any(|(i, s)| s["index"].as_u64() != Some(i as u64))
+            {
+                errors.push("indici dei passi non consecutivi da 0".into());
+            }
+        }
         Contract::AgentResult
         | Contract::AuditEvent
         | Contract::Error
-        | Contract::ToolDescriptor => {}
+        | Contract::ToolDescriptor
+        | Contract::Workflow => {}
     }
     errors
 }

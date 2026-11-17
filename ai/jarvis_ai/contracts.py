@@ -87,6 +87,11 @@ def semantic_errors(schema_name: str, doc: dict) -> list[str]:
                 errors.append("la conferma è legata a parametri diversi")
             if not decided < _ts(conf["expires_at"]) <= expires:
                 errors.append("la conferma deve scadere entro la decisione")
+    if schema_name == "workflow-run":
+        if _ts(doc["finished_at"]) < _ts(doc["started_at"]):
+            errors.append("finished_at precede started_at")
+        if [step["index"] for step in doc["steps"]] != list(range(len(doc["steps"]))):
+            errors.append("indici dei passi non consecutivi da 0")
     if schema_name == "envelope":
         if doc["sender"] == doc["recipient"]:
             errors.append("sender e recipient coincidono")

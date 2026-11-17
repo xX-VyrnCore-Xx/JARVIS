@@ -18,7 +18,7 @@ use crate::audit::AuditLog;
 use crate::catalog::Catalog;
 use crate::config::Config;
 use crate::store::Store;
-use crate::{now, policy, tools};
+use crate::{automation, now, policy, tools};
 
 const HISTORY_MESSAGES: u32 = 10;
 const MAX_MESSAGE: usize = 8000;
@@ -41,7 +41,7 @@ struct Task {
 }
 
 impl Task {
-    fn new(message: &str) -> Self {
+    fn new(message: &str, requester: Value) -> Self {
         let at = now();
         let objective: String = message.chars().take(4000).collect();
         Self {
@@ -49,13 +49,13 @@ impl Task {
                 "contract": "jarvis.task/1",
                 "task_id": uuid::Uuid::new_v4().to_string(),
                 "correlation_id": uuid::Uuid::new_v4().to_string(),
-                "requester": {"kind": "owner", "id": "owner"},
+                "requester": requester.clone(),
                 "objective": objective,
                 "success_conditions": ["Risposta fornita al proprietario", "Ogni strumento eseguito ha superato la policy"],
                 "dependencies": [],
                 "scope": {"nodes": ["core-local"]},
                 "state": "pending",
-                "history": [{"to": "pending", "at": at, "by": {"kind": "owner", "id": "owner"}, "reason": "Messaggio ricevuto"}],
+                "history": [{"to": "pending", "at": at, "by": requester, "reason": "Richiesta ricevuta"}],
                 "created_at": at,
             }),
         }
@@ -210,6 +210,7 @@ impl Jarvis {
             "ai": ai,
             "audit": {"events": events, "chain_valid": errors.is_empty()},
             "pending_confirmations": self.pending.len(),
+            "automations": self.store.workflows().map(|w| w.iter().filter(|(d, _)| d["enabled"] == true).count()).unwrap_or(0),
         })
     }
 
@@ -304,7 +305,7 @@ impl Jarvis {
             )));
         }
         self.expire_pending()?;
-        let mut task = Task::new(message);
+        let mut task = Task::new(message, json!({"kind": "owner", "id": "owner"}));
         self.store
             .message_add("user", message, &task.id(), &now())
             .map_err(internal)?;
@@ -344,6 +345,7 @@ impl Jarvis {
         let decision = policy::decide(
             &self.catalog,
             &policy::Request {
+                subject: json!({"kind": "agent", "id": "general_assistant"}),
                 task_id: &tid,
                 correlation_id: &corr,
                 tool: &tool,
@@ -412,7 +414,7 @@ impl Jarvis {
                 Ok(out)
             }
             _ => {
-                let (status, output) = self.run_tool(&task, &tool, &arguments, &mut out)?;
+                let (status, output) = self.run_tool(&task, &tool, &arguments, false, &mut out)?;
                 let text = self.compose(&task, &inputs, &tool, status, output, &mut out);
                 task.transition("succeeded", "Strumento eseguito e risposta composta");
                 self.finish(task, out, text)
@@ -466,7 +468,7 @@ impl Jarvis {
             out.steps
                 .push(json!({"kind": "confirmation", "approved": true}));
             task.transition("running", "Confermato dal proprietario");
-            let (status, output) = self.run_tool(&task, &tool, &arguments, &mut out)?;
+            let (status, output) = self.run_tool(&task, &tool, &arguments, true, &mut out)?;
             let text = self.compose(&task, &inputs, &tool, status, output, &mut out);
             task.transition("succeeded", "Strumento eseguito dopo conferma");
             self.finish(task, out, text)
@@ -528,17 +530,10 @@ impl Jarvis {
         task: &Task,
         tool: &str,
         arguments: &Value,
+        confirmed: bool,
         out: &mut Outcome,
     ) -> Result<(&'static str, Value), CoreError> {
-        let workspace = self.cfg.workspace();
-        let result = tools::execute(
-            tool,
-            arguments,
-            &tools::Context {
-                workspace: &workspace,
-                store: &self.store,
-            },
-        );
+        let result = self.execute_tool(tool, arguments, confirmed);
         let base = json!({"correlation_id": task.correlation(), "task_id": task.id(), "actor": {"kind": "module", "id": "core"},
                           "node": "core-local", "action": tool});
         match result {
@@ -645,6 +640,502 @@ impl Jarvis {
         )
         .map_err(|e| CoreError::Internal(e.message))
     }
+}
+
+// ---------------------------------------------------------------------- Automation Engine (RF-07)
+
+fn tool_error(code: &'static str, message: impl Into<String>) -> tools::ToolError {
+    tools::ToolError {
+        code,
+        message: message.into(),
+    }
+}
+
+impl Jarvis {
+    /// Esegue uno strumento del catalogo. Gli strumenti `workflow.*` sono gestiti dal Core stesso.
+    fn execute_tool(
+        &mut self,
+        tool: &str,
+        arguments: &Value,
+        confirmed: bool,
+    ) -> Result<Value, tools::ToolError> {
+        match tool {
+            "workflow.create" => {
+                if !confirmed {
+                    return Err(tool_error(
+                        "workflow.not_confirmed",
+                        "la creazione richiede la conferma del proprietario",
+                    ));
+                }
+                let doc = self.build_workflow(arguments, "chat_confirmation")?;
+                self.store_new_workflow(&doc)
+            }
+            "workflow.list" => Ok(
+                json!({"items": self.workflow_views().map_err(|e| tool_error("workflow.unavailable", format!("{e:?}")))?}),
+            ),
+            "workflow.run" => {
+                let (doc, _) = self.find_workflow(arguments["id"].as_str().unwrap_or_default())?;
+                let run = self
+                    .run_workflow(&doc, "manual", None)
+                    .map_err(|e| tool_error("workflow.unavailable", format!("{e:?}")))?;
+                Ok(json!({"name": doc["name"], "status": run["status"], "steps": run["steps"]}))
+            }
+            "workflow.delete" => {
+                let (doc, _) = self.find_workflow(arguments["id"].as_str().unwrap_or_default())?;
+                self.store
+                    .workflow_delete(doc["workflow_id"].as_str().unwrap_or_default())
+                    .map_err(|e| tool_error("workflow.unavailable", e.to_string()))?;
+                Ok(json!({"id": short(&doc), "name": doc["name"]}))
+            }
+            _ => {
+                let workspace = self.cfg.workspace();
+                tools::execute(
+                    tool,
+                    arguments,
+                    &tools::Context {
+                        workspace: &workspace,
+                        store: &self.store,
+                    },
+                )
+            }
+        }
+    }
+
+    fn find_workflow(&self, key: &str) -> Result<(Value, Option<String>), tools::ToolError> {
+        let found = self
+            .store
+            .workflow_find(key)
+            .map_err(|e| tool_error("workflow.unavailable", e.to_string()))?;
+        match found.len() {
+            1 => Ok(found.into_iter().next().expect("un elemento")),
+            0 => Err(tool_error(
+                "workflow.not_found",
+                format!("nessuna automazione con id {key}"),
+            )),
+            _ => Err(tool_error(
+                "workflow.ambiguous",
+                format!("l'id {key} corrisponde a più automazioni: usane uno più lungo"),
+            )),
+        }
+    }
+
+    /// Costruisce un `jarvis.workflow/1` da argomenti dello strumento o del modulo dell'interfaccia.
+    fn build_workflow(&self, args: &Value, method: &str) -> Result<Value, tools::ToolError> {
+        let invalid = |m: String| tool_error("workflow.invalid", m);
+        let raw_steps = args["steps"]
+            .as_array()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| invalid("servono da 1 a 10 passi".into()))?;
+        let mut steps = Vec::new();
+        for (i, step) in raw_steps.iter().enumerate() {
+            let name = step["tool"].as_str().unwrap_or_default();
+            if name.starts_with("workflow.") {
+                return Err(invalid(format!(
+                    "passo {}: un'automazione non può gestire altre automazioni",
+                    i + 1
+                )));
+            }
+            let tool = self.catalog.get(name).ok_or_else(|| {
+                invalid(format!("passo {}: strumento sconosciuto '{name}'", i + 1))
+            })?;
+            let arguments = if step["arguments"].is_object() {
+                step["arguments"].clone()
+            } else {
+                json!({})
+            };
+            if !tool.input.is_valid(&arguments) {
+                return Err(invalid(format!(
+                    "passo {}: argomenti non validi per {name}",
+                    i + 1
+                )));
+            }
+            steps.push(json!({"tool": name, "version": tool.version(), "arguments": arguments}));
+        }
+        let steps = Value::Array(steps);
+        let at = now();
+        let doc = json!({
+            "contract": "jarvis.workflow/1",
+            "workflow_id": uuid::Uuid::new_v4().to_string(),
+            "name": args["name"].as_str().map(|n| n.chars().take(200).collect::<String>()).filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "Automazione".into()),
+            "version": 1,
+            "enabled": true,
+            "trigger": args["trigger"],
+            "steps": steps,
+            "on_failure": if args["on_failure"] == "continue" { "continue" } else { "stop" },
+            "approval": {"approved_by": {"kind": "owner", "id": "owner"}, "method": method, "approved_at": at, "steps_digest": automation::steps_digest(&steps)},
+            "created_at": at,
+        });
+        let report = validate(Contract::Workflow, &doc);
+        if !report.is_valid() {
+            return Err(invalid(format!(
+                "automazione non conforme: {}",
+                report.schema.join("; ")
+            )));
+        }
+        if automation::first_run(&doc["trigger"], chrono::Utc::now(), &chrono::Local).is_none() {
+            return Err(invalid("la data indicata è già passata".into()));
+        }
+        Ok(doc)
+    }
+
+    fn store_new_workflow(&mut self, doc: &Value) -> Result<Value, tools::ToolError> {
+        let next = automation::first_run(&doc["trigger"], chrono::Utc::now(), &chrono::Local)
+            .map(automation::ts);
+        self.store
+            .workflow_put(doc, next.as_deref())
+            .map_err(|e| tool_error("workflow.unavailable", e.to_string()))?;
+        Ok(json!({
+            "id": short(doc), "workflow_id": doc["workflow_id"], "name": doc["name"],
+            "trigger": automation::describe(&doc["trigger"]),
+            "next_run": next.as_deref().map(automation::fmt_local),
+            "steps": doc["steps"].as_array().map(|s| s.iter().map(|x| x["tool"].clone()).collect::<Vec<_>>()),
+        }))
+    }
+
+    fn workflow_views(&self) -> Result<Vec<Value>, CoreError> {
+        let mut out = Vec::new();
+        for (doc, next) in self.store.workflows().map_err(internal)? {
+            let id = doc["workflow_id"].as_str().unwrap_or_default().to_string();
+            let last = self
+                .store
+                .runs(&id, 1)
+                .map_err(internal)?
+                .into_iter()
+                .next();
+            out.push(json!({
+                "id": short(&doc), "workflow_id": id, "name": doc["name"], "enabled": doc["enabled"],
+                "trigger": doc["trigger"], "trigger_text": automation::describe(&doc["trigger"]),
+                "steps": doc["steps"], "on_failure": doc["on_failure"], "approval": doc["approval"],
+                "next_run_at": next, "next_run": next.as_deref().map(automation::fmt_local),
+                "last_run": last.map(|r| json!({"status": r["status"], "started_at": r["started_at"], "trigger": r["trigger"]["kind"]})),
+            }));
+        }
+        Ok(out)
+    }
+
+    /// Esegue un workflow con la policy vigente. I passi a rischio alto passano solo se coperti
+    /// dall'approvazione del proprietario, verificata ricalcolando il digest dei passi.
+    pub fn run_workflow(
+        &mut self,
+        doc: &Value,
+        kind: &str,
+        scheduled_for: Option<&str>,
+    ) -> Result<Value, CoreError> {
+        let name = doc["name"].as_str().unwrap_or("automazione");
+        let mut task = Task::new(
+            &format!("Automazione «{name}»"),
+            json!({"kind": "module", "id": "automation"}),
+        );
+        task.transition("planned", &format!("Trigger {kind}"));
+        task.transition("running", "Esecuzione dei passi");
+        let (tid, corr) = (task.id(), task.correlation());
+        let started = now();
+        let subject = json!({"kind": "module", "id": "automation"});
+        let steps = doc["steps"].as_array().cloned().unwrap_or_default();
+        let approved =
+            doc["approval"]["steps_digest"] == automation::steps_digest(&doc["steps"]).as_str();
+        let stop_on_failure = doc["on_failure"] != "continue";
+        let mut results: Vec<Value> = Vec::new();
+        let mut first_problem: Option<(String, &str)> = None;
+
+        for (index, step) in steps.iter().enumerate() {
+            let tool = step["tool"].as_str().unwrap_or_default().to_string();
+            if !approved || (first_problem.is_some() && stop_on_failure) {
+                results.push(json!({"index": index, "tool": tool, "decision": "not_evaluated", "status": "skipped"}));
+                continue;
+            }
+            let version = step["version"].as_str().unwrap_or_default().to_string();
+            let arguments = step["arguments"].clone();
+            let digest = canonical_digest(
+                &json!({"tool": tool, "version": version, "arguments": arguments}),
+            );
+            let decision = policy::decide(
+                &self.catalog,
+                &policy::Request {
+                    subject: subject.clone(),
+                    task_id: &tid,
+                    correlation_id: &corr,
+                    tool: &tool,
+                    version: &version,
+                    arguments: &arguments,
+                    digest: &digest,
+                },
+            );
+            let verdict = decision["decision"].as_str().unwrap_or("deny").to_string();
+            let preapproved = verdict == "require_confirmation";
+            self.audit(json!({"correlation_id": corr, "task_id": tid, "actor": subject, "node": "core-local",
+                              "action": decision["request"]["action"]["tool"], "decision_id": decision["decision_id"],
+                              "outcome": if verdict == "deny" { "denied" } else { "allowed" }}))?;
+            let mut entry = json!({"index": index, "tool": tool, "decision": verdict, "decision_id": decision["decision_id"]});
+            if preapproved {
+                entry["preapproved"] = true.into();
+            }
+            if verdict == "deny" {
+                let code = decision["reasons"][0]
+                    .as_str()
+                    .unwrap_or("policy.denied")
+                    .to_string();
+                entry["status"] = "denied".into();
+                entry["summary"] = policy::explain(&code).into();
+                entry["error_code"] = code.clone().into();
+                first_problem.get_or_insert((code, "denied"));
+                results.push(entry);
+                continue;
+            }
+            let base = json!({"correlation_id": corr, "task_id": tid, "actor": {"kind": "module", "id": "core"}, "node": "core-local", "action": tool});
+            match self.execute_tool(&tool, &arguments, preapproved) {
+                Ok(output) => {
+                    self.audit(merge(
+                        &base,
+                        json!({"outcome": "succeeded", "effect": "applied"}),
+                    ))?;
+                    entry["status"] = "succeeded".into();
+                    entry["summary"] = automation::summarize(&output).into();
+                }
+                Err(e) => {
+                    self.audit(merge(
+                        &base,
+                        json!({"outcome": "failed", "effect": "not_applied", "error_code": e.code}),
+                    ))?;
+                    entry["status"] = "failed".into();
+                    entry["error_code"] = e.code.into();
+                    entry["summary"] = e.message.chars().take(2000).collect::<String>().into();
+                    first_problem.get_or_insert((e.code.to_string(), "failed"));
+                }
+            }
+            results.push(entry);
+        }
+
+        let succeeded = results
+            .iter()
+            .filter(|r| r["status"] == "succeeded")
+            .count();
+        let mut run = json!({
+            "contract": "jarvis.workflow-run/1",
+            "run_id": uuid::Uuid::new_v4().to_string(),
+            "workflow_id": doc["workflow_id"],
+            "workflow_version": doc["version"],
+            "task_id": tid,
+            "trigger": {"kind": kind},
+            "started_at": started,
+            "finished_at": now(),
+            "steps": results,
+        });
+        if let Some(s) = scheduled_for {
+            run["trigger"]["scheduled_for"] = s.into();
+        }
+        let error = if !approved {
+            Some(
+                json!({"code": "security.approval_mismatch", "category": "forbidden", "message": "i passi non corrispondono a quelli approvati: automazione sospesa", "retryable": false, "effect": "not_applied"}),
+            )
+        } else if let Some((code, kind)) = &first_problem {
+            if succeeded == 0 {
+                let category = if *kind == "denied" {
+                    "policy_denied"
+                } else {
+                    "internal"
+                };
+                Some(
+                    json!({"code": code, "category": category, "message": format!("passo non riuscito: {code}"), "retryable": false, "effect": "not_applied"}),
+                )
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        let status = match (&error, &first_problem) {
+            (Some(_), _) => "failed",
+            (None, Some(_)) => "partial",
+            (None, None) => "succeeded",
+        };
+        run["status"] = status.into();
+        match &error {
+            Some(e) => {
+                run["error"] = e.clone();
+                task.fail(e.clone(), "Automazione non riuscita");
+            }
+            None => task.transition(
+                "succeeded",
+                if status == "partial" {
+                    "Esecuzione parziale"
+                } else {
+                    "Tutti i passi riusciti"
+                },
+            ),
+        }
+        let report = validate(Contract::WorkflowRun, &run);
+        if !report.is_valid() {
+            return Err(CoreError::Internal(format!(
+                "esecuzione non conforme: {report:?}"
+            )));
+        }
+        self.save(&task)?;
+        self.store.run_put(&run).map_err(internal)?;
+        if !approved {
+            // Passi alterati rispetto all'approvazione: l'automazione viene sospesa.
+            let mut disabled = doc.clone();
+            disabled["enabled"] = false.into();
+            disabled["updated_at"] = now().into();
+            self.store.workflow_put(&disabled, None).map_err(internal)?;
+        }
+        Ok(run)
+    }
+
+    /// Esegue i workflow scaduti a `now`. Ogni workflow recupera al più una esecuzione persa.
+    pub fn run_due(
+        &mut self,
+        now_t: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<Value>, CoreError> {
+        let tolerance = chrono::Duration::seconds(self.cfg.scheduler_tick_s as i64 * 2 + 60);
+        let mut runs = Vec::new();
+        for (doc, scheduled) in self
+            .store
+            .workflows_due(&automation::ts(now_t))
+            .map_err(internal)?
+        {
+            if doc["enabled"] != true {
+                continue;
+            }
+            let late = automation::parse_ts(&scheduled).is_some_and(|s| now_t - s > tolerance);
+            let run = self.run_workflow(
+                &doc,
+                if late { "catch_up" } else { "schedule" },
+                Some(&scheduled),
+            )?;
+            // Rilegge il documento: l'esecuzione può averlo sospeso.
+            let current = self
+                .store
+                .workflow_find(doc["workflow_id"].as_str().unwrap_or_default())
+                .map_err(internal)?;
+            if let Some((mut current, _)) = current.into_iter().next() {
+                let next = if current["enabled"] == true {
+                    automation::next_run(&current["trigger"], now_t, &chrono::Local)
+                } else {
+                    None
+                };
+                if next.is_none() && current["trigger"]["kind"] == "once" {
+                    current["enabled"] = false.into();
+                    current["updated_at"] = now().into();
+                }
+                self.store
+                    .workflow_put(&current, next.map(automation::ts).as_deref())
+                    .map_err(internal)?;
+            }
+            runs.push(run);
+        }
+        Ok(runs)
+    }
+
+    // -------------------------------------------------------------- azioni dirette del proprietario
+
+    pub fn workflows(&self) -> Result<Vec<Value>, CoreError> {
+        self.workflow_views()
+    }
+
+    pub fn workflow_runs(&self, key: &str, limit: u32) -> Result<Vec<Value>, CoreError> {
+        let (doc, _) = self
+            .find_workflow(key)
+            .map_err(|e| CoreError::NotFound(e.message))?;
+        self.store
+            .runs(doc["workflow_id"].as_str().unwrap_or_default(), limit)
+            .map_err(internal)
+    }
+
+    fn owner_audit(&mut self, action: &str) -> Result<(), CoreError> {
+        self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "owner", "id": "owner"},
+                          "node": "core-local", "action": action, "outcome": "succeeded", "effect": "applied"}))?;
+        Ok(())
+    }
+
+    /// Creazione dall'interfaccia: il proprietario autenticato approva direttamente i passi.
+    pub fn create_workflow(&mut self, body: &Value) -> Result<Value, CoreError> {
+        let doc = self
+            .build_workflow(body, "owner_ui")
+            .map_err(|e| CoreError::BadRequest(e.message))?;
+        let out = self
+            .store_new_workflow(&doc)
+            .map_err(|e| CoreError::Internal(e.message))?;
+        self.owner_audit("workflow.create")?;
+        Ok(out)
+    }
+
+    pub fn set_workflow_enabled(&mut self, key: &str, enabled: bool) -> Result<Value, CoreError> {
+        let (mut doc, _) = self
+            .find_workflow(key)
+            .map_err(|e| CoreError::NotFound(e.message))?;
+        let next = if enabled {
+            automation::first_run(&doc["trigger"], chrono::Utc::now(), &chrono::Local)
+        } else {
+            None
+        };
+        if enabled && next.is_none() {
+            return Err(CoreError::BadRequest(
+                "l'automazione non ha più esecuzioni future".into(),
+            ));
+        }
+        doc["enabled"] = enabled.into();
+        doc["updated_at"] = now().into();
+        self.store
+            .workflow_put(&doc, next.map(automation::ts).as_deref())
+            .map_err(internal)?;
+        self.owner_audit(if enabled {
+            "workflow.enable"
+        } else {
+            "workflow.disable"
+        })?;
+        Ok(json!({"enabled": enabled, "next_run_at": next.map(automation::ts)}))
+    }
+
+    pub fn run_workflow_now(&mut self, key: &str) -> Result<Value, CoreError> {
+        let (doc, _) = self
+            .find_workflow(key)
+            .map_err(|e| CoreError::NotFound(e.message))?;
+        self.owner_audit("workflow.run")?;
+        self.run_workflow(&doc, "manual", None)
+    }
+
+    pub fn delete_workflow(&mut self, key: &str) -> Result<(), CoreError> {
+        let (doc, _) = self
+            .find_workflow(key)
+            .map_err(|e| CoreError::NotFound(e.message))?;
+        self.store
+            .workflow_delete(doc["workflow_id"].as_str().unwrap_or_default())
+            .map_err(internal)?;
+        self.owner_audit("workflow.delete")
+    }
+
+    pub fn tool_catalog(&self) -> Vec<Value> {
+        self.catalog
+            .iter()
+            .map(|t| {
+                let d = &t.descriptor;
+                json!({"name": d["name"], "summary": d["summary"], "risk": d["risk"], "confirmation": d["confirmation"],
+                       "input_schema": d["input_schema"], "workflow_step": !t.name().starts_with("workflow.")})
+            })
+            .collect()
+    }
+
+    /// Solo per i test: altera i passi di un workflow senza aggiornare l'approvazione.
+    #[doc(hidden)]
+    pub fn tamper_workflow_for_tests(&mut self, key: &str, steps: Value) -> Result<(), CoreError> {
+        let (mut doc, next) = self
+            .find_workflow(key)
+            .map_err(|e| CoreError::NotFound(e.message))?;
+        doc["steps"] = steps;
+        self.store
+            .workflow_put(&doc, next.as_deref())
+            .map_err(internal)
+    }
+}
+
+fn short(doc: &Value) -> String {
+    doc["workflow_id"]
+        .as_str()
+        .unwrap_or_default()
+        .chars()
+        .take(8)
+        .collect()
 }
 
 fn merge(base: &Value, extra: Value) -> Value {

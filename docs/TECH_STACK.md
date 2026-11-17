@@ -36,3 +36,4 @@ Versionare dipendenze e contratti alla loro introduzione. Per Rust/Python, descr
 | Ollama (opzionale) | API `/api/chat` e `/api/tags` | Backend AI locale; nessuna libreria client, solo `urllib` | ADR-0004 |
 | Playwright | 1.63.0 | Test E2E dell'interfaccia | `tests/e2e/ui_smoke.cjs` |
 | Interfaccia Web | HTML, CSS e JavaScript senza dipendenze | Deviazione temporanea da React e Tauri | ADR-0004 |
+| Pianificatore | `tokio::time::interval` nel Core | Automazioni (RF-07) | ADR-0005 |

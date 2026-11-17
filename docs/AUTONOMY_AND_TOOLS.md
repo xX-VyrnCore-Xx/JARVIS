@@ -29,4 +29,23 @@ Il catalogo iniziale è in `contracts/catalog/tools`, con un descrittore `jarvis
 | `memory.remember` | medio | no |
 | `fs.write`, `memory.forget` | alto | sì |
 
+| `workflow.list` | basso | no |
+| `workflow.run` | medio | no (esegue passi già approvati) |
+| `workflow.create`, `workflow.delete` | alto | sì |
+
 Ciclo di un'operazione: proposta dell'agente → validazione degli argomenti → decisione di policy → eventuale conferma → esecuzione nel Core → evento di audit → risposta composta dall'agente con il risultato. Un timeout o un crash del worker termina il task come `failed`, con un errore v1 a effetto `unknown`.
+
+## Automazioni (Fase 3, RF-07)
+
+Le automazioni (`jarvis.workflow/1`) eseguono uno o più passi del catalogo:
+- a intervalli (minimo 1 minuto);
+- ogni giorno a un'ora locale;
+- una volta sola.
+
+Garanzie:
+- **approvazione:** il proprietario approva i passi esatti alla creazione, e l'approvazione è legata al loro digest;
+- **policy:** a ogni esecuzione la policy vigente viene rivalutata. Un passo negato non viene eseguito; con `on_failure: stop` i passi successivi vengono saltati, con `continue` l'esito è `partial`;
+- **evidenze:** ogni esecuzione (`jarvis.workflow-run/1`) registra trigger (`schedule`, `catch_up`, `manual`), istanti, decisione ed esito di ogni passo. Produce anche un task e gli eventi di audit;
+- **riavvio:** le automazioni sopravvivono al riavvio; dopo uno spegnimento si recupera al più un'esecuzione persa.
+
+Dettagli in ADR-0005.

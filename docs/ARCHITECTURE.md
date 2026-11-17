@@ -49,4 +49,6 @@ La disposizione proposta dei moduli nel repository è descritta in [DEVELOPMENT.
 | Computer Use (parziale) | File nella workspace e informazioni di sistema | `core/server/src/tools.rs` |
 | Memory e Data & Storage | Memoria, task e conversazione in SQLite | `core/server/src/store.rs` |
 
-Non ancora implementati: Voice, Web Agent, Automation, Integration Engine, nodi distribuiti, sincronizzazione e Observability oltre all'audit.
+| Automation Engine | Workflow pianificati, pianificatore nel Core, cronologia, approvazione legata ai passi | `core/server/src/automation.rs`, `orchestrator.rs` |
+
+Non ancora implementati: Voice, Web Agent, Integration Engine, nodi distribuiti, sincronizzazione e Observability oltre all'audit.

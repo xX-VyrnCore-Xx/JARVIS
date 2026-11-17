@@ -113,6 +113,37 @@ Valutare stack mobile, motori vocali, trasporto degli eventi e RPC, implementazi
   - avvio da zero con `./jarvis.sh`.
 - **Documenti interessati:** README.md, ARCHITECTURE.md, AI_SYSTEM.md, AUTONOMY_AND_TOOLS.md, SECURITY_AND_PRIVACY.md, MEMORY_DATA_SYNC.md, INTERFACE_AND_DEVICES.md, TECH_STACK.md, REQUIREMENTS.md, DEVOPS_QA_OBSERVABILITY.md.
 
+### ADR-0005 — Automation Engine: workflow pianificati con approvazione legata ai passi
+
+- **Data:** 2026-11-17 · **Stato:** Accettato per la Fase 3 (RF-07)
+- **Contesto:** AUTONOMY_AND_TOOLS.md richiede workflow con versione, operazioni e frequenza, una cronologia delle esecuzioni e la policy vigente applicata anche in background. In background il proprietario non può confermare un'azione rischiosa al momento dell'esecuzione.
+- **Opzioni:**
+  - negare in background ogni strumento che richiede conferma;
+  - chiedere la conferma a ogni esecuzione;
+  - pre-approvare passi precisi alla creazione.
+- **Decisione:**
+  - Contratti `jarvis.workflow/1` e `jarvis.workflow-run/1`.
+  - Tre tipi di trigger: `interval` (minimo 60 s), `daily` (ora locale del Core) e `once`.
+  - Passi presi dal catalogo; gli strumenti `workflow.*` sono esclusi, quindi niente automazioni ricorsive.
+  - Alla creazione il proprietario approva i passi esatti: con la conferma in chat, oppure con un'azione diretta dall'interfaccia autenticata. L'approvazione registra il digest SHA-256 dei passi.
+  - A ogni esecuzione il Core:
+    - ricalcola il digest; se non coincide l'esecuzione fallisce con `security.approval_mismatch` e l'automazione viene sospesa;
+    - rivaluta la policy vigente per ogni passo: i dinieghi restano tali anche se approvati;
+    - esegue i passi `require_confirmation` solo perché coperti dall'approvazione, marcandoli `preapproved`.
+  - Pianificatore nel Core (tokio, ogni `JARVIS_SCHEDULER_TICK_S` secondi) con stato in SQLite. Se il Core resta spento, al riavvio recupera **una** sola esecuzione persa (`catch_up`) e poi riprende dal presente.
+  - Ogni esecuzione crea un task con richiedente `module:automation`, eventi di audit e una voce di cronologia.
+- **Motivazione:** il proprietario decide una volta sola su azioni precise. La policy resta l'ultima parola e ogni alterazione dei passi è rilevata. Recuperare una sola esecuzione evita raffiche di azioni dopo un lungo spegnimento.
+- **Conseguenze:**
+  - modificare i passi richiede di creare una nuova automazione (versione 1); non è ancora prevista una modifica in loco con nuova approvazione;
+  - le notifiche sugli esiti (RF-13) non ci sono ancora;
+  - il fuso orario è quello del Core.
+- **Evidenza:**
+  - `cargo test --locked`: 10 test d'integrazione in `core/server/tests/automation.rs` e 5 test unitari del calcolo delle esecuzioni;
+  - `tests/ai/test_gateway.py`: intenti di pianificazione;
+  - E2E: creazione da chat e da modulo, esecuzione manuale e cronologia;
+  - prova manuale del pianificatore reale su un server avviato.
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, REQUIREMENTS.md, ARCHITECTURE.md, INTERFACE_AND_DEVICES.md, `contracts/README.md`.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

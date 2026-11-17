@@ -25,4 +25,5 @@ Verificare ripetizione della stessa operazione, crash durante la sincronizzazion
 - **Memoria del proprietario:** in SQLite (`data/jarvis.sqlite3`), con elementi inseriti tramite «ricorda che …». Ogni elemento può essere consultato e cancellato dall'interfaccia, con evento di audit, oppure dall'agente previa conferma (RF-08).
 - **Contesto dell'agente:** riceve fino a 50 elementi di memoria e gli ultimi 10 turni della conversazione.
 - **Task e conversazione:** persistono dopo un riavvio.
+- **Automazioni:** le tabelle `workflows` (documento e prossima esecuzione) e `workflow_runs` (cronologia) persistono in SQLite.
 - **Non ancora implementati:** memoria semantica (pgvector o Qdrant), knowledge graph, sincronizzazione fra nodi e backup cifrati.

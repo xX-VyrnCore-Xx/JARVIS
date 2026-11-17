@@ -1,0 +1,39 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "workflow.run",
+  "version": "1.0.0",
+  "summary": "Esegue subito un'automazione esistente, con la policy vigente e l'approvazione già data",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "id"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "description": "Identificativo o prefisso dell'automazione"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "prerequisites": [],
+  "effects": "write_local",
+  "risk": "medium",
+  "permissions": [
+    "core.automation:execute"
+  ],
+  "errors": [
+    "workflow.not_found"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "never"
+  },
+  "confirmation": "none"
+}

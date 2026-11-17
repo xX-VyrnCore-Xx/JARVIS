@@ -23,6 +23,8 @@ Poi apri **http://localhost:8765**. La prima compilazione richiede qualche minut
 - **Senza Ollama** JARVIS parte in modalità *offline*: un modello a regole capisce comandi come «che ore sono», «info sistema», «elenca file», «scrivi note.txt: testo», «leggi note.txt», «ricorda che …», «cosa ricordi» e «dimentica <id>».
 - **Con Ollama** installa un modello con supporto agli strumenti (per esempio `ollama pull qwen2.5:3b`) e riavvia `./jarvis.sh`: JARVIS lo rileva da solo.
 
+- **Automazioni**: scrivi in chat «ogni ora info sistema», «ogni giorno alle 08:00 scrivi buongiorno.txt: ciao» o «tra 5 minuti che ore sono», oppure usa la sezione Automazioni. Le automazioni sopravvivono al riavvio e conservano la cronologia di ogni esecuzione.
+
 Cosa osservare:
 - ogni azione mostra agente, strumento, decisione di policy ed esito;
 - scrivere un file o cancellare un ricordo richiede la tua conferma, valida una sola volta e per 5 minuti;
@@ -36,6 +38,7 @@ Cosa osservare:
 | `JARVIS_AI_BACKEND` | `auto` | `auto`, `ollama` oppure `offline` |
 | `JARVIS_OLLAMA_URL` | `http://127.0.0.1:11434` | Indirizzo di Ollama |
 | `JARVIS_OLLAMA_MODEL` | primo modello installato | Modello da usare, per esempio `qwen2.5:3b` |
+| `JARVIS_SCHEDULER_TICK_S` | `20` | Ogni quanti secondi il Core controlla le automazioni scadute |
 
 Limiti noti della v0.1:
 - un solo utente locale e una richiesta alla volta;

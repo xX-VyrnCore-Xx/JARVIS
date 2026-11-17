@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.local/contracts/v1/workflow-run.schema.json",
+  "title": "Esecuzione di un workflow v1",
+  "description": "AUTONOMY_AND_TOOLS.md: ogni esecuzione programmata conserva istante, trigger e risultato. RF-07, RNF-07.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "run_id", "workflow_id", "workflow_version", "task_id", "trigger", "started_at", "finished_at", "status", "steps"],
+  "properties": {
+    "contract": { "const": "jarvis.workflow-run/1" },
+    "run_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "workflow_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "workflow_version": { "type": "integer", "minimum": 1 },
+    "task_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "trigger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["schedule", "catch_up", "manual"] },
+        "scheduled_for": { "$ref": "common.schema.json#/$defs/timestamp" }
+      }
+    },
+    "started_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "finished_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "status": { "enum": ["succeeded", "partial", "failed"] },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["index", "tool", "decision", "status"],
+        "properties": {
+          "index": { "type": "integer", "minimum": 0 },
+          "tool": { "$ref": "common.schema.json#/$defs/identifier" },
+          "decision": { "enum": ["allow", "deny", "require_confirmation", "not_evaluated"] },
+          "decision_id": { "$ref": "common.schema.json#/$defs/uuid" },
+          "preapproved": { "type": "boolean" },
+          "status": { "enum": ["succeeded", "failed", "denied", "skipped"] },
+          "error_code": { "$ref": "common.schema.json#/$defs/identifier" },
+          "summary": { "type": "string", "maxLength": 2000 }
+        }
+      }
+    },
+    "error": { "$ref": "error.schema.json" }
+  },
+  "allOf": [
+    { "if": { "properties": { "status": { "const": "failed" } } }, "then": { "required": ["error"] } }
+  ]
+}

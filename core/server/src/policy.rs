@@ -26,6 +26,8 @@ pub fn explain(reason: &str) -> &'static str {
 }
 
 pub struct Request<'a> {
+    /// Chi propone l'operazione (agente o modulo di automazione).
+    pub subject: Value,
     pub task_id: &'a str,
     pub correlation_id: &'a str,
     pub tool: &'a str,
@@ -113,7 +115,7 @@ pub fn decide(catalog: &Catalog, req: &Request) -> Value {
         "request": {
             "task_id": req.task_id,
             "correlation_id": req.correlation_id,
-            "subject": {"kind": "agent", "id": "general_assistant"},
+            "subject": req.subject,
             "on_behalf_of": {"kind": "owner", "id": "owner"},
             "action": {"tool": if tool.is_some() { req.tool } else { "unknown" }, "version": if tool.is_some() { req.version } else { "0.0.0" }},
             "resource": resource_uri(req.tool, req.arguments),

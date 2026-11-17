@@ -31,6 +31,7 @@ fn env() -> Env {
         ai_dir: root.join("ai"),
         ai_backend: Some("offline".into()),
         delegation_timeout_ms: 30_000,
+        scheduler_tick_s: 20,
         token: TOKEN.into(),
     };
     let core = Jarvis::new(cfg).expect("core");
@@ -398,6 +399,7 @@ async fn conversation_and_tasks_persist_across_restart() {
         ai_dir: root.join("ai"),
         ai_backend: Some("offline".into()),
         delegation_timeout_ms: 30_000,
+        scheduler_tick_s: 20,
         token: TOKEN.into(),
     };
     let again = Env {
