@@ -30,7 +30,7 @@
       "additionalProperties": false,
       "required": ["refs"],
       "properties": {
-        "refs": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "type": "string", "pattern": "^jarvis://[a-z]+/[A-Za-z0-9._/-]+$" } },
+        "refs": { "type": "array", "maxItems": 64, "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/resource_uri" } },
         "summary": { "type": "string", "maxLength": 4000 }
       }
     },

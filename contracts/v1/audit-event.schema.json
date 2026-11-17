@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.local/contracts/v1/audit-event.schema.json",
+  "title": "Evento di audit v1",
+  "description": "SECURITY_AND_PRIVACY.md: identità, decisione di policy, azione, correlazione ed esito; resistenza alla manipolazione dei log. Catena di hash: 'prev_hash' è l'hash dell'evento precedente nello stesso flusso. RNF-04, RNF-07.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "event_id", "sequence", "stream", "at", "correlation_id", "actor", "action", "outcome", "prev_hash", "hash"],
+  "properties": {
+    "contract": { "const": "jarvis.audit-event/1" },
+    "event_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "sequence": { "type": "integer", "minimum": 0 },
+    "stream": { "$ref": "common.schema.json#/$defs/identifier" },
+    "at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "correlation_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "task_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "actor": { "$ref": "common.schema.json#/$defs/actor" },
+    "node": { "$ref": "common.schema.json#/$defs/identifier" },
+    "action": { "$ref": "common.schema.json#/$defs/identifier" },
+    "decision_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "outcome": { "enum": ["allowed", "denied", "confirmed", "succeeded", "failed", "cancelled", "revoked"] },
+    "effect": { "enum": ["not_applied", "applied", "partial", "unknown"] },
+    "error_code": { "$ref": "common.schema.json#/$defs/identifier" },
+    "prev_hash": { "$ref": "common.schema.json#/$defs/sha256" },
+    "hash": { "$ref": "common.schema.json#/$defs/sha256" }
+  },
+  "allOf": [
+    {
+      "description": "Le azioni autorizzate da policy riportano la decisione.",
+      "if": { "properties": { "outcome": { "enum": ["allowed", "denied", "confirmed"] } } },
+      "then": { "required": ["decision_id"] }
+    },
+    {
+      "if": { "properties": { "outcome": { "const": "failed" } } },
+      "then": { "required": ["error_code", "effect"] }
+    }
+  ]
+}

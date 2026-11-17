@@ -4,8 +4,14 @@ La documentazione approvata si trova in `docs/`. Le istruzioni operative complet
 
 @docs/CLAUDE.md
 
-Note di percorso: i riferimenti nei documenti (README.md, ROADMAP.md, ...) sono relativi a `docs/`. Contratti in `contracts/`, verifiche in `tests/`. Comando di verifica corrente:
+Note di percorso: i riferimenti nei documenti (README.md, ROADMAP.md, ...) sono relativi a `docs/`. Contratti in `contracts/`, Core Rust in `core/`, verifiche trasversali in `tests/`. Comandi di verifica correnti (gli stessi della CI `.github/workflows/contracts.yml`):
 
 ```bash
 python3 -m unittest discover -s tests/contracts -v
 ```
+
+```bash
+cd core && cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked
+```
+
+A fine sessione aggiorna sempre il checkpoint in `docs/ROADMAP.md` e le specifiche toccate in `docs/`.

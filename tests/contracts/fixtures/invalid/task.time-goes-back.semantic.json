@@ -1,0 +1,62 @@
+{
+ "contract": "jarvis.task/1",
+ "task_id": "0b6f4c1e-1d2a-4c3b-9e8f-0000000000a1",
+ "correlation_id": "0b6f4c1e-1d2a-4c3b-9e8f-0000000000c0",
+ "requester": {
+  "kind": "owner",
+  "id": "owner"
+ },
+ "objective": "Confrontare due fonti sintetiche",
+ "success_conditions": [
+  "Report con fonti citate"
+ ],
+ "dependencies": [],
+ "scope": {
+  "nodes": [
+   "core-linux"
+  ],
+  "resources": [
+   "jarvis://task/fixture"
+  ]
+ },
+ "state": "succeeded",
+ "history": [
+  {
+   "to": "pending",
+   "at": "2026-11-17T12:00:00Z",
+   "by": {
+    "kind": "owner",
+    "id": "owner"
+   }
+  },
+  {
+   "from": "pending",
+   "to": "planned",
+   "at": "2026-11-17T12:00:01Z",
+   "by": {
+    "kind": "module",
+    "id": "orchestrator"
+   }
+  },
+  {
+   "from": "planned",
+   "to": "running",
+   "at": "2026-11-17T11:59:00Z",
+   "by": {
+    "kind": "module",
+    "id": "orchestrator"
+   }
+  },
+  {
+   "from": "running",
+   "to": "succeeded",
+   "at": "2026-11-17T12:00:30Z",
+   "by": {
+    "kind": "module",
+    "id": "orchestrator"
+   },
+   "reason": "Condizioni verificate"
+  }
+ ],
+ "created_at": "2026-11-17T12:00:00Z"
+}
