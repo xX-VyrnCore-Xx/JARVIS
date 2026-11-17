@@ -23,9 +23,9 @@ Il checkpoint è la sezione di ripresa versionata con Git. Ogni voce va aggiorna
 | Ultima revisione verificata | Base `ad1972c` sul branch `claude/cool-ramanujan-bogarl`; le modifiche di questa sessione sono nel commit successivo dello stesso branch |
 | Milestone effettiva | Fase 1 — Architettura e contratti, in corso |
 | Risultato disponibile | Contratti v1 in `contracts/v1/`: common, envelope, error, delegation, tool-descriptor (RF-03, RF-05, RNF-01, RNF-04, RNF-07). Vedi [contracts/README.md](../contracts/README.md) e ADR-0001 in [DECISIONS.md](DECISIONS.md) |
-| Verifiche del software | `python3 -m unittest discover -s tests/contracts -v` — Python 3.13.18, jsonschema 4.26.0, container Linux remoto — 4 test OK (7 fixture valide, 11 non valide, ciascuna respinta dalla sola regola prevista). Workflow CI `.github/workflows/contracts.yml` aggiunto, non ancora eseguito su GitHub |
+| Verifiche del software | `python3 -m unittest discover -s tests/contracts -v` — Python 3.13.18, jsonschema 4.26.0, container Linux remoto — 4 test OK (7 fixture valide, 11 non valide, ciascuna respinta dalla sola regola prevista). Workflow CI `.github/workflows/contracts.yml`: run 44082465183 fallita senza runner assegnato (nessun log, 2 s), quindi blocco dell'account GitHub Actions e non dei test |
 | Lacune documentali | Risposte 75–80 senza fonte, lasciate vuote. Scelte aperte invariate: RPC/event bus, storage, segreti, VPN mesh, motori vocali, stack mobile, SLO |
-| Blocchi | Nessuno per la Fase 1. `origin/main` ha una cronologia non correlata (piano in inglese, `docs/PLAN.md`) senza merge base con questo branch: integrazione da decidere con il proprietario |
+| Blocchi | Nessuno per la Fase 1. `origin/main` ha una cronologia non correlata (piano in inglese, `docs/PLAN.md`) senza merge base con questo branch: integrazione da decidere con il proprietario. GitHub Actions non avvia i job (verificare in Settings → Billing il limite di spesa o i minuti per i repository privati, e in Settings → Actions che siano abilitate) |
 | Prossima azione | Contratti `task` (stato e transizioni del task: RF-02) e `policy-decision` (decisione del Security Engine con audit: RNF-04), con fixture e test nello stesso schema. Poi workspace Cargo in `core/` che carica e valida i contratti v1 |
 
 ### Registro delle riprese
