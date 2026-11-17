@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.local/contracts/v1/tool-descriptor.schema.json",
+  "title": "Descrittore di strumento v1",
+  "description": "AUTONOMY_AND_TOOLS.md: input, output, ambito, prerequisiti, effetti, errori, timeout, retry e permessi. SECURITY_AND_PRIVACY.md: conferma per azioni critiche.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "name", "version", "summary", "input_schema", "output_schema", "scope", "effects", "risk", "permissions", "errors", "timeout_ms", "retry", "confirmation"],
+  "properties": {
+    "contract": { "const": "jarvis.tool/1" },
+    "name": { "$ref": "common.schema.json#/$defs/identifier" },
+    "version": { "$ref": "common.schema.json#/$defs/semver" },
+    "summary": { "type": "string", "minLength": 1, "maxLength": 500 },
+    "input_schema": { "type": "object" },
+    "output_schema": { "type": "object" },
+    "scope": { "enum": ["node", "core", "web", "integration"] },
+    "prerequisites": { "type": "array", "items": { "type": "string", "maxLength": 500 } },
+    "effects": { "enum": ["none", "read", "write_local", "write_external"] },
+    "risk": { "enum": ["low", "medium", "high", "critical"] },
+    "permissions": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "pattern": "^[a-z]+(\\.[a-z_]+)+:(read|write|execute|admin)$" } },
+    "errors": { "type": "array", "uniqueItems": true, "items": { "$ref": "common.schema.json#/$defs/identifier" } },
+    "timeout_ms": { "$ref": "common.schema.json#/$defs/duration_ms" },
+    "retry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "enum": ["never", "safe", "idempotency_key"] },
+        "max_attempts": { "type": "integer", "minimum": 1, "maximum": 10 }
+      }
+    },
+    "confirmation": { "enum": ["none", "required"] }
+  },
+  "allOf": [
+    {
+      "description": "Gli strumenti con effetti di scrittura non possono dichiarare retry 'safe': servono chiave di idempotenza o nessun retry.",
+      "if": { "properties": { "effects": { "enum": ["write_local", "write_external"] } } },
+      "then": { "properties": { "retry": { "properties": { "mode": { "enum": ["never", "idempotency_key"] } } } } }
+    },
+    {
+      "description": "Le operazioni a rischio alto o critico richiedono conferma del proprietario.",
+      "if": { "properties": { "risk": { "enum": ["high", "critical"] } } },
+      "then": { "properties": { "confirmation": { "const": "required" } } }
+    }
+  ]
+}

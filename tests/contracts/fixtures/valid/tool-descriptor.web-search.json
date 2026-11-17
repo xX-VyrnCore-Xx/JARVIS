@@ -1,0 +1,1 @@
+{"contract":"jarvis.tool/1","name":"web.search","version":"1.0.0","summary":"Ricerca Web in sola lettura","input_schema":{"type":"object"},"output_schema":{"type":"object"},"scope":"web","effects":"read","risk":"low","permissions":["web.search:read"],"errors":[],"timeout_ms":15000,"retry":{"mode":"safe","max_attempts":2},"confirmation":"none"}

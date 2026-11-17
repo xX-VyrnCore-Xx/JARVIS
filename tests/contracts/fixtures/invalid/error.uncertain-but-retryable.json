@@ -1,0 +1,1 @@
+{"code":"fs.write_timeout","category":"timeout","message":"Scrittura sintetica senza conferma di esito","retryable":true,"effect":"unknown"}

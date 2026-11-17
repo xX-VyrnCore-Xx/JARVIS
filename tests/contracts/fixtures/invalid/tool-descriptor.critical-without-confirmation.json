@@ -1,0 +1,1 @@
+{"contract":"jarvis.tool/1","name":"system.delete_tree","version":"1.0.0","summary":"Cancella una directory","input_schema":{"type":"object"},"output_schema":{"type":"object"},"scope":"node","effects":"write_local","risk":"critical","permissions":["node.filesystem:admin"],"errors":[],"timeout_ms":15000,"retry":{"mode":"never"},"confirmation":"none"}

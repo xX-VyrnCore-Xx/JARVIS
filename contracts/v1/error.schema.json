@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.local/contracts/v1/error.schema.json",
+  "title": "Errore propagato fra moduli v1",
+  "description": "AUTONOMY_AND_TOOLS.md: separare stato, effetto osservato ed errore; con esito incerto interrogare la risorsa prima di ripetere una scrittura.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["code", "category", "message", "retryable", "effect"],
+  "properties": {
+    "code": { "$ref": "common.schema.json#/$defs/identifier" },
+    "category": { "enum": ["validation", "unauthorized", "forbidden", "policy_denied", "not_found", "conflict", "timeout", "unavailable", "resource_exhausted", "cancelled", "internal"] },
+    "message": { "type": "string", "minLength": 1, "maxLength": 2000, "description": "Testo diagnostico minimizzato, senza payload personali o segreti." },
+    "retryable": { "type": "boolean" },
+    "effect": { "enum": ["not_applied", "applied", "partial", "unknown"], "description": "Effetto osservato sulla risorsa al momento dell'errore." },
+    "details": { "type": "object" }
+  },
+  "allOf": [
+    {
+      "description": "Un errore con effetto incerto o parziale non è ripetibile alla cieca: occorre prima verificare lo stato.",
+      "if": { "properties": { "effect": { "enum": ["unknown", "partial"] } } },
+      "then": { "properties": { "retryable": { "const": false } } }
+    },
+    {
+      "description": "Le negazioni di policy e autorizzazione interrompono l'azione e non sono ripetibili automaticamente.",
+      "if": { "properties": { "category": { "enum": ["unauthorized", "forbidden", "policy_denied", "validation"] } } },
+      "then": { "properties": { "retryable": { "const": false }, "effect": { "const": "not_applied" } } }
+    }
+  ]
+}
