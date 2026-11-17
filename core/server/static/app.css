@@ -21,6 +21,7 @@ button.danger { color: var(--bad); }
 button.ghost { background: transparent; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+.topbar { position: relative; }
 .topbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .7rem 1.2rem; border-bottom: 1px solid var(--border); background: var(--panel); flex-wrap: wrap; }
 .brand { font-weight: 700; letter-spacing: .08em; display: flex; align-items: center; gap: .6rem; }
 .brand small { font-weight: 400; letter-spacing: 0; color: var(--muted); }
@@ -87,6 +88,23 @@ main { flex: 1; min-width: 0; min-height: 0; display: flex; }
 .actions-row { display: flex; gap: .4rem; flex-wrap: wrap; margin-top: .5rem; }
 .runs { margin-top: .5rem; display: flex; flex-direction: column; gap: .3rem; }
 .risk-high { color: var(--warn); font-size: .8rem; }
+
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.bell { position: relative; padding: .15rem .55rem; border-radius: 999px; background: transparent; line-height: 1.4; }
+.bell .count { position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; background: var(--bad); color: #fff; font-size: .7rem; font-weight: 700; display: grid; place-items: center; }
+.notif-panel { position: absolute; right: 1rem; top: calc(100% + 6px); width: min(420px, calc(100vw - 32px)); max-height: 70vh; overflow: auto; z-index: 20; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 12px 32px rgba(0,0,0,.25); }
+.notif-head { position: sticky; top: 0; background: var(--panel); display: flex; justify-content: space-between; align-items: center; gap: .5rem; padding: .6rem .8rem; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+button.small { font-size: .78rem; padding: .2rem .5rem; }
+.notif-list { display: flex; flex-direction: column; }
+.notif { text-align: left; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; padding: .65rem .8rem; display: flex; gap: .6rem; }
+.notif.unread { background: var(--panel-2); }
+.notif .dot { width: 8px; height: 8px; border-radius: 50%; margin-top: .45rem; flex: none; background: var(--muted); }
+.notif .dot.error { background: var(--bad); } .notif .dot.warning { background: var(--warn); } .notif .dot.success { background: var(--ok); } .notif .dot.info { background: var(--accent); }
+.notif .t { font-weight: 600; } .notif .b, .notif .m { color: var(--muted); font-size: .82rem; overflow-wrap: anywhere; }
+.toasts { position: fixed; right: 16px; top: 72px; display: flex; flex-direction: column; gap: .5rem; z-index: 30; max-width: min(380px, calc(100vw - 32px)); }
+.toast { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: 10px; padding: .6rem .8rem; box-shadow: 0 8px 24px rgba(0,0,0,.25); cursor: pointer; }
+.toast.error { border-left-color: var(--bad); } .toast.warning { border-left-color: var(--warn); } .toast.success { border-left-color: var(--ok); }
+.toast .b { color: var(--muted); font-size: .85rem; }
 
 @media (max-width: 720px) {
   .layout { flex-direction: column; }

@@ -144,6 +144,37 @@ Valutare stack mobile, motori vocali, trasporto degli eventi e RPC, implementazi
   - prova manuale del pianificatore reale su un server avviato.
 - **Documenti interessati:** AUTONOMY_AND_TOOLS.md, REQUIREMENTS.md, ARCHITECTURE.md, INTERFACE_AND_DEVICES.md, `contracts/README.md`.
 
+### ADR-0006 — Notifiche e monitor delle anomalie
+
+- **Data:** 2026-11-17 · **Stato:** Accettato per la Fase 3 (RF-13)
+- **Contesto:** RF-13 chiede di monitorare attività e anomalie e di notificarle; la verifica rappresentativa è «un guasto simulato è rilevabile e correlabile al task». Le notifiche devono essere utili senza diventare rumore.
+- **Decisione:**
+  - Contratto `jarvis.notification/1`, conservato in SQLite (ultime 500).
+  - Il Core genera notifiche per:
+    - conferme in attesa: si chiudono da sole quando la conferma viene risolta;
+    - conferme scadute;
+    - agente AI non disponibile o degradato;
+    - automazioni fallite o parziali;
+    - successi delle sole automazioni singole e manuali;
+    - automazioni sospese per passi alterati;
+    - registro di audit alterato;
+    - worker terminato all'improvviso.
+  - Ogni notifica porta `correlation_id` e, quando esistono, `task_id` e `workflow_id`.
+  - La `dedupe_key` impedisce duplicati finché la notifica precedente non è letta.
+  - Il monitor gira a ogni intervallo del pianificatore, anche senza interfaccia aperta.
+  - L'interfaccia interroga `/api/notifications?since=` ogni 5 secondi; mostra campanella con contatore, pannello e toast, e se autorizzate le notifiche del browser.
+- **Opzioni scartate:**
+  - SSE o WebSocket: `EventSource` non invia header personalizzati e il token di sessione finirebbe nell'URL. L'interrogazione periodica basta per un utente locale;
+  - notificare ogni esecuzione periodica riuscita: troppo rumore.
+- **Conseguenze:**
+  - ritardo massimo di circa 5 secondi nell'interfaccia;
+  - nessun canale esterno (email, mobile push), rimandato alle integrazioni e al client mobile;
+  - le soglie su risorse (disco, memoria) restano da definire con gli SLO.
+- **Evidenza:**
+  - `core/server/tests/notifications.rs`: 7 test;
+  - E2E: contatore, toast, pannello e chiusura dopo l'approvazione.
+- **Documenti interessati:** DEVOPS_QA_OBSERVABILITY.md, INTERFACE_AND_DEVICES.md, REQUIREMENTS.md, ARCHITECTURE.md, `contracts/README.md`.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

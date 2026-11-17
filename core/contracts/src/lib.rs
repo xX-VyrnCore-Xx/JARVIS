@@ -46,6 +46,7 @@ pub enum Contract {
     Delegation,
     Envelope,
     Error,
+    Notification,
     PolicyDecision,
     Task,
     ToolDescriptor,
@@ -54,12 +55,13 @@ pub enum Contract {
 }
 
 impl Contract {
-    pub const ALL: [Contract; 10] = [
+    pub const ALL: [Contract; 11] = [
         Contract::AgentResult,
         Contract::AuditEvent,
         Contract::Delegation,
         Contract::Envelope,
         Contract::Error,
+        Contract::Notification,
         Contract::PolicyDecision,
         Contract::Task,
         Contract::ToolDescriptor,
@@ -75,6 +77,7 @@ impl Contract {
             Contract::Delegation => "delegation",
             Contract::Envelope => "envelope",
             Contract::Error => "error",
+            Contract::Notification => "notification",
             Contract::PolicyDecision => "policy-decision",
             Contract::Task => "task",
             Contract::ToolDescriptor => "tool-descriptor",
@@ -94,6 +97,7 @@ impl Contract {
             Contract::Delegation => schema_file!("delegation.schema.json"),
             Contract::Envelope => schema_file!("envelope.schema.json"),
             Contract::Error => ERROR,
+            Contract::Notification => schema_file!("notification.schema.json"),
             Contract::PolicyDecision => schema_file!("policy-decision.schema.json"),
             Contract::Task => schema_file!("task.schema.json"),
             Contract::ToolDescriptor => schema_file!("tool-descriptor.schema.json"),
@@ -103,7 +107,7 @@ impl Contract {
     }
 
     fn validator(self) -> &'static Validator {
-        static CELLS: [OnceLock<Validator>; 10] = [const { OnceLock::new() }; 10];
+        static CELLS: [OnceLock<Validator>; 11] = [const { OnceLock::new() }; 11];
         let index = Self::ALL
             .iter()
             .position(|c| *c == self)
@@ -229,7 +233,8 @@ pub fn semantic_errors(contract: Contract, doc: &Value) -> Vec<String> {
         | Contract::AuditEvent
         | Contract::Error
         | Contract::ToolDescriptor
-        | Contract::Workflow => {}
+        | Contract::Workflow
+        | Contract::Notification => {}
     }
     errors
 }

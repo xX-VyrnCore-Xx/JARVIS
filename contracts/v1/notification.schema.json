@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.local/contracts/v1/notification.schema.json",
+  "title": "Notifica v1",
+  "description": "RF-13: attività, anomalie e notifiche; un guasto deve essere rilevabile e correlabile al task. DEVOPS_QA_OBSERVABILITY.md: identificativi condivisi. Testo minimizzato: niente payload personali o segreti.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "notification_id", "created_at", "severity", "category", "title", "source", "correlation_id"],
+  "properties": {
+    "contract": { "const": "jarvis.notification/1" },
+    "notification_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "created_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "severity": { "enum": ["info", "success", "warning", "error"] },
+    "category": { "enum": ["automation", "confirmation", "system", "security"] },
+    "title": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "body": { "type": "string", "maxLength": 2000 },
+    "source": { "$ref": "common.schema.json#/$defs/actor" },
+    "correlation_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "task_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "workflow_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "dedupe_key": { "type": "string", "minLength": 1, "maxLength": 200, "description": "Finché una notifica con la stessa chiave è non letta, non se ne crea un'altra." },
+    "link": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["view"],
+      "properties": {
+        "view": { "enum": ["chat", "tasks", "automations", "audit", "memory", "workspace"] },
+        "ref": { "type": "string", "maxLength": 200 }
+      }
+    },
+    "read_at": { "$ref": "common.schema.json#/$defs/timestamp" }
+  },
+  "allOf": [
+    {
+      "description": "Gli errori di automazione e di sistema sono correlati a un task o a un workflow, salvo le anomalie globali del monitor.",
+      "if": { "properties": { "category": { "const": "automation" } } },
+      "then": { "required": ["workflow_id"] }
+    }
+  ]
+}

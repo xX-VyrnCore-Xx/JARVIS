@@ -95,6 +95,7 @@ function addConfirmation(c) {
       card.remove();
     }
     refreshStatus();
+    pollNotifications();
   };
   card.append(
     el("h3", {}, `Conferma richiesta · ${c.tool} · rischio ${c.risk}`),
@@ -127,6 +128,7 @@ async function send(text) {
   } finally {
     $("#send").disabled = false;
     refreshStatus();
+    pollNotifications();
   }
 }
 
@@ -306,6 +308,79 @@ function show(view) {
 document.querySelectorAll(".nav-item").forEach((b) => b.addEventListener("click", () => show(b.dataset.view)));
 document.querySelectorAll("[data-refresh]").forEach((b) => b.addEventListener("click", () => views[b.dataset.refresh]().catch((e) => alert(e.message))));
 
+// ------------------------------------------------------------------ notifiche (RF-13)
+
+const CATEGORY = { automation: "automazione", confirmation: "conferma", system: "sistema", security: "sicurezza" };
+let notifSince = null;
+let notifPrimed = false;
+
+function toast(n) {
+  const t = el("div", { class: `toast ${n.severity}`, role: "status", onclick: () => { openNotification(n); t.remove(); } },
+    el("div", { class: "t" }, n.title), n.body ? el("div", { class: "b" }, n.body) : null);
+  $("#toasts").append(t);
+  setTimeout(() => t.remove(), 8000);
+  if ("Notification" in window && Notification.permission === "granted" && document.hidden) {
+    try { new Notification(`JARVIS · ${n.title}`, { body: n.body || "", tag: n.dedupe_key || n.notification_id }); } catch { /* non supportato */ }
+  }
+}
+
+function setCount(unread) {
+  const c = $("#notif-count");
+  c.textContent = unread > 99 ? "99+" : String(unread);
+  c.hidden = !unread;
+  $("#bell").setAttribute("aria-label", `Notifiche, ${unread} non lette`);
+}
+
+async function openNotification(n) {
+  if (!n.read_at) {
+    try { const r = await api(`/api/notifications/${n.notification_id}/read`, { method: "POST" }); setCount(r.unread); } catch { /* già letta */ }
+  }
+  $("#notif-panel").hidden = true;
+  $("#bell").setAttribute("aria-expanded", "false");
+  if (n.link && n.link.view) show(n.link.view);
+}
+
+async function renderNotifications() {
+  const data = await api("/api/notifications?limit=30");
+  setCount(data.unread);
+  $("#notif-list").replaceChildren(...(data.items.length ? data.items.map((n) => el("button", { class: `notif${n.read_at ? "" : " unread"}`, onclick: () => openNotification(n) },
+    el("span", { class: `dot ${n.severity}` }),
+    el("span", {},
+      el("div", { class: "t" }, n.title),
+      n.body ? el("div", { class: "b" }, n.body) : null,
+      el("div", { class: "m" }, `${fmtTime(n.created_at)} · ${CATEGORY[n.category] || n.category}${n.task_id ? " · task " + n.task_id.slice(0, 8) : ""}`)))) :
+    [el("p", { class: "empty", style: "padding: .8rem" }, "Nessuna notifica.")]));
+}
+
+async function pollNotifications() {
+  try {
+    const data = await api(`/api/notifications?limit=20${notifSince ? "&since=" + encodeURIComponent(notifSince) : ""}`);
+    setCount(data.unread);
+    if (data.items.length) notifSince = data.items[0].created_at;
+    if (notifPrimed) data.items.filter((n) => !n.read_at).reverse().forEach(toast);
+    notifPrimed = true;
+    if (!$("#notif-panel").hidden && data.items.length) renderNotifications();
+  } catch { /* il Core può essere momentaneamente occupato */ }
+}
+
+$("#bell").addEventListener("click", async () => {
+  const panel = $("#notif-panel");
+  panel.hidden = !panel.hidden;
+  $("#bell").setAttribute("aria-expanded", String(!panel.hidden));
+  if (!panel.hidden) renderNotifications().catch((e) => alert(e.message));
+});
+$("#notif-readall").addEventListener("click", async () => {
+  await api("/api/notifications/read-all", { method: "POST" });
+  renderNotifications();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { $("#notif-panel").hidden = true; $("#bell").setAttribute("aria-expanded", "false"); } });
+if ("Notification" in window && Notification.permission === "default") {
+  $("#notif-browser").hidden = false;
+  $("#notif-browser").addEventListener("click", async () => { await Notification.requestPermission(); $("#notif-browser").hidden = true; });
+}
+
 loadConversation();
 refreshStatus();
+pollNotifications();
 setInterval(refreshStatus, 15000);
+setInterval(pollNotifications, 5000);

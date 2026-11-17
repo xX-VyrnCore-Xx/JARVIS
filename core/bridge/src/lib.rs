@@ -265,6 +265,13 @@ impl Worker {
         let _ = self.child.wait();
     }
 
+    /// Solo per i test: termina il processo come farebbe un crash esterno.
+    #[doc(hidden)]
+    pub fn kill_for_tests(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+
     /// Vero se il processo del worker è terminato.
     pub fn has_exited(&mut self) -> bool {
         matches!(self.child.try_wait(), Ok(Some(_)))
