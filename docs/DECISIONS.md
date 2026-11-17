@@ -318,6 +318,45 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage 
   - E2E: pannello Sistema.
 - **Documenti interessati:** DEVOPS_QA_OBSERVABILITY.md, ARCHITECTURE.md, REQUIREMENTS.md, INTERFACE_AND_DEVICES.md, README.md.
 
+### ADR-0012 — Backup cifrato e ripristino verificato
+
+- **Data:** 2026-11-17 · **Stato:** Accettato (Fase 4, RNF-08). La gestione dei segreti resta aperta: la chiave non viene conservata, deriva ogni volta dalla passphrase del proprietario.
+- **Contesto:** RNF-08 chiede il ripristino su un ambiente pulito. MEMORY_DATA_SYNC.md chiede backup cifrati e la convalida di dati, metadati e permessi dopo il ripristino. SECURITY_AND_PRIVACY.md chiede la protezione dei backup.
+- **Decisione:**
+  - **Formato** `jarvis-backup/1` (`.jbak`):
+    - intestazione `JARVISB1`, sale, nonce;
+    - archivio tar cifrato con XChaCha20-Poly1305 e chiave derivata con Argon2id (64 MiB, 3 passaggi);
+    - passphrase di almeno 12 caratteri.
+  - **Contenuto:**
+    - `manifest.json` con l'impronta SHA-256 di ogni file, lo stato della catena di audit e la sua testa;
+    - istantanea coerente del database (`VACUUM INTO`, presa con il Core bloccato);
+    - registro di audit;
+    - workspace, esclusi i link simbolici.
+  - **Ripristino:**
+    - decifratura autenticata;
+    - percorsi dell'archivio solo relativi;
+    - confronto delle impronte;
+    - catena di audit e `PRAGMA integrity_check`, entrambi verificati in una cartella di appoggio;
+    - solo dopo, i dati attuali vengono spostati in `<dati>.before-restore-<istante>` e sostituiti.
+
+    Qualsiasi errore lascia i dati intatti e rimuove la cartella di appoggio.
+  - **Blocco esclusivo** `data/.lock`: un solo Core per cartella dati. Il ripristino da riga di comando lo rifiuta se JARVIS è in esecuzione.
+  - **Accessi:**
+    - interfaccia: `POST /api/backup`, con token, audit e notifica; l'API non espone percorsi assoluti;
+    - riga di comando: `./jarvis.sh backup` e `./jarvis.sh restore <file>`;
+    - i backup si trovano in `<dati>-backups`, accanto ai dati.
+- **Motivazione:** un backup senza ripristino verificato non è una garanzia. La cifratura autenticata rileva sia la passphrase sbagliata sia le alterazioni. Conservare i dati sostituiti rende reversibile anche il ripristino.
+- **Conseguenze:**
+  - nessuna rotazione o conservazione automatica dei backup;
+  - non esiste ancora un backup pianificato;
+  - limite di 1 GiB nel formato del prototipo;
+  - la cancellazione di dati dal sistema non si propaga ai backup già creati (MEMORY_DATA_SYNC.md richiede di documentarlo).
+- **Evidenza:**
+  - `core/server/tests/backup.rs`: 5 test (ripristino completo su ambiente pulito con memoria, file, automazioni, conversazione e catena di audit estesa dopo il ripristino; passphrase errata, file alterato o non valido senza effetti sui dati; dati precedenti conservati; passphrase corta; blocco della cartella; API protetta e registrata nell'audit);
+  - prova da riga di comando: backup, ripristino rifiutato con passphrase errata, ripristino rifiutato con JARVIS attivo, ripristino riuscito;
+  - E2E: backup dall'interfaccia.
+- **Documenti interessati:** MEMORY_DATA_SYNC.md, SECURITY_AND_PRIVACY.md, DEVOPS_QA_OBSERVABILITY.md, REQUIREMENTS.md, README.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

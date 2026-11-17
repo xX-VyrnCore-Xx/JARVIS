@@ -5,6 +5,8 @@
 #      ./jarvis.sh desktop       app desktop (Tauri) che avvia il Core da sola
 #      ./jarvis.sh voice-setup   installa i motori vocali locali e scarica i modelli (una volta)
 #      ./jarvis.sh doctor        controlla i prerequisiti e spiega cosa manca
+#      ./jarvis.sh backup        backup cifrato dei dati (passphrase richiesta)
+#      ./jarvis.sh restore FILE  ripristina un backup .jbak (con JARVIS chiuso)
 # Su Windows usa jarvis.cmd (doppio clic) oppure jarvis.ps1.
 # Se il file non è eseguibile (es. scaricato come ZIP): bash jarvis.sh
 #
@@ -124,6 +126,10 @@ open_browser() {
     sleep 1
   done
 }
+if [ "$CMD" = "backup" ] || [ "$CMD" = "restore" ]; then
+  # Manutenzione da terminale: il Core esegue l'operazione ed esce (restore richiede JARVIS chiuso).
+  exec "$ROOT/core/target/release/jarvis" "$@"
+fi
 if [ "${JARVIS_NO_BROWSER:-0}" != "1" ]; then
   open_browser &
 fi

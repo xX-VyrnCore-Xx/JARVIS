@@ -164,6 +164,8 @@ pub fn router(state: Shared) -> Router {
         .route("/api/workspace", get(workspace))
         .route("/api/tools", get(tool_catalog))
         .route("/api/metrics", get(metrics))
+        .route("/api/backups", get(backups))
+        .route("/api/backup", post(create_backup))
         .route(
             "/api/voice/transcribe",
             post(voice_transcribe).layer(axum::extract::DefaultBodyLimit::max(5 * 1024 * 1024)),
@@ -306,6 +308,21 @@ async fn workspace(State(state): State<Shared>) -> Response {
         Ok(v) => Json(v).into_response(),
         Err(e) => e.into_response(),
     }
+}
+
+async fn backups(State(state): State<Shared>) -> Json<Value> {
+    Json(with_core(&state, |j| j.backups()).await)
+}
+
+async fn create_backup(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let Some(pass) = body["passphrase"].as_str().map(str::to_string) else {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "campo 'passphrase' mancante",
+        );
+    };
+    reply(with_core(&state, move |j| j.create_backup(&pass)).await)
 }
 
 async fn metrics(State(state): State<Shared>) -> Json<Value> {

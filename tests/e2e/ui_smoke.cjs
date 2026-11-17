@@ -173,6 +173,12 @@ function check(cond, msg) {
   await page.waitForSelector("#metrics-table tbody tr td");
   check((await page.locator("#system-cards").innerText()).includes("catena integra"), "pannello Sistema con stato dei componenti");
   check((await page.locator("#metrics-table").innerText()).includes("POST /api/chat"), "latenze misurate per endpoint");
+  await page.fill('#backup-form input[name="pass"]', "passphrase del test e2e");
+  await page.fill('#backup-form input[name="again"]', "passphrase del test e2e");
+  page.once("dialog", (d) => d.accept());
+  await page.click('#backup-form button[type="submit"]');
+  await page.waitForFunction(() => /\.jbak/.test(document.querySelector("#backup-list").innerText), null, { timeout: 30000 });
+  check(true, "backup cifrato creato dall'interfaccia");
   if (shots) await page.screenshot({ path: `${shots}/jarvis-sistema.png` });
 
   await page.setViewportSize({ width: 390, height: 800 });

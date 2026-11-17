@@ -133,6 +133,8 @@ pub struct Jarvis {
     worker: Option<Worker>,
     pending: HashMap<String, Pending>,
     obs: std::sync::Arc<Observability>,
+    /// Blocco esclusivo sulla cartella dati: un solo Core per volta (rilasciato alla chiusura).
+    _lock: std::fs::File,
 }
 
 fn obj(v: Value) -> Map<String, Value> {
@@ -145,6 +147,18 @@ fn obj(v: Value) -> Map<String, Value> {
 impl Jarvis {
     pub fn new(cfg: Config) -> Result<Self, String> {
         std::fs::create_dir_all(cfg.workspace()).map_err(|e| format!("workspace: {e}"))?;
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(cfg.data_dir.join(".lock"))
+            .map_err(|e| format!("blocco della cartella dati: {e}"))?;
+        lock.try_lock().map_err(|_| {
+            format!(
+                "un altro Core JARVIS sta già usando la cartella dati {}",
+                cfg.data_dir.display()
+            )
+        })?;
         std::fs::create_dir_all(cfg.data_dir.join("audit")).map_err(|e| format!("audit: {e}"))?;
         let store = Store::open(&cfg.data_dir.join("jarvis.sqlite3"))
             .map_err(|e| format!("database: {e}"))?;
@@ -163,6 +177,7 @@ impl Jarvis {
             worker: None,
             pending: HashMap::new(),
             obs: std::sync::Arc::new(Observability::new(Some(&cfg_logs))),
+            _lock: lock,
         })
     }
 
@@ -1742,6 +1757,41 @@ impl Jarvis {
             map.remove("audio_b64");
         }
         Ok((audio, out))
+    }
+}
+
+// ---------------------------------------------------------------------- Backup (RNF-08)
+
+impl Jarvis {
+    /// Backup cifrato con la passphrase del proprietario; istantanea coerente presa sotto il blocco del Core.
+    pub fn create_backup(&mut self, passphrase: &str) -> Result<Value, CoreError> {
+        let timer = Timer::start();
+        let out_dir = self.cfg.backups_dir();
+        let store = &self.store;
+        let summary = crate::backup::create(&self.cfg.data_dir, &out_dir, passphrase, |p| {
+            store.snapshot_to(p).map_err(|e| e.to_string())
+        })
+        .map_err(|e| {
+            if e.contains("passphrase") {
+                CoreError::BadRequest(e)
+            } else {
+                CoreError::Internal(e)
+            }
+        })?;
+        self.obs.observe("backup create", timer.ms(), false);
+        self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "owner", "id": "owner"},
+                          "node": "core-local", "action": "backup.create", "outcome": "succeeded", "effect": "applied"}))?;
+        self.notify(json!({"severity": "success", "category": "system", "title": "Backup creato",
+            "body": format!("{} · {} file cifrati", summary["file"].as_str().unwrap_or(""), summary["files"]), "source": {"kind": "module", "id": "backup"}}))?;
+        let mut view = summary;
+        if let Some(m) = view.as_object_mut() {
+            m.remove("path");
+        }
+        Ok(view)
+    }
+
+    pub fn backups(&self) -> Value {
+        json!({"dir": self.cfg.backups_dir().to_string_lossy(), "items": crate::backup::list(&self.cfg.backups_dir())})
     }
 }
 

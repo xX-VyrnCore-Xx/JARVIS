@@ -378,8 +378,25 @@ views.system = async () => {
         el("td", {}, `${x.p50_ms} ms`), el("td", {}, `${x.p95_ms} ms`), el("td", {}, `${x.max_ms} ms`)));
     }
   }
+  const bk = await api("/api/backups");
+  $("#backup-list").replaceChildren(...(bk.items.length ? bk.items.slice(0, 5).map((b) => el("div", { class: "sub" }, `${b.file} · ${(b.bytes / 1024).toFixed(1)} KiB`)) : [el("div", { class: "sub" }, `Nessun backup in ${bk.dir}`)]));
   $("#metrics-table tbody").replaceChildren(...(rows.length ? rows : [el("tr", {}, el("td", { colspan: "6" }, "Nessuna misura ancora."))]));
 };
+
+$("#backup-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target;
+  if (f.pass.value !== f.again.value) return alert("Le due passphrase non coincidono.");
+  const button = f.querySelector("button");
+  button.disabled = true;
+  button.textContent = "Cifratura…";
+  try {
+    const out = await api("/api/backup", { method: "POST", body: JSON.stringify({ passphrase: f.pass.value }) });
+    f.reset();
+    alert(`Backup creato: ${out.file} (${out.files} file, audit ${out.audit.chain_valid ? "integro" : "da verificare"}).`);
+    views.system();
+  } catch (err) { alert(err.message); } finally { button.disabled = false; button.textContent = "Crea backup"; }
+});
 
 function show(view) {
   document.querySelectorAll(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.view === view));

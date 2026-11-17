@@ -7,6 +7,7 @@
 pub mod api;
 pub mod audit;
 pub mod automation;
+pub mod backup;
 pub mod catalog;
 pub mod config;
 pub mod observability;

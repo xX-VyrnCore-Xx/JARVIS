@@ -92,4 +92,14 @@ impl Config {
     pub fn workspace(&self) -> PathBuf {
         self.data_dir.join("workspace")
     }
+
+    /// Cartella dei backup, accanto ai dati (un ripristino sposta i dati, non i backup).
+    pub fn backups_dir(&self) -> PathBuf {
+        let name = self
+            .data_dir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "data".into());
+        self.data_dir.with_file_name(format!("{name}-backups"))
+    }
 }

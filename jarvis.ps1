@@ -4,9 +4,11 @@
 #      .\jarvis.ps1 desktop       app desktop (Tauri)
 #      .\jarvis.ps1 voice-setup   motori vocali locali e modelli (una volta)
 #      .\jarvis.ps1 doctor        controlla i prerequisiti
+#      .\jarvis.ps1 backup        backup cifrato dei dati
+#      .\jarvis.ps1 restore FILE  ripristina un backup (con JARVIS chiuso)
 # Se PowerShell blocca gli script, usa jarvis.cmd (doppio clic) che lo avvia con -ExecutionPolicy Bypass.
 
-param([string]$Command = "")
+param([string]$Command = "", [string]$Target = "")
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Port = if ($env:JARVIS_PORT) { $env:JARVIS_PORT } else { "8765" }
@@ -96,6 +98,8 @@ if ($Command -eq "desktop") {
     exit $LASTEXITCODE
 }
 
+if ($Command -eq "backup") { & $CoreExe backup; exit $LASTEXITCODE }
+if ($Command -eq "restore") { & $CoreExe restore $Target; exit $LASTEXITCODE }
 if ($env:JARVIS_NO_BROWSER -ne "1") {
     Start-Job -ArgumentList $Port -ScriptBlock {
         param($p)

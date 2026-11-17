@@ -42,6 +42,7 @@ sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev
   L'audio non lascia il computer e non viene salvato. Le conferme restano un clic.
 - **Notifiche**: la campanella in alto segnala conferme in attesa, automazioni fallite e anomalie (agente AI non disponibile, audit alterato). Ogni notifica è collegata al task che l'ha generata.
 
+- **Backup**: dalla sezione Sistema o con `./jarvis.sh backup` crei una copia cifrata dei tuoi dati, protetta da una passphrase che scegli tu (senza passphrase la copia non si apre). Per ripristinarla, con JARVIS chiuso: `./jarvis.sh restore data-backups/<file>.jbak`.
 - **Sistema**: la sezione omonima mostra stato dei componenti e latenze misurate. I log diagnostici sono in `data/logs/core.jsonl` e non contengono i tuoi messaggi.
 
 Cosa osservare:

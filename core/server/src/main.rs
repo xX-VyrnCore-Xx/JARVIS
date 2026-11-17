@@ -4,6 +4,95 @@ use jarvis_core::api;
 use jarvis_core::config::Config;
 use jarvis_core::orchestrator::Jarvis;
 
+/// Passphrase da `JARVIS_BACKUP_PASSPHRASE` oppure dalla prima riga dello standard input.
+fn passphrase() -> String {
+    if let Ok(p) = std::env::var("JARVIS_BACKUP_PASSPHRASE") {
+        return p;
+    }
+    eprint!(
+        "Passphrase del backup (almeno {} caratteri): ",
+        jarvis_core::backup::MIN_PASSPHRASE
+    );
+    let mut line = String::new();
+    let _ = std::io::stdin().read_line(&mut line);
+    line.trim_end_matches(['\r', '\n']).to_string()
+}
+
+/// `jarvis backup` e `jarvis restore <file>` (RNF-08). Restituisce il codice di uscita.
+fn maintenance(cfg: &Config, args: &[String]) -> Option<i32> {
+    match args.first().map(String::as_str) {
+        Some("backup") => {
+            let mut core = match Jarvis::new(cfg.clone()) {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("✗ {e}. Con JARVIS avviato, crea il backup dalla sezione Sistema dell'interfaccia.");
+                    return Some(1);
+                }
+            };
+            Some(match core.create_backup(&passphrase()) {
+                Ok(s) => {
+                    println!(
+                        "✓ Backup creato: {}",
+                        cfg.backups_dir()
+                            .join(s["file"].as_str().unwrap_or(""))
+                            .display()
+                    );
+                    0
+                }
+                Err(e) => {
+                    eprintln!("✗ Backup non riuscito: {e:?}");
+                    1
+                }
+            })
+        }
+        Some("restore") => {
+            let Some(file) = args.get(1) else {
+                eprintln!("Uso: jarvis restore <file.jbak>");
+                return Some(2);
+            };
+            // Il ripristino richiede il Core fermo: il blocco esclusivo sulla cartella dati lo garantisce.
+            if cfg.data_dir.join(".lock").exists() {
+                if let Ok(f) = std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(cfg.data_dir.join(".lock"))
+                {
+                    if f.try_lock().is_err() {
+                        eprintln!(
+                            "✗ JARVIS è in esecuzione su {}: chiudilo prima del ripristino.",
+                            cfg.data_dir.display()
+                        );
+                        return Some(1);
+                    }
+                }
+            }
+            Some(
+                match jarvis_core::backup::restore(
+                    std::path::Path::new(file),
+                    &passphrase(),
+                    &cfg.data_dir,
+                ) {
+                    Ok(s) => {
+                        println!(
+                            "✓ Ripristino completato da {} (creato il {})",
+                            file,
+                            s["created_at"].as_str().unwrap_or("?")
+                        );
+                        if let Some(prev) = s["previous_data"].as_str() {
+                            println!("  I dati precedenti sono conservati in {prev}");
+                        }
+                        0
+                    }
+                    Err(e) => {
+                        eprintln!("✗ Ripristino non riuscito: {e}. I dati attuali non sono stati modificati.");
+                        1
+                    }
+                },
+            )
+        }
+        _ => None,
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let cfg = match Config::from_env() {
@@ -13,6 +102,10 @@ async fn main() {
             std::process::exit(2);
         }
     };
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(code) = maintenance(&cfg, &args) {
+        std::process::exit(code);
+    }
     let addr = std::net::SocketAddr::new(cfg.host, cfg.port);
     let (token, port, data_dir, tick) = (
         cfg.token.clone(),

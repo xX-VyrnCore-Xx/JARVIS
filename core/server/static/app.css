@@ -129,6 +129,7 @@ button.small { font-size: .78rem; padding: .2rem .5rem; }
 .stat .k { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
 .stat .v { font-weight: 600; margin-top: .2rem; overflow-wrap: anywhere; }
 .stat .d { color: var(--muted); font-size: .8rem; overflow-wrap: anywhere; }
+.backup-form { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: .4rem .9rem .8rem; }
 .sub-head { font-size: 1rem; margin: 1.2rem 0 .5rem; }
 .table-wrap { overflow-x: auto; }
 table.metrics { width: 100%; border-collapse: collapse; font-size: .85rem; }

@@ -285,4 +285,11 @@ impl Store {
             [at],
         )
     }
+
+    /// Istantanea coerente del database in un nuovo file (per i backup).
+    pub fn snapshot_to(&self, path: &Path) -> StoreResult<()> {
+        self.conn
+            .execute("VACUUM INTO ?1", [path.to_string_lossy()])?;
+        Ok(())
+    }
 }
