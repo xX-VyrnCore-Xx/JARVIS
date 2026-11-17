@@ -40,6 +40,46 @@ main { flex: 1; min-width: 0; min-height: 0; display: flex; }
 .view { display: none; flex: 1; flex-direction: column; min-height: 0; padding: 1rem 1.2rem; overflow: auto; }
 .view.active { display: flex; }
 #view-chat { padding: 0; overflow: hidden; }
+.avatar-panel {
+  display: flex; align-items: center; gap: .7rem; padding: .45rem 1.2rem;
+  border-bottom: 1px solid var(--border); color: var(--muted); font-size: .82rem;
+}
+.avatar {
+  --avatar-color: var(--accent);
+  position: relative; flex: 0 0 28px; height: 28px; border-radius: 50%;
+  color: var(--avatar-color); perspective: 84px;
+  background: radial-gradient(circle, currentColor 0 16%, transparent 20%);
+}
+.avatar span {
+  position: absolute; inset: 2px; border: 1px solid currentColor; border-radius: 50%;
+  transform: rotateX(52deg) rotateY(var(--angle));
+}
+.avatar span:nth-child(1) { --angle: 0deg; }
+.avatar span:nth-child(2) { --angle: 60deg; }
+.avatar span:nth-child(3) { --angle: 120deg; }
+.avatar[data-state="listening"] { --avatar-color: var(--ok); }
+.avatar[data-state="transcribing"] { --avatar-color: var(--warn); }
+.avatar[data-state="thinking"] span, .avatar[data-state="transcribing"] span {
+  animation: avatar-rotate 1.4s linear infinite;
+}
+.avatar[data-state="listening"] {
+  animation: avatar-pulse .8s ease-in-out infinite alternate;
+}
+.avatar[data-state="speaking"]::after {
+  content: ""; position: absolute; inset: auto 9px 3px; height: 5px;
+  background: currentColor; border-radius: 50%;
+  transform: scaleY(calc(.2 + .8 * var(--mouth-opening, 0)));
+}
+@keyframes avatar-rotate {
+  to { transform: rotateX(52deg) rotateY(calc(var(--angle) + 360deg)); }
+}
+@keyframes avatar-pulse {
+  to { transform: scale(1.12); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .avatar, .avatar span { animation: none !important; }
+  .avatar[data-state="speaking"]::after { transform: scaleY(.2); }
+}
 .view-head { display: flex; align-items: center; justify-content: space-between; }
 .view-head h2 { margin: .2rem 0; font-size: 1.2rem; }
 .hint { color: var(--muted); margin: .2rem 0 1rem; font-size: .9rem; }

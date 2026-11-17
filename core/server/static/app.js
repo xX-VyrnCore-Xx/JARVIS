@@ -42,7 +42,7 @@ const fmtTime = (iso) => (iso ? new Date(iso).toLocaleString("it-IT") : "");
 
 async function refreshStatus() {
   try {
-    const h = await fetch("/api/health", { headers: AUTH }).then((r) => r.json());
+    const h = await api("/api/health");
     const ai = $("#st-ai");
     const b = h.ai && h.ai.gateway && h.ai.gateway.backend;
     if (h.ai && h.ai.status === "up" && b) {
@@ -138,6 +138,7 @@ async function send(text) {
   addMessage("user", text);
   const typing = el("div", { class: "msg typing" }, "JARVIS sta elaborando…");
   messages.append(typing);
+  renderAvatar();
   scrollDown();
   $("#send").disabled = true;
   try {
@@ -150,6 +151,7 @@ async function send(text) {
     typing.remove();
     addMessage("assistant", `Errore: ${e.message}`, { error: true });
   } finally {
+    renderAvatar();
     $("#send").disabled = false;
     refreshStatus();
     pollNotifications();
@@ -581,6 +583,8 @@ let micStream = null;
 let micNode = null;
 let pushChunks = null;
 let player = null;
+let speechRequest = null;
+let speechFrame = 0;
 const vad = { speaking: false, chunks: [], loud: 0, quiet: 0, awaitingCommand: false };
 const SR_TARGET = 16000;
 
@@ -588,7 +592,20 @@ const pref = (k, v) => { try { if (v === undefined) return localStorage.getItem(
 
 function setVoiceState(state) { voiceState = state; renderVoiceState(); }
 
+function renderAvatar() {
+  const state = voiceState === "idle" && messages.querySelector(".typing") ? "thinking" : voiceState;
+  const labels = {
+    idle: "Pronto", thinking: "Elaborazione", listening: "In ascolto",
+    transcribing: "Trascrizione", speaking: "Risposta vocale",
+  };
+  const avatar = $("#avatar");
+  if (avatar.dataset.state === state) return;
+  avatar.dataset.state = state;
+  $("#avatar-status").textContent = labels[state];
+}
+
 function renderVoiceState() {
+  renderAvatar();
   const pill = $("#st-voice");
   const mic = $("#mic");
   const available = voiceStatus && voiceStatus.available;
@@ -717,22 +734,67 @@ async function speakReply(text) {
   stopSpeaking();
   const clean = text.replace(/https?:\/\/\S+/g, "").slice(0, 1500).trim();
   if (!clean) return;
+  const request = new AbortController();
+  speechRequest = request;
   try {
-    const res = await fetch("/api/voice/speak", { method: "POST", headers: { "Content-Type": "application/json", ...AUTH }, body: JSON.stringify({ text: clean }) });
+    const res = await fetch("/api/voice/speak", { method: "POST", headers: { "Content-Type": "application/json", ...AUTH }, body: JSON.stringify({ text: clean }), signal: request.signal });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error?.message || `HTTP ${res.status}`);
-    const url = URL.createObjectURL(await res.blob());
-    player = new Audio(url);
-    player.onended = () => { URL.revokeObjectURL(url); player = null; setVoiceState("idle"); };
-    setVoiceState("speaking");
-    await player.play().catch(() => {});
+    const blob = await res.blob();
+    if (request.signal.aborted) return;
+    const audio = new Audio(URL.createObjectURL(blob));
+    player = audio;
+    audio.onplaying = () => { if (player === audio) setVoiceState("speaking"); };
+    audio.onended = () => { if (player === audio) stopSpeaking(); };
+    audio.onerror = () => {
+      if (player !== audio) return;
+      stopSpeaking();
+      addMessage("assistant", "Riproduzione della risposta vocale interrotta da un errore.", { error: true });
+    };
+    animateSpeech(audio, blob);
+    await audio.play();
   } catch (e) {
-    setVoiceState("idle");
+    if (request.signal.aborted) return;
+    stopSpeaking();
     addMessage("assistant", `Risposta vocale non disponibile: ${e.message}`, { error: true });
   }
 }
 
+async function animateSpeech(audio, blob) {
+  if (typeof OfflineAudioContext !== "function" || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  let decoded;
+  try {
+    const context = new OfflineAudioContext(1, 1, 16000);
+    decoded = await context.decodeAudioData(await blob.arrayBuffer());
+  } catch {
+    return;
+  }
+  if (player !== audio) return;
+  const samples = decoded.getChannelData(0);
+  const avatar = $("#avatar");
+  const update = () => {
+    const start = Math.floor(audio.currentTime * decoded.sampleRate);
+    const end = Math.min(samples.length, start + 480);
+    let peak = 0;
+    if (!audio.paused) {
+      for (let i = start; i < end; i += 4) peak = Math.max(peak, Math.abs(samples[i]));
+    }
+    avatar.style.setProperty("--mouth-opening", Math.min(1, peak * 4).toFixed(2));
+    speechFrame = requestAnimationFrame(update);
+  };
+  speechFrame = requestAnimationFrame(update);
+}
+
 function stopSpeaking() {
-  if (player) { player.pause(); player = null; }
+  speechRequest?.abort();
+  speechRequest = null;
+  cancelAnimationFrame(speechFrame);
+  $("#avatar").style.removeProperty("--mouth-opening");
+  if (player) {
+    const audio = player;
+    player = null;
+    audio.pause();
+    URL.revokeObjectURL(audio.src);
+  }
   if (voiceState === "speaking") setVoiceState("idle");
 }
 
@@ -755,3 +817,7 @@ refreshStatus();
 pollNotifications();
 setInterval(refreshStatus, 15000);
 setInterval(pollNotifications, 5000);
+window.addEventListener("online", () => {
+  refreshStatus();
+  pollNotifications();
+});

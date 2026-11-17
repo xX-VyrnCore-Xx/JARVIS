@@ -55,7 +55,21 @@ function check(cond, msg) {
   };
 
   check((await page.locator("#st-ai").innerText()).includes("offline"), "stato AI visibile nell'intestazione");
-  check((await send("ciao")).includes("JARVIS"), "risposta al saluto");
+  let releaseChat;
+  const pendingChat = new Promise((resolve) => { releaseChat = resolve; });
+  await page.route("**/api/chat", async (route) => {
+    await pendingChat;
+    await route.continue();
+  }, { times: 1 });
+  const greeting = send("ciao");
+  try {
+    await page.waitForSelector('#avatar[data-state="thinking"]');
+    check((await page.textContent("#avatar-status")) === "Elaborazione", "avatar mostra l'elaborazione prima della risposta");
+  } finally {
+    releaseChat();
+  }
+  check((await greeting).includes("JARVIS"), "risposta al saluto");
+  await page.waitForSelector('#avatar[data-state="idle"]');
   check((await send("che ore sono")).startsWith("Sono le"), "strumento time.now eseguito senza conferma");
 
   // Voce: pulsante microfono, trascrizione locale, risposta vocale e interruzione.
@@ -65,6 +79,7 @@ function check(cond, msg) {
   const beforeVoice = await page.locator(".msg.assistant").count();
   await page.click("#mic");
   await page.waitForFunction(() => /in ascolto/.test(document.querySelector("#st-voice").textContent));
+  check((await page.getAttribute("#avatar", "data-state")) === "listening", "avatar segue l'ascolto");
   check((await page.getAttribute("#mic", "aria-pressed")) === "true", "microfono attivo e visibile durante l'ascolto");
   await page.waitForTimeout(1500);
   await page.click("#mic");
@@ -73,9 +88,11 @@ function check(cond, msg) {
   check((await page.locator(".msg.assistant").last().innerText()).startsWith("Sono le"), "risposta al comando vocale");
   await page.waitForSelector("#voice-stop:not([hidden])", { timeout: 15000 });
   check(/risposta vocale/.test(await page.textContent("#st-voice")), "risposta letta ad alta voce");
+  check((await page.getAttribute("#avatar", "data-state")) === "speaking", "avatar segue la riproduzione");
   await page.click("#voice-stop");
   await page.waitForFunction(() => /Voce: pronta/.test(document.querySelector("#st-voice").textContent));
   check(await page.isHidden("#voice-stop"), "risposta vocale interrotta dall'utente");
+  check((await page.getAttribute("#avatar", "data-state")) === "idle", "avatar torna pronto dopo l'interruzione");
   await page.uncheck("#voice-replies");
   await page.check("#voice-handsfree");
   await page.waitForSelector("#mic-live:not([hidden])");

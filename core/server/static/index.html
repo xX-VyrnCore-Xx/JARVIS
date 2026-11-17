@@ -47,6 +47,12 @@
     </nav>
     <main>
       <section class="view active" id="view-chat" aria-label="Chat">
+        <div class="avatar-panel">
+          <div class="avatar" id="avatar" data-state="idle" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </div>
+          <span id="avatar-status" role="status">Pronto</span>
+        </div>
         <div class="messages" id="messages" aria-live="polite"></div>
         <div class="suggestions" id="suggestions">
           <button class="chip">ciao</button>

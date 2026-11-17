@@ -15,7 +15,7 @@ Questo documento raccoglie ciò che serve per l'accettazione finale descritta in
 | RF-07 Automazioni | `automation.rs`, E2E | P5 | Verde | — |
 | RF-08 Memoria | `api.rs`, E2E | P1 | Verde | Nessun indice semantico |
 | RF-09 Voce | `voice.rs`, `tests/ai/test_voice.py`, E2E con motori finti | P6 | Verde (finti) | Motori reali solo sul tuo computer |
-| RF-10 Client | E2E Web e telefono simulato, CI desktop su 3 sistemi | P7, P8 | Verde | App native e avatar assenti |
+| RF-10 Client | E2E Web e telefono simulato, CI desktop su 3 sistemi | P7, P8 | Verde | App native e sincronizzazione labiale basata sui fonemi in sospeso |
 | RF-11 Dispositivi | `devices.rs`, E2E | P8 | Verde | Nodi esecutori, mTLS e VPN mesh assenti |
 | RF-12 Dati | backup, rollback | P9 | Verde | Nessuna sincronizzazione fra nodi |
 | RF-13 Notifiche | `notifications.rs`, E2E | P5 | Verde | Nessun canale esterno |
@@ -73,9 +73,11 @@ Restano decisioni del proprietario, perché richiedono suoi account, certificati
 - canali Stable/Beta;
 - VPN mesh;
 - portachiavi del sistema;
-- avatar e app native.
+- evoluzione dell'avatar con sincronizzazione labiale e app native.
 
 ## Procedura di rilascio e rollback
+
+Il test `tests/contracts/test_packaging.py` verifica gli archivi ZIP e TAR.GZ e le loro impronte con un binario sintetico. Il confezionamento normalizza ordine, date e permessi. A parità di file di input, binario e runtime di compressione, i metadati del filesystem non cambiano l'archivio.
 
 **Rilascio:**
 1. Aggiornare la versione in `core/server/Cargo.toml`.

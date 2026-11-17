@@ -37,9 +37,11 @@ Si adatta al tema chiaro e scuro e allo schermo dello smartphone (verificata a 3
 2. Avvia JARVIS con `JARVIS_ALLOWED_HOSTS=<nome-host>`.
 3. Sul telefono apri l'indirizzo e inserisci il codice generato nella sezione **Dispositivi**.
 
-L'interfaccia si installa come app («Aggiungi a schermata Home»). Dal dispositivo sono disponibili chat, attività, notifiche, voce e, se concesso, le conferme. La revoca è immediata.
+L'interfaccia si installa come app («Aggiungi a schermata Home»). Dal dispositivo sono disponibili chat, attività, notifiche, voce e, se concesso, le conferme. La revoca è immediata. Se il Core o il proxy è irraggiungibile durante la navigazione, la PWA mostra una pagina con «Riprova». Al ritorno della connessione una scheda già aperta aggiorna stato e notifiche. Il service worker evita di salvare pagine, risposte o credenziali.
 
-Restano da sviluppare: installatori autonomi del desktop, avatar, app mobili native e nodi esecutori distribuiti.
+La chat mostra un avatar astratto con anelli CSS 3D. L'etichetta annuncia gli stati pronto, elaborazione, ascolto, trascrizione e risposta vocale. L'avatar segue l'effettivo avvio della riproduzione. Durante la riproduzione l'apertura della bocca segue l'intensità dell'audio locale e rispetta la preferenza per il movimento ridotto.
+
+Restano da sviluppare: sincronizzazione labiale basata sui fonemi, installatori autonomi del desktop, app mobili native e nodi esecutori distribuiti.
 
 ## Voce (RF-09, ADR-0010)
 
