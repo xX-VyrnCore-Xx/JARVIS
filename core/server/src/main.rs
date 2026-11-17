@@ -14,7 +14,12 @@ async fn main() {
         }
     };
     let addr = std::net::SocketAddr::new(cfg.host, cfg.port);
-    let (token, port, data_dir) = (cfg.token.clone(), cfg.port, cfg.data_dir.clone());
+    let (token, port, data_dir, tick) = (
+        cfg.token.clone(),
+        cfg.port,
+        cfg.data_dir.clone(),
+        cfg.scheduler_tick_s,
+    );
     let core = match Jarvis::new(cfg) {
         Ok(c) => c,
         Err(e) => {
@@ -53,7 +58,12 @@ async fn main() {
             .map(|r| format!(" — {r}"))
             .unwrap_or_default()
     );
+    println!(
+        "  Automazioni : {} attive, controllo ogni {tick} s",
+        health["automations"]
+    );
     println!("  Arresto     : Ctrl+C");
+    api::spawn_scheduler(state.clone(), std::time::Duration::from_secs(tick));
     let app = api::router(state);
     if let Err(e) = axum::serve(listener, app)
         .with_graceful_shutdown(async {

@@ -13,6 +13,8 @@ Contratti condivisi fra Core Rust, AI Python, applicazioni e integrazioni (RNF-0
 | `v1/policy-decision.schema.json` | `jarvis.policy-decision/1` — decisione del Security Engine con conferma vincolata | SECURITY_AND_PRIVACY.md | RNF-04, RNF-05 |
 | `v1/audit-event.schema.json` | `jarvis.audit-event/1` — evento di audit in catena di hash | SECURITY_AND_PRIVACY.md, DEVOPS_QA_OBSERVABILITY.md | RNF-04, RNF-07 |
 | `v1/agent-result.schema.json` | `jarvis.agent-result/1` — esito di un agente: risposta oppure una proposta di strumento, con backend e motivo di degradazione | AI_SYSTEM.md | RF-01, RF-04 |
+| `v1/workflow.schema.json` | `jarvis.workflow/1` — automazione pianificata (intervallo, giornaliera, singola) con passi dal catalogo e approvazione del proprietario legata al digest dei passi | AUTONOMY_AND_TOOLS.md | RF-07 |
+| `v1/workflow-run.schema.json` | `jarvis.workflow-run/1` — esecuzione con trigger, istanti, decisione ed esito per passo | AUTONOMY_AND_TOOLS.md | RF-07, RNF-07 |
 | `catalog/tools/*.json` | Catalogo iniziale degli strumenti (`jarvis.tool/1`), con `input_schema` chiuso | AUTONOMY_AND_TOOLS.md | RF-05 |
 
 La delega v1 accetta il campo facoltativo `inputs`: turni recenti (`user` o `assistant`), memoria autorizzata e `tool_result`. È un'aggiunta compatibile: i documenti senza `inputs` restano validi.
@@ -28,6 +30,7 @@ La delega v1 accetta il campo facoltativo `inputs`: turni recenti (`user` o `ass
 | `jarvis.policy-decision/1` | Security Engine | Orchestrator, esecutori degli strumenti, client per la conferma |
 | `jarvis.audit-event/1` | Security Engine ed esecutori | Observability, verifiche di accettazione |
 | `jarvis.agent-result/1` | Agenti (worker Python) | Orchestrator |
+| `jarvis.workflow/1`, `jarvis.workflow-run/1` | Automation Engine (Core) | Interfaccia, Observability |
 | `error` (incorporato) | Ogni modulo | Orchestrator per retry e ripianificazione |
 
 Ordine d'uso in un'esecuzione (ARCHITECTURE.md): il client crea un `task`; l'Orchestrator emette `delegation` in un `envelope`; l'agente propone uno strumento descritto da `tool`; il Security Engine produce `policy-decision` (eventualmente con conferma) e un `audit-event`; l'esecutore restituisce esito o `error` e un nuovo `audit-event`; l'Orchestrator aggiorna la `history` del task.
@@ -53,6 +56,8 @@ Non esprimibili in JSON Schema. Ogni implementazione (Rust, Python, TypeScript) 
 - Envelope: `sender` diverso da `recipient`; `causation_id` diverso da `message_id`.
 - Task: la `history` inizia con `pending` senza `from`; ogni passo parte dallo stato precedente e segue `task-transitions.json`; gli stati terminali non hanno uscite; gli istanti non decrescono e non precedono `created_at`; `state` coincide con l'ultima transizione.
 - Policy decision: `expires_at` segue `decided_at`; la conferma usa lo stesso `parameters_digest` della richiesta e scade dopo `decided_at` ed entro `expires_at`.
+- Workflow run: `finished_at` non precede `started_at`; gli `index` dei passi sono 0, 1, 2, … senza buchi.
+- Workflow (applicato dal Core a ogni esecuzione): `approval.steps_digest` = SHA-256 del JSON canonico di `steps`; se non coincide l'esecuzione fallisce con `security.approval_mismatch`.
 - Audit: in un flusso `sequence` parte da 0 senza buchi; `prev_hash` del primo evento è 64 zeri, poi l'`hash` del precedente; `hash` = SHA-256 esadecimale del JSON canonico dell'evento senza `hash` (chiavi ordinate, separatori `,` e `:` senza spazi, UTF-8 senza escape dei caratteri non ASCII).
 
 Implementazioni di riferimento: Python `tests/contracts/test_contracts_v1.py`, Rust `core/contracts` (crate `jarvis-contracts`). Entrambe usano le stesse fixture e devono dare gli stessi esiti.

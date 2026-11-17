@@ -132,6 +132,12 @@ pub fn router(state: Shared) -> Router {
         .route("/api/memory/{id}", delete(forget))
         .route("/api/audit", get(audit))
         .route("/api/workspace", get(workspace))
+        .route("/api/tools", get(tool_catalog))
+        .route("/api/workflows", get(workflows).post(create_workflow))
+        .route("/api/workflows/{id}", delete(delete_workflow))
+        .route("/api/workflows/{id}/enabled", post(set_enabled))
+        .route("/api/workflows/{id}/run", post(run_now))
+        .route("/api/workflows/{id}/runs", get(workflow_runs))
         .layer(middleware::from_fn_with_state(state.clone(), guard))
         .with_state(state)
 }
@@ -257,6 +263,92 @@ async fn workspace(State(state): State<Shared>) -> Response {
         Ok(v) => Json(v).into_response(),
         Err(e) => e.into_response(),
     }
+}
+
+async fn tool_catalog(State(state): State<Shared>) -> Json<Value> {
+    Json(json!({"items": with_core(&state, |j| j.tool_catalog()).await}))
+}
+
+fn reply(result: Result<Value, CoreError>) -> Response {
+    match result {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+async fn workflows(State(state): State<Shared>) -> Response {
+    reply(
+        with_core(&state, |j| {
+            j.workflows().map(|items| json!({"items": items}))
+        })
+        .await,
+    )
+}
+
+async fn create_workflow(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply(with_core(&state, move |j| j.create_workflow(&body)).await)
+}
+
+async fn delete_workflow(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    reply(
+        with_core(&state, move |j| {
+            j.delete_workflow(&id).map(|()| json!({"deleted": true}))
+        })
+        .await,
+    )
+}
+
+async fn set_enabled(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    let Some(enabled) = body["enabled"].as_bool() else {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "campo 'enabled' booleano mancante",
+        );
+    };
+    reply(with_core(&state, move |j| j.set_workflow_enabled(&id, enabled)).await)
+}
+
+async fn run_now(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    reply(with_core(&state, move |j| j.run_workflow_now(&id)).await)
+}
+
+async fn workflow_runs(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    reply(
+        with_core(&state, move |j| {
+            j.workflow_runs(&id, 20)
+                .map(|items| json!({"items": items}))
+        })
+        .await,
+    )
+}
+
+/// Pianificatore: a ogni intervallo esegue le automazioni scadute (con la policy vigente).
+pub fn spawn_scheduler(state: Shared, tick: std::time::Duration) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tick);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            interval.tick().await;
+            let result = with_core(&state, |j| j.run_due(chrono::Utc::now())).await;
+            match result {
+                Ok(runs) => {
+                    for run in runs {
+                        println!(
+                            "[automazioni] {} → {}",
+                            run["workflow_id"].as_str().unwrap_or("?"),
+                            run["status"].as_str().unwrap_or("?")
+                        );
+                    }
+                }
+                Err(e) => eprintln!("[automazioni] errore del pianificatore: {e:?}"),
+            }
+        }
+    })
 }
 
 /// Usato dai test per costruire lo stato senza aprire una porta.

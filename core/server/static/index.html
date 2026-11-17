@@ -20,6 +20,7 @@
     <nav class="nav" aria-label="Sezioni">
       <button class="nav-item active" data-view="chat">Chat</button>
       <button class="nav-item" data-view="tasks">Attività</button>
+      <button class="nav-item" data-view="automations">Automazioni</button>
       <button class="nav-item" data-view="memory">Memoria</button>
       <button class="nav-item" data-view="workspace">Workspace</button>
       <button class="nav-item" data-view="audit">Audit</button>
@@ -35,6 +36,8 @@
           <button class="chip">leggi note.txt</button>
           <button class="chip">ricorda che preferisco risposte brevi</button>
           <button class="chip">cosa ricordi</button>
+          <button class="chip">ogni ora info sistema</button>
+          <button class="chip">elenca automazioni</button>
         </div>
         <form class="composer" id="composer">
           <textarea id="input" rows="1" placeholder="Scrivi a JARVIS…" title="Invio per inviare, Maiusc+Invio per andare a capo" aria-label="Messaggio (Invio per inviare, Maiusc+Invio per andare a capo)" maxlength="8000"></textarea>
@@ -45,6 +48,34 @@
         <div class="view-head"><h2>Attività</h2><button class="ghost" data-refresh="tasks">Aggiorna</button></div>
         <p class="hint">Ogni richiesta è un task con stati verificati dal contratto <code>jarvis.task/1</code>.</p>
         <div id="tasks" class="list"></div>
+      </section>
+      <section class="view" id="view-automations" aria-label="Automazioni">
+        <div class="view-head"><h2>Automazioni</h2><button class="ghost" data-refresh="automations">Aggiorna</button></div>
+        <p class="hint">Attività pianificate che sopravvivono al riavvio. A ogni esecuzione la policy viene ricontrollata; i passi a rischio alto partono solo perché li hai approvati alla creazione.</p>
+        <details class="panel" id="wf-new">
+          <summary>Nuova automazione</summary>
+          <form id="wf-form" class="form">
+            <label>Nome <input name="name" required maxlength="200" placeholder="Es. Battito orario"></label>
+            <div class="row">
+              <label>Quando
+                <select name="kind">
+                  <option value="interval">Ogni N minuti</option>
+                  <option value="daily">Ogni giorno all'ora</option>
+                  <option value="once">Una volta, tra N minuti</option>
+                </select>
+              </label>
+              <label id="wf-every">Minuti <input name="every" type="number" min="1" value="60"></label>
+              <label id="wf-at" hidden>Ora locale <input name="at" type="time" value="08:00"></label>
+            </div>
+            <div id="wf-steps"></div>
+            <div class="row">
+              <button type="button" class="ghost" id="wf-add-step">+ Aggiungi passo</button>
+              <label class="check"><input type="checkbox" name="continue"> Continua anche se un passo fallisce</label>
+            </div>
+            <button type="submit" class="primary">Crea automazione</button>
+          </form>
+        </details>
+        <div id="automations" class="list"></div>
       </section>
       <section class="view" id="view-memory" aria-label="Memoria">
         <div class="view-head"><h2>Memoria</h2><button class="ghost" data-refresh="memory">Aggiorna</button></div>

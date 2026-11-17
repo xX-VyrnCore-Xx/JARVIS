@@ -25,7 +25,7 @@ function el(tag, attrs = {}, ...children) {
   return node;
 }
 
-const fmtTime = (iso) => (iso ? new Date(iso).toLocaleString() : "");
+const fmtTime = (iso) => (iso ? new Date(iso).toLocaleString("it-IT") : "");
 
 // ------------------------------------------------------------------ stato
 
@@ -99,7 +99,7 @@ function addConfirmation(c) {
   card.append(
     el("h3", {}, `Conferma richiesta · ${c.tool} · rischio ${c.risk}`),
     el("p", {}, c.expected_effect),
-    el("p", { class: "small" }, `Destinazione: ${c.target} · scade alle ${new Date(c.expires_at).toLocaleTimeString()} · valida una sola volta`),
+    el("p", { class: "small" }, `Destinazione: ${c.target} · scade alle ${new Date(c.expires_at).toLocaleTimeString("it-IT")} · valida una sola volta`),
     el("div", { class: "actions" },
       el("button", { class: "primary", onclick: () => decide(true) }, "Approva"),
       el("button", { class: "danger", onclick: () => decide(false) }, "Rifiuta")),
@@ -197,6 +197,103 @@ const views = {
         el("div", { class: "sub" }, `hash ${e.hash.slice(0, 16)}… ← ${e.prev_hash.slice(0, 16)}…`)),
       el("span", { class: `badge ${e.outcome}` }, e.outcome))) : [el("p", { class: "empty" }, "Nessun evento.")]));
   },
+};
+
+// ------------------------------------------------------------------ automazioni
+
+let toolCatalog = null;
+async function catalog() {
+  if (!toolCatalog) toolCatalog = (await api("/api/tools")).items.filter((t) => t.workflow_step);
+  return toolCatalog;
+}
+
+async function addStep() {
+  const tools = await catalog();
+  const box = el("div", { class: "step-box" });
+  const select = el("select", { "aria-label": "Strumento" }, tools.map((t) => el("option", { value: t.name }, `${t.name} — ${t.summary}`)));
+  const args = el("div", { class: "form" });
+  const renderArgs = () => {
+    const tool = tools.find((t) => t.name === select.value);
+    const props = (tool.input_schema && tool.input_schema.properties) || {};
+    const required = (tool.input_schema && tool.input_schema.required) || [];
+    args.replaceChildren(
+      ...(tool.risk === "high" || tool.risk === "critical" ? [el("span", { class: "risk-high" }, "Rischio alto: approvandolo ora, verrà eseguito in background senza ulteriori conferme.")] : []),
+      ...Object.keys(props).map((k) => el("label", {}, `${k}${required.includes(k) ? " *" : ""}`,
+        k === "content" ? el("textarea", { "data-arg": k, rows: "3" }) : el("input", { "data-arg": k, ...(required.includes(k) ? { required: "" } : {}) }))),
+    );
+  };
+  select.addEventListener("change", renderArgs);
+  box.append(el("div", { class: "head" }, select, el("button", { type: "button", class: "ghost danger", onclick: () => box.remove(), "aria-label": "Rimuovi passo" }, "✕")), args);
+  $("#wf-steps").append(box);
+  renderArgs();
+}
+
+function readForm(form) {
+  const f = new FormData(form);
+  const kind = f.get("kind");
+  const trigger = kind === "daily" ? { kind, at: f.get("at") }
+    : kind === "once" ? { kind, at: new Date(Date.now() + Number(f.get("every")) * 60000).toISOString().replace(/\.\d{3}Z$/, "Z") }
+    : { kind, every_seconds: Number(f.get("every")) * 60 };
+  const steps = [...form.querySelectorAll(".step-box")].map((box) => {
+    const args = {};
+    box.querySelectorAll("[data-arg]").forEach((i) => { if (i.value !== "") args[i.dataset.arg] = i.value; });
+    return { tool: box.querySelector("select").value, arguments: args };
+  });
+  return { name: f.get("name"), trigger, steps, on_failure: f.get("continue") ? "continue" : "stop" };
+}
+
+$("#wf-add-step").addEventListener("click", addStep);
+$("#wf-form").kind.addEventListener("change", (e) => {
+  $("#wf-at").hidden = e.target.value !== "daily";
+  $("#wf-every").hidden = e.target.value === "daily";
+});
+$("#wf-new").addEventListener("toggle", (e) => { if (e.target.open && !$("#wf-steps").children.length) addStep(); });
+$("#wf-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = readForm(e.target);
+  if (!body.steps.length) return alert("Aggiungi almeno un passo.");
+  const list = body.steps.map((s, i) => `${i + 1}. ${s.tool} ${JSON.stringify(s.arguments)}`).join("\n");
+  if (!confirm(`Approvi l'automazione «${body.name}»?\n\n${list}\n\nI passi verranno eseguiti in background con la policy vigente.`)) return;
+  try {
+    await api("/api/workflows", { method: "POST", body: JSON.stringify(body) });
+    e.target.reset();
+    $("#wf-steps").replaceChildren();
+    $("#wf-new").open = false;
+    views.automations();
+  } catch (err) { alert(err.message); }
+});
+
+async function showRuns(w, box) {
+  if (box.childElementCount) return box.replaceChildren();
+  const { items } = await api(`/api/workflows/${w.workflow_id}/runs`);
+  box.replaceChildren(...(items.length ? items.map((r) => el("div", { class: "sub" },
+    `${fmtTime(r.started_at)} · ${r.trigger.kind} · ${r.status} · ` + r.steps.map((s) => `${s.tool}:${s.status}${s.preapproved ? " (pre-approvato)" : ""}${s.error_code ? " " + s.error_code : ""}`).join(", "))) :
+    [el("div", { class: "sub" }, "Nessuna esecuzione.")]));
+}
+
+views.automations = async () => {
+  const { items } = await api("/api/workflows");
+  $("#automations").replaceChildren(...(items.length ? items.map((w) => {
+    const runs = el("div", { class: "runs" });
+    const act = (label, fn, cls = "ghost") => el("button", { class: cls, onclick: async () => {
+      try { await fn(); views.automations(); refreshStatus(); } catch (e) { if (e.message !== "Annullato") alert(e.message); }
+    } }, label);
+    return el("div", { class: "card" },
+      el("div", { class: "body" },
+        el("div", { class: "title" }, `${w.name}`),
+        el("div", { class: "sub" }, `[${w.id}] ${w.trigger_text} · ${w.steps.map((s) => s.tool).join(" → ")}`),
+        el("div", { class: "sub" }, `prossima: ${w.next_run || "—"} · ultima: ${w.last_run ? `${w.last_run.status} (${fmtTime(w.last_run.started_at)})` : "mai"}`),
+        el("div", { class: "actions-row" },
+          act("Esegui ora", () => api(`/api/workflows/${w.workflow_id}/run`, { method: "POST" })),
+          act(w.enabled ? "Sospendi" : "Riattiva", () => api(`/api/workflows/${w.workflow_id}/enabled`, { method: "POST", body: JSON.stringify({ enabled: !w.enabled }) })),
+          el("button", { class: "ghost", onclick: () => showRuns(w, runs).catch((e) => alert(e.message)) }, "Cronologia"),
+          act("Elimina", async () => {
+            if (!confirm(`Eliminare «${w.name}»?`)) throw new Error("Annullato");
+            await api(`/api/workflows/${w.workflow_id}`, { method: "DELETE" });
+          }, "ghost danger")),
+        runs),
+      el("span", { class: `badge ${w.enabled ? (w.last_run ? w.last_run.status : "allowed") : "cancelled"}` }, w.enabled ? "attiva" : "sospesa"));
+  }) : [el("p", { class: "empty" }, "Nessuna automazione. Creane una qui sopra o scrivi in chat: \"ogni ora info sistema\".")]));
 };
 
 function show(view) {

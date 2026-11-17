@@ -1,0 +1,37 @@
+{
+ "contract": "jarvis.workflow/1",
+ "workflow_id": "0b6f4c1e-1d2a-4c3b-9e8f-000000000501",
+ "name": "Battito orario",
+ "version": 1,
+ "enabled": true,
+ "trigger": {
+  "kind": "daily",
+  "at": "25:00"
+ },
+ "steps": [
+  {
+   "tool": "system.info",
+   "version": "1.0.0",
+   "arguments": {}
+  },
+  {
+   "tool": "fs.write",
+   "version": "1.0.0",
+   "arguments": {
+    "path": "battito.txt",
+    "content": "ok"
+   }
+  }
+ ],
+ "on_failure": "stop",
+ "approval": {
+  "approved_by": {
+   "kind": "owner",
+   "id": "owner"
+  },
+  "method": "chat_confirmation",
+  "approved_at": "2026-11-17T12:00:00Z",
+  "steps_digest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+ },
+ "created_at": "2026-11-17T12:00:00Z"
+}

@@ -52,6 +52,36 @@ function check(cond, msg) {
   await page.waitForSelector("#tasks .card");
   check((await page.locator("#tasks .badge").first().innerText()) === "succeeded", "attività con stato verificato");
 
+  // Automazioni (RF-07): creazione dalla chat con conferma, esecuzione manuale, cronologia.
+  await page.click('[data-view="chat"]');
+  await send("ogni ora info sistema");
+  await page.waitForSelector(".confirm button.primary");
+  check((await page.locator(".confirm").last().innerText()).includes("workflow.create"), "creare un'automazione chiede conferma");
+  const n = await page.locator(".msg.assistant").count();
+  await page.click(".confirm button.primary");
+  await page.waitForFunction((k) => document.querySelectorAll(".msg.assistant").length > k, n);
+  check((await page.locator(".msg.assistant").last().innerText()).includes("Automazione creata"), "automazione creata dopo l'approvazione");
+  await page.click('[data-view="automations"]');
+  await page.waitForSelector("#automations .card");
+  check((await page.locator("#automations .card").first().innerText()).includes("ogni ora"), "automazione elencata con la frequenza");
+  await page.locator("#automations .card").first().getByRole("button", { name: "Esegui ora" }).click();
+  await page.waitForFunction(() => document.querySelector("#automations .card .sub:nth-of-type(3)") && /ultima: succeeded/.test(document.querySelector("#automations").innerText));
+  await page.locator("#automations .card").first().getByRole("button", { name: "Cronologia" }).click();
+  await page.waitForFunction(() => /manual · succeeded/.test(document.querySelector("#automations .runs").innerText));
+  check(true, "esecuzione manuale registrata nella cronologia");
+  // Creazione dal modulo dell'interfaccia.
+  await page.click("#wf-new summary");
+  await page.fill('#wf-form input[name="name"]', "Battito dal modulo");
+  await page.fill('#wf-form input[name="every"]', "5");
+  await page.selectOption("#wf-steps select", "fs.write");
+  await page.fill('#wf-steps [data-arg="path"]', "battito.txt");
+  await page.fill('#wf-steps [data-arg="content"]', "vivo");
+  page.once("dialog", (d) => d.accept());
+  await page.click('#wf-form button[type="submit"]');
+  await page.waitForFunction(() => /Battito dal modulo/.test(document.querySelector("#automations").innerText));
+  check((await page.locator("#automations").innerText()).includes("ogni 5 minuti"), "automazione creata dal modulo");
+  if (shots) await page.screenshot({ path: `${shots}/jarvis-automazioni.png` });
+
   await page.click('[data-view="audit"]');
   await page.waitForFunction(() => document.querySelector("#audit-summary").textContent.includes("integra"));
   check(true, "catena di audit integra");

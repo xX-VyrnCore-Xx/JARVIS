@@ -1,0 +1,32 @@
+{
+ "contract": "jarvis.workflow-run/1",
+ "run_id": "0b6f4c1e-1d2a-4c3b-9e8f-000000000601",
+ "workflow_id": "0b6f4c1e-1d2a-4c3b-9e8f-000000000501",
+ "workflow_version": 1,
+ "task_id": "0b6f4c1e-1d2a-4c3b-9e8f-0000000000a1",
+ "trigger": {
+  "kind": "schedule",
+  "scheduled_for": "2026-11-17T13:00:00Z"
+ },
+ "started_at": "2026-11-17T13:00:01Z",
+ "finished_at": "2026-11-17T12:59:00Z",
+ "status": "succeeded",
+ "steps": [
+  {
+   "index": 0,
+   "tool": "system.info",
+   "decision": "allow",
+   "decision_id": "0b6f4c1e-1d2a-4c3b-9e8f-0000000000e1",
+   "status": "succeeded",
+   "summary": "ok"
+  },
+  {
+   "index": 1,
+   "tool": "fs.write",
+   "decision": "require_confirmation",
+   "decision_id": "0b6f4c1e-1d2a-4c3b-9e8f-0000000000e2",
+   "preapproved": true,
+   "status": "succeeded"
+  }
+ ]
+}

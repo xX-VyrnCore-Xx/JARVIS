@@ -23,6 +23,7 @@ import re
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -95,6 +96,24 @@ def _describe_tool_result(result: dict) -> str:
         return "Ecco cosa ricordo:\n" + "\n".join(f"• [{i['id']}] {i['text']}" for i in items)
     if tool == "memory.forget":
         return f"Ho dimenticato l'elemento {output.get('id')}."
+    if tool == "workflow.create":
+        return (f"Automazione creata [{output.get('id')}] «{output.get('name')}»: {output.get('trigger')}. "
+                f"Prossima esecuzione: {output.get('next_run') or 'nessuna'}. Passi: {', '.join(output.get('steps') or [])}.")
+    if tool == "workflow.list":
+        items = output.get("items", [])
+        if not items:
+            return "Non ci sono automazioni. Prova: \"ogni ora info sistema\"."
+        lines = []
+        for w in items:
+            state = "attiva" if w.get("enabled") else "sospesa"
+            last = (w.get("last_run") or {}).get("status", "mai eseguita")
+            lines.append(f"• [{w['id']}] {w['name']} — {w['trigger_text']}, {state}; prossima: {w.get('next_run') or '—'}; ultima: {last}")
+        return "Automazioni:\n" + "\n".join(lines)
+    if tool == "workflow.run":
+        steps = ", ".join(f"{s['tool']}: {s['status']}" for s in output.get("steps", []))
+        return f"Ho eseguito «{output.get('name')}»: esito {output.get('status')} ({steps})."
+    if tool == "workflow.delete":
+        return f"Automazione [{output.get('id')}] «{output.get('name')}» eliminata."
     return f"Risultato di {tool}: {json.dumps(output, ensure_ascii=False)}"
 
 
@@ -118,6 +137,63 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
     (re.compile(r"^\s*(?:dimentica|forget)\s+([A-Za-z0-9-]+)\s*$", re.I), "memory.forget", lambda m: {"id": m.group(1)}),
 ]
 
+_UNITS = {"second": 1, "minut": 60, "or": 3600, "giorn": 86400, "minute": 60, "hour": 3600, "day": 86400}
+_SCHEDULE = [
+    (re.compile(r"^\s*ogni giorno alle(?: ore)?\s+(\d{1,2})[:.](\d{2})\s*,?\s+(.+)$", re.I | re.S), "daily"),
+    (re.compile(r"^\s*(?:ogni|every)\s+(?:(\d+)\s+)?(second[oi]|seconds?|minut[oi]|or[ae]|giorn[oi]|minutes?|hours?|days?)\s*,?\s+(.+)$", re.I | re.S), "interval"),
+    (re.compile(r"^\s*(?:tra|fra|in)\s+(\d+)\s+(minut[oi]|or[ae]|minutes?|hours?)\s*,?\s+(.+)$", re.I | re.S), "once"),
+]
+_WORKFLOW_RULES: list[tuple[re.Pattern[str], str, Any]] = [
+    (re.compile(r"\b(elenca|mostra|quali|lista)( le)? automazioni\b|\bautomazioni\?*$", re.I), "workflow.list", lambda m: {}),
+    (re.compile(r"^\s*(?:esegui|avvia|lancia)(?: ora)? (?:l')?automazione\s+([0-9a-f-]{4,})\s*$", re.I), "workflow.run", lambda m: {"id": m.group(1)}),
+    (re.compile(r"^\s*(?:elimina|cancella|rimuovi) (?:l')?automazione\s+([0-9a-f-]{4,})\s*$", re.I), "workflow.delete", lambda m: {"id": m.group(1)}),
+]
+
+
+def _unit_seconds(unit: str) -> int:
+    unit = unit.lower()
+    for prefix, secs in _UNITS.items():
+        if unit.startswith(prefix):
+            return secs
+    return 60
+
+
+def _parse_step(command: str, catalog: dict[str, dict]) -> dict | None:
+    for pattern, tool, args in _RULES:
+        match = pattern.search(command)
+        if match and tool in catalog and not tool.startswith("workflow."):
+            return {"tool": tool, "arguments": args(match)}
+    return None
+
+
+def _parse_schedule(message: str, catalog: dict[str, dict]) -> tuple[dict | None, str | None]:
+    """Restituisce (argomenti per workflow.create, errore)."""
+    for pattern, kind in _SCHEDULE:
+        m = pattern.search(message)
+        if not m:
+            continue
+        if kind == "daily":
+            hour, minute, command = int(m.group(1)), m.group(2), m.group(3)
+            if hour > 23 or int(minute) > 59:
+                return None, "Orario non valido."
+            trigger = {"kind": "daily", "at": f"{hour:02d}:{minute}"}
+        elif kind == "interval":
+            every = int(m.group(1) or 1) * _unit_seconds(m.group(2))
+            if every < 60:
+                return None, "L'intervallo minimo è un minuto."
+            trigger, command = {"kind": "interval", "every_seconds": every}, m.group(3)
+        else:
+            delay = int(m.group(1)) * _unit_seconds(m.group(2))
+            at = (datetime.now(timezone.utc) + timedelta(seconds=delay)).replace(microsecond=0)
+            trigger, command = {"kind": "once", "at": at.isoformat().replace("+00:00", "Z")}, m.group(3)
+        step = _parse_step(command.strip(), catalog)
+        if not step:
+            return None, f"Non so pianificare «{command.strip()}»: uso gli stessi comandi della chat (per esempio «info sistema» o «scrivi file.txt: testo»)."
+        name = command.strip()[:80]
+        return {"name": name, "trigger": trigger, "steps": [step]}, None
+    return None, None
+
+
 HELP = """Sono JARVIS (prototipo v0.1), in modalità offline: capisco comandi semplici.
 Prova con:
 • "che ore sono"
@@ -126,6 +202,8 @@ Prova con:
 • "scrivi note.txt: testo da salvare" (chiede conferma)
 • "leggi note.txt"
 • "ricorda che preferisco risposte brevi" · "cosa ricordi" · "dimentica <id>"
+• "ogni ora info sistema" · "ogni giorno alle 08:00 scrivi buongiorno.txt: ciao" · "tra 5 minuti che ore sono"
+• "elenca automazioni" · "esegui automazione <id>" · "elimina automazione <id>"
 Con Ollama attivo sul tuo computer posso conversare liberamente."""
 
 
@@ -144,6 +222,18 @@ class OfflineBackend:
         if "tool_result" in inputs:
             return _result("reply", self.backend, text=_describe_tool_result(inputs["tool_result"]))
         message = _last_user_message(delegation)
+        if "workflow.create" in catalog:
+            created, problem = _parse_schedule(message, catalog)
+            if problem:
+                return _result("reply", self.backend, text=problem)
+            if created:
+                return _result("tool_call", self.backend, tool="workflow.create", arguments=created, catalog=catalog,
+                               rationale="Pianificazione riconosciuta dal modello offline")
+        for pattern, tool, args in _WORKFLOW_RULES:
+            match = pattern.search(message)
+            if match and tool in catalog:
+                return _result("tool_call", self.backend, tool=tool, arguments=args(match), catalog=catalog,
+                               rationale="Comando riconosciuto dal modello offline")
         for pattern, tool, args in _RULES:
             match = pattern.search(message)
             if match and tool in catalog:

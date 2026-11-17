@@ -13,6 +13,8 @@ pub struct Config {
     /// Override di `JARVIS_AI_BACKEND` per il worker (`auto`, `ollama`, `offline`).
     pub ai_backend: Option<String>,
     pub delegation_timeout_ms: u64,
+    /// Intervallo del pianificatore in secondi.
+    pub scheduler_tick_s: u64,
     pub token: String,
 }
 
@@ -20,6 +22,18 @@ fn repo_root() -> PathBuf {
     std::env::var_os("JARVIS_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."))
+}
+
+/// Un percorso relativo (es. `.venv/bin/python`) va risolto rispetto alla cartella di avvio:
+/// il worker parte con `current_dir` in `ai/`. Un nome semplice (`python3`) resta da cercare nel PATH.
+fn absolutize(p: String) -> String {
+    let path = PathBuf::from(&p);
+    if path.is_relative() && path.components().count() > 1 {
+        if let Ok(cwd) = std::env::current_dir() {
+            return cwd.join(path).to_string_lossy().into_owned();
+        }
+    }
+    p
 }
 
 impl Config {
@@ -49,7 +63,9 @@ impl Config {
             data_dir: var("JARVIS_DATA_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| root.join("data")),
-            python: var("JARVIS_PYTHON").unwrap_or_else(|| "python3".into()),
+            python: var("JARVIS_PYTHON")
+                .map(absolutize)
+                .unwrap_or_else(|| "python3".into()),
             ai_dir: var("JARVIS_AI_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| root.join("ai")),
@@ -57,6 +73,10 @@ impl Config {
             delegation_timeout_ms: var("JARVIS_DELEGATION_TIMEOUT_MS")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(180_000),
+            scheduler_tick_s: var("JARVIS_SCHEDULER_TICK_S")
+                .and_then(|v| v.parse().ok())
+                .filter(|v| *v >= 1)
+                .unwrap_or(20),
             token: uuid::Uuid::new_v4().simple().to_string(),
         })
     }

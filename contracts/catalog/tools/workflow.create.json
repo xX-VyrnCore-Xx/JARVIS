@@ -1,0 +1,132 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "workflow.create",
+  "version": "1.0.0",
+  "summary": "Crea un'automazione pianificata che esegue uno o più strumenti a intervalli, ogni giorno a un'ora locale o una volta sola. I passi a rischio alto saranno eseguiti in background solo perché approvati ora dal proprietario.",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "name",
+      "trigger",
+      "steps"
+    ],
+    "properties": {
+      "name": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "trigger": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "every_seconds"
+            ],
+            "properties": {
+              "kind": {
+                "const": "interval"
+              },
+              "every_seconds": {
+                "type": "integer",
+                "minimum": 60,
+                "maximum": 2592000
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "at"
+            ],
+            "properties": {
+              "kind": {
+                "const": "daily"
+              },
+              "at": {
+                "type": "string",
+                "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                "description": "Ora locale del Core"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "at"
+            ],
+            "properties": {
+              "kind": {
+                "const": "once"
+              },
+              "at": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{1,9})?Z$"
+              }
+            }
+          }
+        ]
+      },
+      "steps": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 10,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tool",
+            "arguments"
+          ],
+          "properties": {
+            "tool": {
+              "enum": [
+                "fs.list",
+                "fs.read",
+                "fs.write",
+                "memory.list",
+                "memory.remember",
+                "system.info",
+                "time.now"
+              ]
+            },
+            "arguments": {
+              "type": "object"
+            }
+          }
+        }
+      },
+      "on_failure": {
+        "enum": [
+          "stop",
+          "continue"
+        ]
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "prerequisites": [],
+  "effects": "write_local",
+  "risk": "high",
+  "permissions": [
+    "core.automation:write"
+  ],
+  "errors": [
+    "workflow.invalid"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "never"
+  },
+  "confirmation": "required"
+}

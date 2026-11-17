@@ -1,0 +1,39 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "workflow.delete",
+  "version": "1.0.0",
+  "summary": "Elimina definitivamente un'automazione e ne interrompe la pianificazione",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "id"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "description": "Identificativo o prefisso dell'automazione"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "prerequisites": [],
+  "effects": "write_local",
+  "risk": "high",
+  "permissions": [
+    "core.automation:write"
+  ],
+  "errors": [
+    "workflow.not_found"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "never"
+  },
+  "confirmation": "required"
+}

@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jarvis.local/contracts/v1/workflow.schema.json",
+  "title": "Workflow pianificato v1",
+  "description": "AUTONOMY_AND_TOOLS.md: un workflow conserva versione, dipendenze, operazioni e configurazione di frequenza; la policy vigente si applica anche in background. RF-07. L'approvazione del proprietario è legata al digest canonico di 'steps': una modifica dei passi invalida l'approvazione.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract", "workflow_id", "name", "version", "enabled", "trigger", "steps", "on_failure", "approval", "created_at"],
+  "properties": {
+    "contract": { "const": "jarvis.workflow/1" },
+    "workflow_id": { "$ref": "common.schema.json#/$defs/uuid" },
+    "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+    "version": { "type": "integer", "minimum": 1 },
+    "enabled": { "type": "boolean" },
+    "trigger": { "$ref": "#/$defs/trigger" },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 10,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tool", "version", "arguments"],
+        "properties": {
+          "tool": { "$ref": "#/$defs/step_tool" },
+          "version": { "$ref": "common.schema.json#/$defs/semver" },
+          "arguments": { "type": "object" }
+        }
+      }
+    },
+    "on_failure": { "enum": ["stop", "continue"] },
+    "approval": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["approved_by", "method", "approved_at", "steps_digest"],
+      "properties": {
+        "approved_by": { "$ref": "common.schema.json#/$defs/actor" },
+        "method": { "enum": ["chat_confirmation", "owner_ui"] },
+        "approved_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+        "steps_digest": { "$ref": "common.schema.json#/$defs/sha256" }
+      }
+    },
+    "created_at": { "$ref": "common.schema.json#/$defs/timestamp" },
+    "updated_at": { "$ref": "common.schema.json#/$defs/timestamp" }
+  },
+  "$defs": {
+    "step_tool": {
+      "description": "Gli strumenti workflow.* non possono essere passi: niente automazioni ricorsive.",
+      "allOf": [
+        { "$ref": "common.schema.json#/$defs/identifier" },
+        { "not": { "pattern": "^workflow\\." } }
+      ]
+    },
+    "trigger": {
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind", "every_seconds"],
+          "properties": { "kind": { "const": "interval" }, "every_seconds": { "type": "integer", "minimum": 60, "maximum": 2592000 } }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind", "at"],
+          "properties": { "kind": { "const": "daily" }, "at": { "type": "string", "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$", "description": "Ora locale del Core" } }
+        },
+        {
+          "type": "object", "additionalProperties": false, "required": ["kind", "at"],
+          "properties": { "kind": { "const": "once" }, "at": { "$ref": "common.schema.json#/$defs/timestamp" } }
+        }
+      ]
+    }
+  }
+}
