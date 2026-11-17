@@ -203,13 +203,24 @@ impl Jarvis {
             }
             Err(e) => json!({"status": "down", "error": e}),
         };
-        let errors = self.audit.verify().unwrap_or_else(|e| vec![e.to_string()]);
-        let events = self.audit.read_all().map(|v| v.len()).unwrap_or(0);
+        let (errors, events) = self.check_audit();
+        if ai["status"] == "down" {
+            let _ = self.notify(json!({
+                "severity": "error", "category": "system", "title": "Agente AI non disponibile",
+                "body": ai["error"]["message"], "source": {"kind": "module", "id": "monitor"}, "dedupe_key": "ai-unavailable",
+            }));
+        } else if let Some(reason) = ai["gateway"]["backend"]["degraded_reason"].as_str() {
+            let _ = self.notify(json!({
+                "severity": "warning", "category": "system", "title": "AI in modalità offline degradata",
+                "body": reason, "source": {"kind": "module", "id": "monitor"}, "dedupe_key": "ai-degraded",
+            }));
+        }
         json!({
             "core": {"version": env!("CARGO_PKG_VERSION"), "status": "up"},
             "ai": ai,
             "audit": {"events": events, "chain_valid": errors.is_empty()},
             "pending_confirmations": self.pending.len(),
+            "notifications_unread": self.store.notifications_unread().unwrap_or(0),
             "automations": self.store.workflows().map(|w| w.iter().filter(|(d, _)| d["enabled"] == true).count()).unwrap_or(0),
         })
     }
@@ -322,6 +333,12 @@ impl Jarvis {
                     "Non riesco a contattare l'agente AI: {}",
                     error["message"].as_str().unwrap_or("errore sconosciuto")
                 );
+                self.notify(json!({
+                    "severity": "error", "category": "system", "title": "Agente AI non disponibile",
+                    "body": format!("La richiesta non è stata elaborata: {}", error["message"].as_str().unwrap_or("errore sconosciuto")),
+                    "source": {"kind": "module", "id": "orchestrator"}, "correlation_id": task.correlation(), "task_id": task.id(),
+                    "dedupe_key": "ai-unavailable", "link": {"view": "tasks", "ref": task.id()},
+                }))?;
                 task.fail(error, "Delega non riuscita");
                 return self.finish(task, out, text);
             }
@@ -400,6 +417,12 @@ impl Jarvis {
                     .as_str()
                     .unwrap_or_default()
                     .to_string();
+                self.notify(json!({
+                    "severity": "warning", "category": "confirmation", "title": format!("Conferma richiesta: {tool}"),
+                    "body": conf["expected_effect"], "source": {"kind": "module", "id": "security"},
+                    "correlation_id": task.correlation(), "task_id": task.id(),
+                    "dedupe_key": format!("confirmation:{id}"), "link": {"view": "chat", "ref": id},
+                }))?;
                 self.pending.insert(
                     id,
                     Pending {
@@ -434,6 +457,9 @@ impl Jarvis {
             .pending
             .remove(confirmation_id)
             .ok_or_else(|| CoreError::NotFound("conferma inesistente o già utilizzata".into()))?;
+        self.store
+            .notification_read_by_key(&format!("confirmation:{confirmation_id}"), &now())
+            .map_err(internal)?;
         let conf = &decision["confirmation"];
         let (tid, corr) = (task.id(), task.correlation());
         let base = json!({"correlation_id": corr, "task_id": tid, "actor": {"kind": "owner", "id": "owner"}, "node": "core-local",
@@ -449,6 +475,11 @@ impl Jarvis {
             ))?;
             task.transition("cancelled", "Conferma scaduta");
             self.save(&task)?;
+            self.notify(json!({
+                "severity": "info", "category": "confirmation", "title": format!("Conferma scaduta: {tool}"),
+                "body": "L'azione non è stata eseguita. Ripeti la richiesta se serve ancora.",
+                "source": {"kind": "module", "id": "security"}, "correlation_id": corr, "task_id": tid, "link": {"view": "tasks", "ref": tid},
+            }))?;
             return Err(CoreError::Gone(
                 "la conferma è scaduta: ripeti la richiesta".into(),
             ));
@@ -972,6 +1003,7 @@ impl Jarvis {
         }
         self.save(&task)?;
         self.store.run_put(&run).map_err(internal)?;
+        self.notify_run(doc, &run, &task)?;
         if !approved {
             // Passi alterati rispetto all'approvazione: l'automazione viene sospesa.
             let mut disabled = doc.clone();
@@ -1136,6 +1168,162 @@ fn short(doc: &Value) -> String {
         .chars()
         .take(8)
         .collect()
+}
+
+// ---------------------------------------------------------------------- Notifiche e monitor (RF-13)
+
+impl Jarvis {
+    /// Crea una notifica `jarvis.notification/1`. Con `dedupe_key`, non duplica una notifica ancora non letta.
+    pub fn notify(&mut self, fields: Value) -> Result<Option<Value>, CoreError> {
+        if let Some(key) = fields["dedupe_key"].as_str() {
+            if self
+                .store
+                .notification_unread_exists(key)
+                .map_err(internal)?
+            {
+                return Ok(None);
+            }
+        }
+        let mut doc = obj(fields);
+        doc.insert("contract".into(), "jarvis.notification/1".into());
+        doc.insert(
+            "notification_id".into(),
+            uuid::Uuid::new_v4().to_string().into(),
+        );
+        doc.insert("created_at".into(), now().into());
+        if !doc.get("correlation_id").is_some_and(Value::is_string) {
+            doc.insert(
+                "correlation_id".into(),
+                uuid::Uuid::new_v4().to_string().into(),
+            );
+        }
+        doc.retain(|_, v| !v.is_null());
+        if let Some(Value::String(body)) = doc.get_mut("body") {
+            *body = body.chars().take(2000).collect();
+        }
+        let doc = Value::Object(doc);
+        let report = validate(Contract::Notification, &doc);
+        if !report.is_valid() {
+            return Err(CoreError::Internal(format!(
+                "notifica non conforme: {report:?}"
+            )));
+        }
+        self.store.notification_put(&doc, 500).map_err(internal)?;
+        Ok(Some(doc))
+    }
+
+    /// Esito di un'automazione: errori e parziali sempre (una notifica non letta per workflow), successi solo per i trigger singoli e manuali.
+    fn notify_run(&mut self, doc: &Value, run: &Value, task: &Task) -> Result<(), CoreError> {
+        let name = doc["name"].as_str().unwrap_or("automazione");
+        let wid = doc["workflow_id"].as_str().unwrap_or_default();
+        let status = run["status"].as_str().unwrap_or_default();
+        let problems: Vec<String> = run["steps"]
+            .as_array()
+            .map(|s| {
+                s.iter()
+                    .filter(|x| x["status"] == "failed" || x["status"] == "denied")
+                    .map(|x| {
+                        format!(
+                            "{} {} ({}): {}",
+                            x["tool"].as_str().unwrap_or("?"),
+                            x["status"].as_str().unwrap_or("?"),
+                            x["error_code"].as_str().unwrap_or("errore"),
+                            x["summary"].as_str().unwrap_or("")
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let (severity, title, body, dedupe) = match status {
+            "failed" if run["error"]["code"] == "security.approval_mismatch" => (
+                "error", format!("Automazione sospesa: {name}"),
+                "I passi salvati non corrispondono a quelli che hai approvato: l'automazione è stata sospesa.".to_string(), None,
+            ),
+            "failed" => ("error", format!("Automazione non riuscita: {name}"), problems.join("; "), Some(format!("workflow-failure:{wid}"))),
+            "partial" => ("warning", format!("Automazione parziale: {name}"), problems.join("; "), Some(format!("workflow-failure:{wid}"))),
+            _ if doc["trigger"]["kind"] == "once" || run["trigger"]["kind"] == "manual" => {
+                ("success", format!("Automazione completata: {name}"), format!("{} passi riusciti", run["steps"].as_array().map_or(0, Vec::len)), None)
+            }
+            _ => return Ok(()),
+        };
+        let category = if run["error"]["code"] == "security.approval_mismatch" {
+            "security"
+        } else {
+            "automation"
+        };
+        self.notify(json!({
+            "severity": severity, "category": category, "title": title, "body": body,
+            "source": {"kind": "module", "id": "automation"}, "correlation_id": task.correlation(), "task_id": task.id(),
+            "workflow_id": wid, "dedupe_key": dedupe, "link": {"view": "automations", "ref": wid},
+        }))?;
+        Ok(())
+    }
+
+    fn check_audit(&mut self) -> (Vec<String>, usize) {
+        let events = self.audit.read_all().unwrap_or_default();
+        let errors = jarvis_contracts::audit_chain_errors(&events);
+        if !errors.is_empty() {
+            let _ = self.notify(json!({
+                "severity": "error", "category": "security", "title": "Registro di audit alterato",
+                "body": format!("La catena di hash non è integra: {}", errors.join("; ")),
+                "source": {"kind": "module", "id": "monitor"}, "dedupe_key": "audit-chain", "link": {"view": "audit"},
+            }));
+        }
+        (errors, events.len())
+    }
+
+    /// Controlli periodici del monitor, eseguiti dal pianificatore anche senza interfaccia aperta.
+    pub fn monitor(&mut self) -> Result<(), CoreError> {
+        self.check_audit();
+        if self.worker.as_mut().is_some_and(|w| w.has_exited()) {
+            self.worker = None;
+            self.notify(json!({
+                "severity": "warning", "category": "system", "title": "Worker AI terminato",
+                "body": "Il processo dell'agente si è chiuso; verrà riavviato alla prossima richiesta.",
+                "source": {"kind": "module", "id": "monitor"}, "dedupe_key": "worker-exited",
+            }))?;
+        }
+        Ok(())
+    }
+
+    pub fn notifications(
+        &self,
+        limit: u32,
+        unread_only: bool,
+        since: Option<&str>,
+    ) -> Result<Value, CoreError> {
+        let items = self
+            .store
+            .notifications(limit, unread_only, since)
+            .map_err(internal)?;
+        let unread = self.store.notifications_unread().map_err(internal)?;
+        Ok(json!({"items": items, "unread": unread}))
+    }
+
+    pub fn mark_notification_read(&mut self, id: &str) -> Result<Value, CoreError> {
+        if !self.store.notification_read(id, &now()).map_err(internal)? {
+            return Err(CoreError::NotFound(
+                "notifica inesistente o già letta".into(),
+            ));
+        }
+        Ok(json!({"unread": self.store.notifications_unread().map_err(internal)?}))
+    }
+
+    pub fn mark_all_notifications_read(&mut self) -> Result<Value, CoreError> {
+        let n = self
+            .store
+            .notifications_read_all(&now())
+            .map_err(internal)?;
+        Ok(json!({"marked": n, "unread": 0}))
+    }
+
+    /// Solo per i test: simula l'arresto improvviso del worker.
+    #[doc(hidden)]
+    pub fn kill_worker_for_tests(&mut self) {
+        if let Some(w) = self.worker.as_mut() {
+            w.kill_for_tests();
+        }
+    }
 }
 
 fn merge(base: &Value, extra: Value) -> Value {

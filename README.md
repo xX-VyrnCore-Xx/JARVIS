@@ -25,6 +25,8 @@ Poi apri **http://localhost:8765**. La prima compilazione richiede qualche minut
 
 - **Automazioni**: scrivi in chat «ogni ora info sistema», «ogni giorno alle 08:00 scrivi buongiorno.txt: ciao» o «tra 5 minuti che ore sono», oppure usa la sezione Automazioni. Le automazioni sopravvivono al riavvio e conservano la cronologia di ogni esecuzione.
 
+- **Notifiche**: la campanella in alto segnala conferme in attesa, automazioni fallite e anomalie (agente AI non disponibile, audit alterato). Ogni notifica è collegata al task che l'ha generata.
+
 Cosa osservare:
 - ogni azione mostra agente, strumento, decisione di policy ed esito;
 - scrivere un file o cancellare un ricordo richiede la tua conferma, valida una sola volta e per 5 minuti;

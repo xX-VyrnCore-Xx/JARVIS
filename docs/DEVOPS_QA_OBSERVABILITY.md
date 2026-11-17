@@ -33,3 +33,20 @@ Il workflow `.github/workflows/contracts.yml` esegue tre job:
 - **E2E:** Core in modalità offline più Chromium (`tests/e2e/ui_smoke.cjs`), con gli screenshot pubblicati come artefatto.
 
 Il proprietario ha autorizzato il merge automatico con CI verde ([DEVELOPMENT.md](DEVELOPMENT.md#integrazione-delle-modifiche)).
+
+## Notifiche e monitor (Fase 3, RF-13)
+
+Il Core trasforma eventi e anomalie in notifiche `jarvis.notification/1`, correlate al task e al workflow che le hanno prodotte.
+
+| Origine | Gravità | Deduplicazione |
+|---|---|---|
+| Conferma in attesa | warning; si chiude quando viene risolta | per conferma |
+| Conferma scaduta | info | — |
+| Agente AI non disponibile | error | finché non letta |
+| AI degradata (Ollama assente o in errore) | warning | finché non letta |
+| Automazione fallita o parziale | error / warning | per workflow, finché non letta |
+| Automazione sospesa per passi alterati | error (sicurezza) | — |
+| Registro di audit alterato | error (sicurezza) | finché non letta |
+| Worker AI terminato | warning | finché non letta |
+
+Il monitor gira a ogni intervallo del pianificatore. Le notifiche si consultano da `GET /api/notifications` e si segnano come lette con `POST /api/notifications/{id}/read` o `POST /api/notifications/read-all`.

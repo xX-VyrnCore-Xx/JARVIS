@@ -15,6 +15,7 @@ Contratti condivisi fra Core Rust, AI Python, applicazioni e integrazioni (RNF-0
 | `v1/agent-result.schema.json` | `jarvis.agent-result/1` — esito di un agente: risposta oppure una proposta di strumento, con backend e motivo di degradazione | AI_SYSTEM.md | RF-01, RF-04 |
 | `v1/workflow.schema.json` | `jarvis.workflow/1` — automazione pianificata (intervallo, giornaliera, singola) con passi dal catalogo e approvazione del proprietario legata al digest dei passi | AUTONOMY_AND_TOOLS.md | RF-07 |
 | `v1/workflow-run.schema.json` | `jarvis.workflow-run/1` — esecuzione con trigger, istanti, decisione ed esito per passo | AUTONOMY_AND_TOOLS.md | RF-07, RNF-07 |
+| `v1/notification.schema.json` | `jarvis.notification/1` — notifica con gravità, categoria, sorgente, correlazione al task o al workflow, chiave di deduplicazione e collegamento a una vista interna | DEVOPS_QA_OBSERVABILITY.md | RF-13, RNF-07 |
 | `catalog/tools/*.json` | Catalogo iniziale degli strumenti (`jarvis.tool/1`), con `input_schema` chiuso | AUTONOMY_AND_TOOLS.md | RF-05 |
 
 La delega v1 accetta il campo facoltativo `inputs`: turni recenti (`user` o `assistant`), memoria autorizzata e `tool_result`. È un'aggiunta compatibile: i documenti senza `inputs` restano validi.
@@ -31,6 +32,7 @@ La delega v1 accetta il campo facoltativo `inputs`: turni recenti (`user` o `ass
 | `jarvis.audit-event/1` | Security Engine ed esecutori | Observability, verifiche di accettazione |
 | `jarvis.agent-result/1` | Agenti (worker Python) | Orchestrator |
 | `jarvis.workflow/1`, `jarvis.workflow-run/1` | Automation Engine (Core) | Interfaccia, Observability |
+| `jarvis.notification/1` | Orchestrator, Security Engine, Automation Engine, monitor | Interfaccia (campanella, toast, notifiche del browser) |
 | `error` (incorporato) | Ogni modulo | Orchestrator per retry e ripianificazione |
 
 Ordine d'uso in un'esecuzione (ARCHITECTURE.md): il client crea un `task`; l'Orchestrator emette `delegation` in un `envelope`; l'agente propone uno strumento descritto da `tool`; il Security Engine produce `policy-decision` (eventualmente con conferma) e un `audit-event`; l'esecutore restituisce esito o `error` e un nuovo `audit-event`; l'Orchestrator aggiorna la `history` del task.

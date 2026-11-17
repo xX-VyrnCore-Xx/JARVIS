@@ -24,7 +24,10 @@ impl Store {
                  created_at TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS workflow_runs (run_id TEXT PRIMARY KEY, workflow_id TEXT NOT NULL,
                  started_at TEXT NOT NULL, doc TEXT NOT NULL);
-             CREATE INDEX IF NOT EXISTS workflow_runs_by_workflow ON workflow_runs (workflow_id, started_at);",
+             CREATE INDEX IF NOT EXISTS workflow_runs_by_workflow ON workflow_runs (workflow_id, started_at);
+             CREATE TABLE IF NOT EXISTS notifications (notification_id TEXT PRIMARY KEY, created_at TEXT NOT NULL,
+                 dedupe_key TEXT, read_at TEXT, doc TEXT NOT NULL);
+             CREATE INDEX IF NOT EXISTS notifications_unread ON notifications (read_at, dedupe_key);",
         )?;
         Ok(Self { conn })
     }
@@ -174,5 +177,85 @@ impl Store {
         let rows = stmt.query_map(params![workflow_id, limit], |r| r.get::<_, String>(0))?;
         rows.map(|r| r.map(|s| serde_json::from_str(&s).unwrap_or(Value::Null)))
             .collect()
+    }
+
+    // ------------------------------------------------------------------ notifiche
+
+    pub fn notification_unread_exists(&self, dedupe_key: &str) -> StoreResult<bool> {
+        self.conn
+            .query_row(
+                "SELECT 1 FROM notifications WHERE dedupe_key = ?1 AND read_at IS NULL LIMIT 1",
+                [dedupe_key],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|r| r.is_some())
+    }
+
+    pub fn notification_put(&self, doc: &Value, keep: u32) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT INTO notifications (notification_id, created_at, dedupe_key, read_at, doc) VALUES (?1, ?2, ?3, NULL, ?4)",
+            params![doc["notification_id"].as_str(), doc["created_at"].as_str(), doc["dedupe_key"].as_str(), doc.to_string()],
+        )?;
+        // Conservazione: restano le `keep` notifiche più recenti.
+        self.conn.execute(
+            "DELETE FROM notifications WHERE notification_id NOT IN (SELECT notification_id FROM notifications ORDER BY created_at DESC LIMIT ?1)",
+            [keep],
+        )?;
+        Ok(())
+    }
+
+    fn with_read(doc: String, read_at: Option<String>) -> Value {
+        let mut v: Value = serde_json::from_str(&doc).unwrap_or(Value::Null);
+        if let Some(r) = read_at {
+            v["read_at"] = r.into();
+        }
+        v
+    }
+
+    pub fn notifications(
+        &self,
+        limit: u32,
+        unread_only: bool,
+        since: Option<&str>,
+    ) -> StoreResult<Vec<Value>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT doc, read_at FROM notifications WHERE (?1 = 0 OR read_at IS NULL) AND (?2 IS NULL OR created_at > ?2)
+             ORDER BY created_at DESC LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(params![unread_only as i32, since, limit], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+        })?;
+        rows.map(|r| r.map(|(d, read)| Self::with_read(d, read)))
+            .collect()
+    }
+
+    pub fn notifications_unread(&self) -> StoreResult<u32> {
+        self.conn.query_row(
+            "SELECT COUNT(*) FROM notifications WHERE read_at IS NULL",
+            [],
+            |r| r.get(0),
+        )
+    }
+
+    pub fn notification_read(&self, id: &str, at: &str) -> StoreResult<bool> {
+        Ok(self.conn.execute(
+            "UPDATE notifications SET read_at = ?2 WHERE notification_id = ?1 AND read_at IS NULL",
+            params![id, at],
+        )? > 0)
+    }
+
+    pub fn notification_read_by_key(&self, dedupe_key: &str, at: &str) -> StoreResult<usize> {
+        self.conn.execute(
+            "UPDATE notifications SET read_at = ?2 WHERE dedupe_key = ?1 AND read_at IS NULL",
+            params![dedupe_key, at],
+        )
+    }
+
+    pub fn notifications_read_all(&self, at: &str) -> StoreResult<usize> {
+        self.conn.execute(
+            "UPDATE notifications SET read_at = ?1 WHERE read_at IS NULL",
+            [at],
+        )
     }
 }

@@ -133,6 +133,9 @@ pub fn router(state: Shared) -> Router {
         .route("/api/audit", get(audit))
         .route("/api/workspace", get(workspace))
         .route("/api/tools", get(tool_catalog))
+        .route("/api/notifications", get(notifications))
+        .route("/api/notifications/read-all", post(read_all))
+        .route("/api/notifications/{id}/read", post(read_one))
         .route("/api/workflows", get(workflows).post(create_workflow))
         .route("/api/workflows/{id}", delete(delete_workflow))
         .route("/api/workflows/{id}/enabled", post(set_enabled))
@@ -276,6 +279,29 @@ fn reply(result: Result<Value, CoreError>) -> Response {
     }
 }
 
+async fn notifications(
+    State(state): State<Shared>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let n = limit(&json!(q), 50);
+    let unread = q.get("unread").is_some_and(|v| v == "1" || v == "true");
+    let since = q.get("since").cloned();
+    reply(
+        with_core(&state, move |j| {
+            j.notifications(n, unread, since.as_deref())
+        })
+        .await,
+    )
+}
+
+async fn read_one(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    reply(with_core(&state, move |j| j.mark_notification_read(&id)).await)
+}
+
+async fn read_all(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.mark_all_notifications_read()).await)
+}
+
 async fn workflows(State(state): State<Shared>) -> Response {
     reply(
         with_core(&state, |j| {
@@ -334,7 +360,14 @@ pub fn spawn_scheduler(state: Shared, tick: std::time::Duration) -> tokio::task:
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             interval.tick().await;
-            let result = with_core(&state, |j| j.run_due(chrono::Utc::now())).await;
+            let result = with_core(&state, |j| {
+                let runs = j.run_due(chrono::Utc::now());
+                if let Err(e) = j.monitor() {
+                    eprintln!("[monitor] errore: {e:?}");
+                }
+                runs
+            })
+            .await;
             match result {
                 Ok(runs) => {
                     for run in runs {

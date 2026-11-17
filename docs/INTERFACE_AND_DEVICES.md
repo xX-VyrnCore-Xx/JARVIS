@@ -24,4 +24,6 @@ L'interfaccia Web è servita dal Core su `http://localhost:8765` e comprende:
 - sezioni Attività, Automazioni, Memoria, Workspace e Audit. Nella sezione Automazioni si crea un'automazione da un modulo generato dal catalogo e la si può eseguire subito, sospendere, riattivare, eliminare o consultarne la cronologia;
 - stato del backend AI e dell'integrità dell'audit nell'intestazione.
 
+La campanella nell'intestazione mostra le notifiche non lette. Il pannello elenca categoria, ora e task correlato, e un clic porta alla vista collegata. Le nuove notifiche compaiono come toast e, se autorizzate, come notifiche del browser quando la pagina non è in primo piano.
+
 Si adatta al tema chiaro e scuro e allo schermo dello smartphone (verificata a 390 px). Desktop Tauri, voce, avatar e mobile nativo restano da sviluppare.

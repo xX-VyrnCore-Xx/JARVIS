@@ -1,6 +1,7 @@
 // E2E dell'interfaccia: chat, strumento a basso rischio, conferma di scrittura, memoria e audit.
 // Uso: JARVIS_URL=http://localhost:8765 node tests/e2e/ui_smoke.cjs [cartella-screenshot]
-// Richiede un Core avviato con JARVIS_AI_BACKEND=offline (risposte deterministiche) e il pacchetto `playwright`.
+// Richiede un Core appena avviato con JARVIS_AI_BACKEND=offline (risposte deterministiche) e una
+// JARVIS_DATA_DIR vuota (i contatori presuppongono uno stato iniziale pulito), più il pacchetto `playwright`.
 const { chromium } = require("playwright");
 
 const URL = process.env.JARVIS_URL || "http://localhost:8765";
@@ -34,11 +35,23 @@ function check(cond, msg) {
   await send("scrivi diario.txt: nota creata dal test E2E");
   await page.waitForSelector(".confirm button.primary");
   check((await page.locator(".confirm").last().innerText()).includes("diario.txt"), "scheda di conferma con effetto atteso");
+  // Notifiche (RF-13): la conferma in attesa compare come notifica e toast, e si chiude quando viene risolta.
+  await page.waitForFunction(() => document.querySelector("#notif-count").textContent === "1" && !document.querySelector("#notif-count").hidden);
+  check(true, "contatore notifiche: 1 conferma in attesa");
+  await page.waitForSelector(".toast.warning");
+  check((await page.locator(".toast.warning").first().innerText()).includes("Conferma richiesta"), "toast della conferma in attesa");
+  await page.click("#bell");
+  await page.waitForSelector("#notif-list .notif.unread");
+  check((await page.locator("#notif-list").innerText()).includes("fs.write"), "notifica elencata nel pannello con il task");
+  if (shots) await page.screenshot({ path: `${shots}/jarvis-notifiche.png` });
+  await page.keyboard.press("Escape");
   if (shots) await page.screenshot({ path: `${shots}/jarvis-conferma.png` });
   const before = await page.locator(".msg.assistant").count();
   await page.click(".confirm button.primary");
   await page.waitForFunction((n) => document.querySelectorAll(".msg.assistant").length > n, before);
   check((await page.locator(".msg.assistant").last().innerText()).includes("diario.txt"), "scrittura eseguita dopo l'approvazione");
+  await page.waitForFunction(() => document.querySelector("#notif-count").hidden);
+  check(true, "notifica chiusa dopo l'approvazione");
   check((await send("leggi diario.txt")).includes("nota creata dal test E2E"), "lettura del file scritto");
   check((await send("leggi ../../etc/passwd")).includes("negato"), "uscita dalla workspace negata");
   await send("ricorda che il test E2E è passato");
