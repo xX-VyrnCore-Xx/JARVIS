@@ -1,6 +1,6 @@
 [package]
 name = "jarvis-desktop"
-version = "0.1.1"
+version = "0.1.2"
 description = "JARVIS desktop (Tauri): avvia il Core locale e ne mostra l'interfaccia"
 edition = "2021"
 rust-version = "1.82"
