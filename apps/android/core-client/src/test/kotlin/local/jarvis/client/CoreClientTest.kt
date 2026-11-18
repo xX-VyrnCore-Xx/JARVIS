@@ -91,4 +91,23 @@ class CoreClientTest {
         assertEquals(403, e.status)
         assertEquals("solo dal computer del proprietario", e.message)
     }
+
+    @Test
+    fun tasksAndNoticesUseDeviceRoutesOnly() {
+        val t = Recorder(listOf(
+            HttpReply(200, """{"items":[{"task_id":"t1","objective":"che ore sono","state":"succeeded","created_at":"2026-11-18T10:00:00Z"}]}"""),
+            HttpReply(200, """{"unread":1,"items":[{"notification_id":"n1","severity":"warning","title":"Conferma richiesta","body":"x","created_at":"2026-11-18T10:00:00Z","read_at":null},{"notification_id":"n2","severity":"info","title":"Fatto","created_at":"2026-11-18T09:00:00Z","read_at":"2026-11-18T09:01:00Z"}]}"""),
+            HttpReply(200, """{"unread":0}"""),
+        ))
+        val client = CoreClient(t)
+        val session = DeviceSession("https://jarvis.example", token, listOf("chat"))
+        assertEquals(listOf(TaskSummary("t1", "che ore sono", "succeeded", "2026-11-18T10:00:00Z")), client.tasks(session))
+        val notices = client.notices(session)
+        assertEquals(1, notices.unread)
+        assertEquals(listOf(false, true), notices.items.map { it.read })
+        assertEquals(0, client.markAllRead(session))
+        assertEquals(listOf("/api/tasks?limit=30", "/api/notifications?limit=30", "/api/notifications/read-all"),
+            t.calls.map { it.second.removePrefix("https://jarvis.example") })
+        assertTrue(t.calls.all { it.third["X-Jarvis-Device"] == token })
+    }
 }

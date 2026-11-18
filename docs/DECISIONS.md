@@ -847,6 +847,20 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - unitari in `nodes.rs`: priorità a carico, lavori in corso e revoca.
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md, contratto `connector`.
 
+### ADR-0032 — Attività e notifiche nelle app iOS e Android
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario; limite «funzioni iOS e Android oltre chat e conferme».
+- **Contesto:** le app native mostravano solo chat e conferme, mentre il permesso `chat` del dispositivo consente già attività e notifiche.
+- **Decisione:**
+  - i client `CoreClient` (Swift e Kotlin) aggiungono `tasks`, `notices` e `markAllRead` sulle rotte già ammesse ai dispositivi (`GET /api/tasks`, `GET /api/notifications`, `POST /api/notifications/read-all`), con le stesse regole: solo HTTPS, nessun redirect, revoca con 401;
+  - le app hanno tre schede: Chat, Attività (stato in italiano, errori evidenziati) e Notifiche (non lette in evidenza, contatore sulla scheda in iOS, «Segna lette»);
+  - nessuna rotta nuova sul Core: memoria, automazioni e impostazioni restano al computer del proprietario.
+- **Conseguenze:**
+  - le notifiche si vedono aprendo l'app; il push a app chiusa passa da ntfy o Telegram (ADR-0026);
+  - la voce resta nella PWA (stesse rotte vocali), non nelle app native.
+- **Evidenza:** `CoreClientTest.tasksAndNoticesUseDeviceRoutesOnly` (Android, 6/6 in locale) e i casi aggiunti a `apps/ios/tests/CoreClientTests.swift`, eseguiti dalla CI su macOS; build dell'APK e dell'app per simulatore in CI.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

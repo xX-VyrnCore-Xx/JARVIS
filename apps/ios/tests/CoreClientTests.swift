@@ -54,6 +54,15 @@ struct CoreClientTests {
                     case "/api/confirmations":
                         precondition(request.httpMethod == "GET")
                         payload = #"{"items":[{"confirmation_id":"\#(actionId)","target":"note.txt","expected_effect":"Scrive","expires_at":"2026-11-17T22:00:00.000Z"}]}"#
+                    case "/api/tasks":
+                        precondition(request.httpMethod == "GET" && url.query == "limit=30")
+                        payload = #"{"items":[{"task_id":"t1","objective":"che ore sono","state":"succeeded","created_at":"2026-11-18T10:00:00Z"}]}"#
+                    case "/api/notifications":
+                        precondition(request.httpMethod == "GET" && url.query == "limit=30")
+                        payload = #"{"unread":1,"items":[{"notification_id":"n1","severity":"warning","title":"Conferma richiesta","body":"x","created_at":"2026-11-18T10:00:00Z","read_at":null},{"notification_id":"n2","severity":"info","title":"Fatto","created_at":"2026-11-18T09:00:00Z","read_at":"2026-11-18T09:01:00Z"}]}"#
+                    case "/api/notifications/read-all":
+                        precondition(request.httpMethod == "POST")
+                        payload = #"{"unread":0}"#
                     case "/api/confirmations/\(actionId)":
                         precondition(request.httpMethod == "POST" && body?["approve"] as? Bool == false)
                         payload = #"{"reply":null}"#
@@ -72,6 +81,12 @@ struct CoreClientTests {
         precondition(reply == "Sono le 12.")
         let actions = try await client.pending(session)
         precondition(actions.count == 1 && actions[0].expiration != nil && actions[0].target == "note.txt")
+        let tasks = try await client.tasks(session)
+        precondition(tasks.count == 1 && tasks[0].state == "succeeded" && tasks[0].objective == "che ore sono")
+        let notices = try await client.notices(session)
+        precondition(notices.unread == 1 && notices.items.map(\.isRead) == [false, true])
+        let unread = try await client.markAllRead(session)
+        precondition(unread == 0)
         let decision = try await client.decide(actions[0], approve: false, session: session)
         precondition(decision == nil)
         do {
@@ -99,6 +114,6 @@ struct CoreClientTests {
             _ = try await redirectClient.history(session)
             preconditionFailure("Risposta HTTP 307 accettata")
         } catch CoreError.rejected(307, _) {}
-        print("iOS: origine HTTPS, associazione, cronologia, chat, conferme, permessi, revoca e rifiuto 307 verificati")
+        print("iOS: origine HTTPS, associazione, cronologia, chat, conferme, attività, notifiche, permessi, revoca e rifiuto 307 verificati")
     }
 }

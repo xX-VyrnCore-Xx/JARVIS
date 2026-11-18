@@ -18,6 +18,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -44,9 +46,11 @@ import local.jarvis.client.ChatMessage
 import local.jarvis.client.CoreClient
 import local.jarvis.client.CoreException
 import local.jarvis.client.DeviceSession
+import local.jarvis.client.Notices
 import local.jarvis.client.PendingAction
+import local.jarvis.client.TaskSummary
 
-/** Client Android di JARVIS (ADR-0018): associazione, chat e conferme, come la PWA e il client iOS. */
+/** Client Android di JARVIS (ADR-0018, ADR-0032): associazione, chat, conferme, attività e notifiche. */
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -60,7 +64,7 @@ class MainActivity : ComponentActivity() {
                         if (current == null) {
                             PairingScreen { paired -> store.save(paired); session = paired }
                         } else {
-                            ChatScreen(current) { store.clear(); session = null }
+                            DeviceScreen(current) { store.clear(); session = null }
                         }
                     }
                 }
@@ -95,6 +99,92 @@ private fun PairingScreen(onPaired: (DeviceSession) -> Unit) {
                 result.onSuccess(onPaired).onFailure { error = it.message ?: "Associazione non riuscita" }
             }
         }) { Text(if (busy) "Associazione…" else "Associa") }
+    }
+}
+
+/** Schede del dispositivo: chat, attività e notifiche (le rotte permesse dal permesso `chat`). */
+@Composable
+private fun ColumnScope.DeviceScreen(session: DeviceSession, onRevoked: () -> Unit) {
+    var tab by remember { mutableStateOf(0) }
+    TabRow(selectedTabIndex = tab) {
+        listOf("Chat", "Attività", "Notifiche").forEachIndexed { i, label ->
+            Tab(selected = tab == i, onClick = { tab = i }, text = { Text(label) })
+        }
+    }
+    when (tab) {
+        0 -> ChatScreen(session, onRevoked)
+        1 -> TasksScreen(session, onRevoked)
+        else -> NoticesScreen(session, onRevoked)
+    }
+}
+
+private val STATE_LABEL = mapOf(
+    "succeeded" to "riuscita", "failed" to "fallita", "waiting_confirmation" to "attende conferma",
+    "running" to "in corso", "cancelled" to "annullata", "planned" to "pianificata", "pending" to "in attesa",
+)
+
+@Composable
+private fun ColumnScope.TasksScreen(session: DeviceSession, onRevoked: () -> Unit) {
+    val tasks = remember { mutableStateListOf<TaskSummary>() }
+    var status by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    suspend fun refresh() {
+        withContext(Dispatchers.IO) { runCatching { client.tasks(session) } }
+            .onSuccess { tasks.clear(); tasks.addAll(it); status = if (it.isEmpty()) "Nessuna attività." else null }
+            .onFailure { if (it is CoreException.Revoked) onRevoked() else status = it.message }
+    }
+    LaunchedEffect(session) { refresh() }
+    TextButton(onClick = { scope.launch { refresh() } }, modifier = Modifier.padding(horizontal = 8.dp)) { Text("Aggiorna") }
+    status?.let { Text(it, modifier = Modifier.padding(horizontal = 16.dp)) }
+    LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(tasks) { t ->
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp)) {
+                    Text(t.objective, style = MaterialTheme.typography.bodyLarge)
+                    Text("${STATE_LABEL[t.state] ?: t.state} · ${t.createdAt.take(16).replace('T', ' ')}", style = MaterialTheme.typography.bodySmall,
+                        color = if (t.state == "failed") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ColumnScope.NoticesScreen(session: DeviceSession, onRevoked: () -> Unit) {
+    var notices by remember { mutableStateOf<Notices?>(null) }
+    var status by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    suspend fun refresh() {
+        withContext(Dispatchers.IO) { runCatching { client.notices(session) } }
+            .onSuccess { notices = it; status = if (it.items.isEmpty()) "Nessuna notifica." else null }
+            .onFailure { if (it is CoreException.Revoked) onRevoked() else status = it.message }
+    }
+    LaunchedEffect(session) { refresh() }
+    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text("Non lette: ${notices?.unread ?: 0}", modifier = Modifier.padding(8.dp))
+        Row {
+            TextButton(onClick = { scope.launch { refresh() } }) { Text("Aggiorna") }
+            TextButton(onClick = {
+                scope.launch {
+                    withContext(Dispatchers.IO) { runCatching { client.markAllRead(session) } }
+                        .onFailure { if (it is CoreException.Revoked) onRevoked() else status = it.message }
+                    refresh()
+                }
+            }) { Text("Segna lette") }
+        }
+    }
+    status?.let { Text(it, modifier = Modifier.padding(horizontal = 16.dp)) }
+    LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(notices?.items ?: emptyList()) { n ->
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp)) {
+                    Text((if (n.read) "" else "● ") + n.title, style = MaterialTheme.typography.titleSmall,
+                        color = when (n.severity) { "error" -> MaterialTheme.colorScheme.error; else -> MaterialTheme.colorScheme.onSurface })
+                    if (n.body.isNotEmpty()) Text(n.body, style = MaterialTheme.typography.bodySmall)
+                    Text(n.createdAt.take(16).replace('T', ' '), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
     }
 }
 

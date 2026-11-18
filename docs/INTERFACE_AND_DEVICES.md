@@ -66,13 +66,15 @@ La chat mostra un avatar astratto con anelli CSS 3D. L'etichetta annuncia gli st
 
 Con «nodo auto <strumento>» il Core sceglie da solo il nodo più libero fra quelli in linea (ADR-0031).
 
-Restano da sviluppare: funzioni iOS oltre chat e conferme, firma degli installer
+Le app iOS e Android hanno tre schede: Chat, Attività e Notifiche (ADR-0032).
+
+Restano da sviluppare: voce nelle app native, firma degli installer
 
 ## App nativa iOS (RF-10, RF-11)
 
 Su macOS, apri `apps/ios/JARVIS.xcodeproj` in Xcode e avvia il target JARVIS su un simulatore iOS 17+ o su un iPhone/iPad. Per il dispositivo fisico seleziona il team di sviluppo in Xcode. Inserisci l'origine HTTPS già autorizzata per il Core, un nome e il codice monouso generato nella sezione **Dispositivi**.
 
-Il client mostra i 50 messaggi più recenti, invia messaggi e mostra le conferme pendenti. Il permesso `confirm` abilita approvazione e rifiuto espliciti. Il token resta nel portachiavi del dispositivo. Il client usa una sessione HTTP effimera, rifiuta i reindirizzamenti e torna alla schermata di associazione quando una richiesta autenticata restituisce 401. L'uscita locale cancella la sessione dal portachiavi. Per revocare il token sul Core usa la sezione **Dispositivi**.
+Il client mostra i 50 messaggi più recenti, invia messaggi e mostra le conferme pendenti. Le schede Attività e Notifiche mostrano lo stato delle richieste e le notifiche, con «Segna lette» (ADR-0032). Il permesso `confirm` abilita approvazione e rifiuto espliciti. Il token resta nel portachiavi del dispositivo. Il client usa una sessione HTTP effimera, rifiuta i reindirizzamenti e torna alla schermata di associazione quando una richiesta autenticata restituisce 401. L'uscita locale cancella la sessione dal portachiavi. Per revocare il token sul Core usa la sezione **Dispositivi**.
 
 La CI compila l'app per simulatore ed esegue i test Swift del protocollo. Le prove sul telefono usano la checklist in [ACCEPTANCE.md](ACCEPTANCE.md).
 
