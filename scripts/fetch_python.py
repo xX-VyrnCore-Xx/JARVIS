@@ -37,12 +37,14 @@ def get(url: str, accept: str = "application/vnd.github+json") -> bytes:
         return r.read()
 
 
-TRIM_GLOBS = [
+# Percorsi da rimuovere, separati per sistema: su Windows i nomi ignorano maiuscole e minuscole e un
+# modello Unix come lib/thread* colpirebbe Lib/threading.py della libreria standard.
+TRIM_UNIX = [
     "lib/python3.*/test", "lib/python3.*/idlelib", "lib/python3.*/tkinter", "lib/python3.*/turtledemo",
-    "lib/python3.*/lib2to3", "lib/python3.*/ensurepip", "lib/tcl*", "lib/tk*", "lib/itcl*", "lib/thread*",
+    "lib/python3.*/lib2to3", "lib/python3.*/ensurepip", "lib/tcl8*", "lib/tk8*", "lib/itcl4*", "lib/thread2*",
     "share", "include",
-    "Lib/test", "Lib/idlelib", "Lib/tkinter", "Lib/turtledemo", "Lib/lib2to3", "Lib/ensurepip", "tcl", "include",
 ]
+TRIM_WINDOWS = ["Lib/test", "Lib/idlelib", "Lib/tkinter", "Lib/turtledemo", "Lib/lib2to3", "Lib/ensurepip", "tcl", "include"]
 
 
 def dereference(root: Path) -> int:
@@ -63,7 +65,8 @@ def dereference(root: Path) -> int:
 
 def trim(root: Path) -> int:
     before = sum(f.stat().st_size for f in root.rglob("*") if f.is_file())
-    for pattern in TRIM_GLOBS:
+    patterns = TRIM_WINDOWS if (root / "python.exe").is_file() else TRIM_UNIX
+    for pattern in patterns:
         for path in root.glob(pattern):
             shutil.rmtree(path) if path.is_dir() else path.unlink()
     for cache in list(root.rglob("__pycache__")):
