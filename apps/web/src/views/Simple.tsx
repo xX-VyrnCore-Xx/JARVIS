@@ -92,6 +92,102 @@ export function Audit({ active }: { active: boolean }) {
   );
 }
 
+const SEVERITY_LABEL: Record<string, string> = { success: "tutte", info: "informazioni e oltre", warning: "avvisi e conferme", error: "solo errori" };
+
+/** Notifiche sul telefono (ADR-0026): canali ntfy e Telegram. */
+function PhoneChannels({ active }: { active: boolean }) {
+  const { data, reload } = useViewData(active, () => api("/api/notify/channels"));
+  const [kind, setKind] = useState("ntfy");
+  const [name, setName] = useState("");
+  const [target, setTarget] = useState("");
+  const [server, setServer] = useState("");
+  const [secret, setSecret] = useState("");
+  const [min, setMin] = useState("warning");
+  const [body, setBody] = useState(false);
+  const items: any[] = data?.items || [];
+
+  const add = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      await post("/api/notify/channels", { kind, name, target, server: server || undefined, secret: secret || undefined, min_severity: min, include_body: body });
+      setName("");
+      setTarget("");
+      setServer("");
+      setSecret("");
+      reload();
+    } catch (err) {
+      alert((err as Error).message);
+    }
+  };
+
+  return (
+    <>
+      <h3 className="sub-head">Notifiche sul telefono</h3>
+      <p className="hint">
+        Ricevi conferme in attesa, errori e avvisi anche lontano dal computer. Per impostazione si inviano solo titolo e categoria:
+        il testo esce dal computer solo se lo scegli. Le conferme si danno sempre da JARVIS.{" "}
+        {kind === "ntfy"
+          ? "ntfy: installa l'app ntfy, iscriviti a un argomento difficile da indovinare e scrivilo qui (server predefinito ntfy.sh, oppure il tuo)."
+          : "Telegram: crea un bot con @BotFather, scrivigli un messaggio e inserisci qui il token del bot e l'identificativo numerico della tua chat."}
+      </p>
+      <form id="channel-form" className="form" onSubmit={add}>
+        <div className="row">
+          <label>Servizio
+            <select name="kind" value={kind} onChange={(e) => setKind(e.target.value)}>
+              <option value="ntfy">ntfy (push)</option>
+              <option value="telegram">Telegram</option>
+            </select>
+          </label>
+          <label>Nome <input name="name" maxLength={60} placeholder="Es. Il mio telefono" value={name} onChange={(e) => setName(e.target.value)} /></label>
+          <label>{kind === "ntfy" ? "Argomento" : "ID della chat"}
+            <input name="target" required value={target} onChange={(e) => setTarget(e.target.value)} placeholder={kind === "ntfy" ? "jarvis-casa-7f3k2x" : "123456789"} />
+          </label>
+        </div>
+        <div className="row">
+          <label>{kind === "ntfy" ? "Token di accesso (facoltativo)" : "Token del bot"}
+            <input name="secret" type="password" autoComplete="off" required={kind === "telegram"} value={secret} onChange={(e) => setSecret(e.target.value)} />
+          </label>
+          <label>Server (facoltativo)
+            <input name="server" placeholder={kind === "ntfy" ? "https://ntfy.sh" : "https://api.telegram.org"} value={server} onChange={(e) => setServer(e.target.value)} />
+          </label>
+          <label>Invia
+            <select name="min_severity" value={min} onChange={(e) => setMin(e.target.value)}>
+              {Object.entries(SEVERITY_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </label>
+        </div>
+        <div className="row">
+          <label className="check"><input type="checkbox" name="include_body" checked={body} onChange={(e) => setBody(e.target.checked)} /> Includi il testo della notifica</label>
+          <button type="submit" className="primary">Aggiungi canale</button>
+        </div>
+      </form>
+      <div id="channels" className="list">
+        {data && !items.length ? <Empty>Nessun canale: le notifiche restano nella campanella di JARVIS.</Empty> : null}
+        {items.map((c) => (
+          <div className="card" key={c.channel_id}>
+            <div className="body">
+              <div className="title">{c.name} <span className="sub">{c.kind}</span></div>
+              <div className="sub">
+                {c.kind === "ntfy" ? `argomento ${c.target}` : `chat ${c.target}`} · {c.server} · {SEVERITY_LABEL[c.min_severity] || c.min_severity} ·{" "}
+                {c.include_body ? "con il testo" : "solo titolo"} · {c.has_secret ? "token salvato" : "senza token"}
+              </div>
+            </div>
+            <button className="ghost" onClick={guard(async () => {
+              await post(`/api/notify/channels/${encodeURIComponent(c.channel_id)}/test`);
+              alert("Notifica di prova inviata: controlla il telefono.");
+            })}>Prova</button>
+            <button className="danger" onClick={guard(async () => {
+              if (!confirm(`Rimuovere il canale «${c.name}»? Il token verrà cancellato.`)) return;
+              await api(`/api/notify/channels/${encodeURIComponent(c.channel_id)}`, { method: "DELETE" });
+              reload();
+            })}>Rimuovi</button>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 const PLATFORM: Record<string, string> = { android: "Android", ios: "iOS", desktop: "desktop", web: "browser", other: "altro" };
 
 export function Devices({ active }: { active: boolean }) {
@@ -182,6 +278,7 @@ export function Devices({ active }: { active: boolean }) {
           </div>
         ))}
       </div>
+      <PhoneChannels active={active} />
     </section>
   );
 }

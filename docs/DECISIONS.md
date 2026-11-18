@@ -715,6 +715,33 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `core/server/tests/streaming.rs` (worker reale contro un Ollama sintetico: tre frammenti, poi esito identico, conversazione salvata, token misurati); E2E dell'interfaccia sul nuovo endpoint.
 - **Documenti interessati:** AI_SYSTEM.md, INTERFACE_AND_DEVICES.md, ROADMAP.md, contratto `delegation`.
 
+### ADR-0026 — Notifiche sul telefono con ntfy e Telegram
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario («procedi con le notifiche esterne sul telefono»); RF-13, canali di notifica esterni indicati come lacuna.
+- **Contesto:** le notifiche arrivavano solo nella campanella e come notifiche del browser, quindi a computer acceso e pagina aperta.
+- **Opzioni:**
+  - push nativo APNs/FCM: richiede account sviluppatore, server e app pubblicate;
+  - email: SMTP e credenziali complesse, consegna lenta;
+  - ntfy (HTTP semplice, app gratuita, server ospitabile in proprio) e Telegram (bot via HTTPS): nessun servizio di JARVIS da gestire.
+- **Decisione:**
+  - tabella `notify_channels`; token nell'archivio dei segreti (`channel:<id>`, portachiavi dove disponibile);
+  - filtro per gravità minima (predefinita `warning`, che include le conferme in attesa);
+  - testo escluso per impostazione: si inviano titolo e categoria;
+  - HTTPS obbligatorio salvo loopback, nessun reindirizzamento, timeout di 10 secondi;
+  - invio in un thread separato con un nuovo tentativo; contatori `notify.external.sent` e `notify.external.failed`; errori nel log senza URL (che per Telegram contiene il token);
+  - pubblicazione ntfy in JSON per titoli UTF-8; collegamento facoltativo `JARVIS_PUBLIC_URL`;
+  - API `GET/POST /api/notify/channels`, `DELETE /api/notify/channels/{id}`, `POST …/{id}/test`, solo per il proprietario, con audit;
+  - le conferme non si danno dal telefono attraverso questi canali.
+- **Conseguenze:**
+  - ogni messaggio inviato passa da un servizio esterno: per questo il testo è escluso salvo scelta esplicita;
+  - un argomento ntfy pubblico è leggibile da chi lo conosce: serve un nome difficile da indovinare (almeno 8 caratteri) oppure un server con token;
+  - nessun limite di frequenza oltre alla deduplicazione delle notifiche.
+- **Evidenza:**
+  - `core/server/tests/channels.rs` con server ntfy e Telegram sintetici: configurazioni non sicure rifiutate, segreti mai restituiti, conferma inviata a entrambi, testo escluso su ntfy e incluso su Telegram per scelta, prova d'invio, rimozione con audit;
+  - unitari in `channels.rs`;
+  - E2E: canale aggiunto dall'interfaccia e prova ricevuta.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, SECURITY_AND_PRIVACY.md, README.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

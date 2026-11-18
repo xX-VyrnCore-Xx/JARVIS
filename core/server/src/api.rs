@@ -248,6 +248,9 @@ pub fn router(state: Shared) -> Router {
         .route("/api/health", get(health))
         .route("/api/chat", post(chat))
         .route("/api/chat/stream", post(chat_stream))
+        .route("/api/notify/channels", get(channels_list).post(channel_add))
+        .route("/api/notify/channels/{id}", delete(channel_delete))
+        .route("/api/notify/channels/{id}/test", post(channel_test))
         .route("/api/confirmations", get(confirmations))
         .route("/api/confirmations/{id}", post(confirm))
         .route("/api/tasks", get(tasks))
@@ -446,6 +449,49 @@ async fn chat_stream(State(state): State<Shared>, Json(body): Json<Value>) -> Re
         axum::body::Body::from_stream(stream),
     )
         .into_response()
+}
+
+async fn channels_list(State(state): State<Shared>) -> Response {
+    match with_core(&state, |j| j.channels()).await {
+        Ok(items) => Json(json!({"items": items})).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+async fn channel_add(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    match with_core(&state, move |j| j.channel_add(&body)).await {
+        Ok(doc) => (StatusCode::CREATED, Json(doc)).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+async fn channel_delete(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    match with_core(&state, move |j| j.channel_delete(&id)).await {
+        Ok(()) => Json(json!({"deleted": true})).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+/// Prova d'invio: il messaggio parte fuori dal blocco del Core e l'esito torna all'interfaccia.
+async fn channel_test(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    let (channel, secret) = match with_core(&state, move |j| j.channel_for_test(&id)).await {
+        Ok(v) => v,
+        Err(e) => return e.into_response(),
+    };
+    let n = json!({"severity": "info", "category": "system", "title": "Prova di notifica",
+                   "body": "Se leggi questo messaggio, JARVIS può raggiungerti sul telefono."});
+    let sent = tokio::task::spawn_blocking(move || {
+        let url = std::env::var("JARVIS_PUBLIC_URL")
+            .ok()
+            .filter(|u| u.starts_with("https://"));
+        crate::channels::send(&channel, secret.as_deref(), &n, url.as_deref())
+    })
+    .await
+    .unwrap_or_else(|_| Err("invio interrotto".into()));
+    match sent {
+        Ok(()) => Json(json!({"sent": true})).into_response(),
+        Err(m) => error(StatusCode::BAD_GATEWAY, "notify.failed", m),
+    }
 }
 
 async fn confirmations(State(state): State<Shared>) -> Json<Value> {

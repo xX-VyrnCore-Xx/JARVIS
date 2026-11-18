@@ -22,6 +22,9 @@ import shutil
 import sys
 import tarfile
 import tempfile
+import http.client
+import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -33,8 +36,17 @@ def get(url: str, accept: str = "application/vnd.github+json") -> bytes:
     token = os.environ.get("GITHUB_TOKEN")
     if token and url.startswith("https://api.github.com/"):
         headers["Authorization"] = f"Bearer {token}"
-    with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=300) as r:  # noqa: S310
-        return r.read()
+    # Download ripetuto fino a 4 volte: la rete dei runner a volte interrompe la risposta (IncompleteRead).
+    for attempt in range(4):
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=300) as r:  # noqa: S310
+                return r.read()
+        except (http.client.IncompleteRead, urllib.error.URLError, ConnectionError, TimeoutError) as exc:
+            if attempt == 3:
+                raise
+            print(f"download interrotto ({exc.__class__.__name__}), nuovo tentativo…", file=sys.stderr)
+            time.sleep(2 ** attempt * 3)
+    raise AssertionError("non raggiungibile")
 
 
 # Percorsi da rimuovere, separati per sistema: su Windows i nomi ignorano maiuscole e minuscole e un

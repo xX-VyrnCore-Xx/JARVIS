@@ -9,6 +9,7 @@ pub mod audit;
 pub mod automation;
 pub mod backup;
 pub mod catalog;
+pub mod channels;
 pub mod config;
 pub mod connectors;
 pub mod memory;

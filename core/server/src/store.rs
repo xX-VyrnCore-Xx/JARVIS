@@ -34,7 +34,8 @@ impl Store {
                  installed_at TEXT NOT NULL, authorized_at TEXT);
              CREATE TABLE IF NOT EXISTS metrics_snapshots (at TEXT PRIMARY KEY, doc TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS devices (device_id TEXT PRIMARY KEY, token_sha256 TEXT NOT NULL UNIQUE,
-                 doc TEXT NOT NULL);",
+                 doc TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS notify_channels (channel_id TEXT PRIMARY KEY, doc TEXT NOT NULL);",
         )?;
         // Migrazione additiva: database creati prima delle fonti Web (RF-06).
         let has_sources = conn.prepare("SELECT sources FROM messages LIMIT 0").is_ok();
@@ -44,6 +45,33 @@ impl Store {
         let store = Self { conn };
         store.memory_migrate()?;
         Ok(store)
+    }
+
+    pub fn channel_put(&self, doc: &Value) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT INTO notify_channels (channel_id, doc) VALUES (?1, ?2)
+             ON CONFLICT(channel_id) DO UPDATE SET doc = excluded.doc",
+            params![doc["channel_id"].as_str(), doc.to_string()],
+        )?;
+        Ok(())
+    }
+
+    pub fn channels(&self) -> StoreResult<Vec<Value>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT doc FROM notify_channels ORDER BY channel_id")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        Ok(rows
+            .filter_map(Result::ok)
+            .filter_map(|d| serde_json::from_str(&d).ok())
+            .collect())
+    }
+
+    pub fn channel_delete(&self, id: &str) -> StoreResult<bool> {
+        Ok(self
+            .conn
+            .execute("DELETE FROM notify_channels WHERE channel_id = ?1", [id])?
+            > 0)
     }
 
     pub fn task_put(&self, doc: &Value, at: &str) -> StoreResult<()> {
