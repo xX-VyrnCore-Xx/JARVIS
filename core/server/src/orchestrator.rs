@@ -236,6 +236,7 @@ impl Jarvis {
             _lock: lock,
         };
         jarvis.register_authorized_connectors()?;
+        jarvis.refresh_embedder();
         jarvis.register_nodes()?;
         crate::rollback::mark(&jarvis.cfg.data_dir)?;
         if let Some(up) = upgraded {
@@ -269,6 +270,7 @@ impl Jarvis {
         // Dopo la configurazione dei modelli il worker riparte con i nuovi percorsi (voce, Ollama).
         if self.setup.take_restart() {
             self.worker = None;
+            self.refresh_embedder();
             self.obs
                 .log("info", "worker.restart", json!({"reason": "setup"}));
         }
@@ -342,7 +344,7 @@ impl Jarvis {
             }));
         }
         json!({
-            "core": {"version": env!("CARGO_PKG_VERSION"), "status": "up", "secrets_store": self.secrets.location()},
+            "core": {"version": env!("CARGO_PKG_VERSION"), "status": "up", "secrets_store": self.secrets.location(), "memory_embeddings": self.embed_model()},
             "web": self.cfg.web.describe(),
             "ai": ai,
             "audit": {"events": events, "chain_valid": errors.is_empty()},
@@ -888,6 +890,31 @@ impl Jarvis {
         out.task = task.doc;
         out.reply = Some(text);
         Ok(out)
+    }
+
+    /// Attiva gli embedding della memoria se è scelto un modello (ADR-0028). Senza Ollama la memoria usa
+    /// l'indice locale; gli embedding mancanti vengono calcolati appena il servizio risponde.
+    fn refresh_embedder(&mut self) {
+        let embedder = self.setup.embed_model().map(|m| {
+            std::sync::Arc::new(crate::memory::OllamaEmbedder::new(
+                self.setup.ollama_url(),
+                &m,
+            )) as std::sync::Arc<dyn crate::memory::Embedder>
+        });
+        match self.store.set_embedder(embedder) {
+            Ok(n) if n > 0 => self.obs.log("info", "memory.embedded", json!({"items": n})),
+            Ok(_) => {}
+            Err(e) => self.obs.log(
+                "warn",
+                "memory.embed_failed",
+                json!({"error": e.to_string()}),
+            ),
+        }
+    }
+
+    /// Modello di embedding attivo, per lo stato del sistema.
+    pub fn embed_model(&self) -> Option<String> {
+        self.store.embedder.as_ref().map(|e| e.model().to_string())
     }
 
     /// Memoria data all'agente (ADR-0022): tutte le preferenze, poi i fatti e gli episodi pertinenti alla

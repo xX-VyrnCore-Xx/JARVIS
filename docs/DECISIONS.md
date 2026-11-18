@@ -767,6 +767,25 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - unitari in `oauth.rs` (vettore della RFC 7636, `state` monouso).
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, SECURITY_AND_PRIVACY.md, ACCEPTANCE.md, README.md, ROADMAP.md, contratto `connector`.
 
+### ADR-0028 — Memoria con i sinonimi tramite embedding di Ollama
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario («completalo definitivamente»); limite dichiarato dall'ADR-0022 («auto» non trova «macchina»).
+- **Contesto:** il vettore locale riconosce flessioni e accenti, non il significato.
+- **Opzioni:**
+  - embedding calcolati nel worker Python: un viaggio in più sul bridge per ogni elemento;
+  - embedding chiesti dal Core a Ollama (`POST /api/embed`): stesso servizio locale del modello di chat, nessuna dipendenza nuova.
+- **Decisione:**
+  - trait `Embedder` con implementazione Ollama (timeout 8 secondi, pausa di 60 secondi dopo un errore);
+  - tabella derivata `memory_embeddings (id, model, vec)`, aggiornata da inserimento, correzione, cancellazione e ricostruzione; gli elementi già presenti vengono calcolati all'attivazione;
+  - punteggio: 30% vettore locale, 25% BM25 e fino al 60% dal modello, considerando solo la similarità sopra 0,4;
+  - modello scelto nella configurazione guidata (`nomic-embed-text` o `mxbai-embed-large`, scaricato con `ollama pull`) o con `JARVIS_EMBED_MODEL`;
+  - stato in `/api/health` (`core.memory_embeddings`) e nella sezione Sistema.
+- **Conseguenze:**
+  - con Ollama spento la ricerca resta quella locale, senza errori;
+  - cambiare modello rende i vettori precedenti inutilizzati finché non vengono ricalcolati (all'avvio o con «Ricostruisci indici»).
+- **Evidenza:** unitari in `memory.rs`: sinonimo trovato solo con il modello, embedding degli elementi esistenti, correzione, cancellazione, ricostruzione; client Ollama contro un server sintetico, con pausa dopo un errore.
+- **Documenti interessati:** MEMORY_DATA_SYNC.md, ACCEPTANCE.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

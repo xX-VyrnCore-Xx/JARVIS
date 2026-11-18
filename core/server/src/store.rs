@@ -7,6 +7,8 @@ use serde_json::{json, Value};
 
 pub struct Store {
     pub(crate) conn: Connection,
+    /// Modello di embedding facoltativo per la memoria (ADR-0028).
+    pub(crate) embedder: Option<std::sync::Arc<dyn crate::memory::Embedder>>,
 }
 
 pub type StoreResult<T> = Result<T, rusqlite::Error>;
@@ -42,7 +44,10 @@ impl Store {
         if !has_sources {
             conn.execute_batch("ALTER TABLE messages ADD COLUMN sources TEXT;")?;
         }
-        let store = Self { conn };
+        let store = Self {
+            conn,
+            embedder: None,
+        };
         store.memory_migrate()?;
         Ok(store)
     }
@@ -72,6 +77,15 @@ impl Store {
             .conn
             .execute("DELETE FROM notify_channels WHERE channel_id = ?1", [id])?
             > 0)
+    }
+
+    /// Attiva gli embedding e calcola quelli mancanti (elementi salvati prima o con un altro modello).
+    pub fn set_embedder(
+        &mut self,
+        e: Option<std::sync::Arc<dyn crate::memory::Embedder>>,
+    ) -> StoreResult<usize> {
+        self.embedder = e;
+        self.memory_embed_missing()
     }
 
     pub fn task_put(&self, doc: &Value, at: &str) -> StoreResult<()> {

@@ -22,6 +22,8 @@ pub const TTS_VOICES: [&str; 3] = [
     "en_US-lessac-medium",
 ];
 pub const OLLAMA_MODELS: [&str; 4] = ["qwen2.5:3b", "llama3.2:3b", "qwen2.5:7b", "gemma3:4b"];
+/// Modelli di embedding per la ricerca nella memoria con i sinonimi (ADR-0028).
+pub const EMBED_MODELS: [&str; 2] = ["nomic-embed-text", "mxbai-embed-large"];
 
 #[derive(Clone, Debug)]
 pub struct Plan {
@@ -29,6 +31,7 @@ pub struct Plan {
     pub stt_model: String,
     pub tts_voice: String,
     pub ollama_model: Option<String>,
+    pub embed_model: Option<String>,
 }
 
 impl Plan {
@@ -47,20 +50,26 @@ impl Plan {
             Some(m) if OLLAMA_MODELS.contains(&m) => Some(m.to_string()),
             Some(m) => return Err(format!("modello Ollama non ammesso: {m}")),
         };
+        let embed_model = match body["embed_model"].as_str() {
+            None | Some("") => None,
+            Some(m) if EMBED_MODELS.contains(&m) => Some(m.to_string()),
+            Some(m) => return Err(format!("modello di embedding non ammesso: {m}")),
+        };
         let plan = Self {
+            embed_model,
             voice: body["voice"].as_bool().unwrap_or(true),
             stt_model: pick("stt_model", &STT_MODELS, "small")?,
             tts_voice: pick("tts_voice", &TTS_VOICES, "it_IT-paola-medium")?,
             ollama_model,
         };
-        if !plan.voice && plan.ollama_model.is_none() {
+        if !plan.voice && plan.ollama_model.is_none() && plan.embed_model.is_none() {
             return Err("niente da configurare: scegli la voce o un modello".into());
         }
         Ok(plan)
     }
 
     fn to_json(&self) -> Value {
-        json!({"voice": self.voice, "stt_model": self.stt_model, "tts_voice": self.tts_voice, "ollama_model": self.ollama_model})
+        json!({"voice": self.voice, "stt_model": self.stt_model, "tts_voice": self.tts_voice, "ollama_model": self.ollama_model, "embed_model": self.embed_model})
     }
 }
 
@@ -162,6 +171,22 @@ impl Setup {
         env
     }
 
+    /// Modello di embedding scelto: variabile `JARVIS_EMBED_MODEL` oppure configurazione guidata salvata.
+    pub fn embed_model(&self) -> Option<String> {
+        std::env::var("JARVIS_EMBED_MODEL")
+            .ok()
+            .filter(|m| !m.is_empty())
+            .or_else(|| {
+                self.saved()?["plan"]["embed_model"]
+                    .as_str()
+                    .map(str::to_string)
+            })
+    }
+
+    pub fn ollama_url(&self) -> &str {
+        &self.ollama_url
+    }
+
     /// Vero una volta dopo una configurazione completata: il Core riavvia il worker.
     pub fn take_restart(&self) -> bool {
         self.restart_worker.swap(false, Ordering::SeqCst)
@@ -207,8 +232,8 @@ impl Setup {
                 "ollama_models": ollama.unwrap_or_default(),
                 "voice_packages": self.packages_dir().join("faster_whisper").is_dir(),
             },
-            "choices": {"stt_models": STT_MODELS, "tts_voices": TTS_VOICES, "ollama_models": OLLAMA_MODELS},
-            "sizes_mb": {"voice_packages": 350, "stt": {"tiny": 75, "base": 145, "small": 470, "medium": 1500}, "tts": 65, "ollama": {"qwen2.5:3b": 1900, "llama3.2:3b": 2000, "qwen2.5:7b": 4700, "gemma3:4b": 3300}},
+            "choices": {"stt_models": STT_MODELS, "tts_voices": TTS_VOICES, "ollama_models": OLLAMA_MODELS, "embed_models": EMBED_MODELS},
+            "sizes_mb": {"voice_packages": 350, "stt": {"tiny": 75, "base": 145, "small": 470, "medium": 1500}, "tts": 65, "ollama": {"qwen2.5:3b": 1900, "llama3.2:3b": 2000, "qwen2.5:7b": 4700, "gemma3:4b": 3300}, "embed": {"nomic-embed-text": 280, "mxbai-embed-large": 670}},
         })
     }
 
@@ -234,6 +259,12 @@ impl Setup {
             steps.push(step(
                 "ollama.model",
                 &format!("Modello AI locale «{m}» (Ollama)"),
+            ));
+        }
+        if let Some(m) = &plan.embed_model {
+            steps.push(step(
+                "ollama.embed",
+                &format!("Memoria con i sinonimi: modello «{m}» (Ollama)"),
             ));
         }
         {
@@ -413,6 +444,7 @@ impl Setup {
                 id,
             ),
             "ollama.model" => self.pull_ollama(id, plan.ollama_model.as_deref().unwrap_or_default()),
+            "ollama.embed" => self.pull_ollama(id, plan.embed_model.as_deref().unwrap_or_default()),
             other => Err(format!("passo sconosciuto: {other}")),
         }
     }

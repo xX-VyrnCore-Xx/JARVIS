@@ -13,7 +13,7 @@ Questo documento raccoglie ciò che serve per l'accettazione finale descritta in
 | RF-05 Computer Use | strumenti file e sistema, `api.rs` | P3 | Verde | File e informazioni di sistema; niente desktop o terminale |
 | RF-06 Web | `web.rs` (SSRF, iniezioni), E2E | P4 | Verde | Navigazione interattiva assente |
 | RF-07 Automazioni | `automation.rs`, E2E | P5 | Verde | — |
-| RF-08 Memoria | `api.rs`, `memory.rs`, E2E | P1 | Verde | Ricerca semantica locale senza sinonimi; nessun PostgreSQL o embeddings da modello (ADR-0022) |
+| RF-08 Memoria | `api.rs`, `memory.rs`, E2E | P1 | Verde | Sinonimi con gli embedding di Ollama (ADR-0028); nessun PostgreSQL |
 | RF-09 Voce | `voice.rs`, `tests/ai/test_voice.py`, E2E con motori finti | P6 | Verde (finti) | Motori reali solo sul tuo computer |
 | RF-10 Client | E2E Web e telefono simulato, CI desktop su 3 sistemi | P7, P8 | Verde | iOS e Android nativi compilati in CI; prove su dispositivo (P8a, P8b) e sincronizzazione fonetica in sospeso |
 | RF-11 Dispositivi e nodi | `devices.rs`, `nodes.rs`, E2E | P8, P13 | Verde | mTLS, VPN mesh e assegnazione automatica assenti |

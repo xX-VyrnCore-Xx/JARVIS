@@ -30,12 +30,13 @@ Verificare ripetizione della stessa operazione, crash durante la sincronizzazion
   - `memory_fts`: indice testuale FTS5 (BM25), senza accenti;
   - `memory_vectors`: vettore locale da 256 dimensioni (radici delle parole e trigrammi con hashing). La ricerca semantica resta offline e deterministica, senza modelli di embedding;
   - `memory_edges`: knowledge graph di triple (soggetto, relazione, oggetto) estratte dai fatti in italiano.
+- **Sinonimi (ADR-0028):** con un modello di embedding di Ollama (`nomic-embed-text` o `mxbai-embed-large`, scelto nella configurazione guidata o con `JARVIS_EMBED_MODEL`) ogni elemento ha anche un vettore del modello in `memory_embeddings`, salvato con il nome del modello. La ricerca combina 30% vettore locale, 25% BM25 e fino al 60% di similarità del modello: «auto» trova «macchina». Senza Ollama, o se non risponde, si usa la ricerca locale; gli embedding mancanti si calcolano quando il servizio torna.
 - **Recupero:** ricerca ibrida (60% similarità del vettore, 40% posizione BM25) con soglia minima. L'agente riceve tutte le preferenze, i fatti (tutti fino a 30, oltre solo i pertinenti) e gli episodi pertinenti alla richiesta. Lo strumento `memory.search` e i comandi «cosa sai di …» e «cerca nella memoria …» la usano dalla chat.
 - **Correzione e cancellazione:** `PATCH` e `DELETE /api/memory/{id}`, con evento di audit, aggiornano subito indice, vettore e grafo. La cancellazione tramite agente richiede conferma (RF-08). I dispositivi associati non accedono alla memoria.
 - **Contesto dell'agente:** gli ultimi 10 turni della conversazione e la memoria selezionata come sopra.
 - **Task e conversazione:** persistono dopo un riavvio.
 - **Automazioni:** le tabelle `workflows` (documento e prossima esecuzione) e `workflow_runs` (cronologia) persistono in SQLite.
-- **Non ancora implementati:** PostgreSQL con pgvector o Qdrant per un Core condiviso, embeddings da modello, sincronizzazione dei dati fra nodi (i nodi esecutori non conservano dati del Core).
+- **Non ancora implementati:** PostgreSQL con pgvector o Qdrant per un Core condiviso, sincronizzazione dei dati fra nodi (i nodi esecutori non conservano dati del Core).
 
 ## Backup e ripristino (RNF-08, ADR-0012)
 

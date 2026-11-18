@@ -63,7 +63,7 @@ export function System({ active, onSetup }: { active: boolean; onSetup: () => vo
       <div id="system-cards" className="grid">
         {h && m ? (
           <>
-            <Stat k="Core" v={`v${h.core.version} · attivo da ${fmtUptime(m.uptime_s)}`} d={h.core.secrets_store ? `chiave dei segreti: ${h.core.secrets_store === "keychain" ? "portachiavi" : "file"}` : undefined} />
+            <Stat k="Core" v={`v${h.core.version} · attivo da ${fmtUptime(m.uptime_s)}`} d={[h.core.secrets_store ? `chiave dei segreti: ${h.core.secrets_store === "keychain" ? "portachiavi" : "file"}` : "", `memoria: ${h.core.memory_embeddings ? "sinonimi con " + h.core.memory_embeddings : "ricerca locale"}`].filter(Boolean).join(" · ")} />
             <Stat k="AI" v={b ? `${b.name} · ${b.model}` : "non disponibile"} d={b && b.degraded_reason ? b.degraded_reason : h.ai.status === "up" ? "worker attivo" : (h.ai.error || {}).message} />
             <Stat k="Voce" v={v && v.available ? `${v.stt.name} · ${v.tts ? v.tts.name : "senza sintesi"}` : "non disponibile"} d={v ? (v.available ? `attivazione: ${v.wake}` : (v.reasons || []).join("; ")) : ""} />
             <Stat k="Web" v={h.web && h.web.enabled ? `attivo · ${h.web.provider}` : "disattivato"} d={h.web ? h.web.provider_url : ""} />
