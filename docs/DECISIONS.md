@@ -427,7 +427,7 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 
 ### ADR-0015 — Release precompilata, rollback di release e audit delle dipendenze (Fasi 6 e 7)
 
-- **Data:** 2026-11-17 · **Stato:** Accettato. Restano decisioni del proprietario: firma dei binari e degli installatori, canali Stable/Beta. Prima release: `v0.1.0`, richiesta dal proprietario e pubblicata subito, prima delle prove P1–P12 (prototipo, non 1.0.0).
+- **Data:** 2026-11-17 · **Stato:** Accettato. Restano decisioni del proprietario: firma dei binari e degli installatori, canali Stable/Beta. Prima release: `v0.1.0`, richiesta dal proprietario e pubblicata subito, prima delle prove P1–P12 (prototipo, non 1.0.0). Il 2026-11-18 il proprietario sceglie `v1.0.0` per la release finale con la configurazione guidata. La CI installa e prova l'app sui 3 sistemi; le prove manuali P1–P13 restano da fare e gli eventuali difetti andranno in una 1.0.x.
 - **Contesto:**
   - RNF-08 chiede il rollback di release;
   - DEVOPS_QA_OBSERVABILITY.md chiede release riproducibili e verifica crittografica;
