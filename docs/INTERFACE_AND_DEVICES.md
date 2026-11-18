@@ -35,6 +35,8 @@ L'interfaccia Web è servita dal Core su `http://localhost:8765` e comprende:
 - sezioni Attività, Automazioni, Memoria, Workspace e Audit. Nella sezione Automazioni si crea un'automazione da un modulo generato dal catalogo e la si può eseguire subito, sospendere, riattivare, eliminare o consultarne la cronologia;
 - stato del backend AI e dell'integrità dell'audit nell'intestazione.
 
+**Notifiche sul telefono (ADR-0026):** dalla sezione Dispositivi si aggiunge un canale **ntfy** (app push gratuita, server `ntfy.sh` o il tuo) oppure **Telegram** (bot creato con @BotFather). Per ogni canale si scelgono la gravità minima (predefinita: avvisi e conferme) e se includere il testo. Senza consenso escono solo titolo e categoria. Con `JARVIS_PUBLIC_URL=https://…` il messaggio contiene il collegamento a JARVIS. Il pulsante «Prova» invia un messaggio di verifica. Le conferme si danno solo da JARVIS.
+
 La campanella nell'intestazione mostra le notifiche non lette. Il pannello elenca categoria, ora e task correlato, e un clic porta alla vista collegata. Le nuove notifiche compaiono come toast e, se autorizzate, come notifiche del browser quando la pagina non è in primo piano.
 
 **App desktop (ADR-0009):** `./jarvis.sh desktop` apre JARVIS in una finestra Tauri per Windows, macOS e Linux. L'app avvia il Core in automatico, tiene i dati nella cartella dell'applicazione dell'utente, apre i link esterni nel browser di sistema e alla chiusura arresta Core e worker, anche in caso di crash.

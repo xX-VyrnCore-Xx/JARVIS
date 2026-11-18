@@ -1705,7 +1705,100 @@ impl Jarvis {
         ));
         self.obs.log("info", "notification", json!({"severity": doc["severity"], "category": doc["category"],
             "task_id": doc["task_id"], "workflow_id": doc["workflow_id"], "correlation_id": doc["correlation_id"]}));
+        self.notify_external(&doc);
         Ok(Some(doc))
+    }
+
+    /// Inoltro ai canali esterni configurati (ADR-0026), in background e fuori dal blocco del Core.
+    fn notify_external(&self, doc: &Value) {
+        let Ok(channels) = self.store.channels() else {
+            return;
+        };
+        let targets: Vec<(Value, Option<String>)> = channels
+            .into_iter()
+            .filter(|c| crate::channels::matches(c, doc))
+            .map(|c| {
+                let secret = self
+                    .secrets
+                    .get(&format!(
+                        "channel:{}",
+                        c["channel_id"].as_str().unwrap_or_default()
+                    ))
+                    .ok()
+                    .flatten();
+                (c, secret)
+            })
+            .collect();
+        crate::channels::dispatch(targets, doc.clone(), self.obs.clone());
+    }
+
+    // ------------------------------------------------------------------ canali di notifica (ADR-0026)
+
+    /// Canali configurati, senza segreti: `has_secret` dice solo se un token è salvato.
+    pub fn channels(&self) -> Result<Vec<Value>, CoreError> {
+        Ok(self
+            .store
+            .channels()
+            .map_err(internal)?
+            .into_iter()
+            .map(|mut c| {
+                let id = c["channel_id"].as_str().unwrap_or_default().to_string();
+                c["has_secret"] = self
+                    .secrets
+                    .get(&format!("channel:{id}"))
+                    .ok()
+                    .flatten()
+                    .is_some()
+                    .into();
+                c
+            })
+            .collect())
+    }
+
+    pub fn channel_add(&mut self, input: &Value) -> Result<Value, CoreError> {
+        let mut doc = crate::channels::normalize(input).map_err(CoreError::BadRequest)?;
+        let secret = input["secret"].as_str().map(str::trim).unwrap_or_default();
+        if doc["kind"] == "telegram" && secret.is_empty() {
+            return Err(CoreError::BadRequest(
+                "serve il token del bot Telegram".into(),
+            ));
+        }
+        let id = uuid::Uuid::new_v4().simple().to_string()[..10].to_string();
+        doc["channel_id"] = id.clone().into();
+        doc["created_at"] = now().into();
+        if !secret.is_empty() {
+            self.secrets
+                .put(&format!("channel:{id}"), secret)
+                .map_err(CoreError::Internal)?;
+        }
+        self.store.channel_put(&doc).map_err(internal)?;
+        self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "owner", "id": "owner"},
+                          "node": "core-local", "action": "notify.channel.add", "outcome": "succeeded", "effect": "applied"}))?;
+        doc["has_secret"] = (!secret.is_empty()).into();
+        Ok(doc)
+    }
+
+    pub fn channel_delete(&mut self, id: &str) -> Result<(), CoreError> {
+        if !self.store.channel_delete(id).map_err(internal)? {
+            return Err(CoreError::NotFound(format!("nessun canale con id {id}")));
+        }
+        let _ = self.secrets.delete(&format!("channel:{id}"));
+        self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "owner", "id": "owner"},
+                          "node": "core-local", "action": "notify.channel.delete", "outcome": "succeeded", "effect": "applied"}))?;
+        Ok(())
+    }
+
+    /// Canale e segreto per una prova d'invio eseguita dall'API fuori dal blocco del Core.
+    pub fn channel_for_test(&self, id: &str) -> Result<(Value, Option<String>), CoreError> {
+        let channel = self
+            .store
+            .channels()
+            .map_err(internal)?
+            .into_iter()
+            .find(|c| c["channel_id"] == id)
+            .ok_or_else(|| CoreError::NotFound(format!("nessun canale con id {id}")))?;
+        let secret = self.secrets.get(&format!("channel:{id}")).ok().flatten();
+        Ok((channel, secret))
     }
 
     /// Esito di un'automazione: errori e parziali sempre (una notifica non letta per workflow), successi solo per i trigger singoli e manuali.

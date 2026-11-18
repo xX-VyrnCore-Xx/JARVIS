@@ -12,6 +12,7 @@ const { chromium } = require("playwright");
 const http = require("http");
 
 const WEB_PORT = Number(process.env.JARVIS_E2E_WEB_PORT || 8799);
+const pushed = [];
 const webServer = http.createServer((req, res) => {
   if (req.url.startsWith("/w/api.php")) {
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -21,6 +22,13 @@ const webServer = http.createServer((req, res) => {
     const ok = req.headers.authorization === "Bearer token-e2e-sintetico";
     res.writeHead(ok ? 200 : 401, { "Content-Type": "application/json" });
     return res.end(JSON.stringify(ok ? { servizio: decodeURIComponent(req.url.slice(11)), stato: "operativo" } : { errore: "no" }));
+  }
+  if (req.method === "POST" && req.url === "/") {
+    // ntfy sintetico (ADR-0026): registra le notifiche inviate al telefono.
+    let raw = "";
+    req.on("data", (c) => { raw += c; });
+    req.on("end", () => { pushed.push(JSON.parse(raw)); res.writeHead(200); res.end("{}"); });
+    return;
   }
   if (req.url === "/pagina") {
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
@@ -288,6 +296,18 @@ function check(cond, msg) {
   check(phone.url().endsWith("/pair"), "dispositivo revocato: accesso perso subito");
   await phoneCtx.close();
   if (shots) await page.screenshot({ path: `${shots}/jarvis-dispositivi.png` });
+
+  // Notifiche sul telefono (ADR-0026): canale ntfy verso il server sintetico, prova d'invio dall'interfaccia.
+  await page.selectOption('#channel-form select[name="kind"]', "ntfy");
+  await page.fill('#channel-form input[name="name"]', "Telefono E2E");
+  await page.fill('#channel-form input[name="target"]', "jarvis-e2e-7f3k2");
+  await page.fill('#channel-form input[name="server"]', `http://127.0.0.1:${WEB_PORT}`);
+  await page.click('#channel-form button[type="submit"]');
+  await page.waitForSelector("#channels .card");
+  page.once("dialog", (d) => d.accept());
+  await page.locator("#channels .card").getByRole("button", { name: "Prova" }).click();
+  for (let i = 0; i < 40 && !pushed.length; i++) await new Promise((r) => setTimeout(r, 100));
+  check(pushed.length > 0 && pushed[0].topic === "jarvis-e2e-7f3k2" && pushed[0].title.includes("Prova di notifica"), "notifica di prova inviata al telefono (ntfy)");
 
   await page.click('[data-view="audit"]');
   await page.waitForFunction(() => document.querySelector("#audit-summary").textContent.includes("integra"));
