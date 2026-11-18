@@ -336,6 +336,14 @@ pub fn request(
         req = req.set(k, v);
     }
     let result = match body {
+        // JSON salvo che il chiamante dichiari un altro tipo (es. i moduli dell'endpoint OAuth).
+        Some(b)
+            if headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("content-type")) =>
+        {
+            req.send_bytes(b)
+        }
         Some(b) => req.set("Content-Type", "application/json").send_bytes(b),
         None => req.call(),
     };

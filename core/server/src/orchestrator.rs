@@ -141,6 +141,7 @@ pub type StreamSink = Box<dyn Fn(&str) + Send>;
 
 pub struct Jarvis {
     stream_sink: Option<StreamSink>,
+    oauth: crate::oauth::Flows,
     cfg: Config,
     store: Store,
     audit: AuditLog,
@@ -208,6 +209,7 @@ impl Jarvis {
             (cfg.data_dir.clone(), cfg.python.clone(), cfg.ai_dir.clone());
         let mut jarvis = Self {
             stream_sink: None,
+            oauth: crate::oauth::Flows::default(),
             cfg,
             store,
             audit,
@@ -2553,6 +2555,10 @@ fn token_name(id: &str) -> String {
     format!("connector:{id}:credential")
 }
 
+fn oauth_name(id: &str) -> String {
+    format!("connector:{id}:oauth")
+}
+
 fn webhook_name(id: &str) -> String {
     format!("connector:{id}:webhook")
 }
@@ -2647,6 +2653,9 @@ impl Jarvis {
             self.secrets
                 .delete(&token_name(&id))
                 .map_err(CoreError::Internal)?;
+            self.secrets
+                .delete(&oauth_name(&id))
+                .map_err(CoreError::Internal)?;
         }
         if open {
             for d in crate::connectors::tool_descriptors(&normalized) {
@@ -2681,6 +2690,11 @@ impl Jarvis {
     /// Salva la credenziale cifrata e registra gli strumenti del connettore.
     pub fn authorize_connector(&mut self, id: &str, credential: &str) -> Result<Value, CoreError> {
         let (manifest, _) = self.connector_manifest(id)?;
+        if manifest["auth"]["type"] == "oauth2" {
+            return Err(CoreError::BadRequest(
+                "questo connettore si autorizza con il pulsante «Accedi» (OAuth)".into(),
+            ));
+        }
         let credential = credential.trim();
         if manifest["auth"]["type"] != "none" {
             if credential.is_empty()
@@ -2727,6 +2741,9 @@ impl Jarvis {
         self.secrets
             .delete(&token_name(id))
             .map_err(CoreError::Internal)?;
+        self.secrets
+            .delete(&oauth_name(id))
+            .map_err(CoreError::Internal)?;
         let removed = self.catalog.remove_connector(id);
         self.store
             .connector_set_authorized(id, None)
@@ -2752,6 +2769,109 @@ impl Jarvis {
             json!({"connector": id, "uninstall": uninstall}),
         );
         Ok(json!({"id": id, "tools_removed": removed, "uninstalled": uninstall}))
+    }
+
+    /// Avvia OAuth (ADR-0027): restituisce la pagina di consenso da aprire nel browser del proprietario.
+    pub fn oauth_start(
+        &mut self,
+        id: &str,
+        client_secret: Option<String>,
+    ) -> Result<Value, CoreError> {
+        let (manifest, _) = self.connector_manifest(id)?;
+        if manifest["auth"]["type"] != "oauth2" {
+            return Err(CoreError::BadRequest("il connettore non usa OAuth".into()));
+        }
+        let secret = client_secret
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty() && s.len() <= 4096 && !s.chars().any(char::is_control));
+        let url = self
+            .oauth
+            .start(&manifest, self.cfg.port, secret)
+            .map_err(CoreError::BadRequest)?;
+        self.connector_audit("connector.oauth.start", id, "succeeded")?;
+        Ok(json!({"authorize_url": url}))
+    }
+
+    /// Ritorno dal servizio: `state` monouso, scambio del codice, token cifrati, strumenti registrati.
+    pub fn oauth_callback(
+        &mut self,
+        state: &str,
+        code: Option<&str>,
+        denied: Option<&str>,
+    ) -> Result<String, CoreError> {
+        let pending = self.oauth.take(state).ok_or_else(|| {
+            CoreError::BadRequest("richiesta scaduta o già usata: riprova da JARVIS".into())
+        })?;
+        let id = pending.connector.clone();
+        if let Some(reason) = denied {
+            self.connector_audit("connector.oauth.denied", &id, "cancelled")?;
+            return Err(CoreError::BadRequest(format!(
+                "il servizio non ha concesso l'accesso ({})",
+                reason.chars().take(60).collect::<String>()
+            )));
+        }
+        let code =
+            code.ok_or_else(|| CoreError::BadRequest("codice di autorizzazione mancante".into()))?;
+        let (manifest, _) = self.connector_manifest(&id)?;
+        let tokens = match crate::oauth::exchange(&manifest, &self.cfg.web, code, &pending) {
+            Ok(t) => t,
+            Err(e) => {
+                self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "owner", "id": "owner"},
+                                  "node": "core-local", "action": "connector.oauth.exchange", "resource": format!("jarvis://connector/{id}"),
+                                  "outcome": "failed", "error_code": "connector.oauth_failed", "effect": "not_applied"}))?;
+                return Err(CoreError::BadRequest(e));
+            }
+        };
+        self.save_oauth_tokens(&id, &tokens)?;
+        self.store
+            .connector_set_authorized(&id, Some(&now()))
+            .map_err(internal)?;
+        self.catalog.remove_connector(&id);
+        for d in crate::connectors::tool_descriptors(&manifest) {
+            self.catalog
+                .insert_dynamic(d)
+                .map_err(CoreError::BadRequest)?;
+        }
+        self.connector_audit("connector.authorize", &id, "succeeded")?;
+        self.obs.log(
+            "info",
+            "connector.authorize",
+            json!({"connector": id, "method": "oauth2"}),
+        );
+        Ok(manifest["name"].as_str().unwrap_or(&id).to_string())
+    }
+
+    fn save_oauth_tokens(&self, id: &str, tokens: &Value) -> Result<(), CoreError> {
+        self.secrets
+            .put(
+                &token_name(id),
+                tokens["access_token"].as_str().unwrap_or_default(),
+            )
+            .map_err(CoreError::Internal)?;
+        self.secrets
+            .put(&oauth_name(id), &tokens.to_string())
+            .map_err(CoreError::Internal)
+    }
+
+    /// Rinnovo automatico dell'access token a 60 secondi dalla scadenza.
+    fn oauth_refresh_if_needed(&self, id: &str, manifest: &Value) -> Result<(), String> {
+        let state: Value = self
+            .secrets
+            .get(&oauth_name(id))?
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .ok_or("connettore non autorizzato: premi «Accedi»")?;
+        if !crate::oauth::expiring(&state) {
+            return Ok(());
+        }
+        let renewed = crate::oauth::refresh(manifest, &self.cfg.web, &state);
+        self.obs.count(if renewed.is_ok() {
+            "connector.oauth.refreshed"
+        } else {
+            "connector.oauth.refresh_failed"
+        });
+        let tokens = renewed?;
+        self.save_oauth_tokens(id, &tokens)
+            .map_err(|e| format!("{e:?}"))
     }
 
     fn call_connector(
@@ -2784,6 +2904,10 @@ impl Jarvis {
                 "connector.not_authorized",
                 "connettore revocato",
             ));
+        }
+        if manifest["auth"]["type"] == "oauth2" {
+            self.oauth_refresh_if_needed(id, &manifest)
+                .map_err(|e| tool_error("connector.not_authorized", e))?;
         }
         let secret = self
             .secrets

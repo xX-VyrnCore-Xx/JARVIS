@@ -56,6 +56,26 @@ pub fn validate_manifest(manifest: &Value, web: &WebConfig) -> Result<Value, Str
     }
     check_url(web, base.as_str())
         .map_err(|r| format!("base_url non ammesso dalla policy Web ({r})"))?;
+    if manifest["auth"]["type"] == "oauth2" {
+        // OAuth (ADR-0027): endpoint in HTTPS (HTTP solo su loopback con la policy di prova) e token
+        // richiesti solo a un host dichiarato.
+        for key in ["authorize_url", "token_url"] {
+            let u = Url::parse(manifest["auth"][key].as_str().unwrap_or_default())
+                .map_err(|_| format!("auth.{key} non valido"))?;
+            let loopback = matches!(u.host_str(), Some("127.0.0.1" | "localhost"));
+            if u.scheme() != "https" && !(web.allow_private && loopback) {
+                return Err(format!("auth.{key} deve usare HTTPS"));
+            }
+        }
+        let token = Url::parse(manifest["auth"]["token_url"].as_str().unwrap_or_default())
+            .map_err(|_| "auth.token_url non valido".to_string())?;
+        let token_host = token.host_str().unwrap_or_default().to_ascii_lowercase();
+        if !hosts.contains(&token_host) {
+            return Err(format!(
+                "l'host di auth.token_url ({token_host}) deve comparire in allowed_hosts"
+            ));
+        }
+    }
     let mut normalized = manifest.clone();
     let mut seen = std::collections::BTreeSet::new();
     for op in normalized["operations"]
@@ -204,7 +224,9 @@ pub fn call(
         "application/json, text/plain;q=0.8".to_string(),
     )];
     match (manifest["auth"]["type"].as_str(), secret) {
-        (Some("bearer"), Some(s)) => headers.push(("Authorization".into(), format!("Bearer {s}"))),
+        (Some("bearer" | "oauth2"), Some(s)) => {
+            headers.push(("Authorization".into(), format!("Bearer {s}")))
+        }
         (Some("header"), Some(s)) => headers.push((
             manifest["auth"]["header_name"]
                 .as_str()
