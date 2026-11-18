@@ -39,13 +39,18 @@ impl Assignment {
 /// Esito di un'assegnazione: output dello strumento oppure (codice, messaggio).
 pub type Outcome = Result<Value, (String, String)>;
 
+struct Pending {
+    node_id: String,
+    delivered: bool,
+}
+
 #[derive(Default)]
 struct State {
     /// impronta del token -> id del nodo
     tokens: HashMap<String, String>,
     queues: HashMap<String, VecDeque<Assignment>>,
     /// assegnazioni consegnate o in coda -> nodo che deve rispondere
-    pending: HashMap<String, String>,
+    pending: HashMap<String, Pending>,
     results: HashMap<String, Outcome>,
     last_seen: HashMap<String, Instant>,
     revoked: HashSet<String>,
@@ -87,7 +92,7 @@ impl NodeHub {
         let lost: Vec<String> = s
             .pending
             .iter()
-            .filter(|(_, n)| *n == node_id)
+            .filter(|(_, assignment)| assignment.node_id == node_id)
             .map(|(a, _)| a.clone())
             .collect();
         for a in lost {
@@ -127,11 +132,10 @@ impl NodeHub {
         let s = self.lock();
         let mut best: Option<(usize, f64, i64, String)> = None;
         for id in candidates {
-            if s.revoked.contains(id) || !s.last_seen.get(id).is_some_and(|t| t.elapsed() <= within)
-            {
+            if s.revoked.contains(id) || s.last_seen.get(id).is_none_or(|t| t.elapsed() > within) {
                 continue;
             }
-            let busy = s.pending.values().filter(|n| *n == id).count();
+            let busy = s.pending.values().filter(|a| &a.node_id == id).count();
             let r = s.resources.get(id).copied().unwrap_or_default();
             let load = r.load.unwrap_or(0.5) / f64::from(r.cpus.max(1));
             let mem = -(r.mem_free_mb.unwrap_or(0) as i64);
@@ -149,7 +153,13 @@ impl NodeHub {
     pub fn enqueue(&self, node_id: &str, tool: &str, arguments: &Value) -> String {
         let id = uuid::Uuid::new_v4().to_string();
         let mut s = self.lock();
-        s.pending.insert(id.clone(), node_id.to_string());
+        s.pending.insert(
+            id.clone(),
+            Pending {
+                node_id: node_id.to_string(),
+                delivered: false,
+            },
+        );
         s.queues
             .entry(node_id.to_string())
             .or_default()
@@ -174,8 +184,8 @@ impl NodeHub {
             }
             let now = Instant::now();
             if now >= deadline {
-                if let Some(node) = s.pending.remove(assignment_id) {
-                    if let Some(q) = s.queues.get_mut(&node) {
+                if let Some(assignment) = s.pending.remove(assignment_id) {
+                    if let Some(q) = s.queues.get_mut(&assignment.node_id) {
                         q.retain(|a| a.id != assignment_id);
                     }
                 }
@@ -202,6 +212,9 @@ impl NodeHub {
                 return None;
             }
             if let Some(a) = s.queues.get_mut(node_id).and_then(VecDeque::pop_front) {
+                if let Some(pending) = s.pending.get_mut(&a.id) {
+                    pending.delivered = true;
+                }
                 return Some(a);
             }
             let now = Instant::now();
@@ -216,10 +229,14 @@ impl NodeHub {
         }
     }
 
-    /// Registra l'esito inviato dal nodo. Rifiuta assegnazioni sconosciute o di un altro nodo.
+    /// Accetta il primo esito di un'assegnazione consegnata a quel nodo.
     pub fn complete(&self, node_id: &str, assignment_id: &str, outcome: Outcome) -> bool {
         let mut s = self.lock();
-        if s.pending.get(assignment_id).map(String::as_str) != Some(node_id) {
+        if !s
+            .pending
+            .get(assignment_id)
+            .is_some_and(|a| a.delivered && a.node_id == node_id)
+        {
             return false;
         }
         s.pending.remove(assignment_id);
@@ -309,6 +326,7 @@ mod tests {
         hub.register("n1", &token_hash(&"a".repeat(64)));
         assert_eq!(hub.authenticate(&"a".repeat(64)).as_deref(), Some("n1"));
         let id = hub.enqueue("n1", "time.now", &json!({}));
+        assert!(!hub.complete("n1", &id, Ok(json!({"precoce": true}))));
         let worker = {
             let hub = hub.clone();
             std::thread::spawn(move || {
@@ -320,6 +338,7 @@ mod tests {
                     "un altro nodo non può rispondere"
                 );
                 assert!(hub.complete("n1", &a.id, Ok(json!({"ok": 1}))));
+                assert!(!hub.complete("n1", &a.id, Ok(json!({"duplicato": true}))));
             })
         };
         assert_eq!(

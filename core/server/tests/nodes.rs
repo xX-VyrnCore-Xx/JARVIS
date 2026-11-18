@@ -29,6 +29,10 @@ fn temp(tag: &str) -> PathBuf {
 
 /// Core HTTP su una porta libera, con il token di sessione «t».
 fn core() -> Env {
+    core_with_router(|app| app)
+}
+
+fn core_with_router(configure: impl FnOnce(axum::Router) -> axum::Router) -> Env {
     std::env::set_var("JARVIS_NODE_TIMEOUT_MS", "4000");
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -53,7 +57,11 @@ fn core() -> Env {
         token: "t".into(),
         web: jarvis_core::web::WebConfig::default(),
     };
-    let app = api::router(api::state(Jarvis::new(cfg).unwrap(), "t".into(), port));
+    let app = configure(api::router(api::state(
+        Jarvis::new(cfg).unwrap(),
+        "t".into(),
+        port,
+    )));
     rt.spawn(async move { axum::serve(listener, app).await.unwrap() });
     Env {
         url: format!("http://127.0.0.1:{port}"),
@@ -223,6 +231,45 @@ fn node_executes_assigned_tools_inside_its_own_workspace() {
 
     stop.store(true, std::sync::atomic::Ordering::Relaxed);
     agent.join().unwrap().unwrap();
+}
+
+#[test]
+fn agent_retries_delivery_of_the_same_result_after_a_transient_failure() {
+    let deliveries = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let incoming = deliveries.clone();
+    let env = core_with_router(|app| {
+        app.layer(axum::middleware::from_fn(
+            move |req: axum::extract::Request, next: axum::middleware::Next| {
+                let incoming = incoming.clone();
+                async move {
+                    use axum::response::IntoResponse;
+                    if req.uri().path().starts_with("/api/nodes/result/") {
+                        let mut deliveries = incoming.lock().unwrap();
+                        deliveries.push(req.uri().path().to_owned());
+                        if deliveries.len() == 1 {
+                            return axum::http::StatusCode::SERVICE_UNAVAILABLE.into_response();
+                        }
+                    }
+                    next.run(req).await
+                }
+            },
+        ))
+    });
+    let node_dir = temp("retry");
+    let (stop, agent) = spawn_agent(&env, &node_dir, &env.pairing_code(), &["time.now"]);
+    env.wait_online("studio");
+
+    let out = env.chat("nodo studio time.now");
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    agent.join().unwrap().unwrap();
+    assert_eq!(
+        step(&out, "tool_result").unwrap()["status"],
+        "succeeded",
+        "{out}"
+    );
+    let deliveries = deliveries.lock().unwrap();
+    assert_eq!(deliveries.len(), 2);
+    assert_eq!(deliveries[0], deliveries[1]);
 }
 
 #[test]
