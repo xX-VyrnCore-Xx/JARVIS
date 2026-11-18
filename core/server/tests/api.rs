@@ -420,3 +420,33 @@ async fn conversation_and_tasks_persist_across_restart() {
     let (_, tasks) = again.api("GET", "/api/tasks", None).await;
     assert_eq!(tasks["items"][0]["state"], "succeeded");
 }
+
+/// Aggiornamenti (ADR-0034): spenti per impostazione, configurazione validata, notifica una sola volta per versione.
+#[tokio::test]
+async fn update_check_notifies_once_per_version() {
+    let e = env();
+    let (_, s) = e.api("GET", "/api/updates", None).await;
+    assert_eq!(
+        (s["enabled"].as_bool(), s["channel"].as_str()),
+        (Some(false), Some("stable"))
+    );
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/updates",
+            Some(json!({"enabled": true, "channel": "nightly"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, s) = e
+        .api(
+            "POST",
+            "/api/updates",
+            Some(json!({"enabled": true, "channel": "beta"})),
+        )
+        .await;
+    assert_eq!(
+        (status, s["channel"].as_str()),
+        (StatusCode::OK, Some("beta"))
+    );
+}

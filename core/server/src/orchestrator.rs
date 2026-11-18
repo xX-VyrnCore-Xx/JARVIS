@@ -141,6 +141,7 @@ pub type StreamSink = Box<dyn Fn(&str) + Send>;
 
 pub struct Jarvis {
     stream_sink: Option<StreamSink>,
+    updates: crate::updates::Updates,
     oauth: crate::oauth::Flows,
     cfg: Config,
     store: Store,
@@ -209,6 +210,7 @@ impl Jarvis {
             (cfg.data_dir.clone(), cfg.python.clone(), cfg.ai_dir.clone());
         let mut jarvis = Self {
             stream_sink: None,
+            updates: crate::updates::Updates::new(&cfg.data_dir),
             oauth: crate::oauth::Flows::default(),
             cfg,
             store,
@@ -1782,6 +1784,50 @@ impl Jarvis {
             })
             .collect();
         crate::channels::dispatch(targets, doc.clone(), self.obs.clone());
+    }
+
+    // ------------------------------------------------------------------ aggiornamenti (ADR-0034)
+
+    pub fn data_dir(&self) -> std::path::PathBuf {
+        self.cfg.data_dir.clone()
+    }
+
+    pub fn updates_state(&self) -> Value {
+        self.updates.state()
+    }
+
+    pub fn updates_configure(&mut self, enabled: bool, channel: &str) -> Result<Value, CoreError> {
+        let s = self
+            .updates
+            .configure(enabled, channel)
+            .map_err(CoreError::BadRequest)?;
+        self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "owner", "id": "owner"},
+                          "node": "core-local", "action": "updates.configure", "outcome": "succeeded", "effect": "applied"}))?;
+        Ok(s)
+    }
+
+    /// URL dell'elenco delle release se il controllo automatico è dovuto (la richiesta va fuori dal blocco).
+    pub fn updates_due(&self) -> bool {
+        self.updates.due(chrono::Utc::now())
+    }
+
+    /// Registra l'esito e notifica una versione più recente, una sola volta per versione.
+    pub fn updates_record(
+        &mut self,
+        result: Result<Vec<Value>, String>,
+    ) -> Result<Value, CoreError> {
+        let (state, newer) = self.updates.record(result).map_err(CoreError::Internal)?;
+        if let Some(r) = newer {
+            let tag = r["tag"].as_str().unwrap_or_default().to_string();
+            self.notify(json!({
+                "severity": "info", "category": "system", "title": format!("Aggiornamento disponibile: JARVIS {tag}"),
+                "body": format!("Hai la versione {}. Scarica {tag} dalla pagina della release e verifica la firma: {}",
+                                env!("CARGO_PKG_VERSION"), r["url"].as_str().unwrap_or_default()),
+                "source": {"kind": "module", "id": "updates"}, "dedupe_key": format!("update:{tag}"),
+                "link": {"view": "system"},
+            }))?;
+        }
+        Ok(state)
     }
 
     // ------------------------------------------------------------------ canali di notifica (ADR-0026)

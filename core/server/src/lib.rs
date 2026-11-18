@@ -37,6 +37,7 @@ pub fn hide_console(cmd: &mut std::process::Command) {
 }
 pub mod store;
 pub mod tools;
+pub mod updates;
 pub mod web;
 
 /// Istante corrente in RFC 3339 UTC con millisecondi (`common.schema.json#/$defs/timestamp`).

@@ -13,6 +13,58 @@ export function Stat({ k, v, d }: { k: string; v: React.ReactNode; d?: React.Rea
   );
 }
 
+/** Aggiornamenti (ADR-0034): spenti per impostazione, canali Stable e Beta, controllo manuale. */
+function UpdatesPanel({ active }: { active: boolean }) {
+  const { data, reload, setData } = useViewData(active, () => api("/api/updates"));
+  const [busy, setBusy] = useState(false);
+  if (!data) return null;
+  const save = async (enabled: boolean, channel: string) => {
+    try {
+      setData(await post("/api/updates", { enabled, channel }));
+    } catch (e) {
+      alert((e as Error).message);
+    }
+  };
+  const check = async () => {
+    setBusy(true);
+    try {
+      setData(await post("/api/updates/check"));
+    } catch (e) {
+      alert((e as Error).message);
+    } finally {
+      setBusy(false);
+      reload();
+    }
+  };
+  return (
+    <div className="backup-form" id="updates">
+      <p className="hint">
+        Versione installata: <b>v{data.current}</b>. Il controllo contatta GitHub una volta al giorno solo se lo attivi e non invia dati
+        tuoi; gli aggiornamenti non si installano da soli.
+      </p>
+      <div className="row">
+        <label className="check">
+          <input type="checkbox" name="updates-enabled" checked={data.enabled} onChange={(e) => save(e.target.checked, data.channel)} /> Controlla gli
+          aggiornamenti ogni giorno
+        </label>
+        <label>Canale
+          <select name="updates-channel" value={data.channel} onChange={(e) => save(data.enabled, e.target.value)}>
+            <option value="stable">Stable</option>
+            <option value="beta">Beta (anche le versioni di prova)</option>
+          </select>
+        </label>
+        <button className="ghost" id="updates-check" type="button" disabled={busy} onClick={check}>{busy ? "Controllo…" : "Controlla ora"}</button>
+      </div>
+      <p className="sub" id="updates-status">
+        {data.error ? `Ultimo controllo non riuscito: ${data.error}` :
+          data.update_available && data.latest ? (
+            <>Disponibile <b>{data.latest.tag}</b>: <a href={data.latest.url} target="_blank" rel="noopener noreferrer">pagina della release</a></>
+          ) : data.checked_at ? `Nessun aggiornamento (ultimo controllo ${fmtTime(data.checked_at)}).` : "Mai controllato."}
+      </p>
+    </div>
+  );
+}
+
 export function System({ active, onSetup }: { active: boolean; onSetup: () => void }) {
   const { data, reload } = useViewData(active, async () => {
     const [h, m, bk, hist] = await Promise.all([
@@ -74,6 +126,8 @@ export function System({ active, onSetup }: { active: boolean; onSetup: () => vo
         ) : null}
       </div>
       <div className="row"><button className="ghost" type="button" id="open-setup" onClick={onSetup}>Configura voce e modello AI</button></div>
+      <h3 className="sub-head">Aggiornamenti</h3>
+      <UpdatesPanel active={active} />
       <h3 className="sub-head">Backup cifrato</h3>
       <form id="backup-form" className="form backup-form" onSubmit={backup}>
         <p className="hint">

@@ -874,6 +874,22 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** unitario `linux_without_secret_service_falls_back_to_the_file` (bus D-Bus non raggiungibile, ripiego sul file; senza sessione nessun portachiavi); CI «avvio reale» su Ubuntu (file).
 - **Documenti interessati:** SECURITY_AND_PRIVACY.md, ACCEPTANCE.md, ROADMAP.md.
 
+### ADR-0034 — Controllo aggiornamenti con canali Stable e Beta
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario; lacuna «canali Stable/Beta» in ACCEPTANCE.md.
+- **Contesto:** il proprietario non sapeva quando usciva una nuova versione; l'installazione automatica non è possibile senza installer firmati con certificati commerciali.
+- **Decisione:**
+  - modulo `updates.rs`; impostazioni in `<dati>/updates.json`, **spente per impostazione** perché il controllo contatta GitHub;
+  - con il controllo attivo, al massimo una richiesta al giorno all'elenco delle release (`JARVIS_UPDATE_URL`, predefinito il repository di JARVIS), fatta fuori dal blocco del Core, senza dati del proprietario e con timeout di 10 secondi;
+  - Stable considera solo le release stabili, Beta anche le prerelease; il confronto segue le versioni semantiche;
+  - una versione più recente diventa una notifica `system` deduplicata per versione, con il collegamento alla release; nessuna installazione automatica;
+  - API `GET/POST /api/updates` (configurazione con audit) e `POST /api/updates/check` (controllo manuale); pannello «Aggiornamenti» nella sezione Sistema. Il collegamento delle notifiche ammette ora anche le viste Sistema, Dispositivi e Plancia (aggiunta compatibile al contratto).
+- **Conseguenze:**
+  - con il repository privato l'elenco non è leggibile senza credenziali: il controllo riporta l'errore e non notifica nulla;
+  - l'aggiornamento resta manuale: si scarica la release, si verifica la firma (ADR-0020) e si installa.
+- **Evidenza:** unitari in `updates.rs` (versioni, canali, impostazioni, cadenza giornaliera, errori); `update_check_notifies_once_per_version` in `tests/api.rs`; E2E: spento per impostazione, controllo manuale verso un elenco sintetico con versione disponibile.
+- **Documenti interessati:** ACCEPTANCE.md, README.md, ROADMAP.md, contratto `notification`.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

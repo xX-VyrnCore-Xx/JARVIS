@@ -73,7 +73,6 @@ Una release `v1.0.0` si pubblica quando:
 
 Restano decisioni del proprietario, perché richiedono suoi account, certificati o scelte:
 - firma dei binari e installatori;
-- canali Stable/Beta;
 - VPN mesh;
 - evoluzione dell'avatar con sincronizzazione labiale basata sui fonemi e client nativo Android.
 
