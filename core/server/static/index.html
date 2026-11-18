@@ -113,8 +113,22 @@
       </section>
       <section class="view" id="view-memory" aria-label="Memoria">
         <div class="view-head"><h2>Memoria</h2><button class="ghost" data-refresh="memory">Aggiorna</button></div>
-        <p class="hint">Ciò che JARVIS ricorda di te. Puoi cancellare ogni elemento; la cancellazione viene registrata nell'audit.</p>
+        <p class="hint">Ciò che JARVIS ricorda di te: fatti, preferenze (sempre nel contesto) ed episodi delle attività, che scadono dopo 30 giorni. Puoi correggere o cancellare ogni elemento; l'operazione viene registrata nell'audit.</p>
+        <div class="memory-tools">
+          <div class="mem-kinds" role="tablist" aria-label="Tipo di memoria">
+            <button class="chip active" data-kind="" role="tab" aria-selected="true">Tutto</button>
+            <button class="chip" data-kind="semantic" role="tab" aria-selected="false">Fatti</button>
+            <button class="chip" data-kind="procedural" role="tab" aria-selected="false">Preferenze</button>
+            <button class="chip" data-kind="episodic" role="tab" aria-selected="false">Episodi</button>
+          </div>
+          <input id="memory-search" type="search" placeholder="Cerca nella memoria…" aria-label="Cerca nella memoria">
+          <button class="ghost" id="memory-reindex" title="Ricostruisce indice di ricerca e grafo dai dati">Ricostruisci indici</button>
+        </div>
         <div id="memory" class="list"></div>
+        <details class="memory-graph-box">
+          <summary>Grafo delle conoscenze</summary>
+          <div id="memory-graph"></div>
+        </details>
       </section>
       <section class="view" id="view-workspace" aria-label="Workspace">
         <div class="view-head"><h2>Workspace</h2><button class="ghost" data-refresh="workspace">Aggiorna</button></div>

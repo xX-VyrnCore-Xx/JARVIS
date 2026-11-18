@@ -22,11 +22,20 @@ Verificare ripetizione della stessa operazione, crash durante la sincronizzazion
 
 ## Stato del prototipo v0.1
 
-- **Memoria del proprietario:** in SQLite (`data/jarvis.sqlite3`), con elementi inseriti tramite «ricorda che …». Ogni elemento può essere consultato e cancellato dall'interfaccia, con evento di audit, oppure dall'agente previa conferma (RF-08).
-- **Contesto dell'agente:** riceve fino a 50 elementi di memoria e gli ultimi 10 turni della conversazione.
+- **Memoria del proprietario (ADR-0022):** in SQLite (`data/jarvis.sqlite3`), tabella `memory` con tipo, provenienza, data di modifica e scadenza:
+  - *semantica*: fatti salvati con «ricorda che …»;
+  - *procedurale*: preferenze e regole («preferisco …», «d'ora in poi …»), sempre nel contesto dell'agente;
+  - *episodica*: un riassunto per ogni attività conclusa dalla chat, legato al task e con scadenza di 30 giorni (`JARVIS_EPISODIC_DAYS`; 0 disattiva). Le operazioni sulla memoria non generano episodi, così un fatto cancellato non sopravvive in un riassunto.
+- **Indici derivati, ricostruibili** dalla sola tabella `memory` (`POST /api/memory/reindex` o «Ricostruisci indici»):
+  - `memory_fts`: indice testuale FTS5 (BM25), senza accenti;
+  - `memory_vectors`: vettore locale da 256 dimensioni (radici delle parole e trigrammi con hashing). La ricerca semantica resta offline e deterministica, senza modelli di embedding;
+  - `memory_edges`: knowledge graph di triple (soggetto, relazione, oggetto) estratte dai fatti in italiano.
+- **Recupero:** ricerca ibrida (60% similarità del vettore, 40% posizione BM25) con soglia minima. L'agente riceve tutte le preferenze, i fatti (tutti fino a 30, oltre solo i pertinenti) e gli episodi pertinenti alla richiesta. Lo strumento `memory.search` e i comandi «cosa sai di …» e «cerca nella memoria …» la usano dalla chat.
+- **Correzione e cancellazione:** `PATCH` e `DELETE /api/memory/{id}`, con evento di audit, aggiornano subito indice, vettore e grafo. La cancellazione tramite agente richiede conferma (RF-08). I dispositivi associati non accedono alla memoria.
+- **Contesto dell'agente:** gli ultimi 10 turni della conversazione e la memoria selezionata come sopra.
 - **Task e conversazione:** persistono dopo un riavvio.
 - **Automazioni:** le tabelle `workflows` (documento e prossima esecuzione) e `workflow_runs` (cronologia) persistono in SQLite.
-- **Non ancora implementati:** memoria semantica (pgvector o Qdrant), knowledge graph, sincronizzazione fra nodi e backup cifrati.
+- **Non ancora implementati:** PostgreSQL con pgvector o Qdrant per un Core condiviso, embeddings da modello, sincronizzazione dei dati fra nodi (i nodi esecutori non conservano dati del Core).
 
 ## Backup e ripristino (RNF-08, ADR-0012)
 

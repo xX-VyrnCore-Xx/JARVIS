@@ -251,7 +251,9 @@ pub fn router(state: Shared) -> Router {
         .route("/api/tasks", get(tasks))
         .route("/api/conversation", get(conversation))
         .route("/api/memory", get(memory))
-        .route("/api/memory/{id}", delete(forget))
+        .route("/api/memory/graph", get(memory_graph))
+        .route("/api/memory/reindex", post(memory_reindex))
+        .route("/api/memory/{id}", delete(forget).patch(memory_correct))
         .route("/api/audit", get(audit))
         .route("/api/workspace", get(workspace))
         .route("/api/tools", get(tool_catalog))
@@ -447,9 +449,44 @@ async fn conversation(
     }
 }
 
-async fn memory(State(state): State<Shared>) -> Response {
-    match with_core(&state, |j| j.memory()).await {
+async fn memory(
+    State(state): State<Shared>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let kind = q.get("kind").cloned().filter(|k| !k.is_empty());
+    let query = q.get("q").cloned();
+    match with_core(&state, move |j| {
+        j.memory_query(kind.as_deref(), query.as_deref())
+    })
+    .await
+    {
         Ok(items) => Json(json!({"items": items})).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+async fn memory_graph(State(state): State<Shared>) -> Response {
+    match with_core(&state, |j| j.memory_graph()).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+async fn memory_reindex(State(state): State<Shared>) -> Response {
+    match with_core(&state, |j| j.memory_reindex()).await {
+        Ok(n) => Json(json!({"reindexed": n})).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+async fn memory_correct(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    let text = body["text"].as_str().unwrap_or_default().to_string();
+    match with_core(&state, move |j| j.memory_correct(&id, &text)).await {
+        Ok(()) => Json(json!({"updated": true})).into_response(),
         Err(e) => e.into_response(),
     }
 }

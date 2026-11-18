@@ -200,3 +200,21 @@ dialog.setup legend { padding: 0 .3rem; }
 .setup-steps .step progress { width: 100%; }
 .setup-steps .step.done .icon { color: var(--ok); }
 .setup-steps .step.failed .icon { color: var(--bad); }
+
+/* Memoria (ADR-0022) */
+.memory-tools { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; margin-bottom: .8rem; }
+.memory-tools input[type=search] { flex: 1; min-width: 12rem; }
+.mem-kinds { display: flex; gap: .3rem; flex-wrap: wrap; }
+.mem-kinds .chip { border: 1px solid var(--border); background: transparent; cursor: pointer; }
+.mem-kinds .chip.active { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+.badge.mem-semantic { color: var(--accent); }
+.badge.mem-procedural { color: var(--ok); }
+.badge.mem-episodic { color: var(--muted); }
+.memory-graph-box { margin-top: 1rem; }
+.memory-graph-box summary { cursor: pointer; color: var(--muted); }
+svg.graph { width: 100%; max-height: 440px; margin-top: .6rem; }
+svg.graph .edge { stroke: var(--border); stroke-width: 1.5; }
+svg.graph .edge-label { fill: var(--muted); font-size: 11px; }
+svg.graph .node { fill: var(--panel-2); stroke: var(--accent); stroke-width: 1.5; }
+svg.graph .node.owner { fill: var(--accent); filter: drop-shadow(0 0 6px var(--accent)); }
+svg.graph .node-label { fill: var(--text); font-size: 12px; }

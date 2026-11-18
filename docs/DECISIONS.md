@@ -623,6 +623,32 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - CI «avvio reale»: `core.secrets_store` vale `keychain` su macOS e Windows, `file` su Linux.
 - **Documenti interessati:** SECURITY_AND_PRIVACY.md, ACCEPTANCE.md, ROADMAP.md.
 
+### ADR-0022 — Memoria semantica, procedurale ed episodica con indici locali ricostruibili
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario («finisci tutte le fasi e la memoria»), MEMORY_DATA_SYNC.md.
+- **Contesto:** la memoria era un elenco di frasi. L'agente riceveva i primi 50 elementi, senza tipi, provenienza, ricerca o correzione. La specifica chiede memoria episodica, semantica e procedurale, ricerca semantica, knowledge graph e indici derivati ricostruibili.
+- **Opzioni:**
+  - PostgreSQL con pgvector o Qdrant: servizi esterni, non adatti a un'installazione desktop autonoma;
+  - embeddings da Ollama: qualità migliore, ma assenti senza Ollama e diversi a ogni cambio di modello, quindi l'indice andrebbe ricostruito;
+  - SQLite con FTS5 e un vettore locale con hashing: sempre disponibile, deterministico e ricostruibile.
+- **Decisione:**
+  - colonne additive su `memory` (`kind`, `source`, `updated_at`, `expires_at`) con migrazione automatica dei database esistenti;
+  - indici `memory_fts`, `memory_vectors` e `memory_edges` derivati dalla tabella e ricostruiti all'avvio se mancano;
+  - ricerca ibrida con soglia; contesto dell'agente con preferenze, fatti ed episodi pertinenti;
+  - episodi automatici per le attività della chat, con scadenza e senza le operazioni sulla memoria;
+  - API `GET /api/memory?kind=&q=`, `PATCH /api/memory/{id}`, `GET /api/memory/graph`, `POST /api/memory/reindex`, con audit per correzione e ricostruzione;
+  - strumento `memory.search` e parametro `kind` per `memory.remember` e `memory.list`.
+- **Conseguenze:**
+  - la ricerca riconosce flessioni e accenti, non i sinonimi: «auto» non trova «macchina». Embeddings da modello restano un'estensione possibile, perché l'indice è derivato;
+  - l'estrazione delle triple copre le frasi italiane comuni («il mio X si chiama Y», «abito a …», «X è Y»), non frasi arbitrarie;
+  - un episodio contiene la richiesta originale (160 caratteri): si cancella come ogni altro elemento e scade da solo.
+- **Evidenza:**
+  - `core/server/tests/memory.rs`: tipi, ricerca tollerante alle flessioni, grafo, episodi, correzione e cancellazione propagate, ricostruzione, audit;
+  - unitari in `memory.rs`: vettori, triple, tipo dedotto, migrazione di un database precedente;
+  - `tests/ai/test_gateway.py`: preferenze e ricerca dalla chat offline;
+  - E2E: filtro per tipo, ricerca, grafo nella sezione Memoria.
+- **Documenti interessati:** MEMORY_DATA_SYNC.md, README.md, ROADMAP.md, ACCEPTANCE.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

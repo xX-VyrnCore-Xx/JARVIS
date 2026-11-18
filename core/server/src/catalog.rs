@@ -17,13 +17,14 @@ macro_rules! tool_file {
     };
 }
 
-const SOURCES: [&str; 15] = [
+const SOURCES: [&str; 16] = [
     tool_file!("fs.list"),
     tool_file!("fs.read"),
     tool_file!("fs.write"),
     tool_file!("memory.forget"),
     tool_file!("memory.list"),
     tool_file!("memory.remember"),
+    tool_file!("memory.search"),
     tool_file!("system.info"),
     tool_file!("time.now"),
     tool_file!("web.fetch"),

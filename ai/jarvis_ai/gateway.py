@@ -98,12 +98,18 @@ def _describe_tool_result(result: dict) -> str:
     if tool == "fs.write":
         return f"Ho scritto {output.get('bytes_written', 0)} byte in '{output.get('path')}'."
     if tool == "memory.remember":
-        return f"Ricordato (id {output.get('id')}): {output.get('text')}"
+        what = "Preferenza salvata" if output.get("kind") == "procedural" else "Ricordato"
+        return f"{what} (id {output.get('id')}): {output.get('text')}"
     if tool == "memory.list":
         items = output.get("items", [])
         if not items:
             return "La memoria è vuota."
-        return "Ecco cosa ricordo:\n" + "\n".join(f"• [{i['id']}] {i['text']}" for i in items)
+        return "Ecco cosa ricordo:\n" + "\n".join(f"• [{i['id']}]{_kind_label(i)} {i['text']}" for i in items)
+    if tool == "memory.search":
+        items = output.get("items", [])
+        if not items:
+            return f"Non trovo nulla in memoria su «{output.get('query')}»."
+        return f"In memoria su «{output.get('query')}»:\n" + "\n".join(f"• [{i['id']}]{_kind_label(i)} {i['text']}" for i in items)
     if tool == "memory.forget":
         return f"Ho dimenticato l'elemento {output.get('id')}."
     if tool == "web.search":
@@ -206,6 +212,8 @@ def _reason(output: Any) -> str:
 
 _RULES: list[tuple[re.Pattern[str], str, Any]] = [
     (re.compile(r"^\s*(?:apri|visita|leggi(?: la pagina)?|riassumi|fetch|open)\s+(https?://\S+)\s*$", re.I), "web.fetch", lambda m: {"url": m.group(1)}),
+    (re.compile(r"^\s*(?:cerca nella (?:mia )?memoria|cerca tra i ricordi|search memory(?: for)?)\s*:?\s+(.+)$|^\s*cosa sai (?:di|su|sul|sulla|del|della)\s+(?!me\b)(.+?)\s*\??$", re.I | re.S),
+     "memory.search", lambda m: {"query": (m.group(1) or m.group(2)).strip()[:500]}),
     (re.compile(r"^\s*(?:cerca(?: sul web| online| in rete)?|search(?: the web)?)\s*:?\s+(.+)$", re.I | re.S), "web.search", lambda m: {"query": m.group(1).strip()[:300]}),
     (re.compile(r"\b(che ore sono|che ora è|ora attuale|data di oggi|che giorno è|what time)\b", re.I), "time.now", lambda m: {}),
     (re.compile(r"\b(info(?:rmazioni)? (?:di |sul |del )?sistema|system info|che sistema)\b", re.I), "system.info", lambda m: {}),
@@ -216,6 +224,8 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
     (re.compile(r"^\s*(?:elenca|lista|mostra)(?: i)? file(?: in| di| della cartella)?\s*[\"']?([^\"'\s]*)[\"']?\s*$|^\s*(?:ls|list files)\s*([^\s]*)\s*$", re.I),
      "fs.list", lambda m: {"path": (m.group(1) or m.group(2) or ".")}),
     (re.compile(r"^\s*(?:ricorda(?:ti)?(?: che)?|remember(?: that)?)\s+(.+)$", re.I | re.S), "memory.remember", lambda m: {"text": m.group(1).strip()}),
+    (re.compile(r"^\s*((?:preferisco|d'ora in poi|da ora in poi|d’ora in poi)\b.+)$", re.I | re.S), "memory.remember",
+     lambda m: {"text": m.group(1).strip()[:1000], "kind": "procedural"}),
     (re.compile(r"\b(cosa ricordi|cosa sai di me|mostra(?: la)? memoria|what do you remember)\b", re.I), "memory.list", lambda m: {}),
     (re.compile(r"^\s*(?:dimentica|forget)\s+([A-Za-z0-9-]+)\s*$", re.I), "memory.forget", lambda m: {"id": m.group(1)}),
 ]
@@ -228,6 +238,8 @@ _SCHEDULE = [
 ]
 _WORKFLOW_RULES: list[tuple[re.Pattern[str], str, Any]] = [
     (re.compile(r"^\s*(?:apri|visita|leggi(?: la pagina)?|riassumi|fetch|open)\s+(https?://\S+)\s*$", re.I), "web.fetch", lambda m: {"url": m.group(1)}),
+    (re.compile(r"^\s*(?:cerca nella (?:mia )?memoria|cerca tra i ricordi|search memory(?: for)?)\s*:?\s+(.+)$|^\s*cosa sai (?:di|su|sul|sulla|del|della)\s+(?!me\b)(.+?)\s*\??$", re.I | re.S),
+     "memory.search", lambda m: {"query": (m.group(1) or m.group(2)).strip()[:500]}),
     (re.compile(r"^\s*(?:cerca(?: sul web| online| in rete)?|search(?: the web)?)\s*:?\s+(.+)$", re.I | re.S), "web.search", lambda m: {"query": m.group(1).strip()[:300]}),
     (re.compile(r"\b(elenca|mostra|quali|lista)( le)? automazioni\b|\bautomazioni\?*$", re.I), "workflow.list", lambda m: {}),
     (re.compile(r"^\s*(?:esegui|avvia|lancia)(?: ora)? (?:l')?automazione\s+([0-9a-f-]{4,})\s*$", re.I), "workflow.run", lambda m: {"id": m.group(1)}),
@@ -331,13 +343,14 @@ def _parse_schedule(message: str, catalog: dict[str, dict]) -> tuple[dict | None
     return None, None
 
 
-HELP = """Sono JARVIS (prototipo v0.1), in modalità offline: capisco comandi semplici.
+HELP = """Sono JARVIS, in modalità offline: capisco comandi semplici.
 Prova con:
 • "che ore sono"
 • "info sistema"
 • "elenca file"
 • "scrivi note.txt: testo da salvare" (chiede conferma)
 • "leggi note.txt"
+• "ricorda che …", "preferisco …", "cosa sai di …", "cerca nella memoria …"
 • "ricorda che preferisco risposte brevi" · "cosa ricordi" · "dimentica <id>"
 • "ogni ora info sistema" · "ogni giorno alle 08:00 scrivi buongiorno.txt: ciao" · "tra 5 minuti che ore sono"
 • "elenca automazioni" · "esegui automazione <id>" · "elimina automazione <id>"
@@ -410,6 +423,14 @@ def _last_user_message(delegation: dict) -> str:
         if msg["role"] == "user":
             return msg["content"]
     return delegation["objective"]
+
+
+
+_KIND_LABELS = {"procedural": " (preferenza)", "episodic": " (episodio)"}
+
+
+def _kind_label(item: dict) -> str:
+    return _KIND_LABELS.get(item.get("kind", ""), "")
 
 
 # --------------------------------------------------------------------------- ollama

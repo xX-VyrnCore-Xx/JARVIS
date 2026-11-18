@@ -1,13 +1,22 @@
 {
   "contract": "jarvis.tool/1",
   "name": "memory.list",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "summary": "Elenca le informazioni salvate in memoria",
   "input_schema": {
     "type": "object",
     "additionalProperties": false,
     "required": [],
-    "properties": {}
+    "properties": {
+      "kind": {
+        "type": "string",
+        "enum": [
+          "semantic",
+          "procedural",
+          "episodic"
+        ]
+      }
+    }
   },
   "output_schema": {
     "type": "object"

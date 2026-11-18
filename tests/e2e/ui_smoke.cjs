@@ -141,6 +141,25 @@ function check(cond, msg) {
   await page.click('[data-view="memory"]');
   await page.waitForSelector("#memory .card");
   check((await page.locator("#memory").innerText()).includes("il test E2E è passato"), "memoria visibile nella sezione Memoria");
+  // Memoria completa (ADR-0022): preferenze, ricerca pertinente, filtro per tipo, grafo delle conoscenze.
+  await page.click('[data-view="chat"]');
+  await send("ricorda che mia sorella si chiama Anna");
+  check((await send("preferisco risposte brevi")).includes("Preferenza salvata"), "preferenza salvata come memoria procedurale");
+  check((await send("cosa sai di Anna?")).includes("Anna"), "ricerca nella memoria dalla chat");
+  await page.click('[data-view="memory"]');
+  await page.waitForSelector("#memory .card");
+  await page.click('.mem-kinds [data-kind="procedural"]');
+  await page.waitForFunction(() => [...document.querySelectorAll("#memory .card")].every((c) => c.dataset.kind === "procedural") && document.querySelectorAll("#memory .card").length === 1);
+  check((await page.locator("#memory").innerText()).includes("preferisco risposte brevi"), "filtro Preferenze");
+  await page.click('.mem-kinds [data-kind=""]');
+  await page.fill("#memory-search", "sorelle");
+  await page.waitForFunction(() => document.querySelector("#memory .card .title")?.textContent.includes("Anna"));
+  check(true, "ricerca tollerante alle flessioni nella sezione Memoria");
+  await page.fill("#memory-search", "");
+  await page.click(".memory-graph-box summary");
+  await page.waitForSelector("#memory-graph svg.graph");
+  check((await page.locator("#memory-graph").innerHTML()).includes("Anna"), "grafo delle conoscenze con le relazioni");
+  if (shots) await page.screenshot({ path: `${shots}/jarvis-memoria.png`, fullPage: true });
 
   await page.click('[data-view="tasks"]');
   await page.waitForSelector("#tasks .card");

@@ -1,0 +1,50 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "memory.search",
+  "version": "1.0.0",
+  "summary": "Cerca nella memoria del proprietario gli elementi più pertinenti a una domanda (fatti, preferenze, episodi)",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "query"
+    ],
+    "properties": {
+      "query": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      },
+      "kind": {
+        "type": "string",
+        "enum": [
+          "semantic",
+          "procedural",
+          "episodic"
+        ]
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 20
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "prerequisites": [],
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.memory:read"
+  ],
+  "errors": [],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

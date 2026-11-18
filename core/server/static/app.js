@@ -239,15 +239,35 @@ const views = {
       el("span", { class: `badge ${t.state}` }, t.state))) : [el("p", { class: "empty" }, "Nessuna attività.")]));
   },
   async memory() {
-    const { items } = await api("/api/memory");
+    const kind = memoryState.kind, q = $("#memory-search").value.trim();
+    const params = new URLSearchParams();
+    if (kind) params.set("kind", kind);
+    if (q) params.set("q", q);
+    const { items } = await api(`/api/memory${params.toString() ? "?" + params : ""}`);
+    const labels = { semantic: "fatto", procedural: "preferenza", episodic: "episodio" };
     const box = $("#memory");
-    box.replaceChildren(...(items.length ? items.map((m) => el("div", { class: "card" },
-      el("div", { class: "body" }, el("div", { class: "title" }, m.text), el("div", { class: "sub" }, `${m.id} · ${fmtTime(m.created_at)}`)),
-      el("button", { class: "danger", onclick: async () => {
-        if (!confirm(`Cancellare definitivamente «${m.text}»?`)) return;
-        await api(`/api/memory/${encodeURIComponent(m.id)}`, { method: "DELETE" });
-        views.memory(); refreshStatus();
-      } }, "Cancella"))) : [el("p", { class: "empty" }, "La memoria è vuota. Prova: \"ricorda che …\"")]));
+    box.replaceChildren(...(items.length ? items.map((m) => {
+      const title = el("div", { class: "title" }, m.text);
+      const meta = [m.id, fmtTime(m.created_at)];
+      if (m.expires_at) meta.push(`scade ${fmtTime(m.expires_at)}`);
+      if (m.score != null) meta.push(`pertinenza ${Math.round(m.score * 100)}%`);
+      return el("div", { class: "card", "data-kind": m.kind || "semantic" },
+        el("div", { class: "body" },
+          el("span", { class: `badge mem-${m.kind || "semantic"}` }, labels[m.kind] || "fatto"), " ", title,
+          el("div", { class: "sub" }, meta.join(" · "))),
+        m.kind === "episodic" ? null : el("button", { class: "ghost", onclick: async () => {
+          const text = prompt("Correggi l'elemento di memoria:", m.text);
+          if (text == null || !text.trim() || text.trim() === m.text) return;
+          await api(`/api/memory/${encodeURIComponent(m.id)}`, { method: "PATCH", body: JSON.stringify({ text: text.trim() }) });
+          views.memory();
+        } }, "Correggi"),
+        el("button", { class: "danger", onclick: async () => {
+          if (!confirm(`Cancellare definitivamente «${m.text}»?`)) return;
+          await api(`/api/memory/${encodeURIComponent(m.id)}`, { method: "DELETE" });
+          views.memory(); refreshStatus();
+        } }, "Cancella"));
+    }) : [el("p", { class: "empty" }, q ? `Nessun ricordo pertinente a «${q}».` : "La memoria è vuota. Prova: \"ricorda che …\" oppure \"preferisco …\"")]));
+    if ($(".memory-graph-box").open) drawMemoryGraph();
   },
   async workspace() {
     const data = await api("/api/workspace");
@@ -508,6 +528,67 @@ function show(view) {
 }
 
 document.querySelectorAll(".nav-item").forEach((b) => b.addEventListener("click", () => show(b.dataset.view)));
+// ------------------------------------------------------------------ memoria (ADR-0022)
+
+const memoryState = { kind: "" };
+document.querySelectorAll(".mem-kinds .chip").forEach((b) => b.addEventListener("click", () => {
+  memoryState.kind = b.dataset.kind;
+  document.querySelectorAll(".mem-kinds .chip").forEach((c) => {
+    c.classList.toggle("active", c === b); c.setAttribute("aria-selected", String(c === b));
+  });
+  views.memory().catch((e) => alert(e.message));
+}));
+let memorySearchTimer;
+$("#memory-search").addEventListener("input", () => {
+  clearTimeout(memorySearchTimer);
+  memorySearchTimer = setTimeout(() => views.memory().catch((e) => alert(e.message)), 250);
+});
+$("#memory-reindex").addEventListener("click", async () => {
+  const { reindexed } = await api("/api/memory/reindex", { method: "POST" });
+  await views.memory();
+  toast({ severity: "info", title: "Memoria", body: `Indici ricostruiti per ${reindexed} elementi`, notification_id: `reindex-${Date.now()}` });
+});
+$(".memory-graph-box").addEventListener("toggle", (e) => { if (e.target.open) drawMemoryGraph(); });
+
+/** Grafo radiale in SVG: il proprietario al centro, le entità collegate attorno. */
+async function drawMemoryGraph() {
+  const { nodes, edges } = await api("/api/memory/graph");
+  const box = $("#memory-graph");
+  if (!edges.length) {
+    box.replaceChildren(el("p", { class: "empty" }, "Nessuna relazione ancora. Prova: «ricorda che mia sorella si chiama Anna»."));
+    return;
+  }
+  const NS = "http://www.w3.org/2000/svg";
+  const svgEl = (tag, attrs, text) => {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    if (text != null) n.textContent = text;
+    return n;
+  };
+  const W = 640, H = 420, cx = W / 2, cy = H / 2;
+  const pos = {};
+  const center = nodes.find((n) => n.id === "io") || nodes[0];
+  const others = nodes.filter((n) => n !== center);
+  pos[center.id] = [cx, cy];
+  others.forEach((n, i) => {
+    const a = (2 * Math.PI * i) / others.length - Math.PI / 2;
+    const r = others.length > 10 && i % 2 ? 175 : 140;
+    pos[n.id] = [cx + r * Math.cos(a), cy + r * 0.82 * Math.sin(a)];
+  });
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, class: "graph", role: "img", "aria-label": `Grafo con ${nodes.length} entità e ${edges.length} relazioni` });
+  for (const e of edges) {
+    const [x1, y1] = pos[e.from], [x2, y2] = pos[e.to];
+    svg.append(svgEl("line", { x1, y1, x2, y2, class: "edge" }));
+    svg.append(svgEl("text", { x: (x1 + x2) / 2, y: (y1 + y2) / 2 - 4, class: "edge-label", "text-anchor": "middle" }, e.relation));
+  }
+  for (const n of nodes) {
+    const [x, y] = pos[n.id];
+    svg.append(svgEl("circle", { cx: x, cy: y, r: n === center ? 22 : 15, class: n === center ? "node owner" : "node" }));
+    svg.append(svgEl("text", { x, y: y + (n === center ? 38 : 30), class: "node-label", "text-anchor": "middle" }, n.label));
+  }
+  box.replaceChildren(svg);
+}
+
 document.querySelectorAll("[data-refresh]").forEach((b) => b.addEventListener("click", () => views[b.dataset.refresh]().catch((e) => alert(e.message))));
 
 // ------------------------------------------------------------------ notifiche (RF-13)
