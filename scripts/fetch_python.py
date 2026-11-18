@@ -5,6 +5,10 @@ Uso: python scripts/fetch_python.py --triple x86_64-unknown-linux-gnu --dest app
 Sceglie dall'ultima release di astral-sh/python-build-standalone l'archivio `install_only` di CPython
 3.12 per la piattaforma indicata, ne verifica l'impronta SHA-256 pubblicata e lo estrae in --dest.
 Nella CI usa GITHUB_TOKEN per l'API di GitHub. Solo libreria standard.
+
+I collegamenti simbolici (es. bin/python3 -> python3.12) vengono sostituiti da copie: il bundler degli
+installer non li conserva. Con --trim, da eseguire dopo l'installazione delle dipendenze, rimuove le
+parti non usate da JARVIS (test della libreria standard, IDLE, Tk, intestazioni C) per ridurre gli installer.
 """
 
 from __future__ import annotations
@@ -33,12 +37,51 @@ def get(url: str, accept: str = "application/vnd.github+json") -> bytes:
         return r.read()
 
 
+TRIM_GLOBS = [
+    "lib/python3.*/test", "lib/python3.*/idlelib", "lib/python3.*/tkinter", "lib/python3.*/turtledemo",
+    "lib/python3.*/lib2to3", "lib/python3.*/ensurepip", "lib/tcl*", "lib/tk*", "lib/itcl*", "lib/thread*",
+    "share", "include",
+    "Lib/test", "Lib/idlelib", "Lib/tkinter", "Lib/turtledemo", "Lib/lib2to3", "Lib/ensurepip", "tcl", "include",
+]
+
+
+def dereference(root: Path) -> int:
+    """Sostituisce i collegamenti simbolici ai file con copie reali; restituisce quanti ne ha sostituiti."""
+    count = 0
+    for path in sorted(root.rglob("*")):
+        if path.is_symlink():
+            target = path.resolve()
+            path.unlink()
+            if target.is_file():
+                shutil.copy2(target, path)
+                count += 1
+            elif target.is_dir():
+                shutil.copytree(target, path, symlinks=False)
+                count += 1
+    return count
+
+
+def trim(root: Path) -> int:
+    before = sum(f.stat().st_size for f in root.rglob("*") if f.is_file())
+    for pattern in TRIM_GLOBS:
+        for path in root.glob(pattern):
+            shutil.rmtree(path) if path.is_dir() else path.unlink()
+    for cache in list(root.rglob("__pycache__")):
+        shutil.rmtree(cache, ignore_errors=True)
+    after = sum(f.stat().st_size for f in root.rglob("*") if f.is_file())
+    return (before - after) // 1048576
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--triple", required=True)
     parser.add_argument("--dest", required=True, type=Path)
     parser.add_argument("--minor", default="3.12")
+    parser.add_argument("--trim", action="store_true", help="riduce un Python già scaricato in --dest")
     args = parser.parse_args()
+    if args.trim:
+        print(f"Python ridotto di {trim(args.dest)} MB")
+        return 0
     release = json.loads(get(API))
     pattern = re.compile(rf"^cpython-{re.escape(args.minor)}\.\d+\+\d+-{re.escape(args.triple)}-install_only\.tar\.gz$")
     assets = {a["name"]: a for a in release["assets"]}
@@ -69,6 +112,7 @@ def main() -> int:
             shutil.rmtree(args.dest)
         args.dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(Path(tmp) / "python"), args.dest)
+    print(f"collegamenti simbolici sostituiti da copie: {dereference(args.dest)}")
     print(f"{name} ({len(data) // 1048576} MB, sha256 {digest[:16]}…) -> {args.dest}")
     return 0
 

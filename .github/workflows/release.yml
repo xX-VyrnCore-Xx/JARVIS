@@ -60,7 +60,9 @@ jobs:
           python scripts/fetch_python.py --triple "$TRIPLE" --dest apps/desktop/src-tauri/python
           if [ "$RUNNER_OS" = "Windows" ]; then py=apps/desktop/src-tauri/python/python.exe; else py=apps/desktop/src-tauri/python/bin/python3; fi
           "$py" -m pip install --disable-pip-version-check -q -r tests/contracts/requirements.txt
+          python scripts/fetch_python.py --triple "$TRIPLE" --dest apps/desktop/src-tauri/python --trim
           "$py" -c "import jsonschema, sys; print('Python incluso', sys.version.split()[0])"
+          find apps/desktop/src-tauri/python -type l | head -5 | grep . && { echo "collegamenti simbolici residui"; exit 1; } || true
       - name: Programmi di installazione (Tauri)
         working-directory: apps/desktop/src-tauri
         shell: bash
@@ -70,8 +72,10 @@ jobs:
         shell: bash
         run: |
           sudo dpkg -i apps/desktop/src-tauri/target/release/bundle/deb/*.deb
-          root=$(dirname "$(dirname "$(dpkg -L jarvis | grep 'jarvis_ai/worker.py$')")")
-          test -x /usr/bin/jarvis-core && test -x "$root/python/bin/python3"
+          root=$(dirname "$(dirname "$(dirname "$(dpkg -L jarvis | grep 'jarvis_ai/worker.py$')")")")
+          echo "risorse installate in $root"
+          test -x /usr/bin/jarvis-core || { echo "manca /usr/bin/jarvis-core"; exit 1; }
+          test -x "$root/python/bin/python3" || { echo "manca $root/python/bin/python3"; ls -la "$root/python/bin" | head; exit 1; }
           JARVIS_HOME="$root" JARVIS_PYTHON="$root/python/bin/python3" JARVIS_DATA_DIR="$RUNNER_TEMP/dati" /usr/bin/jarvis-core > core.log 2>&1 &
           python tests/smoke/start_smoke.py http://127.0.0.1:8765 120 || { cat core.log; exit 1; }
       - name: Installazione dal .dmg e avvio del Core installato (macOS)
