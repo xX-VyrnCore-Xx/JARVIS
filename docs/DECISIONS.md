@@ -694,6 +694,27 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - `test_token_budget_selects_relevant_tools_and_reports_usage` in `tests/ai/test_gateway.py`.
 - **Documenti interessati:** AI_SYSTEM.md, ROADMAP.md, contratto `agent-result`.
 
+### ADR-0025 — Streaming delle risposte dal modello alla dashboard
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario («procedi con lo streaming delle risposte»).
+- **Contesto:** con Ollama la risposta compariva solo a generazione finita, anche dopo molti secondi.
+- **Opzioni:**
+  - WebSocket: un canale in più da proteggere (host, token, CSP);
+  - Server-Sent Events: solo GET, mentre il messaggio va in POST;
+  - `fetch` con corpo NDJSON in streaming sullo stesso percorso protetto: nessuna dipendenza nuova lato browser.
+- **Decisione:**
+  - envelope `delegation.progress` (stato `running`, payload `{delta}`) dal worker al Core quando la delega ha `stream: true` (aggiunta compatibile al contratto `delegation`);
+  - `Worker::delegate_streaming` nel bridge;
+  - `Jarvis::chat_streaming` con un destinatario dei frammenti;
+  - endpoint `POST /api/chat/stream` (NDJSON), ammesso anche ai dispositivi associati con il permesso `chat`;
+  - la dashboard mostra il testo in arrivo con un cursore e lo sostituisce con l'esito.
+- **Conseguenze:**
+  - i frammenti non passano dalla policy: sono testo del modello, mai azioni. Gli strumenti restano proposte valutate dal Core;
+  - durante la generazione il Core resta occupato come prima (un turno alla volta);
+  - le app native continuano a usare `POST /api/chat`.
+- **Evidenza:** `core/server/tests/streaming.rs` (worker reale contro un Ollama sintetico: tre frammenti, poi esito identico, conversazione salvata, token misurati); E2E dell'interfaccia sul nuovo endpoint.
+- **Documenti interessati:** AI_SYSTEM.md, INTERFACE_AND_DEVICES.md, ROADMAP.md, contratto `delegation`.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

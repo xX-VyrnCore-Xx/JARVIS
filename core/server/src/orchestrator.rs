@@ -136,7 +136,11 @@ impl Outcome {
     }
 }
 
+/// Destinazione dei frammenti di risposta durante una chat in streaming (ADR-0025).
+pub type StreamSink = Box<dyn Fn(&str) + Send>;
+
 pub struct Jarvis {
+    stream_sink: Option<StreamSink>,
     cfg: Config,
     store: Store,
     audit: AuditLog,
@@ -203,6 +207,7 @@ impl Jarvis {
         let (cfg_setup_dir, cfg_setup_python, cfg_setup_ai) =
             (cfg.data_dir.clone(), cfg.python.clone(), cfg.ai_dir.clone());
         let mut jarvis = Self {
+            stream_sink: None,
             cfg,
             store,
             audit,
@@ -366,6 +371,7 @@ impl Jarvis {
             "issued_at": ts(issued),
             "expires_at": ts(expires),
             "inputs": self.with_dynamic_tools(inputs),
+            "stream": self.stream_sink.is_some(),
         })
     }
 
@@ -428,8 +434,20 @@ impl Jarvis {
     fn call_agent_inner(&mut self, task: &Task, inputs: &Value) -> Result<Value, Value> {
         let delegation = self.delegation(task, inputs);
         let (id, corr) = (task.id(), task.correlation());
-        let worker = self.worker()?;
-        match worker.delegate(&id, &corr, &delegation) {
+        let sink = self.stream_sink.take();
+        let worker = match self.worker() {
+            Ok(w) => w,
+            Err(e) => {
+                self.stream_sink = sink;
+                return Err(e);
+            }
+        };
+        let sent = match &sink {
+            Some(f) => worker.delegate_streaming(&id, &corr, &delegation, &mut |d| f(d)),
+            None => worker.delegate(&id, &corr, &delegation),
+        };
+        self.stream_sink = sink;
+        match sent {
             Ok(env) if env["status"] == "succeeded" => {
                 let report = validate(Contract::AgentResult, &env["payload"]);
                 if report.is_valid() {
@@ -480,6 +498,19 @@ impl Jarvis {
     }
 
     // ------------------------------------------------------------------ chat
+
+    /// Chat con i frammenti della risposta inoltrati a `sink` mentre il modello li genera (ADR-0025).
+    /// L'esito finale è lo stesso di `chat`: policy, conferme e audit non cambiano.
+    pub fn chat_streaming(
+        &mut self,
+        message: &str,
+        sink: StreamSink,
+    ) -> Result<Outcome, CoreError> {
+        self.stream_sink = Some(sink);
+        let out = self.chat(message);
+        self.stream_sink = None;
+        out
+    }
 
     pub fn chat(&mut self, message: &str) -> Result<Outcome, CoreError> {
         let timer = Timer::start();

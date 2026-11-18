@@ -119,6 +119,18 @@ impl Worker {
         correlation_id: &str,
         delegation: &Value,
     ) -> Result<Value, BridgeError> {
+        self.delegate_streaming(task_id, correlation_id, delegation, &mut |_| {})
+    }
+
+    /// Come `delegate`, ma inoltra a `on_delta` i frammenti `delegation.progress` correlati (ADR-0025).
+    /// Il timeout della delega vale per l'intera risposta, frammenti compresi.
+    pub fn delegate_streaming(
+        &mut self,
+        task_id: &str,
+        correlation_id: &str,
+        delegation: &Value,
+        on_delta: &mut dyn FnMut(&str),
+    ) -> Result<Value, BridgeError> {
         let report = validate(Contract::Delegation, delegation);
         if !report.is_valid() {
             return Err(BridgeError::new(
@@ -131,13 +143,14 @@ impl Worker {
         }
         let recipient = json!({"kind": "agent", "id": delegation["delegate"]["agent"]});
         let timeout = Duration::from_millis(delegation["timeout_ms"].as_u64().unwrap_or(1));
-        self.request(
+        self.request_streaming(
             task_id,
             correlation_id,
             recipient,
             "delegation.request",
             delegation,
             timeout,
+            on_delta,
         )
     }
 
@@ -150,6 +163,28 @@ impl Worker {
         message_type: &str,
         payload: &Value,
         timeout: Duration,
+    ) -> Result<Value, BridgeError> {
+        self.request_streaming(
+            task_id,
+            correlation_id,
+            recipient,
+            message_type,
+            payload,
+            timeout,
+            &mut |_| {},
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn request_streaming(
+        &mut self,
+        task_id: &str,
+        correlation_id: &str,
+        recipient: Value,
+        message_type: &str,
+        payload: &Value,
+        timeout: Duration,
+        on_delta: &mut dyn FnMut(&str),
     ) -> Result<Value, BridgeError> {
         let request = json!({
             "contract": "jarvis.envelope/1",
@@ -185,62 +220,73 @@ impl Worker {
             .and_then(|()| stdin.flush())
             .map_err(|_| Self::closed("scrittura verso il worker non riuscita", "unknown"))?;
 
-        let raw = match self.lines.recv_timeout(timeout) {
-            Ok(Ok(raw)) => raw,
-            Ok(Err(_)) | Err(RecvTimeoutError::Disconnected) => {
-                self.terminate();
-                return Err(Self::closed(
-                    "il worker si è chiuso senza risposta",
+        let deadline = std::time::Instant::now() + timeout;
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            let raw = match self.lines.recv_timeout(remaining) {
+                Ok(Ok(raw)) => raw,
+                Ok(Err(_)) | Err(RecvTimeoutError::Disconnected) => {
+                    self.terminate();
+                    return Err(Self::closed(
+                        "il worker si è chiuso senza risposta",
+                        "unknown",
+                    ));
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    self.terminate();
+                    return Err(BridgeError::new(
+                        "bridge.timeout",
+                        "timeout",
+                        format!(
+                            "nessuna risposta entro {} ms; worker terminato",
+                            timeout.as_millis()
+                        ),
+                        false,
+                        "unknown",
+                    ));
+                }
+            };
+
+            let response: Value = serde_json::from_str(&raw).map_err(|_| {
+                BridgeError::new(
+                    "bridge.invalid_response",
+                    "internal",
+                    "risposta non JSON",
+                    false,
                     "unknown",
-                ));
-            }
-            Err(RecvTimeoutError::Timeout) => {
-                self.terminate();
+                )
+            })?;
+            let report = validate(Contract::Envelope, &response);
+            if !report.is_valid() {
                 return Err(BridgeError::new(
-                    "bridge.timeout",
-                    "timeout",
-                    format!(
-                        "nessuna risposta entro {} ms; worker terminato",
-                        timeout.as_millis()
-                    ),
+                    "bridge.invalid_response",
+                    "internal",
+                    format!("risposta non conforme: {report:?}"),
                     false,
                     "unknown",
                 ));
             }
-        };
-
-        let response: Value = serde_json::from_str(&raw).map_err(|_| {
-            BridgeError::new(
-                "bridge.invalid_response",
-                "internal",
-                "risposta non JSON",
-                false,
-                "unknown",
-            )
-        })?;
-        let report = validate(Contract::Envelope, &response);
-        if !report.is_valid() {
-            return Err(BridgeError::new(
-                "bridge.invalid_response",
-                "internal",
-                format!("risposta non conforme: {report:?}"),
-                false,
-                "unknown",
-            ));
+            if response["causation_id"] != request["message_id"]
+                || response["correlation_id"] != request["correlation_id"]
+                || response["task_id"] != request["task_id"]
+            {
+                return Err(BridgeError::new(
+                    "bridge.uncorrelated_response",
+                    "internal",
+                    "risposta non correlata alla richiesta",
+                    false,
+                    "unknown",
+                ));
+            }
+            // Frammento intermedio: si inoltra e si continua ad attendere l'esito.
+            if response["type"] == "delegation.progress" && response["status"] == "running" {
+                if let Some(delta) = response["payload"]["delta"].as_str() {
+                    on_delta(delta);
+                }
+                continue;
+            }
+            return Ok(response);
         }
-        if response["causation_id"] != request["message_id"]
-            || response["correlation_id"] != request["correlation_id"]
-            || response["task_id"] != request["task_id"]
-        {
-            return Err(BridgeError::new(
-                "bridge.uncorrelated_response",
-                "internal",
-                "risposta non correlata alla richiesta",
-                false,
-                "unknown",
-            ));
-        }
-        Ok(response)
     }
 
     fn closed(message: &str, effect: &'static str) -> BridgeError {

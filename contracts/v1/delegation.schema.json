@@ -264,6 +264,11 @@
           }
         }
       }
+    },
+    "stream": {
+      "type": "boolean",
+      "default": false,
+      "description": "Se vero, l'agente invia i frammenti di testo come envelope delegation.progress (status running, payload {delta}) prima dell'esito (ADR-0025)."
     }
   }
 }

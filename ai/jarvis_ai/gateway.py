@@ -27,7 +27,7 @@ import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from jarvis_ai.contracts import SCHEMA_DIR
 
@@ -515,7 +515,32 @@ class OllamaBackend:
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — URL locale configurato dal proprietario
             return json.loads(resp.read().decode("utf-8"))
 
-    def respond(self, delegation: dict, catalog: dict[str, dict]) -> dict:
+    def _stream(self, body: dict, timeout: float, emit: Callable[[str], None]) -> dict:
+        """Chiamata in streaming: inoltra i frammenti di testo e ricompone la risposta come quella non in streaming."""
+        req = urllib.request.Request(self.url + "/api/chat", data=json.dumps({**body, "stream": True}).encode(),
+                                     headers={"Content-Type": "application/json"})
+        content: list[str] = []
+        tool_calls: list[dict] = []
+        final: dict = {}
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — URL locale configurato dal proprietario
+            for raw in resp:
+                if not raw.strip():
+                    continue
+                chunk = json.loads(raw.decode("utf-8"))
+                if chunk.get("error"):
+                    raise ValueError(str(chunk["error"])[:200])
+                msg = chunk.get("message") or {}
+                if msg.get("content"):
+                    content.append(msg["content"])
+                    if not tool_calls:
+                        emit(msg["content"])
+                tool_calls += msg.get("tool_calls") or []
+                if chunk.get("done"):
+                    final = chunk
+                    break
+        return {**final, "message": {"role": "assistant", "content": "".join(content), "tool_calls": tool_calls}}
+
+    def respond(self, delegation: dict, catalog: dict[str, dict], emit: Callable[[str], None] | None = None) -> dict:
         inputs = delegation.get("inputs", {})
         memory = "\n".join(f"- {m}" for m in inputs.get("memory", [])) or "(vuota)"
         messages = [{"role": "system", "content": SYSTEM_PROMPT.format(memory=memory)}]
@@ -540,7 +565,7 @@ class OllamaBackend:
             ]
             sent = len(names)
         timeout = min(self.timeout_s, delegation.get("timeout_ms", 120000) / 1000)
-        data = self._post("/api/chat", body, timeout)
+        data = self._stream(body, timeout, emit) if emit else self._post("/api/chat", body, timeout)
         msg = data.get("message", {})
         by_fn = {_fn_name(n): n for n in catalog}
         for call in msg.get("tool_calls") or []:
@@ -614,7 +639,8 @@ class Gateway:
         active = self.ollama.info if self.ollama else self.offline.backend
         return {"backend": active, "tools": sorted(self.catalog), "reason": None if self.ollama else self.reason}
 
-    def respond(self, delegation: dict) -> dict:
+    def respond(self, delegation: dict, emit: Callable[[str], None] | None = None) -> dict:
+        """`emit` riceve i frammenti di testo man mano che il modello li genera (streaming, ADR-0025)."""
         allowed = {t["name"] for t in delegation.get("tools", [])}
         catalog = {k: v for k, v in self.catalog.items() if k in allowed}
         # Strumenti dinamici (connettori RF-14): descritti dal Core nella delega, mai dal catalogo statico.
@@ -624,7 +650,7 @@ class Gateway:
         self._recover_ollama()
         if self.ollama:
             try:
-                return self.ollama.respond(delegation, catalog)
+                return self.ollama.respond(delegation, catalog, emit)
             except (urllib.error.URLError, OSError, ValueError, KeyError) as exc:
                 self._degrade(f"Ollama non disponibile durante la richiesta ({exc.__class__.__name__})")
         return self.offline.respond(delegation, catalog)

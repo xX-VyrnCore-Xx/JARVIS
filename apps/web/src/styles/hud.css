@@ -143,6 +143,8 @@ main { flex: 1; min-width: 0; min-height: 0; display: flex; }
 .step.allow, .step.succeeded { color: var(--ok); }
 .step.deny, .step.failed { color: var(--bad); }
 .step.require_confirmation { color: var(--warn); }
+.msg.streaming::after { content: "▍"; color: var(--accent); margin-left: 1px; animation: caret 1s steps(2) infinite; }
+@keyframes caret { 50% { opacity: 0; } }
 .typing { color: var(--muted); font-style: italic; border-style: dashed; }
 .confirm { border: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 9%, var(--panel-solid)); border-radius: var(--radius); padding: .85rem 1rem; max-width: min(760px, 92%); box-shadow: 0 0 22px color-mix(in srgb, var(--warn) 18%, transparent); }
 .confirm h3 { margin: 0 0 .35rem; font-size: 1rem; color: var(--warn); }

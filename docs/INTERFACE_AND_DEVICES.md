@@ -30,7 +30,7 @@ Verificare per piattaforma enrollment, revoca, segnalazione dei limiti OS, ripre
 Sul dispositivo associato la plancia non compare: si apre la chat.
 
 L'interfaccia Web è servita dal Core su `http://localhost:8765` e comprende:
-- chat, con i passaggi di ogni risposta (agente, strumento, policy, esito);
+- chat con le risposte del modello locale che compaiono parola per parola (ADR-0025) e i passaggi di ogni risposta (agente, strumento, policy, esito);
 - schede di conferma con effetto atteso, destinazione e scadenza;
 - sezioni Attività, Automazioni, Memoria, Workspace e Audit. Nella sezione Automazioni si crea un'automazione da un modulo generato dal catalogo e la si può eseguire subito, sospendere, riattivare, eliminare o consultarne la cronologia;
 - stato del backend AI e dell'integrità dell'audit nell'intestazione.
