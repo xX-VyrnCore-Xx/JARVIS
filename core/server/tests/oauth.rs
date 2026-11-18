@@ -29,6 +29,8 @@ struct AuthServer {
     refreshed: u32,
     last_bearer: String,
     revoked: Vec<String>,
+    /// Access token accettato dall'API; il test lo cambia per simulare una revoca lato servizio.
+    accepted: Option<String>,
 }
 
 fn form(body: &str) -> std::collections::HashMap<String, String> {
@@ -93,9 +95,10 @@ fn auth_server() -> (String, Arc<Mutex<AuthServer>>) {
                         if f.get("refresh_token").map(String::as_str) == Some("rinnovo-1") =>
                     {
                         s.refreshed += 1;
+                        let token = format!("accesso-{}", s.refreshed + 1);
                         (
                             200,
-                            json!({"access_token": "accesso-2", "expires_in": 3600, "token_type": "Bearer"}),
+                            json!({"access_token": token, "expires_in": 3600, "token_type": "Bearer"}),
                         )
                     }
                     _ => (400, json!({"error": "unsupported_grant_type"})),
@@ -110,7 +113,8 @@ fn auth_server() -> (String, Arc<Mutex<AuthServer>>) {
                 (200, json!({}))
             } else if first.starts_with("GET /api/profilo") {
                 s.last_bearer = auth.clone();
-                if auth == "Bearer accesso-2" {
+                let accepted = s.accepted.clone().unwrap_or_else(|| "accesso-2".into());
+                if auth == format!("Bearer {accepted}") {
                     (200, json!({"nome": "Proprietario sintetico"}))
                 } else {
                     (401, json!({"error": "token scaduto"}))
@@ -293,6 +297,29 @@ async fn oauth_pkce_flow_authorizes_refreshes_and_revokes() {
         let s = auth.lock().unwrap();
         assert_eq!(s.refreshed, 1, "rinnovo automatico");
         assert_eq!(s.last_bearer, "Bearer accesso-2");
+    }
+
+    // Il servizio invalida il token prima della scadenza dichiarata: 401, rinnovo immediato e una sola
+    // nuova chiamata (ADR-0037).
+    auth.lock().unwrap().accepted = Some("accesso-3".into());
+    let (_, out) = env
+        .json(
+            "POST",
+            "/api/chat",
+            Some(json!({"message": "connettore profilo leggi"})),
+        )
+        .await;
+    assert!(
+        out["reply"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Proprietario sintetico"),
+        "{out}"
+    );
+    {
+        let s = auth.lock().unwrap();
+        assert_eq!(s.refreshed, 2, "rinnovo dopo il 401");
+        assert_eq!(s.last_bearer, "Bearer accesso-3");
     }
 
     // Consenso negato dal proprietario sul servizio.

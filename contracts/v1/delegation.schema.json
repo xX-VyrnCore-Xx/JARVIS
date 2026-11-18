@@ -262,6 +262,43 @@
               }
             }
           }
+        },
+        "tool_history": {
+          "description": "Passi già eseguiti in questo turno, in ordine (ciclo dell'agente, ADR-0037). L'ultimo coincide con tool_result. Aggiunta compatibile (facoltativa) della v1.",
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tool",
+              "status",
+              "output"
+            ],
+            "properties": {
+              "tool": {
+                "$ref": "common.schema.json#/$defs/identifier"
+              },
+              "status": {
+                "enum": [
+                  "succeeded",
+                  "failed",
+                  "denied",
+                  "cancelled"
+                ]
+              },
+              "output": {},
+              "arguments": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "steps_left": {
+          "description": "Strumenti che l'agente può ancora chiedere in questo turno; 0 = deve rispondere. Aggiunta compatibile (facoltativa) della v1.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4
         }
       }
     },

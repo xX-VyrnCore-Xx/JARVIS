@@ -168,6 +168,16 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
             Ok(json!({"path": s("path"), "bytes_written": content.len()}))
         }
         "memory.remember" => {
+            // Stessa informazione già ricordata: nessun duplicato, si restituisce l'elemento esistente.
+            if let Some((id, kind)) = ctx
+                .store
+                .memory_find_same(s("text"))
+                .map_err(|e| ToolError::new("memory.unavailable", e.to_string()))?
+            {
+                return Ok(
+                    json!({"id": id, "text": s("text"), "kind": kind, "already_known": true}),
+                );
+            }
             let id = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
             let kind = args["kind"]
                 .as_str()

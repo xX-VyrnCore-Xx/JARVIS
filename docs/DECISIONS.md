@@ -922,6 +922,20 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** anteprima delle risorse generate; `cargo fmt` e `clippy -D warnings` dell'app su Linux; build degli installatori e prove di installazione nel workflow `release` sui 3 sistemi (il codice solo macOS si compila lì).
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md, README.md.
 
+### ADR-0037 — Ciclo dell'agente, prompt di sistema, OAuth reattivo, database e memoria senza duplicati
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario («system prompt del modello, migliora l'orchestratore e il collegamento ai tools e agli OAuth, migliora il database e la memoria»). Estende ADR-0004, ADR-0022, ADR-0024 e ADR-0027.
+- **Contesto:** l'orchestratore eseguiva un solo strumento per richiesta, nonostante il limite `max_steps: 4` dichiarato nella delega; il prompt di sistema non conosceva data e ora né regole d'uso degli strumenti; un token OAuth invalidato dal servizio prima della scadenza falliva fino al rinnovo successivo; la memoria accettava duplicati; il database non aveva manutenzione né diagnostica.
+- **Decisione:**
+  - **Ciclo dell'agente** (`Jarvis::drive`): fino a 4 strumenti per richiesta. Ogni proposta passa da policy, audit ed eventuale conferma; dopo ogni risultato l'agente riceve `inputs.tool_history` e `inputs.steps_left` (aggiunte compatibili al contratto di delega) e decide se chiedere un altro strumento o rispondere. Con `steps_left = 0`, dopo un rifiuto o una negazione della policy l'agente deve rispondere. Una proposta identica a un passo già eseguito chiude il ciclo (`loop_guard`). La conferma sospende il ciclo e lo riprende con lo stesso contesto. Gli esiti precedenti all'ultimo viaggiano ridotti a 3.000 caratteri.
+  - **Prompt di sistema** (`system_prompt` in `gateway.py`): identità, data e ora locali, stile, regole sugli strumenti (uno per volta, mai risultati inventati, conferma chiesta dal Core, memoria prima di `memory.search`, salvataggio dei fatti stabili), sicurezza sui contenuti non attendibili, preferenze del proprietario come istruzioni. I passi precedenti tornano al modello come chiamate e risultati di strumenti; anche i file letti sono marcati come non attendibili.
+  - **OAuth reattivo:** una risposta 401 diventa `connector.token_rejected`; con OAuth il Core rinnova subito il token e ripete la chiamata una sola volta, anche per le scritture, perché il servizio non le ha eseguite.
+  - **Memoria:** `memory.remember` riconosce lo stesso fatto (maiuscole, accenti e punteggiatura ignorati) e restituisce l'elemento esistente con `already_known`; gli episodi elencano tutti gli strumenti del turno.
+  - **Database:** `synchronous=NORMAL` con WAL, `busy_timeout` di 5 secondi, `foreign_keys`, temporanei in memoria; indici su task, messaggi e scadenze delle automazioni; versione dello schema in `user_version` (2); `PRAGMA optimize` all'apertura e manutenzione ogni 6 ore (statistiche, checkpoint del WAL, pulizia dei ricordi scaduti); `GET /api/database` con integrità rapida, dimensione e righe, mostrato nel pannello «Database locale» della sezione Sistema.
+- **Conseguenze:** una richiesta composta («che ore sono e che sistema uso?») si risolve in un turno; il consumo di token cresce con i passi, limitato da `steps_left` e dalla riduzione degli esiti. In modalità offline il comportamento non cambia (un solo strumento). Versione 1.4.0.
+- **Evidenza:** `tests/agent_loop.rs` (catena di 2 strumenti, ripetizione bloccata, arresto a 4 strumenti) con il worker reale contro un Ollama sintetico; `tests/oauth.rs` (401, rinnovo e nuova chiamata); `tests/memory.rs` (nessun duplicato, `/api/database`); `tests/ai/test_gateway.py` (strumenti di nuovo offerti, risposta finale senza strumenti, prompt con data e preferenze); E2E 71/71.
+- **Documenti interessati:** AI_SYSTEM.md, AUTONOMY_AND_TOOLS.md, MEMORY_DATA_SYNC.md, ROADMAP.md, contratto `delegation`.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

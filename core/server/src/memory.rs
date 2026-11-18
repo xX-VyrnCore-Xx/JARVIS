@@ -428,6 +428,38 @@ impl Store {
         self.memory_index(item.id, item.text, item.kind)
     }
 
+    /// Elemento con lo stesso testo normalizzato (maiuscole, accenti e punteggiatura ignorati), se esiste:
+    /// `memory.remember` lo riusa invece di creare un duplicato (ADR-0037).
+    pub fn memory_find_same(&self, text: &str) -> StoreResult<Option<(String, String)>> {
+        let key = normalize(text)
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        if key.is_empty() {
+            return Ok(None);
+        }
+        let mut stmt = self.conn.prepare("SELECT id, text, kind FROM memory")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (id, existing, kind) = row?;
+            if normalize(&existing)
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                == key
+            {
+                return Ok(Some((id, kind)));
+            }
+        }
+        Ok(None)
+    }
+
     pub fn memory_add(&self, id: &str, text: &str, at: &str) -> StoreResult<()> {
         self.memory_insert(
             &NewItem {

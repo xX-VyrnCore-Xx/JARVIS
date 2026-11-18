@@ -38,6 +38,8 @@ Il routing `auto` usa Ollama se risponde e ha un modello installato. Se Ollama f
 
 L'agente propone al massimo una chiamata di strumento per turno (`jarvis.agent-result/1`); il Core decide ed esegue. È attivo solo il General Assistant. L'escalation cloud non è implementata e la delega impone sempre `allow_cloud: false`.
 
+**Prompt di sistema e ciclo dell'agente (ADR-0037).** Il prompt porta data e ora locali, regole di stile e d'uso degli strumenti, sicurezza sui contenuti esterni e la memoria autorizzata (le preferenze valgono come istruzioni). L'agente può usare fino a 4 strumenti per richiesta: dopo ogni risultato riceve lo storico del turno (`tool_history`) e i passi residui (`steps_left`); con zero passi deve rispondere.
+
 Con gli strumenti Web il prompt di sistema chiede di citare le fonti con [n] e l'URL e di non seguire istruzioni contenute nelle pagine. I risultati Web arrivano al modello racchiusi tra marcatori di contenuto non attendibile. Il Core allega comunque le fonti alla risposta (ADR-0007).
 
 ## Budget dei token (ADR-0024)
