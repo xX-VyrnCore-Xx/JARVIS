@@ -68,6 +68,7 @@ export function System({ active, onSetup }: { active: boolean; onSetup: () => vo
             <Stat k="Voce" v={v && v.available ? `${v.stt.name} · ${v.tts ? v.tts.name : "senza sintesi"}` : "non disponibile"} d={v ? (v.available ? `attivazione: ${v.wake}` : (v.reasons || []).join("; ")) : ""} />
             <Stat k="Web" v={h.web && h.web.enabled ? `attivo · ${h.web.provider}` : "disattivato"} d={h.web ? h.web.provider_url : ""} />
             <Stat k="Audit" v={`${h.audit.events} eventi`} d={h.audit.chain_valid ? "catena integra ✓" : "catena ALTERATA ✗"} />
+            <Stat k="Token del modello" v={`${c["ai.tokens.prompt"] || 0} in ingresso · ${c["ai.tokens.output"] || 0} generati`} d={`budget del contesto (ADR-0024) · ${c["ai.tools.sent"] || 0} descrizioni di strumenti inviate`} />
             <Stat k="Worker" v={`${c["worker.spawned"] || 0} avvii · ${c["worker.crashed"] || 0} arresti anomali`} d={`${c["delegation.failed"] || 0} deleghe fallite`} />
           </>
         ) : null}

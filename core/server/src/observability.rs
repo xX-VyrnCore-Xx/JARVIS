@@ -89,6 +89,16 @@ impl Observability {
             .record(ms, error);
     }
 
+    /// Incrementa un contatore di `n` (es. token consumati dal modello).
+    pub fn add(&self, name: &str, n: u64) {
+        *self
+            .counters
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(name.to_string())
+            .or_default() += n;
+    }
+
     pub fn count(&self, name: &str) {
         *self
             .counters

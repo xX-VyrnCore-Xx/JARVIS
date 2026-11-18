@@ -671,6 +671,29 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - controllo del bundle nel job e2e; `tsc --noEmit` nel build.
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, TECH_STACK.md, DEVELOPMENT.md, CLAUDE.md, ROADMAP.md.
 
+### ADR-0024 — Budget dei token verso il modello locale
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario («miglioramento di uso dei token»).
+- **Contesto:**
+  - ogni delega inviava fino a 10 turni da 8000 caratteri, fino a 50 elementi di memoria e la descrizione completa di tutti gli strumenti (16 più connettori e nodi);
+  - con modelli locali da 3–7 miliardi di parametri questo allunga la valutazione del prompt, può superare la finestra di contesto e peggiora la scelta dello strumento.
+- **Opzioni:**
+  - riassumere la conversazione con il modello: costa una chiamata in più;
+  - budget deterministici nel Core e selezione degli strumenti nel worker: nessuna chiamata in più, comportamento verificabile.
+- **Decisione:**
+  - cronologia e memoria entro budget nel Core (`budget_history`, `budget_memory`);
+  - selezione degli strumenti per parole chiave con un nucleo fisso;
+  - schemi compatti e JSON compatto per gli esiti;
+  - `num_ctx` e `keep_alive` espliciti;
+  - campo facoltativo `usage` in `jarvis.agent-result/1` (aggiunta compatibile) con contatori nel Core.
+- **Conseguenze:**
+  - se la richiesta non contiene parole chiave note, il modello vede solo il nucleo: per i casi ambigui resta `JARVIS_TOOL_SELECTION=all`;
+  - i turni vecchi accorciati perdono dettagli, che restano nella conversazione salvata e nella memoria episodica.
+- **Evidenza:**
+  - `budget_tests` in `orchestrator.rs` (ultimo turno intero, budget rispettato, memoria in ordine di priorità);
+  - `test_token_budget_selects_relevant_tools_and_reports_usage` in `tests/ai/test_gateway.py`.
+- **Documenti interessati:** AI_SYSTEM.md, ROADMAP.md, contratto `agent-result`.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).
