@@ -17,11 +17,27 @@ Al primo avvio si apre **Configura JARVIS** con le scelte consigliate già selez
 - voce locale con riconoscimento `small`, voce italiana Paola e «Ehi Jarvis»;
 - se [Ollama](https://ollama.com/download) è installato, il modello `qwen2.5:3b`.
 
-Un clic su **Installa** scarica tutto mostrando l'avanzamento (circa 2,7 GB). La configurazione si ripete da Sistema → «Configura voce e modello AI». L'impronta si verifica con il file `.sha256` accanto (`sha256sum -c <file>.sha256`).
+Un clic su **Installa** scarica tutto mostrando l'avanzamento (circa 2,7 GB). La configurazione si ripete da Sistema → «Configura voce e modello AI». Ogni release è firmata dal workflow di GitHub, senza chiavi da custodire (ADR-0020). Si verifica così:
 
-I file non sono firmati:
+```bash
+gh attestation verify JARVIS_1.0.0_aarch64.dmg --repo xX-VyrnCore-Xx/JARVIS
+```
+
+In alternativa, con `cosign`, si verifica l'elenco firmato delle impronte e poi il file scaricato:
+
+```bash
+cosign verify-blob --bundle SHA256SUMS.sigstore.json --certificate-identity-regexp '^https://github.com/xX-VyrnCore-Xx/JARVIS/' --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS
+```
+
+```bash
+sha256sum -c --ignore-missing SHA256SUMS
+```
+
+Resta pubblicata solo l'ultima versione stabile.
+
+Senza un certificato Apple Developer o Authenticode a pagamento, i sistemi mostrano ancora un avviso al primo avvio:
 - **Windows:** SmartScreen può chiedere «Ulteriori informazioni → Esegui comunque»;
-- **macOS:** apri l'app con clic destro → Apri.
+- **macOS:** l'app ha una firma ad hoc; aprila con clic destro → Apri, oppure da Impostazioni di Sistema → Privacy e sicurezza → «Apri comunque».
 
 Le istruzioni qui sotto valgono per chi usa i sorgenti.
 

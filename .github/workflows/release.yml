@@ -15,6 +15,11 @@ on:
         description: "Tag da creare e pubblicare (es. v0.1.0): deve corrispondere alla versione del Core. Vuoto = solo archivi"
         required: false
         default: ""
+      sostituisci:
+        description: "Se la release del tag esiste già, la elimina con il suo tag e la ricrea sul commit costruito"
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write
@@ -95,6 +100,9 @@ jobs:
           cp -R "$RUNNER_TEMP/dmg/JARVIS.app" "$RUNNER_TEMP/Applications/"
           hdiutil detach "$RUNNER_TEMP/dmg"
           app="$RUNNER_TEMP/Applications/JARVIS.app"
+          # Firma ad hoc dell'app (ADR-0020): sigillo valido su tutto il pacchetto.
+          codesign --verify --verbose=2 "$app"
+          codesign -dv "$app" 2>&1 | grep -E "Signature=adhoc|flags=" 
           res="$app/Contents/Resources"
           test -x "$app/Contents/MacOS/jarvis-core" && test -x "$res/python/bin/python3"
           JARVIS_HOME="$res" JARVIS_PYTHON="$res/python/bin/python3" JARVIS_DATA_DIR="$RUNNER_TEMP/dati" "$app/Contents/MacOS/jarvis-core" > core.log 2>&1 &
@@ -114,16 +122,12 @@ jobs:
           Start-Process -FilePath $core.FullName -RedirectStandardOutput core.log -RedirectStandardError core.err -NoNewWindow
           python tests/smoke/start_smoke.py http://127.0.0.1:8765 120
           if ($LASTEXITCODE -ne 0) { Get-Content core.log, core.err; exit 1 }
-      - name: Installer e impronte SHA-256
+      - name: Installer da pubblicare
         shell: bash
         run: |
           mkdir -p dist
           find apps/desktop/src-tauri/target/release/bundle \( -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.msi' -o -name '*-setup.exe' \) -type f -exec cp {} dist/ \;
-          cd dist
-          for f in *; do
-            if command -v sha256sum >/dev/null; then sha256sum "$f" > "$f.sha256"; else shasum -a 256 "$f" > "$f.sha256"; fi
-          done
-          ls -la
+          ls -la dist
       - uses: actions/upload-artifact@v4
         with:
           name: jarvis-${{ matrix.target }}
@@ -136,6 +140,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
       - name: Tag coerente con la versione del Core
@@ -151,11 +157,44 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Release pubblica con archivi e impronte SHA-256
+      - name: Elenco delle impronte SHA-256
+        working-directory: dist
+        run: |
+          rm -f ./*.sha256
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+      # Firma senza chiavi da custodire (ADR-0020): attestazione di provenienza di GitHub per ogni installer e
+      # firma Sigstore dell'elenco delle impronte, legate a questo workflow e a questo commit.
+      - name: Attestazione di provenienza degli installer
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: |
+            dist/*.deb
+            dist/*.AppImage
+            dist/*.dmg
+            dist/*.msi
+            dist/*-setup.exe
+      - uses: sigstore/cosign-installer@v3
+      - name: Firma Sigstore dell'elenco delle impronte
+        working-directory: dist
+        run: |
+          cosign sign-blob --yes --bundle SHA256SUMS.sigstore.json SHA256SUMS
+          cosign verify-blob --bundle SHA256SUMS.sigstore.json \
+            --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@$GITHUB_REF" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS
+      - name: Release pubblica con installer, impronte e firme
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.name }}
+          REPLACE: ${{ inputs.sostituisci && 'true' || 'false' }}
         run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          if [ "$REPLACE" = "true" ] && gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "sostituzione della release $TAG"
+            gh release delete "$TAG" --yes --cleanup-tag --repo "$GITHUB_REPOSITORY"
+            sleep 5
+          fi
           extra=""
           case "$TAG" in *-*) extra="--prerelease" ;; esac
           # Con l'avvio manuale il tag non esiste ancora: lo crea qui sul commit costruito (via git, così un
@@ -174,3 +213,18 @@ jobs:
             gh api "repos/$GITHUB_REPOSITORY/releases?per_page=3" --jq '.[].tag_name' || true
             exit 1
           }
+      # Resta pubblicata solo l'ultima versione stabile (decisione del proprietario del 2026-11-18): le release
+      # precedenti e i loro tag vengono eliminati. Una prerelease non elimina nulla. Il ritorno a una versione
+      # precedente resta possibile in locale con `jarvis rollback` (ADR-0015).
+      - name: Solo l'ultima release stabile
+        if: ${{ !contains(steps.tag.outputs.name, '-') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.tag.outputs.name }}
+        run: |
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName --jq '.[].tagName' | while read -r old; do
+            [ "$old" = "$TAG" ] && continue
+            echo "eliminazione della release $old e del suo tag"
+            gh release delete "$old" --yes --cleanup-tag --repo "$GITHUB_REPOSITORY"
+          done
+          gh release list --repo "$GITHUB_REPOSITORY"

@@ -470,7 +470,7 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
     - Linux: installazione reale del `.deb` con `dpkg`;
     - Windows: installazione reale dell'`.msi` con `msiexec /qn`;
     - macOS: l'app viene copiata dal `.dmg` montato, come in un'installazione;
-    - in tutti i casi, il Core installato con il Python incluso supera `tests/smoke/start_smoke.py`. Si pubblicano solo gli installer, con un `.sha256` per ciascuno.
+    - in tutti i casi, il Core installato con il Python incluso supera `tests/smoke/start_smoke.py`. Si pubblicano solo gli installer, con l'elenco firmato `SHA256SUMS` (ADR-0020).
 - **Motivazione:** si installa e si avvia senza prerequisiti né terminale. Le prove usano i file installati, non la cartella di build.
 - **Conseguenze:**
   - installer non firmati (avvisi di SmartScreen e Gatekeeper finché il proprietario non fornisce i certificati);
@@ -577,6 +577,27 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - E2E con passi simulati: finestra al primo avvio con le scelte consigliate, dimensione stimata, completamento dei passi;
   - installazione della voce con il Python incluso verificata dalla CI di release sui 3 sistemi.
 - **Documenti interessati:** README.md, ACCEPTANCE.md, INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
+### ADR-0020 — Firma delle release senza chiavi e una sola release pubblicata
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario («firma autonomamente le release», «lascia solamente quelle necessarie»).
+- **Contesto:** gli installer non erano firmati. Un certificato Apple Developer ID o Authenticode richiede un acquisto e un'identità del proprietario, che la sessione non può ottenere. Erano pubblicate tre release (`v0.1.0`, `v0.1.1`, `v1.0.0`).
+- **Opzioni:**
+  - chiave GPG o minisign custodita nei segreti del repository: richiede di generarla e conservarla fuori dalla sessione;
+  - firma senza chiavi con l'identità OIDC del workflow (Sigstore e attestazioni di GitHub): nessun segreto, verificabile da chiunque;
+  - certificati commerciali: rinviati al proprietario.
+- **Decisione:**
+  - il job di pubblicazione crea un'attestazione di provenienza (`actions/attest-build-provenance`) per ogni installer;
+  - crea un unico `SHA256SUMS` al posto dei file `.sha256` separati e lo firma con `cosign sign-blob` senza chiavi. Il bundle `SHA256SUMS.sigstore.json` viene verificato nel job stesso e pubblicato con la release;
+  - l'app macOS ha una firma ad hoc (`signingIdentity: "-"`), verificata in CI con `codesign --verify`;
+  - dopo una release stabile, il workflow elimina le altre release e i loro tag. Una prerelease non elimina nulla;
+  - l'input `sostituisci` ricrea una release esistente con lo stesso tag sul commit costruito.
+- **Conseguenze:**
+  - l'origine di ogni file è verificabile con `gh attestation verify` oppure con `cosign verify-blob` e `sha256sum -c`;
+  - SmartScreen e Gatekeeper mostrano ancora un avviso al primo avvio finché non si usano certificati commerciali;
+  - il ritorno a una versione precedente resta locale (`jarvis rollback`, ADR-0015).
+- **Evidenza:** workflow «release»: verifica `cosign verify-blob` nel job di pubblicazione, `codesign --verify` dell'app installata dal `.dmg`, elenco finale delle release.
+- **Documenti interessati:** README.md, ACCEPTANCE.md, ROADMAP.md.
 
 ### Decisione operativa — Merge automatico con CI verde
 
