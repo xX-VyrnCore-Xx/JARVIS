@@ -28,6 +28,7 @@ struct AuthServer {
     issued: u32,
     refreshed: u32,
     last_bearer: String,
+    revoked: Vec<String>,
 }
 
 fn form(body: &str) -> std::collections::HashMap<String, String> {
@@ -99,6 +100,14 @@ fn auth_server() -> (String, Arc<Mutex<AuthServer>>) {
                     }
                     _ => (400, json!({"error": "unsupported_grant_type"})),
                 }
+            } else if first.starts_with("POST /revoke") {
+                let f = form(&body);
+                s.revoked.push(format!(
+                    "{}:{}",
+                    f.get("token_type_hint").cloned().unwrap_or_default(),
+                    f.get("token").cloned().unwrap_or_default()
+                ));
+                (200, json!({}))
             } else if first.starts_with("GET /api/profilo") {
                 s.last_bearer = auth.clone();
                 if auth == "Bearer accesso-2" {
@@ -193,7 +202,7 @@ async fn oauth_pkce_flow_authorizes_refreshes_and_revokes() {
     let manifest = json!({
         "contract": "jarvis.connector/1", "id": "profilo", "name": "Profilo", "version": "1.0.0", "description": "Servizio OAuth sintetico",
         "base_url": format!("{server}/api"), "allowed_hosts": ["127.0.0.1"],
-        "auth": {"type": "oauth2", "authorize_url": format!("{server}/authorize"), "token_url": format!("{server}/token"),
+        "auth": {"type": "oauth2", "authorize_url": format!("{server}/authorize"), "token_url": format!("{server}/token"), "revoke_url": format!("{server}/revoke"),
                  "client_id": "jarvis-test", "scopes": ["profile.read"]},
         "operations": [{"name": "leggi", "summary": "Profilo del proprietario", "method": "GET", "path": "/profilo", "effects": "read",
                         "input_schema": {"type": "object", "additionalProperties": false, "properties": {}}}],
@@ -312,10 +321,16 @@ async fn oauth_pkce_flow_authorizes_refreshes_and_revokes() {
     assert!(page.contains("non ha concesso"));
 
     // Revoca: token cancellati e strumenti rimossi.
-    let (status, _) = env
+    let (status, out) = env
         .json("POST", "/api/connectors/profilo/revoke", None)
         .await;
     assert_eq!(status, StatusCode::OK);
+    assert_eq!(out["remote_revoked"], true, "{out}");
+    assert_eq!(
+        auth.lock().unwrap().revoked,
+        vec!["refresh_token:rinnovo-1".to_string()],
+        "revoca presso il servizio (RFC 7009)"
+    );
     let (_, tools) = env.json("GET", "/api/tools", None).await;
     assert!(!tools.to_string().contains("connector.profilo."));
     let (_, audit) = env.json("GET", "/api/audit?limit=100", None).await;

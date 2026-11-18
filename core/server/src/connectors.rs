@@ -59,7 +59,10 @@ pub fn validate_manifest(manifest: &Value, web: &WebConfig) -> Result<Value, Str
     if manifest["auth"]["type"] == "oauth2" {
         // OAuth (ADR-0027): endpoint in HTTPS (HTTP solo su loopback con la policy di prova) e token
         // richiesti solo a un host dichiarato.
-        for key in ["authorize_url", "token_url"] {
+        for key in ["authorize_url", "token_url", "revoke_url"] {
+            if manifest["auth"][key].is_null() {
+                continue;
+            }
             let u = Url::parse(manifest["auth"][key].as_str().unwrap_or_default())
                 .map_err(|_| format!("auth.{key} non valido"))?;
             let loopback = matches!(u.host_str(), Some("127.0.0.1" | "localhost"));
@@ -67,13 +70,17 @@ pub fn validate_manifest(manifest: &Value, web: &WebConfig) -> Result<Value, Str
                 return Err(format!("auth.{key} deve usare HTTPS"));
             }
         }
-        let token = Url::parse(manifest["auth"]["token_url"].as_str().unwrap_or_default())
-            .map_err(|_| "auth.token_url non valido".to_string())?;
-        let token_host = token.host_str().unwrap_or_default().to_ascii_lowercase();
-        if !hosts.contains(&token_host) {
-            return Err(format!(
-                "l'host di auth.token_url ({token_host}) deve comparire in allowed_hosts"
-            ));
+        for key in ["token_url", "revoke_url"] {
+            let Some(raw) = manifest["auth"][key].as_str() else {
+                continue;
+            };
+            let u = Url::parse(raw).map_err(|_| format!("auth.{key} non valido"))?;
+            let host = u.host_str().unwrap_or_default().to_ascii_lowercase();
+            if !hosts.contains(&host) {
+                return Err(format!(
+                    "l'host di auth.{key} ({host}) deve comparire in allowed_hosts"
+                ));
+            }
         }
     }
     let mut normalized = manifest.clone();

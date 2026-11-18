@@ -321,3 +321,51 @@ fn offline_node_and_wrong_codes_are_reported() {
         "{out}"
     );
 }
+
+#[test]
+fn automatic_node_choice_runs_on_an_online_node_and_follows_revocation() {
+    let env = core();
+    let mut agents = vec![];
+    for name in ["Studio", "Garage"] {
+        let stop = Arc::new(AtomicBool::new(false));
+        let cfg = AgentConfig {
+            core_url: env.url.clone(),
+            dir: temp("auto"),
+            name: name.into(),
+            code: Some(env.pairing_code()),
+            capabilities: vec!["time.now".into(), "system.info".into()],
+            poll_wait_s: 1,
+        };
+        let s = stop.clone();
+        agents.push((stop, std::thread::spawn(move || run(&cfg, s))));
+    }
+    env.wait_online("studio");
+    env.wait_online("garage");
+    let (_, tools) = env.call("GET", "/api/tools", None);
+    assert!(
+        tools.to_string().contains("node.auto.time.now"),
+        "strumento automatico registrato"
+    );
+
+    let out = env.chat("nodo auto time.now");
+    assert_eq!(
+        step(&out, "tool_result").unwrap()["status"],
+        "succeeded",
+        "{out}"
+    );
+
+    // Revocati entrambi i nodi, lo strumento automatico sparisce.
+    let (_, devices) = env.call("GET", "/api/devices", None);
+    for d in devices["items"].as_array().unwrap() {
+        let id = d["device_id"].as_str().unwrap();
+        env.call("POST", &format!("/api/devices/{id}/revoke"), None);
+    }
+    for (_, a) in agents {
+        let _ = a.join();
+    }
+    let (_, tools) = env.call("GET", "/api/tools", None);
+    assert!(
+        !tools.to_string().contains("node.auto."),
+        "nessun nodo, nessuno strumento automatico"
+    );
+}

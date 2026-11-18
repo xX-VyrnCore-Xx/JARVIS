@@ -217,6 +217,54 @@ pub fn refresh(manifest: &Value, web: &WebConfig, state: &Value) -> Result<Value
     token_request(manifest, web, &pairs, state)
 }
 
+/// Revoca presso il servizio (RFC 7009): prima il refresh token, che invalida anche gli access token
+/// collegati, altrimenti l'access token. Restituisce un esito leggibile; i token locali vengono cancellati
+/// comunque dal chiamante.
+pub fn revoke(
+    manifest: &Value,
+    web: &WebConfig,
+    state: &Value,
+    access: Option<&str>,
+) -> Result<(), String> {
+    let Some(raw) = manifest["auth"]["revoke_url"].as_str() else {
+        return Err("il servizio non dichiara un endpoint di revoca".into());
+    };
+    let url = Url::parse(raw).map_err(|_| "revoke_url non valido".to_string())?;
+    let (token, hint) = match (state["refresh_token"].as_str(), access) {
+        (Some(r), _) => (r.to_string(), "refresh_token"),
+        (None, Some(a)) => (a.to_string(), "access_token"),
+        (None, None) => return Err("nessun token da revocare".into()),
+    };
+    let client_id = manifest["auth"]["client_id"].as_str().unwrap_or_default();
+    let mut pairs = vec![
+        ("token", token.as_str()),
+        ("token_type_hint", hint),
+        ("client_id", client_id),
+    ];
+    if let Some(s) = state["client_secret"].as_str() {
+        pairs.push(("client_secret", s));
+    }
+    let headers = vec![(
+        "Content-Type".to_string(),
+        "application/x-www-form-urlencoded".to_string(),
+    )];
+    let (status, _, _) = crate::web::request(
+        web,
+        "POST",
+        &url,
+        &headers,
+        Some(&form(&pairs)),
+        &allowed_hosts(manifest),
+    )
+    .map_err(|e| e.message)?;
+    // RFC 7009: 200 anche per un token già scaduto o sconosciuto.
+    if (200..300).contains(&status) {
+        Ok(())
+    } else {
+        Err(format!("il servizio ha risposto HTTP {status} alla revoca"))
+    }
+}
+
 /// Pagina mostrata nel browser al ritorno dal servizio.
 pub fn page(ok: bool, message: &str) -> String {
     let esc = message

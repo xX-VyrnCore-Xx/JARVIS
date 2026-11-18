@@ -64,7 +64,9 @@ La chat mostra un avatar astratto con anelli CSS 3D. L'etichetta annuncia gli st
 
 **Programmi di installazione (ADR-0016):** la release contiene l'app desktop pronta da installare. Windows `.msi` e setup `.exe`, macOS `.dmg`, Linux `.deb` e `.AppImage`. Core, runtime AI e Python sono inclusi.
 
-Restano da sviluppare: funzioni iOS oltre chat e conferme, firma degli installer assegnazione automatica dei lavori ai nodi in base alle risorse.
+Con «nodo auto <strumento>» il Core sceglie da solo il nodo più libero fra quelli in linea (ADR-0031).
+
+Restano da sviluppare: funzioni iOS oltre chat e conferme, firma degli installer
 
 ## App nativa iOS (RF-10, RF-11)
 

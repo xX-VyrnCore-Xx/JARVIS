@@ -2448,6 +2448,7 @@ impl Jarvis {
                 // Nodo: token, coda e assegnazioni in attesa annullati, strumenti tolti dal catalogo.
                 self.nodes.revoke(id);
                 self.catalog.remove_prefix(&format!("node.{slug}."));
+                self.refresh_auto_node_tools();
             }
             self.device_audit("device.revoke", id, "revoked")?;
         }
@@ -2486,8 +2487,51 @@ impl Jarvis {
                 .clone();
             self.catalog
                 .insert_dynamic(crate::nodes::tool_descriptor(&base, slug, name))?;
+            // Scelta automatica (ADR-0031): lo strumento esiste finché almeno un nodo lo offre.
+            self.catalog.insert_dynamic(crate::nodes::tool_descriptor(
+                &base,
+                "auto",
+                "scelto automaticamente",
+            ))?;
         }
         Ok(())
+    }
+
+    /// Strumenti `node.auto.*` coerenti con i nodi rimasti dopo una revoca.
+    fn refresh_auto_node_tools(&mut self) {
+        self.catalog.remove_prefix("node.auto.");
+        let docs = self.node_devices();
+        for doc in docs {
+            for cap in doc["capabilities"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+            {
+                if let Some(base) = self.catalog.get(cap).map(|t| t.descriptor.clone()) {
+                    let _ = self.catalog.insert_dynamic(crate::nodes::tool_descriptor(
+                        &base,
+                        "auto",
+                        "scelto automaticamente",
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Nodi associati e non revocati.
+    fn node_devices(&self) -> Vec<Value> {
+        self.store
+            .devices()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|d| {
+                d.get("revoked_at").is_none()
+                    && d["scopes"]
+                        .as_array()
+                        .is_some_and(|s| s.iter().any(|x| x == "node"))
+            })
+            .collect()
     }
 
     fn register_nodes(&mut self) -> Result<(), String> {
@@ -2545,13 +2589,41 @@ impl Jarvis {
                 "l'operazione sul nodo richiede la conferma del proprietario",
             ));
         }
-        let node = self
-            .store
-            .devices()
-            .map_err(|e| tool_error("node.unavailable", e.to_string()))?
-            .into_iter()
-            .find(|d| d["slug"] == slug && d.get("revoked_at").is_none())
-            .ok_or_else(|| tool_error("node.revoked", "nodo non associato o revocato"))?;
+        let node = if slug == "auto" {
+            // Scelta automatica (ADR-0031): il nodo in linea più libero fra quelli che offrono lo strumento.
+            let offering: Vec<Value> = self
+                .node_devices()
+                .into_iter()
+                .filter(|d| {
+                    d["capabilities"]
+                        .as_array()
+                        .is_some_and(|c| c.iter().any(|x| x == base))
+                })
+                .collect();
+            let ids: Vec<String> = offering
+                .iter()
+                .filter_map(|d| d["device_id"].as_str().map(str::to_string))
+                .collect();
+            let chosen = self
+                .nodes
+                .pick(&ids, std::time::Duration::from_secs(60))
+                .ok_or_else(|| {
+                    tool_error("node.offline", format!("nessun nodo in linea offre {base}"))
+                })?;
+            offering
+                .into_iter()
+                .find(|d| d["device_id"] == chosen.as_str())
+                .unwrap_or_default()
+        } else {
+            self.store
+                .devices()
+                .map_err(|e| tool_error("node.unavailable", e.to_string()))?
+                .into_iter()
+                .find(|d| d["slug"] == slug && d.get("revoked_at").is_none())
+                .ok_or_else(|| tool_error("node.revoked", "nodo non associato o revocato"))?
+        };
+        let slug = node["slug"].as_str().unwrap_or(slug).to_string();
+        let slug = slug.as_str();
         let id = node["device_id"].as_str().unwrap_or_default().to_string();
         if !self.nodes.online(&id, std::time::Duration::from_secs(60)) {
             return Err(tool_error(
@@ -2787,7 +2859,28 @@ impl Jarvis {
     /// Revoca: credenziale cancellata e strumenti rimossi dal catalogo (la policy li nega da subito).
     /// Con `uninstall` elimina anche manifest e segreto del webhook.
     pub fn revoke_connector(&mut self, id: &str, uninstall: bool) -> Result<Value, CoreError> {
-        self.connector_manifest(id)?;
+        let (manifest, _) = self.connector_manifest(id)?;
+        // OAuth (ADR-0027): prima della cancellazione locale si chiede al servizio di invalidare i token.
+        let remote =
+            if manifest["auth"]["type"] == "oauth2" && manifest["auth"]["revoke_url"].is_string() {
+                let state: Value = self
+                    .secrets
+                    .get(&oauth_name(id))
+                    .ok()
+                    .flatten()
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or(Value::Null);
+                let access = self.secrets.get(&token_name(id)).ok().flatten();
+                let r = crate::oauth::revoke(&manifest, &self.cfg.web, &state, access.as_deref());
+                self.obs.count(if r.is_ok() {
+                    "connector.oauth.revoked_remote"
+                } else {
+                    "connector.oauth.revoke_failed"
+                });
+                Some(r)
+            } else {
+                None
+            };
         self.secrets
             .delete(&token_name(id))
             .map_err(CoreError::Internal)?;
@@ -2818,7 +2911,11 @@ impl Jarvis {
             "connector.revoke",
             json!({"connector": id, "uninstall": uninstall}),
         );
-        Ok(json!({"id": id, "tools_removed": removed, "uninstalled": uninstall}))
+        Ok(
+            json!({"id": id, "tools_removed": removed, "uninstalled": uninstall,
+                  "remote_revoked": remote.as_ref().map(Result::is_ok),
+                  "remote_error": remote.and_then(Result::err)}),
+        )
     }
 
     /// Avvia OAuth (ADR-0027): restituisce la pagina di consenso da aprire nel browser del proprietario.

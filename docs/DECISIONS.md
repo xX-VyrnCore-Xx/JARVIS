@@ -826,6 +826,27 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - E2E: firme valide nella sezione Audit.
 - **Documenti interessati:** SECURITY_AND_PRIVACY.md, ROADMAP.md.
 
+### ADR-0031 — Revoca OAuth presso il servizio e scelta automatica del nodo
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario; limiti dichiarati dagli ADR-0027 (revoca solo locale) e ADR-0017 (assegnazione manuale ai nodi).
+- **Decisione — revoca OAuth:**
+  - campo facoltativo `auth.revoke_url` nel contratto `connector`, con host tra gli `allowed_hosts`;
+  - alla revoca o disinstallazione il Core chiama l'endpoint RFC 7009 con il refresh token (o l'access token) prima di cancellare i token locali;
+  - l'esito torna in `remote_revoked` e `remote_error`. I token locali vengono cancellati comunque.
+- **Decisione — scelta del nodo:**
+  - a ogni richiesta di lavoro il nodo dichiara CPU e, su Linux, carico medio e memoria disponibile;
+  - lo strumento `node.auto.<strumento>` esiste finché almeno un nodo lo offre. Il Core sceglie, fra i nodi in linea che lo offrono, quello con meno lavori in corso, poi con il carico per CPU più basso, poi con più memoria libera;
+  - policy, conferma («sul nodo scelto automaticamente») e audit restano quelli dei nodi;
+  - in chat: «nodo auto <strumento> …»; il nome «auto» è riservato.
+- **Conseguenze:**
+  - su macOS e Windows il nodo dichiara solo le CPU: la scelta si basa su lavori in corso e CPU;
+  - se il servizio non risponde alla revoca, l'interfaccia lo segnala; la revoca resta valida in JARVIS.
+- **Evidenza:**
+  - `tests/oauth.rs`: revoca RFC 7009 ricevuta dal server sintetico con il refresh token;
+  - `tests/nodes.rs`: due nodi reali, esecuzione automatica, strumento rimosso alla revoca;
+  - unitari in `nodes.rs`: priorità a carico, lavori in corso e revoca.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md, contratto `connector`.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

@@ -163,8 +163,13 @@ fn expected_effect(tool: &str, args: &Value) -> String {
         ),
         t if t.starts_with("node.") => {
             let (slug, base) = t["node.".len()..].split_once('.').unwrap_or(("?", t));
+            let target = if slug == "auto" {
+                "Sul nodo scelto automaticamente (il più libero fra quelli in linea)".to_string()
+            } else {
+                format!("Sul nodo «{slug}»")
+            };
             format!(
-                "Sul nodo «{slug}»: {}",
+                "{target}: {}",
                 expected_effect(base, args).replace("della workspace", "della workspace del nodo")
             )
         }

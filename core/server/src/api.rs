@@ -898,6 +898,22 @@ async fn node_next(
         .unwrap_or(20u64)
         .min(25);
     let hub = state.nodes.clone();
+    // Risorse dichiarate dal nodo (ADR-0031): servono alla scelta automatica.
+    hub.report(
+        &id,
+        crate::nodes::Resources {
+            cpus: q
+                .get("cpus")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1)
+                .clamp(1, 1024),
+            load: q
+                .get("load")
+                .and_then(|v| v.parse::<f64>().ok())
+                .filter(|l| l.is_finite() && *l >= 0.0),
+            mem_free_mb: q.get("mem_free_mb").and_then(|v| v.parse().ok()),
+        },
+    );
     let next =
         tokio::task::spawn_blocking(move || hub.next(&id, std::time::Duration::from_secs(wait)))
             .await
