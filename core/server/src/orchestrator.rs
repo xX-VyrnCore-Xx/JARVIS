@@ -237,6 +237,7 @@ impl Jarvis {
         };
         jarvis.register_authorized_connectors()?;
         jarvis.refresh_embedder();
+        jarvis.enable_audit_signing()?;
         jarvis.register_nodes()?;
         crate::rollback::mark(&jarvis.cfg.data_dir)?;
         if let Some(up) = upgraded {
@@ -892,6 +893,27 @@ impl Jarvis {
         Ok(out)
     }
 
+    /// Firma del registro di audit (ADR-0030): chiave Ed25519 generata al primo avvio e custodita
+    /// nell'archivio dei segreti.
+    fn enable_audit_signing(&mut self) -> Result<(), String> {
+        let name = "audit:signing-key";
+        let seed = match self.secrets.get(name)? {
+            Some(hexkey) => hex::decode(hexkey)
+                .map_err(|_| "chiave di firma dell'audit danneggiata".to_string())?,
+            None => {
+                let mut k = [0u8; 32];
+                getrandom::getrandom(&mut k).map_err(|e| e.to_string())?;
+                self.secrets.put(name, &hex::encode(k))?;
+                k.to_vec()
+            }
+        };
+        let seed: [u8; 32] = seed
+            .try_into()
+            .map_err(|_| "chiave di firma dell'audit danneggiata".to_string())?;
+        self.audit.set_signer(&seed);
+        Ok(())
+    }
+
     /// Attiva gli embedding della memoria se è scelto un modello (ADR-0028). Senza Ollama la memoria usa
     /// l'indice locale; gli embedding mancanti vengono calcolati appena il servizio risponde.
     fn refresh_embedder(&mut self) {
@@ -1108,8 +1130,9 @@ impl Jarvis {
         let errors = jarvis_contracts::audit_chain_errors(&events);
         let total = events.len();
         let recent: Vec<Value> = events.into_iter().rev().take(limit).collect();
+        let signatures = self.audit.verify_signatures().map_err(internal)?;
         Ok(
-            json!({"total": total, "chain_valid": errors.is_empty(), "chain_errors": errors, "events": recent}),
+            json!({"total": total, "chain_valid": errors.is_empty(), "chain_errors": errors, "events": recent, "signatures": signatures}),
         )
     }
 

@@ -805,6 +805,27 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `tests/ai/test_voice.py` (sequenza, allineamento a silenzi e durata, contratto) e `tests/ui/audio_offline.test.cjs` (visema corrente, labbra chiuse, bocca arrotondata, ritorno a riposo).
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md, contratto `voice-synthesis`.
 
+### ADR-0030 — Firma Ed25519 del registro di audit
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario; lacuna «firma dell'audit» nel checkpoint.
+- **Contesto:** la catena SHA-256 rileva un evento modificato, ma chi può scrivere il file può ricalcolare l'intera catena, che torna coerente.
+- **Opzioni:**
+  - ancoraggio esterno degli hash (servizio di marcatura temporale): richiede rete e un terzo;
+  - firma di ogni evento con una chiave locale tenuta fuori dal file: nessuna dipendenza esterna.
+- **Decisione:**
+  - chiave Ed25519 generata al primo avvio e custodita nell'archivio dei segreti (`audit:signing-key`, portachiavi su macOS e Windows);
+  - ogni nuovo evento è firmato sul messaggio `jarvis-audit/1|stream|sequenza|hash`. Le firme stanno in `core-security.jsonl.sig.jsonl`, così gli eventi restano conformi al contratto;
+  - `GET /api/audit` riporta `signatures`: firmati, eventi precedenti all'attivazione, validità, errori e chiave pubblica;
+  - la sezione Audit mostra lo stato e la chiave pubblica da conservare fuori dal computer;
+  - il backup cifrato include il file delle firme; la chiave privata viaggia con l'archivio dei segreti.
+- **Conseguenze:**
+  - una catena ricalcolata non ha firme valide, salvo che l'attaccante abbia anche la chiave privata, cioè accesso al portachiavi;
+  - gli eventi scritti prima dell'attivazione restano protetti solo dalla catena di hash e sono contati a parte.
+- **Evidenza:**
+  - unitario `signatures_detect_a_recomputed_chain`: catena ricalcolata coerente ma firma non valida;
+  - E2E: firme valide nella sezione Audit.
+- **Documenti interessati:** SECURITY_AND_PRIVACY.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

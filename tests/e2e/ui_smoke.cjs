@@ -312,6 +312,7 @@ function check(cond, msg) {
   await page.click('[data-view="audit"]');
   await page.waitForFunction(() => document.querySelector("#audit-summary").textContent.includes("integra"));
   check(true, "catena di audit integra");
+  check((await page.locator("#audit-signatures").innerText()).includes("valide"), "firme Ed25519 del registro valide");
   if (shots) await page.screenshot({ path: `${shots}/jarvis-audit.png` });
 
   // Sistema (Fase 4): stato dei componenti e latenze misurate.

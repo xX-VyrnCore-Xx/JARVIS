@@ -105,6 +105,10 @@ pub fn create(
         ("data/jarvis.sqlite3".into(), db),
         ("data/audit/core-security.jsonl".into(), audit),
     ];
+    // Firme del registro (ADR-0030): la chiave privata resta nell'archivio dei segreti già incluso.
+    if let Ok(sigs) = fs::read(data_dir.join("audit/core-security.jsonl.sig.jsonl")) {
+        files.push(("data/audit/core-security.jsonl.sig.jsonl".into(), sigs));
+    }
     // Chiave dei segreti dei connettori: senza di essa i segreti ripristinati sarebbero illeggibili.
     // Resta protetta dalla cifratura del backup.
     // Su macOS e Windows la chiave sta nel portachiavi (ADR-0021): il ripristino la riscrive come file e

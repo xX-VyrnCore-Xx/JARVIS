@@ -755,7 +755,9 @@ async fn voice_speak(State(state): State<Shared>, Json(body): Json<Value>) -> Re
         // Labiale (ADR-0029): audio e visemi insieme, così l'avatar li sincronizza con la riproduzione.
         Ok((audio, mut meta)) if with_visemes => {
             use base64::Engine as _;
-            meta["audio_b64"] = base64::engine::general_purpose::STANDARD.encode(&audio).into();
+            meta["audio_b64"] = base64::engine::general_purpose::STANDARD
+                .encode(&audio)
+                .into();
             Json(meta).into_response()
         }
         Ok((audio, meta)) => {

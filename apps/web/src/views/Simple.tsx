@@ -74,6 +74,13 @@ export function Audit({ active }: { active: boolean }) {
       <ViewHead title="Audit" refreshKey="audit" onRefresh={reload} />
       <p className="hint" id="audit-summary">
         {data ? `${data.total} eventi · catena di hash ${data.chain_valid ? "integra ✓" : "ALTERATA ✗ " + data.chain_errors.join("; ")}` : ""}
+        {data?.signatures?.enabled ? (
+          <span id="audit-signatures">
+            {` · firme Ed25519 ${data.signatures.valid ? "valide ✓" : "NON VALIDE ✗ " + data.signatures.errors.join("; ")} (${data.signatures.signed} firmati${data.signatures.unsigned_before_activation ? `, ${data.signatures.unsigned_before_activation} precedenti alla firma` : ""})`}
+            <br />
+            <span className="sub">Chiave pubblica: <code>{data.signatures.public_key}</code> (conservala fuori dal computer per verifiche indipendenti)</span>
+          </span>
+        ) : null}
       </p>
       <div id="audit" className="list">
         {data && !data.events.length ? <Empty>Nessun evento.</Empty> : null}
