@@ -87,5 +87,6 @@ La chat web condivisa dal desktop e dalla PWA integra un avatar astratto 3D con 
 | 2026-11-18 | dopo PR #32 | ADR-0032: app iOS e Android con schede Chat, Attività e Notifiche sulle rotte già ammesse ai dispositivi | Android `core-client` 6/6 in locale; iOS e APK in CI | Secret Service su Linux, release successiva |
 | 2026-11-18 | dopo PR #32 | ADR-0033: chiave dei segreti nel Secret Service su Linux con sessione D-Bus, ripiego sul file altrimenti | Unitari dei segreti 5/5 | CI e release `v1.3.0` |
 | 2026-11-18 | dopo PR #32 | ADR-0034: controllo aggiornamenti facoltativo con canali Stable e Beta, notifica per versione, pannello in Sistema | Rust: 2 unitari + 1 API OK; E2E 70/70 | CI e release `v1.3.0` |
+| 2026-11-18 | dopo PR #32 | ADR-0035: rifinitura grafica per macOS e Windows (icone, barra laterale a gruppi riducibile, palette ⌘K/Ctrl+K, indicatori in Plancia, chat e notifiche animate, caratteri per piattaforma, schermata d'avvio dell'app desktop) | tsc e build OK; E2E superato; clippy e fmt dell'app Tauri OK | CI, merge e release `v1.3.0` |
 
 Per ogni ripresa registrare data, revisione, lavoro completato, verifiche eseguite, blocchi, ipotesi e prossimo passo concreto. Conservare il checkpoint con le modifiche alle quali si riferisce.

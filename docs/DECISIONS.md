@@ -890,6 +890,21 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** unitari in `updates.rs` (versioni, canali, impostazioni, cadenza giornaliera, errori); `update_check_notifies_once_per_version` in `tests/api.rs`; E2E: spento per impostazione, controllo manuale verso un elenco sintetico con versione disponibile.
 - **Documenti interessati:** ACCEPTANCE.md, README.md, ROADMAP.md, contratto `notification`.
 
+### ADR-0035 — Rifinitura grafica della dashboard per macOS e Windows
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario («migliora la grafica della dashboard sia per macOS che per Windows»). Estende l'ADR-0023.
+- **Decisione:**
+  - icone vettoriali in linea (`Icon.tsx`), senza dipendenze o richieste esterne;
+  - barra laterale a gruppi (Operazioni, Dati, Integrazioni, Sistema), riducibile e ricordata nel browser, con il numero di conferme in attesa sulla Chat;
+  - palette comandi con ⌘K su macOS e Ctrl+K su Windows e Linux: sezioni, comandi rapidi e richiesta libera a JARVIS;
+  - Plancia con saluto, riga di indicatori (attività di oggi, riuscite, da confermare, ricordi, nodi in linea), ingresso scaglionato dei pannelli e sfondo con luci in movimento lento;
+  - chat con etichette «Tu»/«JARVIS» via CSS, indicatore di scrittura animato e pulsanti con icona; notifiche a comparsa con icona e barra del tempo;
+  - adattamento alla piattaforma: classe `platform-mac` o `platform-win` sulla radice; caratteri SF su macOS e Segoe UI Variable su Windows; raggi diversi; barre di scorrimento sottili;
+  - app desktop: finestra scura con sfondo coerente fin dall'apertura, parametro `?app=desktop` per le rifiniture dell'app, schermata d'avvio con reattore animato e stato d'errore.
+- **Conseguenze:** il movimento rispetta `prefers-reduced-motion`; gli identificativi del DOM usati dai test restano invariati; nessuna nuova rotta né contratto.
+- **Evidenza:** `tsc` e `npm run build` OK; E2E `tests/e2e/ui_smoke.cjs` superato con il Core 1.3.0 offline; `cargo fmt`, `clippy -D warnings` e `cargo check` dell'app Tauri OK; schermate di Plancia, Chat e palette controllate.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).
