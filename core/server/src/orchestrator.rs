@@ -2467,7 +2467,9 @@ impl Jarvis {
             });
         if stale {
             doc["last_seen_at"] = now().into();
-            self.store.device_put(&doc, &hash).map_err(internal)?;
+            if !self.store.device_touch(&doc, &hash).map_err(internal)? {
+                return Ok(None);
+            }
         }
         Ok(Some(doc))
     }
@@ -2476,29 +2478,20 @@ impl Jarvis {
         self.store.devices().map_err(internal)
     }
 
-    /// Revoca immediata: il token smette di funzionare alla richiesta successiva.
-    pub fn revoke_device(&mut self, id: &str) -> Result<Value, CoreError> {
-        let mut doc = self
-            .store
-            .devices()
-            .map_err(internal)?
-            .into_iter()
-            .find(|d| d["device_id"] == id)
-            .ok_or_else(|| CoreError::NotFound(format!("nessun dispositivo {id}")))?;
-        if doc.get("revoked_at").is_none() {
-            doc["revoked_at"] = now().into();
-            self.store.device_put(&doc, "").map_err(internal)?;
-            // L'impronta viene cancellata: il vecchio token non trova più alcun dispositivo.
-            self.store.device_retire_token(id).map_err(internal)?;
-            if let Some(slug) = doc["slug"].as_str() {
-                // Nodo: token, coda e assegnazioni in attesa annullati, strumenti tolti dal catalogo.
-                self.nodes.revoke(id);
+    /// Aggiorna catalogo e audit dopo il commit della revoca.
+    pub(crate) fn record_device_revocation(
+        &mut self,
+        id: &str,
+        doc: &Value,
+    ) -> Result<(), CoreError> {
+        if let Some(slug) = doc["slug"].as_str() {
+            // Un nuovo nodo può aver già riutilizzato lo slug mentre l'API aspettava il lock del Core.
+            if !self.node_devices().iter().any(|d| d["slug"] == slug) {
                 self.catalog.remove_prefix(&format!("node.{slug}."));
-                self.refresh_auto_node_tools();
             }
-            self.device_audit("device.revoke", id, "revoked")?;
+            self.refresh_auto_node_tools();
         }
-        Ok(doc)
+        self.device_audit("device.revoke", id, "revoked")
     }
 }
 
@@ -2681,7 +2674,10 @@ impl Jarvis {
             ));
         }
         let timer = Timer::start();
-        let assignment = self.nodes.enqueue(&id, base, arguments);
+        let assignment = self
+            .nodes
+            .enqueue(&id, base, arguments)
+            .ok_or_else(|| tool_error("node.revoked", "nodo non associato o revocato"))?;
         let outcome = self.nodes.wait_result(&assignment, self.node_timeout);
         self.obs
             .observe(&format!("node {slug}"), timer.ms(), outcome.is_err());
@@ -3151,7 +3147,7 @@ impl Jarvis {
                 t.descriptor["effects"] != "read" && t.descriptor["effects"] != "none"
             });
         if (write_external && matches!(code, "web.timeout" | "web.unreachable"))
-            || (node_write && code == "node.timeout")
+            || (node_write && matches!(code, "node.timeout" | "node.revoked"))
         {
             "unknown"
         } else {

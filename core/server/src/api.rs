@@ -38,6 +38,7 @@ pub struct AppState {
     pub remote_hosts: Vec<String>,
     /// Assegnazioni ai nodi esecutori: le loro richieste non passano dal blocco del Core.
     pub nodes: Arc<crate::nodes::NodeHub>,
+    device_db: std::path::PathBuf,
     /// Configurazione guidata dei modelli: stato letto senza il blocco del Core.
     pub setup: Arc<crate::setup::Setup>,
 }
@@ -1009,7 +1010,31 @@ async fn device_me(State(state): State<Shared>, headers: axum::http::HeaderMap) 
 }
 
 async fn revoke_device(State(state): State<Shared>, Path(id): Path<String>) -> Response {
-    reply(with_core(&state, move |j| j.revoke_device(&id)).await)
+    // Il Core può avere il lock mentre attende l'esito proprio da questo nodo.
+    let result = tokio::task::spawn_blocking(move || {
+        let (doc, changed) =
+            crate::store::Store::revoke_device(&state.device_db, &id, &crate::now())
+                .map_err(|e| CoreError::Internal(e.to_string()))?
+                .ok_or_else(|| CoreError::NotFound(format!("nessun dispositivo {id}")))?;
+        if doc["slug"].is_string() {
+            state.nodes.revoke(&id);
+        }
+        if changed {
+            state
+                .core
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .record_device_revocation(&id, &doc)?;
+        }
+        Ok(doc)
+    })
+    .await
+    .unwrap_or_else(|_| {
+        Err(CoreError::Internal(
+            "operazione di revoca interrotta".into(),
+        ))
+    });
+    reply(result)
 }
 
 async fn connectors(State(state): State<Shared>) -> Response {
@@ -1172,6 +1197,7 @@ pub fn state_with_remote(
     let obs = core.observability();
     let nodes = core.node_hub();
     let setup = core.setup();
+    let device_db = core.data_dir().join("jarvis.sqlite3");
     Arc::new(AppState {
         core: Arc::new(Mutex::new(core)),
         obs,
@@ -1180,6 +1206,7 @@ pub fn state_with_remote(
         last_health: Mutex::new(json!({})),
         remote_hosts,
         nodes,
+        device_db,
         setup,
     })
 }
