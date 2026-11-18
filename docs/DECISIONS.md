@@ -516,6 +516,31 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - E2E: codice per nodo con il comando da eseguire.
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, SECURITY_AND_PRIVACY.md, REQUIREMENTS.md, ACCEPTANCE.md, README.md.
 
+### ADR-0018 — Client Android nativo (RF-10)
+
+- **Data:** 2026-11-18 · **Stato:** Accettato. Restano da fare la prova su dispositivo (P8b), la firma per la distribuzione, le notifiche push e la voce nativa.
+- **Contesto:** RF-10 prevede client mobili nativi. Il client iOS (`apps/ios`) copre associazione, chat e conferme; Android aveva solo la PWA.
+- **Decisione:**
+  - **Due moduli Gradle in `apps/android`:**
+    - `core-client`, in Kotlin puro: tutta la logica di rete, compilabile e verificabile senza Android SDK;
+    - `app`, in Jetpack Compose (minSdk 26, targetSdk 35).
+  - **Stesse regole del client iOS:**
+    - indirizzo solo HTTPS, senza credenziali, query o percorsi;
+    - nessun redirect e nessuna cache;
+    - token di 64 caratteri esadecimali, inviato solo nell'header `X-Jarvis-Device`;
+    - associazione rifiutata senza il permesso `chat`, quindi un codice per nodi non associa il telefono;
+    - le conferme partono solo con il permesso `confirm`;
+    - 401 vale come revoca e riporta all'associazione.
+  - **Sessione cifrata** con AES-GCM e una chiave dell'Android Keystore, che non lascia il telefono. Backup dell'app disattivato e traffico in chiaro vietato nel manifest.
+  - **CI:** job «Android» con i test di `core-client` e l'APK di debug come artefatto. In locale, senza SDK: `gradle -p apps/android -Pjarvis.coreOnly=true :core-client:test`.
+- **Motivazione:** la logica di rete resta verificabile ovunque e allineata al client iOS; l'interfaccia è un livello sottile.
+- **Conseguenze:**
+  - l'APK di debug non è firmato per la distribuzione;
+  - la voce e le notifiche push restano alla PWA;
+  - l'app non è verificata su un dispositivo reale fino alla prova P8b.
+- **Evidenza:** `CoreClientTest` (5 test: indirizzi ammessi e rifiutati, associazione con piattaforma `android` e token valido, codice per nodi rifiutato, token del dispositivo su ogni richiesta, conferma senza permesso bloccata prima della rete, identificativo in minuscolo, revoca, messaggi d'errore del Core); build dell'APK nella CI.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ACCEPTANCE.md, REQUIREMENTS.md, README.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

@@ -15,7 +15,7 @@ Questo documento raccoglie ciò che serve per l'accettazione finale descritta in
 | RF-07 Automazioni | `automation.rs`, E2E | P5 | Verde | — |
 | RF-08 Memoria | `api.rs`, E2E | P1 | Verde | Nessun indice semantico |
 | RF-09 Voce | `voice.rs`, `tests/ai/test_voice.py`, E2E con motori finti | P6 | Verde (finti) | Motori reali solo sul tuo computer |
-| RF-10 Client | E2E Web e telefono simulato, CI desktop su 3 sistemi | P7, P8 | Verde | iOS nativo compilato; prova dispositivo, Android e sincronizzazione fonetica in sospeso |
+| RF-10 Client | E2E Web e telefono simulato, CI desktop su 3 sistemi | P7, P8 | Verde | iOS e Android nativi compilati in CI; prove su dispositivo (P8a, P8b) e sincronizzazione fonetica in sospeso |
 | RF-11 Dispositivi e nodi | `devices.rs`, `nodes.rs`, E2E | P8, P13 | Verde | mTLS, VPN mesh e assegnazione automatica assenti |
 | RF-12 Dati | backup, rollback | P9 | Verde | Nessuna sincronizzazione fra nodi |
 | RF-13 Notifiche | `notifications.rs`, E2E | P5 | Verde | Nessun canale esterno |
@@ -57,6 +57,7 @@ Da eseguire sul proprio computer con una release o con i sorgenti. Annotare esit
 | P7 | App desktop | Installa dalla release (`.msi`/`.exe`, `.dmg`, `.deb`/`.AppImage`) e apri JARVIS dal menu; dai sorgenti: `./jarvis.sh desktop` | Si apre senza installare Python o Rust; chiudendola si fermano Core e worker; la disinstallazione rimuove l'app ma non i dati |
 | P8 | Telefono | `tailscale serve 8765`, `JARVIS_ALLOWED_HOSTS=<host>`, codice dalla sezione Dispositivi | Associazione, chat dal telefono; dopo la revoca l'accesso cade subito |
 | P8a | App nativa iOS | Avvia il target JARVIS da Xcode, associa al Core, invia un messaggio, verifica conferme con e senza permesso, riapri l’app e revoca dal Core | Cronologia e chat funzionano, l’associazione persiste e la prima richiesta successiva alla revoca torna all’associazione |
+| P8b | App nativa Android | Installa l'APK `jarvis-android-debug` della CI (o compila `apps/android`), inserisci l'indirizzo HTTPS del Core e il codice, invia un messaggio, verifica le conferme con e senza permesso, riapri l'app e revoca dal Core | Chat e cronologia funzionano, l'associazione resta dopo il riavvio dell'app, dopo la revoca l'app torna all'associazione |
 | P9 | Backup e rollback | Sezione Sistema → backup; `./jarvis.sh restore <file>`; dopo un aggiornamento `./jarvis.sh rollback` | Dati ripristinati; i dati sostituiti restano in una cartella a parte |
 | P10 | Connettore | Installa un connettore verso un servizio tuo, autorizza, revoca | Chiamata riuscita; dopo la revoca la chiamata è negata |
 | P11 | Prestazioni | `python tests/perf/latency.py http://127.0.0.1:8765 30` con Ollama attivo | p95 entro `tests/perf/slo.json` per le serie senza modello; registrare quelle con il modello |
@@ -67,7 +68,7 @@ Da eseguire sul proprio computer con una release o con i sorgenti. Annotare esit
 
 Una release `v1.0.0` si pubblica quando:
 1. tutti i job delle due CI sono verdi sul commit da rilasciare;
-2. le prove P1–P12, inclusa P8a per il client nativo iOS, sono superate o i difetti aperti sono registrati come non bloccanti;
+2. le prove P1–P13, incluse P8a e P8b per i client nativi, sono superate o i difetti aperti sono registrati come non bloccanti;
 3. il proprietario accetta esplicitamente.
 
 Restano decisioni del proprietario, perché richiedono suoi account, certificati o scelte:
