@@ -11,6 +11,7 @@ pub mod backup;
 pub mod catalog;
 pub mod config;
 pub mod connectors;
+pub mod memory;
 pub mod node_agent;
 pub mod nodes;
 pub mod observability;

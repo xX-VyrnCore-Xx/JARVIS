@@ -623,6 +623,54 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - CI «avvio reale»: `core.secrets_store` vale `keychain` su macOS e Windows, `file` su Linux.
 - **Documenti interessati:** SECURITY_AND_PRIVACY.md, ACCEPTANCE.md, ROADMAP.md.
 
+### ADR-0022 — Memoria semantica, procedurale ed episodica con indici locali ricostruibili
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario («finisci tutte le fasi e la memoria»), MEMORY_DATA_SYNC.md.
+- **Contesto:** la memoria era un elenco di frasi. L'agente riceveva i primi 50 elementi, senza tipi, provenienza, ricerca o correzione. La specifica chiede memoria episodica, semantica e procedurale, ricerca semantica, knowledge graph e indici derivati ricostruibili.
+- **Opzioni:**
+  - PostgreSQL con pgvector o Qdrant: servizi esterni, non adatti a un'installazione desktop autonoma;
+  - embeddings da Ollama: qualità migliore, ma assenti senza Ollama e diversi a ogni cambio di modello, quindi l'indice andrebbe ricostruito;
+  - SQLite con FTS5 e un vettore locale con hashing: sempre disponibile, deterministico e ricostruibile.
+- **Decisione:**
+  - colonne additive su `memory` (`kind`, `source`, `updated_at`, `expires_at`) con migrazione automatica dei database esistenti;
+  - indici `memory_fts`, `memory_vectors` e `memory_edges` derivati dalla tabella e ricostruiti all'avvio se mancano;
+  - ricerca ibrida con soglia; contesto dell'agente con preferenze, fatti ed episodi pertinenti;
+  - episodi automatici per le attività della chat, con scadenza e senza le operazioni sulla memoria;
+  - API `GET /api/memory?kind=&q=`, `PATCH /api/memory/{id}`, `GET /api/memory/graph`, `POST /api/memory/reindex`, con audit per correzione e ricostruzione;
+  - strumento `memory.search` e parametro `kind` per `memory.remember` e `memory.list`.
+- **Conseguenze:**
+  - la ricerca riconosce flessioni e accenti, non i sinonimi: «auto» non trova «macchina». Embeddings da modello restano un'estensione possibile, perché l'indice è derivato;
+  - l'estrazione delle triple copre le frasi italiane comuni («il mio X si chiama Y», «abito a …», «X è Y»), non frasi arbitrarie;
+  - un episodio contiene la richiesta originale (160 caratteri): si cancella come ogni altro elemento e scade da solo.
+- **Evidenza:**
+  - `core/server/tests/memory.rs`: tipi, ricerca tollerante alle flessioni, grafo, episodi, correzione e cancellazione propagate, ricostruzione, audit;
+  - unitari in `memory.rs`: vettori, triple, tipo dedotto, migrazione di un database precedente;
+  - `tests/ai/test_gateway.py`: preferenze e ricerca dalla chat offline;
+  - E2E: filtro per tipo, ricerca, grafo nella sezione Memoria.
+- **Documenti interessati:** MEMORY_DATA_SYNC.md, README.md, ROADMAP.md, ACCEPTANCE.md.
+
+### ADR-0023 — Dashboard React e TypeScript con tema HUD olografico
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario («crea la dashboard completa moderna e futuristica»); scelte confermate: React + TypeScript, stile HUD olografico. Sostituisce la deviazione temporanea dall'uso di React dell'ADR-0004.
+- **Contesto:** TECH_STACK.md prevede React e TypeScript per la dashboard Web, ma il prototipo usava JavaScript senza dipendenze. INTERFACE_AND_DEVICES.md chiede una dashboard con attività, esecutore, condizioni offline, errori e conferme in attesa.
+- **Opzioni:**
+  - evolvere l'interfaccia esistente: rapido, ma lontano dallo stack documentato;
+  - React e TypeScript con un server di sviluppo separato: complica avvio e CSP;
+  - React e TypeScript compilati in un bundle fisso servito dal Core.
+- **Decisione:**
+  - `apps/web` (Vite 8, React 19.3, TypeScript 5.9 in modalità strict) produce `core/server/static/app.js` (IIFE) e `app.css`, inclusi nel Core con `include_str!`. Restano invariati la CSP (`script-src 'self'`), `boot.js` e l'iniezione del token;
+  - il bundle è versionato: Rust, installer e `jarvis.sh` non richiedono Node. La CI lo ricostruisce, verifica che sia identico e controlla con `npm audit` le dipendenze distribuite;
+  - tutte le funzioni precedenti sono state portate con gli stessi ID e classi: chat, conferme, voce con mani libere e interruzione, avatar, notifiche, attività, automazioni, memoria, workspace, connettori, dispositivi, audit, sistema, backup e configurazione guidata;
+  - nuova vista iniziale «Plancia» per il proprietario; tema scuro HUD con variante chiara; layout adattato fino a 390 px; movimento ridotto rispettato.
+- **Conseguenze:**
+  - modificare l'interfaccia richiede `npm run build` in `apps/web` prima del commit;
+  - il bundle pesa circa 290 kB (90 kB compressi), servito localmente;
+  - il motore vocale è un modulo TypeScript testato con `tests/ui/audio_offline.test.cjs`.
+- **Evidenza:**
+  - E2E `tests/e2e/ui_smoke.cjs`: 66 verifiche, comprese plancia, comando rapido, conferme in attesa ed esecutore;
+  - controllo del bundle nel job e2e; `tsc --noEmit` nel build.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, TECH_STACK.md, DEVELOPMENT.md, CLAUDE.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

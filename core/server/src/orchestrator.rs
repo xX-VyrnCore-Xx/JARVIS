@@ -21,6 +21,10 @@ use crate::observability::{Observability, Timer};
 use crate::store::Store;
 use crate::{automation, now, policy, tools};
 
+/// Memoria nel contesto dell'agente (ADR-0022).
+const MEMORY_PROCEDURAL: usize = 20;
+const MEMORY_SMALL: usize = 30;
+const MEMORY_RELEVANT: usize = 8;
 const HISTORY_MESSAGES: u32 = 10;
 const MAX_MESSAGE: usize = 8000;
 
@@ -435,14 +439,14 @@ impl Jarvis {
             .into_iter()
             .map(|m| json!({"role": m["role"], "content": m["content"].as_str().unwrap_or_default().chars().take(MAX_MESSAGE).collect::<String>()}))
             .collect();
-        let memory: Vec<Value> = self
-            .store
-            .memory_list()
-            .map_err(internal)?
-            .into_iter()
-            .take(50)
-            .map(|m| m["text"].clone())
-            .collect();
+        let query = messages
+            .iter()
+            .rev()
+            .find(|m| m["role"] == "user")
+            .and_then(|m| m["content"].as_str())
+            .unwrap_or_default()
+            .to_string();
+        let memory = self.memory_context(&query)?;
         Ok(json!({"messages": messages, "memory": memory}))
     }
 
@@ -823,6 +827,7 @@ impl Jarvis {
 
     fn finish(&mut self, task: Task, mut out: Outcome, text: String) -> Result<Outcome, CoreError> {
         self.save(&task)?;
+        self.record_episode(&task, &out);
         self.store
             .message_add(
                 "assistant",
@@ -837,6 +842,112 @@ impl Jarvis {
         Ok(out)
     }
 
+    /// Memoria data all'agente (ADR-0022): tutte le preferenze, poi i fatti e gli episodi pertinenti alla
+    /// richiesta. Con una memoria piccola i fatti sono inclusi tutti, come prima.
+    fn memory_context(&self, query: &str) -> Result<Vec<Value>, CoreError> {
+        let _ = self.store.memory_purge_expired(&now());
+        let mut out: Vec<Value> = vec![];
+        let mut seen = std::collections::HashSet::new();
+        for m in self
+            .store
+            .memory_list_kind(Some("procedural"))
+            .map_err(internal)?
+            .into_iter()
+            .take(MEMORY_PROCEDURAL)
+        {
+            seen.insert(m["id"].as_str().unwrap_or_default().to_string());
+            out.push(format!("[preferenza] {}", m["text"].as_str().unwrap_or_default()).into());
+        }
+        let semantic = self
+            .store
+            .memory_list_kind(Some("semantic"))
+            .map_err(internal)?;
+        let relevant = if semantic.len() <= MEMORY_SMALL {
+            semantic
+        } else {
+            vec![]
+        };
+        let found = if query.trim().is_empty() {
+            vec![]
+        } else {
+            self.store
+                .memory_search(query, None, MEMORY_RELEVANT)
+                .map_err(internal)?
+        };
+        for m in relevant.into_iter().chain(found) {
+            let id = m["id"].as_str().unwrap_or_default().to_string();
+            if !seen.insert(id) {
+                continue;
+            }
+            let text = m["text"].as_str().unwrap_or_default();
+            out.push(
+                match m["kind"].as_str() {
+                    Some("episodic") => format!(
+                        "[episodio del {}] {text}",
+                        m["created_at"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .get(..10)
+                            .unwrap_or_default()
+                    ),
+                    Some("procedural") => format!("[preferenza] {text}"),
+                    _ => text.to_string(),
+                }
+                .into(),
+            );
+        }
+        Ok(out)
+    }
+
+    /// Memoria episodica: un riassunto per ogni attività conclusa dalla chat, legato al task e con scadenza
+    /// (`JARVIS_EPISODIC_DAYS`, 30 predefiniti, 0 disattiva). Le operazioni sulla memoria non generano episodi,
+    /// così un fatto cancellato non sopravvive in un riassunto.
+    fn record_episode(&self, task: &Task, out: &Outcome) {
+        let days: i64 = std::env::var("JARVIS_EPISODIC_DAYS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30);
+        if days <= 0 {
+            return;
+        }
+        let tool = out
+            .steps
+            .iter()
+            .find(|s| s["kind"] == "tool_call")
+            .and_then(|s| s["tool"].as_str());
+        if tool.is_some_and(|t| t.starts_with("memory.")) {
+            return;
+        }
+        let objective: String = task.doc["objective"]
+            .as_str()
+            .unwrap_or_default()
+            .chars()
+            .take(160)
+            .collect();
+        if objective.trim().is_empty() {
+            return;
+        }
+        let state = task.doc["state"].as_str().unwrap_or("unknown");
+        let text = match tool {
+            Some(t) => format!("Richiesta «{objective}»: {t}, esito {state}"),
+            None => format!("Richiesta «{objective}»: risposta diretta, esito {state}"),
+        };
+        let at = now();
+        let expires = (chrono::Utc::now() + chrono::Duration::days(days))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let id = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
+        let _ = self.store.memory_insert(
+            &crate::memory::NewItem {
+                id: &id,
+                text: &text,
+                kind: "episodic",
+                source: json!({"kind": "task", "task_id": task.id()}),
+                expires_at: Some(expires),
+            },
+            &at,
+        );
+    }
+
     // ------------------------------------------------------------------ letture e azioni dirette
 
     pub fn tasks(&self, limit: u32) -> Result<Vec<Value>, CoreError> {
@@ -849,6 +960,60 @@ impl Jarvis {
 
     pub fn memory(&self) -> Result<Vec<Value>, CoreError> {
         self.store.memory_list().map_err(internal)
+    }
+
+    /// Elenco filtrato per tipo o, con `query`, ricerca ibrida ordinata per pertinenza.
+    pub fn memory_query(
+        &self,
+        kind: Option<&str>,
+        query: Option<&str>,
+    ) -> Result<Vec<Value>, CoreError> {
+        if let Some(k) = kind {
+            if !crate::memory::KINDS.contains(&k) {
+                return Err(CoreError::BadRequest(format!(
+                    "tipo di memoria sconosciuto: {k}"
+                )));
+            }
+        }
+        let _ = self.store.memory_purge_expired(&now());
+        match query.map(str::trim).filter(|q| !q.is_empty()) {
+            Some(q) => self.store.memory_search(q, kind, 20).map_err(internal),
+            None => self.store.memory_list_kind(kind).map_err(internal),
+        }
+    }
+
+    /// Correzione diretta del proprietario: aggiorna testo e indici derivati, con audit.
+    pub fn memory_correct(&mut self, id: &str, text: &str) -> Result<(), CoreError> {
+        let text = text.trim();
+        if text.is_empty() || text.chars().count() > 1000 {
+            return Err(CoreError::BadRequest(
+                "testo vuoto o oltre 1000 caratteri".into(),
+            ));
+        }
+        if !self
+            .store
+            .memory_update(id, text, &now())
+            .map_err(internal)?
+        {
+            return Err(CoreError::NotFound(format!(
+                "nessun elemento di memoria con id {id}"
+            )));
+        }
+        self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "owner", "id": "owner"},
+                          "node": "core-local", "action": "memory.correct", "outcome": "succeeded", "effect": "applied"}))?;
+        Ok(())
+    }
+
+    pub fn memory_graph(&self) -> Result<Value, CoreError> {
+        self.store.memory_graph().map_err(internal)
+    }
+
+    /// Ricostruzione degli indici derivati dalla tabella sorgente.
+    pub fn memory_reindex(&mut self) -> Result<usize, CoreError> {
+        let n = self.store.memory_reindex().map_err(internal)?;
+        self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "owner", "id": "owner"},
+                          "node": "core-local", "action": "memory.reindex", "outcome": "succeeded", "effect": "applied"}))?;
+        Ok(n)
     }
 
     /// Cancellazione diretta richiesta dal proprietario dall'interfaccia (RF-08).

@@ -63,7 +63,7 @@ Al primo avvio vengono compilati i componenti: richiede alcuni minuti e l'avanza
 sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev
 ```
 
-- **Senza Ollama** JARVIS parte in modalità *offline*: un modello a regole capisce comandi come «che ore sono», «info sistema», «elenca file», «scrivi note.txt: testo», «leggi note.txt», «ricorda che …», «cosa ricordi» e «dimentica <id>».
+- **Senza Ollama** JARVIS parte in modalità *offline*: un modello a regole capisce comandi come «che ore sono», «info sistema», «elenca file», «scrivi note.txt: testo», «leggi note.txt», «ricorda che …», «preferisco …», «cosa sai di …», «cosa ricordi» e «dimentica <id>».
 - **Con Ollama** installa un modello con supporto agli strumenti (per esempio `ollama pull qwen2.5:3b`) e invia un messaggio. Se il gateway è già in modalità offline, attendi almeno 15 secondi dall'ultimo tentativo: la richiesta successiva verifica di nuovo Ollama.
 
 - **Automazioni**: scrivi in chat «ogni ora info sistema», «ogni giorno alle 08:00 scrivi buongiorno.txt: ciao» o «tra 5 minuti che ore sono», oppure usa la sezione Automazioni. Le automazioni sopravvivono al riavvio e conservano la cronologia di ogni esecuzione. Si possono modificare («modifica automazione <id> ogni 2 ore» o il pulsante Modifica): ogni modifica crea una nuova versione, approvata da te.
@@ -89,7 +89,9 @@ Cosa osservare:
 - ogni azione mostra agente, strumento, decisione di policy ed esito;
 - scrivere un file o cancellare un ricordo richiede la tua conferma, valida una sola volta e per 5 minuti;
 - i file restano nella cartella `data/workspace`, e ogni tentativo di uscirne viene negato;
-- le sezioni Attività, Memoria e Audit mostrano stato, ricordi cancellabili e la catena di hash verificata.
+- **Plancia** (ADR-0023): la dashboard iniziale in stile HUD olografico mostra il nucleo animato di JARVIS, le operazioni da confermare, le attività con il loro esecutore, nodi e condizioni offline, prestazioni, errori, memoria, automazioni e dispositivi, con un comando rapido. Il pulsante ◐ passa al tema chiaro;
+- le sezioni Attività, Memoria e Audit mostrano stato, ricordi e la catena di hash verificata;
+- **Memoria** (ADR-0022): fatti («ricorda che …»), preferenze («preferisco …», sempre tenute presenti) ed episodi delle attività, che scadono dopo 30 giorni (`JARVIS_EPISODIC_DAYS`, 0 li disattiva). La ricerca trova i ricordi pertinenti anche con parole flesse o senza accenti. Ogni ricordo si corregge o si cancella; il grafo delle conoscenze mostra le relazioni («mia sorella si chiama Anna»).
 
 | Variabile | Predefinito | Effetto |
 |---|---|---|

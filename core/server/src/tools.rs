@@ -169,17 +169,37 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
         }
         "memory.remember" => {
             let id = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
+            let kind = args["kind"]
+                .as_str()
+                .unwrap_or_else(|| crate::memory::infer_kind(s("text")));
             ctx.store
-                .memory_add(&id, s("text"), &crate::now())
+                .memory_insert(
+                    &crate::memory::NewItem {
+                        id: &id,
+                        text: s("text"),
+                        kind,
+                        source: json!({"kind": "agent"}),
+                        expires_at: None,
+                    },
+                    &crate::now(),
+                )
                 .map_err(|e| ToolError::new("memory.unavailable", e.to_string()))?;
-            Ok(json!({"id": id, "text": s("text")}))
+            Ok(json!({"id": id, "text": s("text"), "kind": kind}))
         }
         "memory.list" => {
             let items = ctx
                 .store
-                .memory_list()
+                .memory_list_kind(args["kind"].as_str())
                 .map_err(|e| ToolError::new("memory.unavailable", e.to_string()))?;
             Ok(json!({"items": items}))
+        }
+        "memory.search" => {
+            let limit = args["limit"].as_u64().unwrap_or(5) as usize;
+            let items = ctx
+                .store
+                .memory_search(s("query"), args["kind"].as_str(), limit)
+                .map_err(|e| ToolError::new("memory.unavailable", e.to_string()))?;
+            Ok(json!({"query": s("query"), "items": items}))
         }
         "memory.forget" => {
             let deleted = ctx

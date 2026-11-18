@@ -18,6 +18,17 @@ Verificare per piattaforma enrollment, revoca, segnalazione dei limiti OS, ripre
 
 ## Stato del prototipo v0.1
 
+**Dashboard (ADR-0023):** l'interfaccia è un'applicazione React e TypeScript (`apps/web`) con tema HUD olografico: scuro per impostazione, chiaro con il pulsante ◐. La vista iniziale **Plancia** riunisce:
+- il nucleo animato di JARVIS, che segue gli stati pronto, elaborazione, ascolto, trascrizione e risposta vocale;
+- ora, stato di AI, voce, audit e Core, e un comando rapido che apre la chat;
+- le operazioni in attesa di conferma, approvabili o rifiutabili dalla plancia;
+- le attività recenti con stato ed esecutore (Core locale, nodo, automazione, dispositivo);
+- condizioni e nodi: Core, nodi esecutori in linea o no, modalità offline dell'AI, voce o Web non disponibili;
+- prestazioni (p95 della chat, richieste, errori e storico), errori e avvisi recenti;
+- memoria (fatti, preferenze, episodi, relazioni e grafo), automazioni attive e dispositivi.
+
+Sul dispositivo associato la plancia non compare: si apre la chat.
+
 L'interfaccia Web è servita dal Core su `http://localhost:8765` e comprende:
 - chat, con i passaggi di ogni risposta (agente, strumento, policy, esito);
 - schede di conferma con effetto atteso, destinazione e scadenza;

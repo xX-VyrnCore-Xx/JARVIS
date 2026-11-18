@@ -1,7 +1,7 @@
 {
   "contract": "jarvis.tool/1",
   "name": "memory.remember",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "summary": "Salva un'informazione nella memoria persistente del proprietario",
   "input_schema": {
     "type": "object",
@@ -14,6 +14,14 @@
         "type": "string",
         "minLength": 1,
         "maxLength": 1000
+      },
+      "kind": {
+        "type": "string",
+        "enum": [
+          "semantic",
+          "procedural"
+        ],
+        "description": "semantic per fatti, procedural per preferenze e regole; se assente lo deduce il Core"
       }
     }
   },

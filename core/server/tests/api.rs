@@ -268,8 +268,11 @@ async fn memory_round_trip_and_owner_deletion() {
         )
         .await;
     assert_eq!(status, StatusCode::OK);
-    let (_, mem) = e.api("GET", "/api/memory", None).await;
+    // Restano solo gli episodi delle attività (ADR-0022), che non contengono il fatto cancellato.
+    let (_, mem) = e.api("GET", "/api/memory?kind=semantic", None).await;
     assert!(mem["items"].as_array().unwrap().is_empty());
+    let (_, all) = e.api("GET", "/api/memory", None).await;
+    assert!(!all.to_string().contains("blu"), "{all}");
 }
 
 #[tokio::test]

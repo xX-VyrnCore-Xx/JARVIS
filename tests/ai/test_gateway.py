@@ -182,6 +182,10 @@ class OfflineBackend(unittest.TestCase):
             "ricorda che uso Linux": ("memory.remember", {"text": "uso Linux"}),
             "cosa ricordi": ("memory.list", {}),
             "dimentica 1a2b3c4d": ("memory.forget", {"id": "1a2b3c4d"}),
+            "preferisco risposte brevi": ("memory.remember", {"text": "preferisco risposte brevi", "kind": "procedural"}),
+            "cosa sai di Marco?": ("memory.search", {"query": "Marco"}),
+            "cerca nella memoria: compleanno": ("memory.search", {"query": "compleanno"}),
+            "cosa sai di me": ("memory.list", {}),
         }
         for message, (tool, args) in cases.items():
             with self.subTest(message=message):
@@ -248,6 +252,8 @@ class OfflineBackend(unittest.TestCase):
         self.assertIn("negato", r["text"])
         r = self.call("x", tool_result={"tool": "memory.list", "status": "succeeded", "output": {"items": [{"id": "a", "text": "t"}]}})
         self.assertIn("[a] t", r["text"])
+        r = self.call("x", tool_result={"tool": "memory.search", "status": "succeeded", "output": {"query": "q", "items": [{"id": "b", "text": "u", "kind": "procedural"}]}})
+        self.assertIn("[b] (preferenza) u", r["text"])
 
     def test_memory_recall_and_help(self):
         self.assertIn("caffè", self.call("caffè?", memory=["amo il caffè"])["text"])

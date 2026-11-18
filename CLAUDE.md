@@ -43,6 +43,12 @@ Prototipo avviabile con `./jarvis.sh` (porta 8765). Test E2E dell'interfaccia, c
 JARVIS_URL=http://localhost:8765 node tests/e2e/ui_smoke.cjs
 ```
 
+Dashboard React (`apps/web`, ADR-0023): dopo ogni modifica ai sorgenti rigenera il bundle versionato in `core/server/static`:
+
+```bash
+cd apps/web && npm ci && npm run build
+```
+
 App desktop: `./jarvis.sh desktop`. Build e controlli dell'app Tauri (su Linux servono le librerie WebKitGTK):
 
 ```bash
