@@ -60,6 +60,37 @@ fn post_json(req: ureq::Request, body: &Value) -> Result<ureq::Response, ureq::E
         .send_string(&body.to_string())
 }
 
+/// Ritenta solo la consegna dell'esito già calcolato, anche per gli strumenti di scrittura.
+fn send_result(
+    http: &ureq::Agent,
+    url: &str,
+    token: &str,
+    reply: &Value,
+    stop: &AtomicBool,
+) -> Result<(), AgentError> {
+    for attempt in 0..3 {
+        if attempt > 0 {
+            if stop.load(Ordering::Relaxed) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(200 * attempt));
+        }
+        let sent = post_json(
+            http.post(url)
+                .timeout(Duration::from_secs(3))
+                .set("X-Jarvis-Device", token),
+            reply,
+        );
+        match sent {
+            Err(ureq::Error::Status(401, _)) => return Err(AgentError::Revoked),
+            Err(ureq::Error::Transport(_) | ureq::Error::Status(408 | 429 | 500..=599, _)) => {}
+            // Un 404 indica un esito già ricevuto, un'assegnazione scaduta o un Core riavviato.
+            _ => return Ok(()),
+        }
+    }
+    Ok(())
+}
+
 fn read_json(r: ureq::Response) -> Value {
     r.into_string()
         .ok()
@@ -200,14 +231,13 @@ pub fn run(cfg: &AgentConfig, stop: Arc<AtomicBool>) -> Result<(), AgentError> {
                 Err(e) => json!({"ok": false, "code": e.code, "message": e.message}),
             }
         };
-        let sent = post_json(
-            http.post(&format!("{}/api/nodes/result/{id}", cfg.core_url))
-                .set("X-Jarvis-Device", &token),
+        send_result(
+            &http,
+            &format!("{}/api/nodes/result/{id}", cfg.core_url),
+            &token,
             &reply,
-        );
-        if let Err(ureq::Error::Status(401, _)) = sent {
-            return Err(AgentError::Revoked);
-        }
+            &stop,
+        )?;
     }
     Ok(())
 }

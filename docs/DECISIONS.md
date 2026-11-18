@@ -487,7 +487,7 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 
 ### ADR-0017 — Nodi esecutori (Fase 5, RF-11)
 
-- **Data:** 2026-11-18 · **Stato:** Accettato. Restano aperte l'identità crittografica con mTLS (sostituirà il token del nodo), la VPN mesh, l'assegnazione automatica in base alle risorse e le capacità oltre file e sistema.
+- **Data:** 2026-11-18 · **Stato:** Accettato. Restano aperte l'identità crittografica con mTLS (sostituirà il token del nodo), la VPN mesh e le capacità oltre file e sistema. La scelta automatica è disponibile con ADR-0031.
 - **Contesto:** il piano prevede nodi autorizzati che eseguono il lavoro assegnato dal Core. RF-11 chiede che un dispositivo revocato perda accesso e assegnazioni.
 - **Opzioni:**
   - il Core si collega al nodo (porte aperte sul nodo, firewall e NAT da gestire);
@@ -500,9 +500,10 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - **Hub delle assegnazioni** (`nodes.rs`) con blocco proprio e impronte dei token. Il Core attende l'esito tenendo il proprio blocco: le richieste dei nodi non possono passare da quel blocco senza bloccarsi a vicenda. L'hub accetta solo esiti di assegnazioni consegnate a quel nodo.
   - **Guasti:**
     - nodo non in linea (nessuna richiesta nell'ultimo minuto): `node.offline` immediato;
+    - errori di trasporto e risposte HTTP 408, 429 o 5xx durante la consegna: fino a tre invii dello stesso esito, senza riesecuzione dello strumento. Il Core registra il primo esito ricevuto per un'assegnazione consegnata al nodo;
     - nessuna risposta entro `JARVIS_NODE_TIMEOUT_MS` (30 s): `node.timeout`, assegnazione ritirata, effetto `unknown` per le scritture;
     - uno strumento non dichiarato viene rifiutato anche dal nodo.
-  - **Revoca:** il token smette di valere, la coda si svuota, le assegnazioni in attesa falliscono con `node.revoked`, gli strumenti escono dal catalogo e l'agente del nodo si ferma alla richiesta successiva.
+  - **Revoca:** l'API registra la revoca e ritira il token nella stessa transazione SQLite. L'hub svuota la coda e risveglia chi attende un esito con `node.revoked` prima che l'API acquisisca il lock del Core per rimuovere gli strumenti e registrare l'audit. Una scrittura interrotta dalla revoca ha effetto `unknown`; l'agente si ferma quando il Core rifiuta il token.
   - **Comando offline:** «nodo <slug> <strumento> chiave=valore». Con Ollama gli strumenti del nodo arrivano all'agente come descrittori dinamici.
 - **Motivazione:** il nodo funziona anche dietro NAT senza aprire porte e senza servizi aggiuntivi, e riusa associazione, revoca e permessi minimi già verificati per i dispositivi.
 - **Conseguenze:**
@@ -512,6 +513,8 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:**
   - `core/server/tests/nodes.rs`: 3 test con Core HTTP reale e agente in un altro thread (strumenti nel catalogo, lettura eseguita dal nodo, scrittura con conferma nella workspace del nodo e non in quella del Core, uscita dalla workspace negata, audit, permessi 0600 del token, revoca con agente fermato e strumenti rimossi, token revocato rifiutato, codice per chat che non associa un nodo, token del nodo che non apre l'API del proprietario, nodo non in linea);
   - unitari in `nodes.rs` (2): attesa, ritiro, esito da un altro nodo rifiutato, revoca durante l'attesa;
+  - `agent_retries_delivery_of_the_same_result_after_a_transient_failure`: al primo invio il Core HTTP risponde 503, al secondo accetta l'esito per la stessa assegnazione e la chat riceve il risultato;
+  - `api_revocation_interrupts_an_assignment_waiting_for_a_result`: revoca HTTP durante una scrittura assegnata, esito `node.revoked`, effetto `unknown` e token ritirato anche in SQLite;
   - prova manuale: `./jarvis.sh node` come secondo processo, «nodo laboratorio system.info» dalla chat, revoca con uscita del processo («il nodo è stato revocato»);
   - E2E: codice per nodo con il comando da eseguire.
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, SECURITY_AND_PRIVACY.md, REQUIREMENTS.md, ACCEPTANCE.md, README.md.
@@ -915,7 +918,7 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - all'avvio, dopo l'autorizzazione del proprietario, l'app toglie l'attributo di quarantena dal proprio pacchetto in `/Applications`, così Core e Python inclusi non vengono bloccati come programmi scaricati; nessun effetto se l'app gira dal `.dmg` montato o da una copia traslocata;
   - Windows: setup NSIS in italiano con immagini laterale e d'intestazione, icona dell'installer e cartella del menu Start «JARVIS»; MSI con banner e immagine di dialogo; finestra con tema scuro (ADR-0035);
   - note di installazione per ogni sistema in testa alla release (`.github/release-notes.md`); la verifica in CI controlla anche il sigillo profondo (`codesign --deep --strict`) e il collegamento ad Applicazioni nel `.dmg`.
-- **Conseguenze:** senza certificati commerciali restano gli avvisi di Gatekeeper e SmartScreen al primo avvio, ora spiegati nel `.dmg` e nella release. La versione passa a 1.3.1.
+- **Conseguenze:** senza certificati commerciali restano gli avvisi di Gatekeeper e SmartScreen al primo avvio, ora spiegati nel `.dmg` e nella release. La versione passa a 1.3.2.
 - **Evidenza:** anteprima delle risorse generate; `cargo fmt` e `clippy -D warnings` dell'app su Linux; build degli installatori e prove di installazione nel workflow `release` sui 3 sistemi (il codice solo macOS si compila lì).
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md, README.md.
 
