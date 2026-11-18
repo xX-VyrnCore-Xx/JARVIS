@@ -24,7 +24,7 @@ Questo documento raccoglie ciò che serve per l'accettazione finale descritta in
 | RNF-01 Contratti | `tests/contracts`, `jarvis-contracts` | — | Verde | — |
 | RNF-02 Guasti | `resilience.rs` (blocco, crash, output non valido) | — | Verde | Perdita di rete fra nodi non provata |
 | RNF-03 Risorse | `tests/perf` (p95 in CI) | P11 | Verde | Misure con modelli reali da fare |
-| RNF-04 Sicurezza | token, host, CSP, policy, conferme, audit, revoca | P8, P12 | Verde | Passkey e mTLS assenti; portachiavi su macOS e Windows, file 0600 su Linux |
+| RNF-04 Sicurezza | token, host, CSP, policy, conferme, audit, revoca | P8, P12 | Verde | Passkey e mTLS assenti; portachiavi su macOS, Windows e Linux con sessione grafica |
 | RNF-05 Local-first | nessun backend cloud | — | Verde | — |
 | RNF-06 Offline | backend offline in tutta la CI | P2 | Verde | — |
 | RNF-07 Osservabilità | metriche, log, esportazione | — | Verde | Trace distribuite assenti |
@@ -75,7 +75,6 @@ Restano decisioni del proprietario, perché richiedono suoi account, certificati
 - firma dei binari e installatori;
 - canali Stable/Beta;
 - VPN mesh;
-- portachiavi del sistema su Linux (Secret Service);
 - evoluzione dell'avatar con sincronizzazione labiale basata sui fonemi e client nativo Android.
 
 ## Procedura di rilascio e rollback

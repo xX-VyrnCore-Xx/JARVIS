@@ -861,6 +861,19 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `CoreClientTest.tasksAndNoticesUseDeviceRoutesOnly` (Android, 6/6 in locale) e i casi aggiunti a `apps/ios/tests/CoreClientTests.swift`, eseguiti dalla CI su macOS; build dell'APK e dell'app per simulatore in CI.
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
 
+### ADR-0033 — Portachiavi su Linux con Secret Service
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario; limite dell'ADR-0021 (Linux solo con il file 0600).
+- **Decisione:**
+  - su Linux la chiave dei segreti va nel Secret Service (GNOME Keyring, KWallet) tramite `keyring` con D-Bus; libdbus è compilata dal sorgente, così la build non richiede pacchetti di sviluppo;
+  - il portachiavi si usa solo con una sessione D-Bus (`DBUS_SESSION_BUS_ADDRESS`). Su server, servizi di sistema e CI resta il file 0600;
+  - stesse regole dell'ADR-0021: spostamento dal file con rilettura, nessuna chiave nuova se il portachiavi non risponde e ci sono segreti, ripiego sul file solo senza segreti.
+- **Conseguenze:**
+  - su un desktop Linux con sessione grafica copiare la cartella dei dati non basta più per leggere i segreti;
+  - avviare il Core senza la sessione con cui la chiave è stata salvata (per esempio da un servizio di sistema) richiede di ripristinare un backup o di usare `JARVIS_SECRETS_KEYCHAIN=off` fin dall'inizio.
+- **Evidenza:** unitario `linux_without_secret_service_falls_back_to_the_file` (bus D-Bus non raggiungibile, ripiego sul file; senza sessione nessun portachiavi); CI «avvio reale» su Ubuntu (file).
+- **Documenti interessati:** SECURITY_AND_PRIVACY.md, ACCEPTANCE.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

@@ -34,10 +34,10 @@ pub trait KeyVault {
 }
 
 /// Voce del portachiavi legata alla cartella dei dati, così più installazioni non si sovrascrivono.
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 struct SystemVault(keyring::Entry);
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 impl KeyVault for SystemVault {
     fn get(&self) -> Result<Option<Vec<u8>>, String> {
         match self.0.get_secret() {
@@ -63,13 +63,16 @@ pub fn system_vault(data_dir: &Path) -> Option<Box<dyn KeyVault>> {
     if std::env::var("JARVIS_SECRETS_KEYCHAIN").is_ok_and(|v| v == "off") {
         return None;
     }
-    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
     {
+        // Linux senza sessione D-Bus (server, servizi di sistema): nessun portachiavi, si usa il file 0600.
+        #[cfg(target_os = "linux")]
+        std::env::var_os("DBUS_SESSION_BUS_ADDRESS")?;
         keyring::Entry::new("JARVIS", &vault_account(data_dir))
             .ok()
             .map(|e| Box::new(SystemVault(e)) as Box<dyn KeyVault>)
     }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
         let _ = data_dir;
         None
@@ -366,5 +369,29 @@ mod tests {
         let b = fresh("acc-b");
         assert_ne!(vault_account(&a), vault_account(&b));
         assert_eq!(vault_account(&a), vault_account(&a));
+    }
+
+    /// Linux con un bus D-Bus che non risponde (sessione chiusa, servizio assente): si ripiega sul file
+    /// invece di bloccare l'avvio, purché non ci siano segreti cifrati con una chiave del portachiavi.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_without_secret_service_falls_back_to_the_file() {
+        let dir = fresh("linux");
+        std::env::set_var(
+            "DBUS_SESSION_BUS_ADDRESS",
+            "unix:path=/nonexistent/jarvis-test-bus",
+        );
+        let vault = system_vault(&dir);
+        assert!(
+            vault.is_some(),
+            "con una sessione D-Bus dichiarata si prova il portachiavi"
+        );
+        let s = SecretStore::open_with(&dir, vault.as_deref()).unwrap();
+        assert_eq!(s.location(), "file");
+        std::env::remove_var("DBUS_SESSION_BUS_ADDRESS");
+        assert!(
+            system_vault(&dir).is_none(),
+            "senza sessione D-Bus niente portachiavi"
+        );
     }
 }
