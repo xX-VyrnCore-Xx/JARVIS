@@ -317,6 +317,60 @@ fn revocation_removes_tools_fails_pending_work_and_stops_the_node() {
 }
 
 #[test]
+fn api_revocation_interrupts_an_assignment_waiting_for_a_result() {
+    let env = core();
+    let (status, paired) = env.call(
+        "POST",
+        "/api/devices/pair",
+        Some(json!({
+            "code": env.pairing_code(), "name": "Studio", "platform": "desktop",
+            "capabilities": ["fs.write"]
+        })),
+    );
+    assert_eq!(status, 200, "{paired}");
+    let token = paired["token"].as_str().unwrap();
+    let id = paired["device"]["device_id"].as_str().unwrap();
+    let poll = |wait| match ureq::get(&format!("{}/api/nodes/next?wait={wait}", env.url))
+        .set("X-Jarvis-Device", token)
+        .call()
+    {
+        Ok(response) => response.status(),
+        Err(ureq::Error::Status(status, _)) => status,
+        Err(err) => panic!("{err}"),
+    };
+    assert_eq!(poll(0), 204);
+
+    let out = env.chat("nodo studio fs.write path=nota.txt content=prova");
+    let confirmation = out["confirmation"]["confirmation_id"].as_str().unwrap();
+    let revoke = format!("/api/devices/{id}/revoke");
+    std::thread::scope(|scope| {
+        let pending = scope.spawn(|| {
+            env.call(
+                "POST",
+                &format!("/api/confirmations/{confirmation}"),
+                Some(json!({"approve": true})),
+            )
+        });
+        assert_eq!(poll(3), 200, "assegnazione consegnata al nodo");
+        let (status, revoked) = env.call("POST", &revoke, None);
+        assert_eq!(status, 200, "{revoked}");
+        assert!(revoked["revoked_at"].is_string());
+        let (status, out) = pending.join().unwrap();
+        assert_eq!(status, 200, "{out}");
+        let result = step(&out, "tool_result").unwrap();
+        assert_eq!(result["error"], "node.revoked", "{out}");
+        assert_eq!(result["effect"], "unknown", "{out}");
+        assert_eq!(env.call("POST", &revoke, None), (200, revoked));
+    });
+    assert_eq!(poll(0), 401);
+    let stored = jarvis_core::store::Store::open(&env.data.join("jarvis.sqlite3")).unwrap();
+    assert!(stored
+        .device_by_token(&jarvis_core::nodes::token_hash(token))
+        .unwrap()
+        .is_none());
+}
+
+#[test]
 fn offline_node_and_wrong_codes_are_reported() {
     let env = core();
     let node_dir = temp("agent");

@@ -150,9 +150,12 @@ impl NodeHub {
         best.map(|b| b.3)
     }
 
-    pub fn enqueue(&self, node_id: &str, tool: &str, arguments: &Value) -> String {
+    pub fn enqueue(&self, node_id: &str, tool: &str, arguments: &Value) -> Option<String> {
         let id = uuid::Uuid::new_v4().to_string();
         let mut s = self.lock();
+        if s.revoked.contains(node_id) {
+            return None;
+        }
         s.pending.insert(
             id.clone(),
             Pending {
@@ -170,7 +173,7 @@ impl NodeHub {
             });
         drop(s);
         self.changed.notify_all();
-        id
+        Some(id)
     }
 
     /// Attende l'esito; allo scadere l'assegnazione viene ritirata (se ancora in coda) e restituisce
@@ -325,7 +328,7 @@ mod tests {
         let hub = std::sync::Arc::new(NodeHub::default());
         hub.register("n1", &token_hash(&"a".repeat(64)));
         assert_eq!(hub.authenticate(&"a".repeat(64)).as_deref(), Some("n1"));
-        let id = hub.enqueue("n1", "time.now", &json!({}));
+        let id = hub.enqueue("n1", "time.now", &json!({})).unwrap();
         assert!(!hub.complete("n1", &id, Ok(json!({"precoce": true}))));
         let worker = {
             let hub = hub.clone();
@@ -348,7 +351,7 @@ mod tests {
         worker.join().unwrap();
         assert!(hub.online("n1", Duration::from_secs(5)));
 
-        let id = hub.enqueue("n1", "time.now", &json!({}));
+        let id = hub.enqueue("n1", "time.now", &json!({})).unwrap();
         let h = hub.clone();
         let revoker = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(100));
@@ -361,9 +364,10 @@ mod tests {
         revoker.join().unwrap();
         assert!(hub.authenticate(&"a".repeat(64)).is_none());
         assert!(hub.next("n1", Duration::from_millis(10)).is_none());
+        assert!(hub.enqueue("n1", "time.now", &json!({})).is_none());
 
         hub.register("n3", &token_hash(&"b".repeat(64)));
-        let id = hub.enqueue("n3", "time.now", &json!({}));
+        let id = hub.enqueue("n3", "time.now", &json!({})).unwrap();
         assert_eq!(
             hub.wait_result(&id, Duration::from_millis(50))
                 .unwrap_err()
@@ -413,7 +417,7 @@ mod tests {
             Some("c"),
             "carico per CPU più basso"
         );
-        hub.enqueue("c", "time.now", &json!({}));
+        hub.enqueue("c", "time.now", &json!({})).unwrap();
         assert_eq!(
             hub.pick(&all, Duration::from_secs(60)).as_deref(),
             Some("b"),

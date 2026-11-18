@@ -384,12 +384,48 @@ impl Store {
             .map(|d| d.and_then(|d| serde_json::from_str(&d).ok()))
     }
 
-    pub fn device_retire_token(&self, id: &str) -> StoreResult<()> {
-        self.conn.execute(
-            "UPDATE devices SET token_sha256 = 'revocato:' || device_id WHERE device_id = ?1",
-            [id],
-        )?;
-        Ok(())
+    /// Aggiorna la presenza solo se il token è ancora attivo.
+    pub fn device_touch(&self, doc: &Value, token_sha256: &str) -> StoreResult<bool> {
+        self.conn
+            .execute(
+                "UPDATE devices SET doc = ?1 WHERE token_sha256 = ?2",
+                params![doc.to_string(), token_sha256],
+            )
+            .map(|updated| updated != 0)
+    }
+
+    /// Registra la revoca e ritira il token nella stessa transazione, su una connessione indipendente.
+    pub(crate) fn revoke_device(
+        db: &Path,
+        id: &str,
+        revoked_at: &str,
+    ) -> StoreResult<Option<(Value, bool)>> {
+        let mut conn =
+            Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let Some(raw) = tx
+            .query_row(
+                "SELECT doc FROM devices WHERE device_id = ?1",
+                [id],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?
+        else {
+            return Ok(None);
+        };
+        let mut doc: Value = serde_json::from_str(&raw).map_err(|err| {
+            rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(err))
+        })?;
+        let changed = doc.get("revoked_at").is_none();
+        if changed {
+            doc["revoked_at"] = revoked_at.into();
+            tx.execute(
+                "UPDATE devices SET doc = ?1, token_sha256 = 'revocato:' || device_id WHERE device_id = ?2",
+                params![doc.to_string(), id],
+            )?;
+        }
+        tx.commit()?;
+        Ok(Some((doc, changed)))
     }
 
     /// Dispositivi con l'impronta del token (per registrare i nodi all'avvio).
