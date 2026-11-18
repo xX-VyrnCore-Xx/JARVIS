@@ -88,9 +88,14 @@ def main() -> int:
         print(f"Python ridotto di {trim(args.dest)} MB")
         return 0
     release = json.loads(get(API))
-    pattern = re.compile(rf"^cpython-{re.escape(args.minor)}\.\d+\+\d+-{re.escape(args.triple)}-install_only\.tar\.gz$")
     assets = {a["name"]: a for a in release["assets"]}
-    names = sorted((n for n in assets if pattern.match(n)), key=lambda n: int(n.split("+")[0].rsplit(".", 1)[1]))
+    names: list[str] = []
+    # Preferenza per la variante senza simboli di debug (molto più piccola su Linux), poi quella completa.
+    for variant in ("install_only_stripped", "install_only"):
+        pattern = re.compile(rf"^cpython-{re.escape(args.minor)}\.\d+\+\d+-{re.escape(args.triple)}-{variant}\.tar\.gz$")
+        names = sorted((n for n in assets if pattern.match(n)), key=lambda n: int(n.split("+")[0].rsplit(".", 1)[1]))
+        if names:
+            break
     if not names:
         sys.exit(f"nessun Python {args.minor} per {args.triple} nella release {release.get('tag_name')}")
     name = names[-1]
