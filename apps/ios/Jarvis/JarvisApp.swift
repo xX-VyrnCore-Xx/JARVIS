@@ -17,7 +17,13 @@ struct JarvisView: View {
                 if !model.restored {
                     ProgressView("Apertura di JARVIS")
                 } else if let session = model.session {
-                    chat(session)
+                    TabView {
+                        chat(session).tabItem { Label("Chat", systemImage: "bubble.left.and.bubble.right") }
+                        tasks(session).tabItem { Label("Attività", systemImage: "checklist") }
+                        notices(session)
+                            .tabItem { Label("Notifiche", systemImage: "bell") }
+                            .badge(model.unread)
+                    }
                 } else {
                     pairing
                 }
@@ -54,6 +60,47 @@ struct JarvisView: View {
                 Text("Associa dispositivo")
             } footer: {
                 Text("Genera un codice monouso dalla sezione Dispositivi del Core.")
+            }
+        }
+    }
+
+    private static let stateLabel = [
+        "succeeded": "riuscita", "failed": "fallita", "waiting_confirmation": "attende conferma",
+        "running": "in corso", "cancelled": "annullata", "planned": "pianificata", "pending": "in attesa",
+    ]
+
+    /// Attività recenti (ADR-0032).
+    private func tasks(_ session: DeviceSession) -> some View {
+        List {
+            if model.tasks.isEmpty { Text("Nessuna attività.").foregroundStyle(.secondary) }
+            ForEach(model.tasks) { task in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(task.objective)
+                    Text("\(Self.stateLabel[task.state] ?? task.state) · \(task.createdAt.prefix(16).replacingOccurrences(of: "T", with: " "))")
+                        .font(.caption).foregroundStyle(task.state == "failed" ? .red : .secondary)
+                }
+            }
+        }
+        .refreshable { await model.reload(session) }
+    }
+
+    /// Notifiche con le non lette in evidenza (RF-13, ADR-0032).
+    private func notices(_ session: DeviceSession) -> some View {
+        List {
+            if model.notices.isEmpty { Text("Nessuna notifica.").foregroundStyle(.secondary) }
+            ForEach(model.notices) { notice in
+                VStack(alignment: .leading, spacing: 4) {
+                    Text((notice.isRead ? "" : "● ") + notice.title)
+                        .font(.headline).foregroundStyle(notice.severity == "error" ? .red : .primary)
+                    if let body = notice.body, !body.isEmpty { Text(body).font(.footnote) }
+                    Text(notice.createdAt.prefix(16).replacingOccurrences(of: "T", with: " ")).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .refreshable { await model.reload(session) }
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button("Segna lette") { Task { await model.markAllRead(session) } }.disabled(model.busy || model.unread == 0)
             }
         }
     }
@@ -137,6 +184,9 @@ final class JarvisModel: ObservableObject {
     @Published var draft = ""
     @Published var messages: [ChatMessage] = []
     @Published var actions: [PendingAction] = []
+    @Published var tasks: [TaskSummary] = []
+    @Published var notices: [Notice] = []
+    @Published var unread = 0
     @Published var selection: PendingAction?
     @Published var error: String?
     @Published var busy = false
@@ -195,6 +245,13 @@ final class JarvisModel: ObservableObject {
         await run { try await refresh(session) }
     }
 
+    func markAllRead(_ session: DeviceSession) async {
+        await run {
+            unread = try await client.markAllRead(session)
+            try await refresh(session)
+        }
+    }
+
     func signOut() async {
         await run { try disconnect() }
     }
@@ -202,9 +259,14 @@ final class JarvisModel: ObservableObject {
     private func refresh(_ session: DeviceSession) async throws {
         async let history = client.history(session)
         async let pending = client.pending(session)
-        let (loadedMessages, loadedActions) = try await (history, pending)
+        async let recent = client.tasks(session)
+        async let inbox = client.notices(session)
+        let (loadedMessages, loadedActions, loadedTasks, loadedNotices) = try await (history, pending, recent, inbox)
         messages = loadedMessages
         actions = loadedActions.sorted { $0.expiresAt < $1.expiresAt }
+        tasks = loadedTasks
+        notices = loadedNotices.items
+        unread = loadedNotices.unread
     }
 
     private func disconnect() throws {
@@ -216,6 +278,9 @@ final class JarvisModel: ObservableObject {
         session = nil
         messages = []
         actions = []
+        tasks = []
+        notices = []
+        unread = 0
         selection = nil
         draft = ""
     }

@@ -77,6 +77,8 @@ fn main() {
                     .title("JARVIS")
                     .inner_size(1200.0, 820.0)
                     .min_inner_size(380.0, 520.0)
+                    .theme(Some(tauri::Theme::Dark))
+                    .background_color(tauri::webview::Color(5, 10, 20, 255))
                     .on_navigation(move |url| {
                         let core = *allowed.lock().unwrap_or_else(|e| e.into_inner());
                         let to_core =
@@ -118,7 +120,9 @@ fn main() {
                 };
                 match started {
                     Ok(core) => {
-                        let url: url::Url = core.url.parse().expect("URL del Core");
+                        let mut url: url::Url = core.url.parse().expect("URL del Core");
+                        // La dashboard applica le rifiniture dell'app desktop (ADR-0035).
+                        url.query_pairs_mut().append_pair("app", "desktop");
                         *core_port.lock().unwrap_or_else(|e| e.into_inner()) = Some(core.port);
                         *handle
                             .state::<CoreState>()

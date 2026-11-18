@@ -32,6 +32,7 @@ export function Avatar({ id, size = "small" }: { id?: string; size?: "small" | "
           <i className="halo"></i>
           <i className="ticks"></i>
           <b className="iris"></b>
+          <b className="mouth"></b>
         </>
       ) : null}
     </div>

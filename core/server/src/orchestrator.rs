@@ -141,6 +141,7 @@ pub type StreamSink = Box<dyn Fn(&str) + Send>;
 
 pub struct Jarvis {
     stream_sink: Option<StreamSink>,
+    updates: crate::updates::Updates,
     oauth: crate::oauth::Flows,
     cfg: Config,
     store: Store,
@@ -209,6 +210,7 @@ impl Jarvis {
             (cfg.data_dir.clone(), cfg.python.clone(), cfg.ai_dir.clone());
         let mut jarvis = Self {
             stream_sink: None,
+            updates: crate::updates::Updates::new(&cfg.data_dir),
             oauth: crate::oauth::Flows::default(),
             cfg,
             store,
@@ -236,6 +238,8 @@ impl Jarvis {
             _lock: lock,
         };
         jarvis.register_authorized_connectors()?;
+        jarvis.refresh_embedder();
+        jarvis.enable_audit_signing()?;
         jarvis.register_nodes()?;
         crate::rollback::mark(&jarvis.cfg.data_dir)?;
         if let Some(up) = upgraded {
@@ -269,6 +273,7 @@ impl Jarvis {
         // Dopo la configurazione dei modelli il worker riparte con i nuovi percorsi (voce, Ollama).
         if self.setup.take_restart() {
             self.worker = None;
+            self.refresh_embedder();
             self.obs
                 .log("info", "worker.restart", json!({"reason": "setup"}));
         }
@@ -342,7 +347,7 @@ impl Jarvis {
             }));
         }
         json!({
-            "core": {"version": env!("CARGO_PKG_VERSION"), "status": "up", "secrets_store": self.secrets.location()},
+            "core": {"version": env!("CARGO_PKG_VERSION"), "status": "up", "secrets_store": self.secrets.location(), "memory_embeddings": self.embed_model()},
             "web": self.cfg.web.describe(),
             "ai": ai,
             "audit": {"events": events, "chain_valid": errors.is_empty()},
@@ -890,6 +895,52 @@ impl Jarvis {
         Ok(out)
     }
 
+    /// Firma del registro di audit (ADR-0030): chiave Ed25519 generata al primo avvio e custodita
+    /// nell'archivio dei segreti.
+    fn enable_audit_signing(&mut self) -> Result<(), String> {
+        let name = "audit:signing-key";
+        let seed = match self.secrets.get(name)? {
+            Some(hexkey) => hex::decode(hexkey)
+                .map_err(|_| "chiave di firma dell'audit danneggiata".to_string())?,
+            None => {
+                let mut k = [0u8; 32];
+                getrandom::getrandom(&mut k).map_err(|e| e.to_string())?;
+                self.secrets.put(name, &hex::encode(k))?;
+                k.to_vec()
+            }
+        };
+        let seed: [u8; 32] = seed
+            .try_into()
+            .map_err(|_| "chiave di firma dell'audit danneggiata".to_string())?;
+        self.audit.set_signer(&seed);
+        Ok(())
+    }
+
+    /// Attiva gli embedding della memoria se è scelto un modello (ADR-0028). Senza Ollama la memoria usa
+    /// l'indice locale; gli embedding mancanti vengono calcolati appena il servizio risponde.
+    fn refresh_embedder(&mut self) {
+        let embedder = self.setup.embed_model().map(|m| {
+            std::sync::Arc::new(crate::memory::OllamaEmbedder::new(
+                self.setup.ollama_url(),
+                &m,
+            )) as std::sync::Arc<dyn crate::memory::Embedder>
+        });
+        match self.store.set_embedder(embedder) {
+            Ok(n) if n > 0 => self.obs.log("info", "memory.embedded", json!({"items": n})),
+            Ok(_) => {}
+            Err(e) => self.obs.log(
+                "warn",
+                "memory.embed_failed",
+                json!({"error": e.to_string()}),
+            ),
+        }
+    }
+
+    /// Modello di embedding attivo, per lo stato del sistema.
+    pub fn embed_model(&self) -> Option<String> {
+        self.store.embedder.as_ref().map(|e| e.model().to_string())
+    }
+
     /// Memoria data all'agente (ADR-0022): tutte le preferenze, poi i fatti e gli episodi pertinenti alla
     /// richiesta. Con una memoria piccola i fatti sono inclusi tutti, come prima.
     fn memory_context(&self, query: &str) -> Result<Vec<Value>, CoreError> {
@@ -1081,8 +1132,9 @@ impl Jarvis {
         let errors = jarvis_contracts::audit_chain_errors(&events);
         let total = events.len();
         let recent: Vec<Value> = events.into_iter().rev().take(limit).collect();
+        let signatures = self.audit.verify_signatures().map_err(internal)?;
         Ok(
-            json!({"total": total, "chain_valid": errors.is_empty(), "chain_errors": errors, "events": recent}),
+            json!({"total": total, "chain_valid": errors.is_empty(), "chain_errors": errors, "events": recent, "signatures": signatures}),
         )
     }
 
@@ -1732,6 +1784,50 @@ impl Jarvis {
             })
             .collect();
         crate::channels::dispatch(targets, doc.clone(), self.obs.clone());
+    }
+
+    // ------------------------------------------------------------------ aggiornamenti (ADR-0034)
+
+    pub fn data_dir(&self) -> std::path::PathBuf {
+        self.cfg.data_dir.clone()
+    }
+
+    pub fn updates_state(&self) -> Value {
+        self.updates.state()
+    }
+
+    pub fn updates_configure(&mut self, enabled: bool, channel: &str) -> Result<Value, CoreError> {
+        let s = self
+            .updates
+            .configure(enabled, channel)
+            .map_err(CoreError::BadRequest)?;
+        self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "owner", "id": "owner"},
+                          "node": "core-local", "action": "updates.configure", "outcome": "succeeded", "effect": "applied"}))?;
+        Ok(s)
+    }
+
+    /// URL dell'elenco delle release se il controllo automatico è dovuto (la richiesta va fuori dal blocco).
+    pub fn updates_due(&self) -> bool {
+        self.updates.due(chrono::Utc::now())
+    }
+
+    /// Registra l'esito e notifica una versione più recente, una sola volta per versione.
+    pub fn updates_record(
+        &mut self,
+        result: Result<Vec<Value>, String>,
+    ) -> Result<Value, CoreError> {
+        let (state, newer) = self.updates.record(result).map_err(CoreError::Internal)?;
+        if let Some(r) = newer {
+            let tag = r["tag"].as_str().unwrap_or_default().to_string();
+            self.notify(json!({
+                "severity": "info", "category": "system", "title": format!("Aggiornamento disponibile: JARVIS {tag}"),
+                "body": format!("Hai la versione {}. Scarica {tag} dalla pagina della release e verifica la firma: {}",
+                                env!("CARGO_PKG_VERSION"), r["url"].as_str().unwrap_or_default()),
+                "source": {"kind": "module", "id": "updates"}, "dedupe_key": format!("update:{tag}"),
+                "link": {"view": "system"},
+            }))?;
+        }
+        Ok(state)
     }
 
     // ------------------------------------------------------------------ canali di notifica (ADR-0026)
@@ -2398,6 +2494,7 @@ impl Jarvis {
                 // Nodo: token, coda e assegnazioni in attesa annullati, strumenti tolti dal catalogo.
                 self.nodes.revoke(id);
                 self.catalog.remove_prefix(&format!("node.{slug}."));
+                self.refresh_auto_node_tools();
             }
             self.device_audit("device.revoke", id, "revoked")?;
         }
@@ -2436,8 +2533,51 @@ impl Jarvis {
                 .clone();
             self.catalog
                 .insert_dynamic(crate::nodes::tool_descriptor(&base, slug, name))?;
+            // Scelta automatica (ADR-0031): lo strumento esiste finché almeno un nodo lo offre.
+            self.catalog.insert_dynamic(crate::nodes::tool_descriptor(
+                &base,
+                "auto",
+                "scelto automaticamente",
+            ))?;
         }
         Ok(())
+    }
+
+    /// Strumenti `node.auto.*` coerenti con i nodi rimasti dopo una revoca.
+    fn refresh_auto_node_tools(&mut self) {
+        self.catalog.remove_prefix("node.auto.");
+        let docs = self.node_devices();
+        for doc in docs {
+            for cap in doc["capabilities"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+            {
+                if let Some(base) = self.catalog.get(cap).map(|t| t.descriptor.clone()) {
+                    let _ = self.catalog.insert_dynamic(crate::nodes::tool_descriptor(
+                        &base,
+                        "auto",
+                        "scelto automaticamente",
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Nodi associati e non revocati.
+    fn node_devices(&self) -> Vec<Value> {
+        self.store
+            .devices()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|d| {
+                d.get("revoked_at").is_none()
+                    && d["scopes"]
+                        .as_array()
+                        .is_some_and(|s| s.iter().any(|x| x == "node"))
+            })
+            .collect()
     }
 
     fn register_nodes(&mut self) -> Result<(), String> {
@@ -2495,13 +2635,41 @@ impl Jarvis {
                 "l'operazione sul nodo richiede la conferma del proprietario",
             ));
         }
-        let node = self
-            .store
-            .devices()
-            .map_err(|e| tool_error("node.unavailable", e.to_string()))?
-            .into_iter()
-            .find(|d| d["slug"] == slug && d.get("revoked_at").is_none())
-            .ok_or_else(|| tool_error("node.revoked", "nodo non associato o revocato"))?;
+        let node = if slug == "auto" {
+            // Scelta automatica (ADR-0031): il nodo in linea più libero fra quelli che offrono lo strumento.
+            let offering: Vec<Value> = self
+                .node_devices()
+                .into_iter()
+                .filter(|d| {
+                    d["capabilities"]
+                        .as_array()
+                        .is_some_and(|c| c.iter().any(|x| x == base))
+                })
+                .collect();
+            let ids: Vec<String> = offering
+                .iter()
+                .filter_map(|d| d["device_id"].as_str().map(str::to_string))
+                .collect();
+            let chosen = self
+                .nodes
+                .pick(&ids, std::time::Duration::from_secs(60))
+                .ok_or_else(|| {
+                    tool_error("node.offline", format!("nessun nodo in linea offre {base}"))
+                })?;
+            offering
+                .into_iter()
+                .find(|d| d["device_id"] == chosen.as_str())
+                .unwrap_or_default()
+        } else {
+            self.store
+                .devices()
+                .map_err(|e| tool_error("node.unavailable", e.to_string()))?
+                .into_iter()
+                .find(|d| d["slug"] == slug && d.get("revoked_at").is_none())
+                .ok_or_else(|| tool_error("node.revoked", "nodo non associato o revocato"))?
+        };
+        let slug = node["slug"].as_str().unwrap_or(slug).to_string();
+        let slug = slug.as_str();
         let id = node["device_id"].as_str().unwrap_or_default().to_string();
         if !self.nodes.online(&id, std::time::Duration::from_secs(60)) {
             return Err(tool_error(
@@ -2737,7 +2905,28 @@ impl Jarvis {
     /// Revoca: credenziale cancellata e strumenti rimossi dal catalogo (la policy li nega da subito).
     /// Con `uninstall` elimina anche manifest e segreto del webhook.
     pub fn revoke_connector(&mut self, id: &str, uninstall: bool) -> Result<Value, CoreError> {
-        self.connector_manifest(id)?;
+        let (manifest, _) = self.connector_manifest(id)?;
+        // OAuth (ADR-0027): prima della cancellazione locale si chiede al servizio di invalidare i token.
+        let remote =
+            if manifest["auth"]["type"] == "oauth2" && manifest["auth"]["revoke_url"].is_string() {
+                let state: Value = self
+                    .secrets
+                    .get(&oauth_name(id))
+                    .ok()
+                    .flatten()
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or(Value::Null);
+                let access = self.secrets.get(&token_name(id)).ok().flatten();
+                let r = crate::oauth::revoke(&manifest, &self.cfg.web, &state, access.as_deref());
+                self.obs.count(if r.is_ok() {
+                    "connector.oauth.revoked_remote"
+                } else {
+                    "connector.oauth.revoke_failed"
+                });
+                Some(r)
+            } else {
+                None
+            };
         self.secrets
             .delete(&token_name(id))
             .map_err(CoreError::Internal)?;
@@ -2768,7 +2957,11 @@ impl Jarvis {
             "connector.revoke",
             json!({"connector": id, "uninstall": uninstall}),
         );
-        Ok(json!({"id": id, "tools_removed": removed, "uninstalled": uninstall}))
+        Ok(
+            json!({"id": id, "tools_removed": removed, "uninstalled": uninstall,
+                  "remote_revoked": remote.as_ref().map(Result::is_ok),
+                  "remote_error": remote.and_then(Result::err)}),
+        )
     }
 
     /// Avvia OAuth (ADR-0027): restituisce la pagina di consenso da aprire nel browser del proprietario.

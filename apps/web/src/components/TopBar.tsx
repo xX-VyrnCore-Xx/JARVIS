@@ -3,6 +3,8 @@ import { api, fmtTime, guard, post } from "../lib/api";
 import { voice } from "../lib/voice";
 import { useApp, useVoice } from "../state";
 import type { Notification } from "../state";
+import { SHORTCUT } from "./CommandPalette";
+import { Icon } from "./Icon";
 
 const CATEGORY: Record<string, string> = {
   automation: "automazione", confirmation: "conferma", system: "sistema", security: "sicurezza", integration: "integrazione",
@@ -59,7 +61,7 @@ function ThemeToggle() {
         }
       }}
     >
-      <span aria-hidden="true">◐</span>
+      <Icon name="theme" />
     </button>
   );
 }
@@ -108,6 +110,11 @@ export function TopBar() {
         <span className="brand-mark" aria-hidden="true"></span>
         <span className="brand-name">JARVIS</span> <small id="brand-version">{health?.core?.version ? `v${health.core.version}` : ""}</small>
       </div>
+      <button className="palette-trigger" type="button" onClick={() => window.dispatchEvent(new Event("jarvis:palette"))} aria-label="Apri la palette comandi">
+        <Icon name="search" size={16} />
+        <span>Cerca o chiedi…</span>
+        <kbd>{SHORTCUT}</kbd>
+      </button>
       <div className="status" id="status" role="status" aria-live="polite">
         <AiPill />
         {health?.audit ? (
@@ -123,7 +130,7 @@ export function TopBar() {
           className="bell" id="bell" aria-haspopup="true" aria-expanded={open} aria-controls="notif-panel" title="Notifiche"
           aria-label={`Notifiche, ${unread} non lette`} onClick={() => setOpen(!open)}
         >
-          <span aria-hidden="true">🔔</span>
+          <Icon name="bell" />
           <span className="count" id="notif-count" hidden={!unread}>{unread > 99 ? "99+" : String(unread)}</span>
         </button>
       </div>
@@ -193,8 +200,12 @@ export function Toasts() {
               if (n.link?.view) show(n.link.view);
             }}
           >
-            <div className="t">{n.title}</div>
-            {n.body ? <div className="b">{n.body}</div> : null}
+            <Icon name={n.severity === "error" || n.severity === "warning" ? "alert" : n.severity === "success" ? "check" : "info"} className="toast-icon" />
+            <div className="toast-text">
+              <div className="t">{n.title}</div>
+              {n.body ? <div className="b">{n.body}</div> : null}
+            </div>
+            <i className="toast-timer" aria-hidden="true"></i>
           </div>
         );
       })}

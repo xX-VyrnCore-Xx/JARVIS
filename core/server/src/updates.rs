@@ -1,0 +1,239 @@
+//! Controllo aggiornamenti con i canali Stable e Beta (ADR-0034).
+//!
+//! - Facoltativo e spento per impostazione, perché contatta GitHub: lo attiva il proprietario dalla sezione
+//!   Sistema.
+//! - Al massimo una volta al giorno, più il controllo manuale. La richiesta va fuori dal blocco del Core e non
+//!   invia dati del proprietario: chiede solo l'elenco delle release pubbliche.
+//! - Stable considera solo le release stabili; Beta include anche le prerelease (`v1.3.0-rc.1`).
+//! - Una versione più recente diventa una notifica `system` deduplicata per versione, con il collegamento alla
+//!   release. Nessuna installazione automatica: la release si scarica e si verifica a mano (ADR-0020).
+
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use serde_json::{json, Value};
+
+pub const DEFAULT_URL: &str =
+    "https://api.github.com/repos/xX-VyrnCore-Xx/JARVIS/releases?per_page=20";
+pub const CHANNELS: [&str; 2] = ["stable", "beta"];
+const EVERY: chrono::Duration = chrono::Duration::hours(24);
+
+/// Versione semantica minima: numeri principali e un eventuale suffisso di prerelease.
+fn parse(v: &str) -> Option<(u64, u64, u64, Option<String>)> {
+    let v = v.trim().trim_start_matches('v');
+    let (core, pre) = match v.split_once('-') {
+        Some((c, p)) => (c, Some(p.to_string())),
+        None => (v, None),
+    };
+    let mut it = core.split('.').map(|x| x.parse::<u64>().ok());
+    Some((it.next()??, it.next()??, it.next()??, pre))
+}
+
+/// Vero se `candidate` è più recente di `current` (una prerelease precede la stabile con gli stessi numeri).
+pub fn is_newer(candidate: &str, current: &str) -> bool {
+    let (Some(a), Some(b)) = (parse(candidate), parse(current)) else {
+        return false;
+    };
+    match (a.0, a.1, a.2).cmp(&(b.0, b.1, b.2)) {
+        std::cmp::Ordering::Greater => true,
+        std::cmp::Ordering::Less => false,
+        std::cmp::Ordering::Equal => match (&a.3, &b.3) {
+            (None, Some(_)) => true,
+            (Some(x), Some(y)) => x > y,
+            _ => false,
+        },
+    }
+}
+
+/// La release più recente del canale, fra quelle dell'API di GitHub (bozze escluse).
+pub fn latest(releases: &[Value], channel: &str) -> Option<Value> {
+    releases
+        .iter()
+        .filter(|r| r["draft"] != true)
+        .filter(|r| channel == "beta" || r["prerelease"] != true)
+        .filter(|r| r["tag_name"].as_str().and_then(parse).is_some())
+        .max_by(|a, b| {
+            let (x, y) = (a["tag_name"].as_str().unwrap_or_default(), b["tag_name"].as_str().unwrap_or_default());
+            if is_newer(x, y) {
+                std::cmp::Ordering::Greater
+            } else if is_newer(y, x) {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .map(|r| json!({"tag": r["tag_name"], "url": r["html_url"], "published_at": r["published_at"], "prerelease": r["prerelease"] == true}))
+}
+
+/// Impostazioni e ultimo esito, salvati in `<dati>/updates.json`.
+pub struct Updates {
+    path: PathBuf,
+    pub url: String,
+}
+
+impl Updates {
+    pub fn new(data_dir: &Path) -> Self {
+        Self {
+            path: data_dir.join("updates.json"),
+            url: std::env::var("JARVIS_UPDATE_URL").unwrap_or_else(|_| DEFAULT_URL.to_string()),
+        }
+    }
+
+    pub fn state(&self) -> Value {
+        let mut s: Value = std::fs::read(&self.path)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_else(|| json!({}));
+        if !s["enabled"].is_boolean() {
+            s["enabled"] = false.into();
+        }
+        if !s["channel"].as_str().is_some_and(|c| CHANNELS.contains(&c)) {
+            s["channel"] = "stable".into();
+        }
+        s["current"] = env!("CARGO_PKG_VERSION").into();
+        s
+    }
+
+    fn save(&self, s: &Value) -> Result<(), String> {
+        let mut s = s.clone();
+        if let Some(o) = s.as_object_mut() {
+            o.remove("current");
+        }
+        std::fs::write(&self.path, s.to_string()).map_err(|e| e.to_string())
+    }
+
+    pub fn configure(&self, enabled: bool, channel: &str) -> Result<Value, String> {
+        if !CHANNELS.contains(&channel) {
+            return Err(format!("canale sconosciuto: {channel} (stable o beta)"));
+        }
+        let mut s = self.state();
+        s["enabled"] = enabled.into();
+        s["channel"] = channel.into();
+        self.save(&s)?;
+        Ok(self.state())
+    }
+
+    /// Vero se il controllo automatico è attivo e l'ultimo è più vecchio di un giorno.
+    pub fn due(&self, now: chrono::DateTime<chrono::Utc>) -> bool {
+        let s = self.state();
+        s["enabled"] == true
+            && s["checked_at"]
+                .as_str()
+                .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                .is_none_or(|t| now - t.with_timezone(&chrono::Utc) >= EVERY)
+    }
+
+    /// Scarica l'elenco delle release (da chiamare fuori dal blocco del Core).
+    pub fn fetch(&self) -> Result<Vec<Value>, String> {
+        let agent = ureq::AgentBuilder::new()
+            .timeout(Duration::from_secs(10))
+            .redirects(2)
+            .user_agent(concat!("JARVIS/", env!("CARGO_PKG_VERSION")))
+            .build();
+        let body = agent
+            .get(&self.url)
+            .set("Accept", "application/vnd.github+json")
+            .call()
+            .map_err(|e| match e {
+                ureq::Error::Status(code, _) => {
+                    format!("il servizio delle release ha risposto HTTP {code}")
+                }
+                ureq::Error::Transport(t) => {
+                    format!("servizio delle release non raggiungibile ({})", t.kind())
+                }
+            })?
+            .into_string()
+            .map_err(|e| e.to_string())?;
+        serde_json::from_str::<Vec<Value>>(&body)
+            .map_err(|_| "elenco delle release non leggibile".to_string())
+    }
+
+    /// Registra l'esito di un controllo; restituisce la release più recente se è un aggiornamento.
+    pub fn record(
+        &self,
+        result: Result<Vec<Value>, String>,
+    ) -> Result<(Value, Option<Value>), String> {
+        let mut s = self.state();
+        s["checked_at"] = crate::now().into();
+        let newer = match result {
+            Ok(releases) => {
+                let latest = latest(&releases, s["channel"].as_str().unwrap_or("stable"));
+                s["latest"] = latest.clone().unwrap_or(Value::Null);
+                s["error"] = Value::Null;
+                latest.filter(|l| {
+                    is_newer(
+                        l["tag"].as_str().unwrap_or_default(),
+                        env!("CARGO_PKG_VERSION"),
+                    )
+                })
+            }
+            Err(e) => {
+                s["error"] = e.into();
+                None
+            }
+        };
+        s["update_available"] = newer.is_some().into();
+        self.save(&s)?;
+        Ok((self.state(), newer))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn versions_and_channels() {
+        assert!(is_newer("v1.3.0", "1.2.0"));
+        assert!(!is_newer("v1.2.0", "1.2.0"));
+        assert!(
+            is_newer("v1.2.0", "1.2.0-rc.1"),
+            "la stabile segue la prerelease"
+        );
+        assert!(!is_newer("v1.3.0-rc.1", "1.3.0"));
+        assert!(is_newer("v2.0.0", "1.9.9"));
+        assert!(!is_newer("nonsense", "1.0.0"));
+        let releases = vec![
+            json!({"tag_name": "v1.2.0", "prerelease": false, "html_url": "https://x/1.2.0"}),
+            json!({"tag_name": "v1.3.0-rc.1", "prerelease": true, "html_url": "https://x/rc"}),
+            json!({"tag_name": "v1.4.0", "draft": true}),
+        ];
+        assert_eq!(latest(&releases, "stable").unwrap()["tag"], "v1.2.0");
+        assert_eq!(
+            latest(&releases, "beta").unwrap()["tag"],
+            "v1.3.0-rc.1",
+            "beta include le prerelease"
+        );
+    }
+
+    #[test]
+    fn settings_and_schedule() {
+        let dir =
+            std::env::temp_dir().join(format!("jarvis-upd-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let u = Updates::new(&dir);
+        assert_eq!(
+            (
+                u.state()["enabled"].as_bool(),
+                u.state()["channel"].as_str()
+            ),
+            (Some(false), Some("stable"))
+        );
+        assert!(!u.due(chrono::Utc::now()), "spento per impostazione");
+        assert!(u.configure(true, "nightly").is_err());
+        u.configure(true, "beta").unwrap();
+        assert!(u.due(chrono::Utc::now()));
+        let (state, newer) = u
+            .record(Ok(vec![
+                json!({"tag_name": "v99.0.0", "prerelease": false, "html_url": "https://x/99"}),
+            ]))
+            .unwrap();
+        assert_eq!(newer.unwrap()["tag"], "v99.0.0");
+        assert_eq!(state["update_available"], true);
+        assert!(!u.due(chrono::Utc::now()), "un controllo al giorno");
+        assert!(u.due(chrono::Utc::now() + chrono::Duration::hours(25)));
+        let (state, newer) = u.record(Err("servizio non raggiungibile".into())).unwrap();
+        assert!(newer.is_none() && state["error"].is_string());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

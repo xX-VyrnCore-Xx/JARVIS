@@ -13,10 +13,10 @@ interface SetupStatus {
   first_run: boolean;
   running: boolean;
   steps: { label: string; status: string; progress?: number | null; detail?: string }[];
-  choices: { stt_models: string[]; tts_voices: string[]; ollama_models: string[] };
+  choices: { stt_models: string[]; tts_voices: string[]; ollama_models: string[]; embed_models?: string[] };
   detected: { ollama: boolean; ollama_models: string[] };
-  saved?: { plan?: { stt_model?: string; tts_voice?: string; ollama_model?: string } };
-  sizes_mb: { voice_packages: number; tts: number; stt: Record<string, number>; ollama: Record<string, number> };
+  saved?: { plan?: { stt_model?: string; tts_voice?: string; ollama_model?: string; embed_model?: string } };
+  sizes_mb: { voice_packages: number; tts: number; stt: Record<string, number>; ollama: Record<string, number>; embed?: Record<string, number> };
 }
 
 export interface SetupHandle {
@@ -32,6 +32,8 @@ export const SetupDialog = forwardRef<SetupHandle>(function SetupDialog(_, ref) 
   const [tts, setTts] = useState("it_IT-paola-medium");
   const [ollama, setOllama] = useState(false);
   const [model, setModel] = useState("qwen2.5:3b");
+  const [embed, setEmbed] = useState(false);
+  const [embedModel, setEmbedModel] = useState("nomic-embed-text");
   const [steps, setSteps] = useState<SetupStatus["steps"] | null>(null);
   const [running, setRunning] = useState(false);
   const [finished, setFinished] = useState<string | null>(null);
@@ -61,6 +63,8 @@ export const SetupDialog = forwardRef<SetupHandle>(function SetupDialog(_, ref) 
     setTts(saved.tts_voice || "it_IT-paola-medium");
     setModel(saved.ollama_model || "qwen2.5:3b");
     setOllama(s.detected.ollama);
+    setEmbed(s.detected.ollama);
+    setEmbedModel(saved.embed_model || "nomic-embed-text");
     setFinished(null);
     setRunning(s.running);
     if (s.running) {
@@ -94,12 +98,14 @@ export const SetupDialog = forwardRef<SetupHandle>(function SetupDialog(_, ref) 
     let total = 0;
     if (voiceOn) total += mb.voice_packages + (mb.stt[stt] || 0) + mb.tts;
     if (ollama && status.detected.ollama) total += mb.ollama[model] || 0;
+    if (embed && status.detected.ollama) total += mb.embed?.[embedModel] || 0;
     return total ? `Download stimato: circa ${(total / 1024).toFixed(1)} GB.` : "Niente da scaricare.";
   };
 
   const start = async () => {
     try {
-      await post("/api/setup/start", { voice: voiceOn, stt_model: stt, tts_voice: tts, ollama_model: ollama && status?.detected.ollama ? model : null });
+      await post("/api/setup/start", { voice: voiceOn, stt_model: stt, tts_voice: tts, ollama_model: ollama && status?.detected.ollama ? model : null,
+        embed_model: embed && status?.detected.ollama ? embedModel : null });
       setRunning(true);
       setSteps([]);
       watch();
@@ -144,6 +150,15 @@ export const SetupDialog = forwardRef<SetupHandle>(function SetupDialog(_, ref) 
           <label>Modello
             <select name="ollama_model" value={model} onChange={(e) => setModel(e.target.value)}>
               {(status?.choices.ollama_models || []).map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
+          </label>
+        </fieldset>
+        <fieldset>
+          <legend><label className="check"><input type="checkbox" name="embed" checked={embed} disabled={!status?.detected.ollama} onChange={(e) => setEmbed(e.target.checked)} /> Memoria con i sinonimi (Ollama)</label></legend>
+          <p className="hint">La ricerca nella memoria riconosce i sinonimi («auto» trova «macchina»). Senza, resta la ricerca locale.</p>
+          <label>Modello
+            <select name="embed_model" value={embedModel} onChange={(e) => setEmbedModel(e.target.value)}>
+              {(status?.choices.embed_models || []).map((v) => <option key={v} value={v}>{v}</option>)}
             </select>
           </label>
         </fieldset>

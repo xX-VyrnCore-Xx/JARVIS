@@ -49,6 +49,16 @@ struct State {
     results: HashMap<String, Outcome>,
     last_seen: HashMap<String, Instant>,
     revoked: HashSet<String>,
+    /// Risorse dichiarate dal nodo all'ultima richiesta di lavoro (ADR-0031).
+    resources: HashMap<String, Resources>,
+}
+
+/// Risorse dichiarate da un nodo: CPU disponibili, carico medio dell'ultimo minuto e memoria libera.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Resources {
+    pub cpus: u32,
+    pub load: Option<f64>,
+    pub mem_free_mb: Option<u64>,
 }
 
 #[derive(Default)]
@@ -104,6 +114,36 @@ impl NodeHub {
             .last_seen
             .get(node_id)
             .is_some_and(|t| t.elapsed() <= within)
+    }
+
+    /// Aggiorna le risorse dichiarate dal nodo.
+    pub fn report(&self, node_id: &str, res: Resources) {
+        self.lock().resources.insert(node_id.to_string(), res);
+    }
+
+    /// Scelta automatica (ADR-0031): fra i candidati in linea, quello con meno lavori in corso, poi carico
+    /// per CPU più basso, poi più memoria libera. `None` se nessuno è in linea.
+    pub fn pick(&self, candidates: &[String], within: Duration) -> Option<String> {
+        let s = self.lock();
+        let mut best: Option<(usize, f64, i64, String)> = None;
+        for id in candidates {
+            if s.revoked.contains(id) || !s.last_seen.get(id).is_some_and(|t| t.elapsed() <= within)
+            {
+                continue;
+            }
+            let busy = s.pending.values().filter(|n| *n == id).count();
+            let r = s.resources.get(id).copied().unwrap_or_default();
+            let load = r.load.unwrap_or(0.5) / f64::from(r.cpus.max(1));
+            let mem = -(r.mem_free_mb.unwrap_or(0) as i64);
+            let key = (busy, load, mem, id.clone());
+            if best
+                .as_ref()
+                .is_none_or(|b| (key.0, key.1, key.2) < (b.0, b.1, b.2))
+            {
+                best = Some(key);
+            }
+        }
+        best.map(|b| b.3)
     }
 
     pub fn enqueue(&self, node_id: &str, tool: &str, arguments: &Value) -> String {
@@ -206,6 +246,10 @@ pub fn slug(name: &str) -> String {
         .take(24)
         .collect::<String>();
     let out = out.trim_end_matches('-').to_string();
+    // «auto» è riservato alla scelta automatica del nodo (ADR-0031).
+    if out == "auto" {
+        return "nodo-auto".into();
+    }
     if out.chars().next().is_some_and(|c| c.is_ascii_lowercase()) {
         out
     } else {
@@ -256,6 +300,7 @@ mod tests {
         assert_eq!(slug("  PC #2 (studio) "), "pc-2-studio");
         assert_eq!(slug("42"), "nodo-42");
         assert_eq!(slug("ç"), "nodo");
+        assert_eq!(slug("Auto"), "nodo-auto", "nome riservato");
     }
 
     #[test]
@@ -309,6 +354,61 @@ mod tests {
         assert!(
             hub.next("n3", Duration::from_millis(10)).is_none(),
             "assegnazione scaduta ritirata dalla coda"
+        );
+    }
+
+    #[test]
+    fn automatic_choice_prefers_idle_and_less_loaded_nodes() {
+        let hub = NodeHub::default();
+        for id in ["a", "b", "c"] {
+            hub.register(id, &token_hash(&id.repeat(64)));
+            let _ = hub.next(id, Duration::from_millis(1));
+        }
+        hub.report(
+            "a",
+            Resources {
+                cpus: 2,
+                load: Some(1.8),
+                mem_free_mb: Some(1000),
+            },
+        );
+        hub.report(
+            "b",
+            Resources {
+                cpus: 8,
+                load: Some(1.0),
+                mem_free_mb: Some(8000),
+            },
+        );
+        hub.report(
+            "c",
+            Resources {
+                cpus: 4,
+                load: Some(0.2),
+                mem_free_mb: Some(500),
+            },
+        );
+        let all: Vec<String> = ["a", "b", "c"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(
+            hub.pick(&all, Duration::from_secs(60)).as_deref(),
+            Some("c"),
+            "carico per CPU più basso"
+        );
+        hub.enqueue("c", "time.now", &json!({}));
+        assert_eq!(
+            hub.pick(&all, Duration::from_secs(60)).as_deref(),
+            Some("b"),
+            "nodo occupato evitato"
+        );
+        hub.revoke("b");
+        assert_eq!(
+            hub.pick(&all, Duration::from_secs(60)).as_deref(),
+            Some("a")
+        );
+        assert_eq!(
+            hub.pick(&["x".into()], Duration::from_secs(60)),
+            None,
+            "nessuno in linea"
         );
     }
 }

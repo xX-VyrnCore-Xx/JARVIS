@@ -5,15 +5,86 @@
   "description": "RF-09: TTS locale. L'audio (WAV PCM 16 bit mono) viaggia come base64 nel payload del bridge e viene restituito al client come audio/wav; non viene conservato.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["contract", "audio_format", "sample_rate", "duration_ms", "engine", "voice", "text_chars"],
+  "required": [
+    "contract",
+    "audio_format",
+    "sample_rate",
+    "duration_ms",
+    "engine",
+    "voice",
+    "text_chars"
+  ],
   "properties": {
-    "contract": { "const": "jarvis.voice-synthesis/1" },
-    "audio_format": { "const": "wav" },
-    "sample_rate": { "type": "integer", "minimum": 8000, "maximum": 48000 },
-    "duration_ms": { "type": "integer", "minimum": 0, "maximum": 600000 },
-    "engine": { "$ref": "voice-transcription.schema.json#/$defs/engine" },
-    "voice": { "type": "string", "minLength": 1, "maxLength": 200 },
-    "text_chars": { "type": "integer", "minimum": 1, "maximum": 4000 },
-    "audio_b64": { "type": "string", "contentEncoding": "base64" }
+    "contract": {
+      "const": "jarvis.voice-synthesis/1"
+    },
+    "audio_format": {
+      "const": "wav"
+    },
+    "sample_rate": {
+      "type": "integer",
+      "minimum": 8000,
+      "maximum": 48000
+    },
+    "duration_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 600000
+    },
+    "engine": {
+      "$ref": "voice-transcription.schema.json#/$defs/engine"
+    },
+    "voice": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "text_chars": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4000
+    },
+    "audio_b64": {
+      "type": "string",
+      "contentEncoding": "base64"
+    },
+    "visemes": {
+      "type": "array",
+      "maxItems": 2000,
+      "description": "Labiale (ADR-0029): visemi con inizio e durata in ms, allineati all'audio.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "v",
+          "t",
+          "d"
+        ],
+        "properties": {
+          "v": {
+            "enum": [
+              "A",
+              "E",
+              "I",
+              "O",
+              "U",
+              "M",
+              "F",
+              "L",
+              "S",
+              "X"
+            ]
+          },
+          "t": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "d": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    }
   }
 }

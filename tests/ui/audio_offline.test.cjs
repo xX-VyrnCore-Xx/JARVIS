@@ -58,7 +58,7 @@ test("il movimento della bocca segue l'audio e si azzera quando si interrompe", 
   let id = 0;
   const audio = { currentTime: 0, paused: false, src: "blob:x", pause() { this.paused = true; } };
   const blob = { arrayBuffer: async () => new ArrayBuffer(0) };
-  const avatar = { style: { setProperty: (...args) => properties.set(...args), removeProperty: (key) => properties.delete(key) } };
+  const avatar = { dataset: {}, style: { setProperty: (...args) => properties.set(...args), removeProperty: (key) => properties.delete(key) } };
   const { context, voice } = loadVoice({
     document: { querySelectorAll: () => [avatar] },
     OfflineAudioContext: class {
@@ -92,4 +92,43 @@ test("il movimento della bocca segue l'audio e si azzera quando si interrompe", 
   voice.player = audio;
   await voice.animateSpeech(audio, blob);
   assert.equal(frames.size, 0);
+});
+
+test("il labiale segue il visema corrente e torna a riposo alla fine", async () => {
+  const properties = new Map();
+  const frames = new Map();
+  let id = 0;
+  const audio = { currentTime: 0, paused: false, src: "blob:x", pause() { this.paused = true; } };
+  const blob = { arrayBuffer: async () => new ArrayBuffer(0) };
+  const avatar = { dataset: {}, style: { setProperty: (...args) => properties.set(...args), removeProperty: (key) => properties.delete(key) } };
+  const { voice } = loadVoice({
+    document: { querySelectorAll: () => [avatar] },
+    OfflineAudioContext: class {
+      async decodeAudioData() {
+        const samples = new Float32Array(16000).fill(0.25);
+        return { sampleRate: 16000, getChannelData: () => samples };
+      }
+    },
+    matchMedia: () => ({ matches: false }),
+    requestAnimationFrame: (cb) => { frames.set(++id, cb); return id; },
+    cancelAnimationFrame: (frame) => frames.delete(frame),
+    URL: { revokeObjectURL() {} },
+  });
+  voice.player = audio;
+  await voice.animateSpeech(audio, blob, [{ v: "A", t: 0, d: 100 }, { v: "M", t: 100, d: 100 }, { v: "U", t: 200, d: 100 }]);
+  const tick = () => { const [frame, cb] = frames.entries().next().value; frames.delete(frame); cb(); };
+  tick();
+  assert.equal(avatar.dataset.viseme, "A");
+  assert.equal(properties.get("--mouth-opening"), "1.00", "vocale aperta con audio pieno");
+  audio.currentTime = 0.15;
+  tick();
+  assert.equal(avatar.dataset.viseme, "M");
+  assert.equal(properties.get("--mouth-opening"), "0.00", "labbra chiuse");
+  audio.currentTime = 0.25;
+  tick();
+  assert.equal(avatar.dataset.viseme, "U");
+  assert.equal(properties.get("--mouth-width"), "0.28", "bocca arrotondata");
+  voice.stopSpeaking();
+  assert.equal(avatar.dataset.viseme, undefined);
+  assert.equal(properties.has("--mouth-width"), false);
 });

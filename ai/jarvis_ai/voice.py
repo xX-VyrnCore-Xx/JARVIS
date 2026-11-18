@@ -25,6 +25,8 @@ import wave
 from pathlib import Path
 from typing import Any
 
+from jarvis_ai import visemes
+
 MAX_SECONDS = 60
 MAX_BYTES = 4 * 1024 * 1024
 MAX_TTS_CHARS = 4000
@@ -291,4 +293,5 @@ class VoiceService:
             "voice": self.tts.voice,
             "text_chars": len(text),
             "audio_b64": base64.b64encode(audio).decode("ascii"),
+            "visemes": visemes.timeline(text, samples, rate),
         }

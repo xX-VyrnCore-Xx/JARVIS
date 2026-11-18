@@ -14,6 +14,30 @@ struct ChatMessage: Decodable, Identifiable {
     private enum CodingKeys: String, CodingKey { case role, content }
 }
 
+struct TaskSummary: Decodable, Identifiable {
+    let taskId: String
+    let objective: String
+    let state: String
+    let createdAt: String
+    var id: String { taskId }
+}
+
+struct Notice: Decodable, Identifiable {
+    let notificationId: String
+    let severity: String
+    let title: String
+    let body: String?
+    let createdAt: String
+    let readAt: String?
+    var id: String { notificationId }
+    var isRead: Bool { readAt != nil }
+}
+
+struct Notices: Decodable {
+    let unread: Int
+    let items: [Notice]
+}
+
 struct PendingAction: Decodable, Identifiable {
     let confirmationId: UUID
     let target: String
@@ -70,6 +94,8 @@ struct CoreClient {
     private struct Decision: Encodable { let approve: Bool }
     private struct Reply: Decodable { let reply: String? }
     private struct List<T: Decodable>: Decodable { let items: [T] }
+    private struct Unread: Decodable { let unread: Int }
+    private struct Empty: Encodable {}
     private struct ErrorResponse: Decodable {
         struct Detail: Decodable { let message: String }
         let error: Detail
@@ -108,6 +134,23 @@ struct CoreClient {
     func pending(_ session: DeviceSession) async throws -> [PendingAction] {
         let result: List<PendingAction> = try await request(origin: session.origin, path: "/api/confirmations", token: session.token)
         return result.items
+    }
+
+    /// Attività recenti con il loro stato (permesso `chat`, ADR-0032).
+    func tasks(_ session: DeviceSession) async throws -> [TaskSummary] {
+        let result: List<TaskSummary> = try await request(origin: session.origin, path: "/api/tasks?limit=30", token: session.token)
+        return result.items
+    }
+
+    /// Notifiche con il conteggio delle non lette (RF-13).
+    func notices(_ session: DeviceSession) async throws -> Notices {
+        try await request(origin: session.origin, path: "/api/notifications?limit=30", token: session.token)
+    }
+
+    func markAllRead(_ session: DeviceSession) async throws -> Int {
+        let body = try JSONEncoder().encode(Empty())
+        let result: Unread = try await request(origin: session.origin, path: "/api/notifications/read-all", token: session.token, body: body)
+        return result.unread
     }
 
     func send(_ message: String, session: DeviceSession) async throws -> String? {

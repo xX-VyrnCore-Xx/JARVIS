@@ -163,9 +163,10 @@ pub fn run(cfg: &AgentConfig, stop: Arc<AtomicBool>) -> Result<(), AgentError> {
     while !stop.load(Ordering::Relaxed) {
         let res = http
             .get(&format!(
-                "{}/api/nodes/next?wait={}",
+                "{}/api/nodes/next?wait={}{}",
                 cfg.core_url,
-                cfg.poll_wait_s.min(25)
+                cfg.poll_wait_s.min(25),
+                resources_query()
             ))
             .set("X-Jarvis-Device", &token)
             .call();
@@ -209,4 +210,26 @@ pub fn run(cfg: &AgentConfig, stop: Arc<AtomicBool>) -> Result<(), AgentError> {
         }
     }
     Ok(())
+}
+
+/// Risorse del computer per la scelta automatica del nodo (ADR-0031): CPU, e su Linux carico e memoria libera.
+fn resources_query() -> String {
+    let cpus = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let mut q = format!("&cpus={cpus}");
+    if let Ok(load) = std::fs::read_to_string("/proc/loadavg") {
+        if let Some(l) = load.split_whitespace().next() {
+            q.push_str(&format!("&load={l}"));
+        }
+    }
+    if let Ok(mem) = std::fs::read_to_string("/proc/meminfo") {
+        if let Some(kb) = mem
+            .lines()
+            .find(|l| l.starts_with("MemAvailable:"))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|v| v.parse::<u64>().ok())
+        {
+            q.push_str(&format!("&mem_free_mb={}", kb / 1024));
+        }
+    }
+    q
 }

@@ -13,6 +13,12 @@ data class DeviceSession(val origin: String, val token: String, val scopes: List
 
 data class ChatMessage(val role: String, val content: String)
 
+data class TaskSummary(val id: String, val objective: String, val state: String, val createdAt: String)
+
+data class Notice(val id: String, val severity: String, val title: String, val body: String, val createdAt: String, val read: Boolean)
+
+data class Notices(val unread: Int, val items: List<Notice>)
+
 data class PendingAction(val confirmationId: String, val target: String, val expectedEffect: String, val expiresAt: String)
 
 sealed class CoreException(message: String) : Exception(message) {
@@ -90,6 +96,25 @@ class CoreClient(private val transport: Transport = UrlConnectionTransport) {
         request(session.origin, "/api/confirmations", session.token).items().map {
             PendingAction(it.optString("confirmation_id"), it.optString("target"), it.optString("expected_effect"), it.optString("expires_at"))
         }
+
+    /** Attività recenti con il loro stato (permesso `chat`). */
+    fun tasks(session: DeviceSession): List<TaskSummary> =
+        request(session.origin, "/api/tasks?limit=30", session.token).items().map {
+            TaskSummary(it.optString("task_id"), it.optString("objective"), it.optString("state"), it.optString("created_at"))
+        }
+
+    /** Notifiche con il conteggio delle non lette (RF-13). */
+    fun notices(session: DeviceSession): Notices {
+        val json = request(session.origin, "/api/notifications?limit=30", session.token)
+        val items = json.items().map {
+            Notice(it.optString("notification_id"), it.optString("severity"), it.optString("title"),
+                it.optString("body"), it.optString("created_at"), !it.isNull("read_at") && it.optString("read_at").isNotEmpty())
+        }
+        return Notices(json.optInt("unread", 0), items)
+    }
+
+    fun markAllRead(session: DeviceSession): Int =
+        request(session.origin, "/api/notifications/read-all", session.token, JSONObject()).optInt("unread", 0)
 
     fun send(message: String, session: DeviceSession): String? =
         request(session.origin, "/api/chat", session.token, JSONObject().put("message", message)).optString("reply").ifEmpty { null }

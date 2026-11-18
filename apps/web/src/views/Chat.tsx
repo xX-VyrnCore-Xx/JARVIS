@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, chatStream, fmtTime, post, pref } from "../lib/api";
 import { voice } from "../lib/voice";
 import { Avatar, AVATAR_LABELS, useAvatarState } from "../components/Avatar";
+import { Icon } from "../components/Icon";
 import { useApp, useVoice } from "../state";
 
 interface Step {
@@ -223,7 +224,8 @@ export function Chat({ active }: { active: boolean }) {
       <div className="messages" id="messages" aria-live="polite" ref={box}>
         {items.map((it) =>
           it.kind === "msg" ? (
-            <div key={it.id} className={`msg ${it.role}${it.error ? " error" : ""}${it.streaming ? " streaming" : ""}`} aria-busy={it.streaming || undefined}>
+            <div key={it.id} className={`msg ${it.role}${it.error ? " error" : ""}${it.streaming ? " streaming" : ""}`} aria-busy={it.streaming || undefined}
+              data-who={it.role === "user" ? "Tu" : "JARVIS"}>
               {it.text}
               <Sources sources={it.sources} />
               <StepChips steps={it.steps} />
@@ -246,7 +248,11 @@ export function Chat({ active }: { active: boolean }) {
             </div>
           ),
         )}
-        {pending ? <div className="msg typing">JARVIS sta elaborando…</div> : null}
+        {pending ? (
+          <div className="msg typing" aria-label="JARVIS sta elaborando">
+            <span className="dots" aria-hidden="true"><i></i><i></i><i></i></span> JARVIS sta elaborando…
+          </div>
+        ) : null}
       </div>
       <div className="suggestions" id="suggestions">
         {SUGGESTIONS.map((s) => (
@@ -270,7 +276,7 @@ export function Chat({ active }: { active: boolean }) {
           Mani libere («Ehi Jarvis»)
         </label>
         <button type="button" className="ghost small" id="voice-stop" hidden={voice.state !== "speaking"} onClick={() => voice.stopSpeaking()}>
-          ⏹ Interrompi
+          <Icon name="stop" size={14} /> Interrompi
         </button>
         <span className="mic-live" id="mic-live" hidden={!voice.micOpen} aria-live="polite">● Microfono attivo</span>
       </div>
@@ -281,7 +287,7 @@ export function Chat({ active }: { active: boolean }) {
           title={available ? "Parla (clic per iniziare e per terminare)" : `Voce non disponibile: ${(st?.reasons || []).join("; ")}`}
           onClick={() => void voice.togglePushToTalk()}
         >
-          🎤
+          <Icon name="mic" size={20} />
         </button>
         <textarea
           id="input" ref={input} rows={1} placeholder="Scrivi a JARVIS…" maxLength={8000} value={text}
@@ -299,7 +305,7 @@ export function Chat({ active }: { active: boolean }) {
             }
           }}
         />
-        <button type="submit" id="send" className="primary" disabled={pending}>Invia</button>
+        <button type="submit" id="send" className="primary send" disabled={pending}><Icon name="send" size={16} /> Invia</button>
       </form>
     </section>
   );

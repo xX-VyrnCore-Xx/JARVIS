@@ -10,6 +10,7 @@ import { useApp, useVoice } from "../state";
 import type { Notification } from "../state";
 import type { Confirmation } from "./Chat";
 import { MemoryGraph } from "./Memory";
+import { Icon } from "../components/Icon";
 import type { MemoryItem } from "./Memory";
 
 interface Snapshot {
@@ -38,11 +39,11 @@ function executor(t: any): string {
   return "Core locale";
 }
 
-function Panel({ title, code, children, className = "" }: { title: string; code: string; children: React.ReactNode; className?: string }) {
+function Panel({ title, code, icon, children, className = "" }: { title: string; code: string; icon: string; children: React.ReactNode; className?: string }) {
   return (
     <section className={`hud-panel ${className}`} aria-label={title}>
       <header>
-        <h3>{title}</h3>
+        <h3><Icon name={icon} size={16} className="panel-icon" />{title}</h3>
         <span className="hud-code" aria-hidden="true">{code}</span>
       </header>
       <div className="hud-body">{children}</div>
@@ -77,6 +78,22 @@ function Sparkline({ points }: { points: number[] }) {
   );
 }
 
+function greeting(h: number) {
+  return h < 5 ? "Buonanotte" : h < 13 ? "Buongiorno" : h < 18 ? "Buon pomeriggio" : "Buonasera";
+}
+
+function Kpi({ icon, label, value, tone = "" }: { icon: string; label: string; value: React.ReactNode; tone?: string }) {
+  return (
+    <div className={`kpi ${tone}`}>
+      <Icon name={icon} size={20} className="kpi-icon" />
+      <div>
+        <b>{value}</b>
+        <span>{label}</span>
+      </div>
+    </div>
+  );
+}
+
 function Clock() {
   const [now, setNow] = useState(new Date());
   useEffect(() => {
@@ -85,6 +102,7 @@ function Clock() {
   }, []);
   return (
     <div className="hud-clock">
+      <span className="greet">{greeting(now.getHours())}.</span>
       <span className="time">{now.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</span>
       <span className="date">{now.toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" })}</span>
     </div>
@@ -163,6 +181,10 @@ export function Dashboard({ active }: { active: boolean }) {
   const devicesActive = (snap?.devices || []).filter((d) => !d.revoked_at && !d.slug).length;
   const nextRuns = (snap?.workflows || []).filter((w) => w.enabled).slice(0, 5);
 
+  const today = new Date().toISOString().slice(0, 10);
+  const todays = (snap?.tasks || []).filter((t) => (t.created_at || "").startsWith(today));
+  const done = (snap?.tasks || []).filter((t) => t.state === "succeeded" || t.state === "failed");
+  const okRate = done.length ? Math.round((100 * done.filter((t) => t.state === "succeeded").length) / done.length) : null;
   const offline: { label: string; detail: string; tone: string }[] = [];
   if (!reachable) offline.push({ label: "Core", detail: "non raggiungibile", tone: "bad" });
   if (health?.ai?.status && health.ai.status !== "up") offline.push({ label: "AI", detail: health.ai.error?.message || "non disponibile", tone: "bad" });
@@ -194,7 +216,15 @@ export function Dashboard({ active }: { active: boolean }) {
           </div>
         </section>
 
-        <Panel title="In attesa di conferma" code="CNF" className={snap?.confirmations.length ? "alert" : ""}>
+        <section className="kpi-row" aria-label="Indicatori">
+          <Kpi icon="bolt" label="attività oggi" value={todays.length} />
+          <Kpi icon="check" label="riuscite" value={okRate == null ? "—" : `${okRate}%`} tone={okRate != null && okRate < 80 ? "warn" : "ok"} />
+          <Kpi icon="shield" label="da confermare" value={snap?.confirmations.length ?? 0} tone={snap?.confirmations.length ? "warn" : ""} />
+          <Kpi icon="memory" label="ricordi" value={(snap?.memory || []).length} />
+          <Kpi icon="node" label="nodi in linea" value={`${nodesOnline}/${(snap?.nodes || []).length}`} />
+        </section>
+
+        <Panel title="In attesa di conferma" icon="shield" code="CNF" className={snap?.confirmations.length ? "alert" : ""}>
           <div id="dash-confirmations" className="hud-list">
             {snap && !snap.confirmations.length ? <p className="empty">Nessuna operazione in attesa.</p> : null}
             {(snap?.confirmations || []).map((c) => (
@@ -213,7 +243,7 @@ export function Dashboard({ active }: { active: boolean }) {
           </div>
         </Panel>
 
-        <Panel title="Attività ed esecutori" code="TSK" className="wide">
+        <Panel title="Attività ed esecutori" icon="tasks" code="TSK" className="wide">
           <div id="dash-tasks" className="hud-list">
             {snap && !snap.tasks.length ? <p className="empty">Nessuna attività: prova un comando qui sopra.</p> : null}
             {(snap?.tasks || []).slice(0, 7).map((t) => (
@@ -230,7 +260,7 @@ export function Dashboard({ active }: { active: boolean }) {
           <button className="ghost small link" onClick={() => show("tasks")}>Tutte le attività →</button>
         </Panel>
 
-        <Panel title="Condizioni e nodi" code="NET">
+        <Panel title="Condizioni e nodi" icon="node" code="NET">
           <div className="hud-list" id="dash-conditions">
             <div className="hud-item">
               <span className="led succeeded" aria-hidden="true"></span>
@@ -248,7 +278,7 @@ export function Dashboard({ active }: { active: boolean }) {
           </div>
         </Panel>
 
-        <Panel title="Prestazioni" code="PRF">
+        <Panel title="Prestazioni" icon="gauge" code="PRF">
           <div className="gauges">
             <Gauge value={chatP95} max={Math.max(1000, chatP95)} label="p95 chat" unit="ms" tone={chatP95 > 2000 ? "warn" : "accent"} />
             <Gauge value={reqs} max={Math.max(reqs, 100)} label="richieste" />
@@ -261,7 +291,7 @@ export function Dashboard({ active }: { active: boolean }) {
           </div>
         </Panel>
 
-        <Panel title="Errori e avvisi" code="ERR" className={failed.length || alerts.length ? "warnline" : ""}>
+        <Panel title="Errori e avvisi" icon="alert" code="ERR" className={failed.length || alerts.length ? "warnline" : ""}>
           <div className="hud-list" id="dash-errors">
             {snap && !failed.length && !alerts.length ? <p className="empty">Nessun errore recente.</p> : null}
             {failed.slice(0, 3).map((t) => (
@@ -273,7 +303,7 @@ export function Dashboard({ active }: { active: boolean }) {
           </div>
         </Panel>
 
-        <Panel title="Memoria" code="MEM" className="wide">
+        <Panel title="Memoria" icon="memory" code="MEM" className="wide">
           <div className="mem-stats">
             <div><b>{kinds.semantic}</b><span>fatti</span></div>
             <div><b>{kinds.procedural}</b><span>preferenze</span></div>
@@ -284,7 +314,7 @@ export function Dashboard({ active }: { active: boolean }) {
           <button className="ghost small link" onClick={() => show("memory")}>Apri la memoria →</button>
         </Panel>
 
-        <Panel title="Automazioni" code="AUT">
+        <Panel title="Automazioni" icon="automations" code="AUT">
           <div className="hud-list">
             {snap && !nextRuns.length ? <p className="empty">Nessuna automazione attiva.</p> : null}
             {nextRuns.map((w) => (
@@ -297,7 +327,7 @@ export function Dashboard({ active }: { active: boolean }) {
           <button className="ghost small link" onClick={() => show("automations")}>Gestisci →</button>
         </Panel>
 
-        <Panel title="Dispositivi" code="DEV">
+        <Panel title="Dispositivi" icon="devices" code="DEV">
           <div className="mem-stats">
             <div><b>{devicesActive}</b><span>associati</span></div>
             <div><b>{nodesOnline}/{(snap?.nodes || []).length}</b><span>nodi in linea</span></div>

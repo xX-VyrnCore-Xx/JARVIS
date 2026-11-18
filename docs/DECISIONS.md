@@ -767,6 +767,144 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - unitari in `oauth.rs` (vettore della RFC 7636, `state` monouso).
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, SECURITY_AND_PRIVACY.md, ACCEPTANCE.md, README.md, ROADMAP.md, contratto `connector`.
 
+### ADR-0028 — Memoria con i sinonimi tramite embedding di Ollama
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario («completalo definitivamente»); limite dichiarato dall'ADR-0022 («auto» non trova «macchina»).
+- **Contesto:** il vettore locale riconosce flessioni e accenti, non il significato.
+- **Opzioni:**
+  - embedding calcolati nel worker Python: un viaggio in più sul bridge per ogni elemento;
+  - embedding chiesti dal Core a Ollama (`POST /api/embed`): stesso servizio locale del modello di chat, nessuna dipendenza nuova.
+- **Decisione:**
+  - trait `Embedder` con implementazione Ollama (timeout 8 secondi, pausa di 60 secondi dopo un errore);
+  - tabella derivata `memory_embeddings (id, model, vec)`, aggiornata da inserimento, correzione, cancellazione e ricostruzione; gli elementi già presenti vengono calcolati all'attivazione;
+  - punteggio: 30% vettore locale, 25% BM25 e fino al 60% dal modello, considerando solo la similarità sopra 0,4;
+  - modello scelto nella configurazione guidata (`nomic-embed-text` o `mxbai-embed-large`, scaricato con `ollama pull`) o con `JARVIS_EMBED_MODEL`;
+  - stato in `/api/health` (`core.memory_embeddings`) e nella sezione Sistema.
+- **Conseguenze:**
+  - con Ollama spento la ricerca resta quella locale, senza errori;
+  - cambiare modello rende i vettori precedenti inutilizzati finché non vengono ricalcolati (all'avvio o con «Ricostruisci indici»).
+- **Evidenza:** unitari in `memory.rs`: sinonimo trovato solo con il modello, embedding degli elementi esistenti, correzione, cancellazione, ricostruzione; client Ollama contro un server sintetico, con pausa dopo un errore.
+- **Documenti interessati:** MEMORY_DATA_SYNC.md, ACCEPTANCE.md, ROADMAP.md.
+
+### ADR-0029 — Labiale con visemi allineati all'audio
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario; voce «sincronizzazione labiale basata sui fonemi» nel checkpoint e in INTERFACE_AND_DEVICES.md.
+- **Contesto:** la bocca dell'avatar seguiva solo il volume, quindi ogni suono aveva la stessa forma.
+- **Opzioni:**
+  - allineamenti dei fonemi di Piper: disponibili solo con alcune voci e versioni;
+  - riconoscimento dei fonemi dall'audio: un modello in più;
+  - conversione grafema→visema dell'italiano, che è quasi fonetico, con tempi allineati all'audio.
+- **Decisione:**
+  - `ai/jarvis_ai/visemes.py` trasforma il testo in visemi (A, E, I, O, U, M, F, L, S, X) con pesi fonetici: vocali lunghe, consonanti brevi, pause alla punteggiatura;
+  - i tempi coprono esattamente il parlato: inizio e fine dopo e prima dei silenzi, pause lunghe agganciate al silenzio più vicino, segmenti distribuiti fra le pause;
+  - campo facoltativo `visemes` nel contratto `voice-synthesis`; `POST /api/voice/speak` con `with_visemes: true` restituisce audio e visemi insieme;
+  - la dashboard imposta forma (`--mouth-width`, `data-viseme`) e apertura (visema × intensità dell'audio) a ogni fotogramma. L'avatar grande ha una bocca olografica, quello piccolo un'ellisse.
+- **Conseguenze:**
+  - l'allineamento è stimato, non misurato fonema per fonema: con frasi lunghe senza pause può anticipare o ritardare di qualche decina di millisecondi;
+  - le parole straniere seguono la pronuncia italiana delle lettere.
+- **Evidenza:** `tests/ai/test_voice.py` (sequenza, allineamento a silenzi e durata, contratto) e `tests/ui/audio_offline.test.cjs` (visema corrente, labbra chiuse, bocca arrotondata, ritorno a riposo).
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md, contratto `voice-synthesis`.
+
+### ADR-0030 — Firma Ed25519 del registro di audit
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario; lacuna «firma dell'audit» nel checkpoint.
+- **Contesto:** la catena SHA-256 rileva un evento modificato, ma chi può scrivere il file può ricalcolare l'intera catena, che torna coerente.
+- **Opzioni:**
+  - ancoraggio esterno degli hash (servizio di marcatura temporale): richiede rete e un terzo;
+  - firma di ogni evento con una chiave locale tenuta fuori dal file: nessuna dipendenza esterna.
+- **Decisione:**
+  - chiave Ed25519 generata al primo avvio e custodita nell'archivio dei segreti (`audit:signing-key`, portachiavi su macOS e Windows);
+  - ogni nuovo evento è firmato sul messaggio `jarvis-audit/1|stream|sequenza|hash`. Le firme stanno in `core-security.jsonl.sig.jsonl`, così gli eventi restano conformi al contratto;
+  - `GET /api/audit` riporta `signatures`: firmati, eventi precedenti all'attivazione, validità, errori e chiave pubblica;
+  - la sezione Audit mostra lo stato e la chiave pubblica da conservare fuori dal computer;
+  - il backup cifrato include il file delle firme; la chiave privata viaggia con l'archivio dei segreti.
+- **Conseguenze:**
+  - una catena ricalcolata non ha firme valide, salvo che l'attaccante abbia anche la chiave privata, cioè accesso al portachiavi;
+  - gli eventi scritti prima dell'attivazione restano protetti solo dalla catena di hash e sono contati a parte.
+- **Evidenza:**
+  - unitario `signatures_detect_a_recomputed_chain`: catena ricalcolata coerente ma firma non valida;
+  - E2E: firme valide nella sezione Audit.
+- **Documenti interessati:** SECURITY_AND_PRIVACY.md, ROADMAP.md.
+
+### ADR-0031 — Revoca OAuth presso il servizio e scelta automatica del nodo
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario; limiti dichiarati dagli ADR-0027 (revoca solo locale) e ADR-0017 (assegnazione manuale ai nodi).
+- **Decisione — revoca OAuth:**
+  - campo facoltativo `auth.revoke_url` nel contratto `connector`, con host tra gli `allowed_hosts`;
+  - alla revoca o disinstallazione il Core chiama l'endpoint RFC 7009 con il refresh token (o l'access token) prima di cancellare i token locali;
+  - l'esito torna in `remote_revoked` e `remote_error`. I token locali vengono cancellati comunque.
+- **Decisione — scelta del nodo:**
+  - a ogni richiesta di lavoro il nodo dichiara CPU e, su Linux, carico medio e memoria disponibile;
+  - lo strumento `node.auto.<strumento>` esiste finché almeno un nodo lo offre. Il Core sceglie, fra i nodi in linea che lo offrono, quello con meno lavori in corso, poi con il carico per CPU più basso, poi con più memoria libera;
+  - policy, conferma («sul nodo scelto automaticamente») e audit restano quelli dei nodi;
+  - in chat: «nodo auto <strumento> …»; il nome «auto» è riservato.
+- **Conseguenze:**
+  - su macOS e Windows il nodo dichiara solo le CPU: la scelta si basa su lavori in corso e CPU;
+  - se il servizio non risponde alla revoca, l'interfaccia lo segnala; la revoca resta valida in JARVIS.
+- **Evidenza:**
+  - `tests/oauth.rs`: revoca RFC 7009 ricevuta dal server sintetico con il refresh token;
+  - `tests/nodes.rs`: due nodi reali, esecuzione automatica, strumento rimosso alla revoca;
+  - unitari in `nodes.rs`: priorità a carico, lavori in corso e revoca.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md, contratto `connector`.
+
+### ADR-0032 — Attività e notifiche nelle app iOS e Android
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario; limite «funzioni iOS e Android oltre chat e conferme».
+- **Contesto:** le app native mostravano solo chat e conferme, mentre il permesso `chat` del dispositivo consente già attività e notifiche.
+- **Decisione:**
+  - i client `CoreClient` (Swift e Kotlin) aggiungono `tasks`, `notices` e `markAllRead` sulle rotte già ammesse ai dispositivi (`GET /api/tasks`, `GET /api/notifications`, `POST /api/notifications/read-all`), con le stesse regole: solo HTTPS, nessun redirect, revoca con 401;
+  - le app hanno tre schede: Chat, Attività (stato in italiano, errori evidenziati) e Notifiche (non lette in evidenza, contatore sulla scheda in iOS, «Segna lette»);
+  - nessuna rotta nuova sul Core: memoria, automazioni e impostazioni restano al computer del proprietario.
+- **Conseguenze:**
+  - le notifiche si vedono aprendo l'app; il push a app chiusa passa da ntfy o Telegram (ADR-0026);
+  - la voce resta nella PWA (stesse rotte vocali), non nelle app native.
+- **Evidenza:** `CoreClientTest.tasksAndNoticesUseDeviceRoutesOnly` (Android, 6/6 in locale) e i casi aggiunti a `apps/ios/tests/CoreClientTests.swift`, eseguiti dalla CI su macOS; build dell'APK e dell'app per simulatore in CI.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
+### ADR-0033 — Portachiavi su Linux con Secret Service
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario; limite dell'ADR-0021 (Linux solo con il file 0600).
+- **Decisione:**
+  - su Linux la chiave dei segreti va nel Secret Service (GNOME Keyring, KWallet) tramite `keyring` con D-Bus; libdbus è compilata dal sorgente, così la build non richiede pacchetti di sviluppo;
+  - il portachiavi si usa solo con una sessione D-Bus (`DBUS_SESSION_BUS_ADDRESS`). Su server, servizi di sistema e CI resta il file 0600;
+  - stesse regole dell'ADR-0021: spostamento dal file con rilettura, nessuna chiave nuova se il portachiavi non risponde e ci sono segreti, ripiego sul file solo senza segreti.
+- **Conseguenze:**
+  - su un desktop Linux con sessione grafica copiare la cartella dei dati non basta più per leggere i segreti;
+  - avviare il Core senza la sessione con cui la chiave è stata salvata (per esempio da un servizio di sistema) richiede di ripristinare un backup o di usare `JARVIS_SECRETS_KEYCHAIN=off` fin dall'inizio.
+- **Evidenza:** unitario `linux_without_secret_service_falls_back_to_the_file` (bus D-Bus non raggiungibile, ripiego sul file; senza sessione nessun portachiavi); CI «avvio reale» su Ubuntu (file).
+- **Documenti interessati:** SECURITY_AND_PRIVACY.md, ACCEPTANCE.md, ROADMAP.md.
+
+### ADR-0034 — Controllo aggiornamenti con canali Stable e Beta
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario; lacuna «canali Stable/Beta» in ACCEPTANCE.md.
+- **Contesto:** il proprietario non sapeva quando usciva una nuova versione; l'installazione automatica non è possibile senza installer firmati con certificati commerciali.
+- **Decisione:**
+  - modulo `updates.rs`; impostazioni in `<dati>/updates.json`, **spente per impostazione** perché il controllo contatta GitHub;
+  - con il controllo attivo, al massimo una richiesta al giorno all'elenco delle release (`JARVIS_UPDATE_URL`, predefinito il repository di JARVIS), fatta fuori dal blocco del Core, senza dati del proprietario e con timeout di 10 secondi;
+  - Stable considera solo le release stabili, Beta anche le prerelease; il confronto segue le versioni semantiche;
+  - una versione più recente diventa una notifica `system` deduplicata per versione, con il collegamento alla release; nessuna installazione automatica;
+  - API `GET/POST /api/updates` (configurazione con audit) e `POST /api/updates/check` (controllo manuale); pannello «Aggiornamenti» nella sezione Sistema. Il collegamento delle notifiche ammette ora anche le viste Sistema, Dispositivi e Plancia (aggiunta compatibile al contratto).
+- **Conseguenze:**
+  - con il repository privato l'elenco non è leggibile senza credenziali: il controllo riporta l'errore e non notifica nulla;
+  - l'aggiornamento resta manuale: si scarica la release, si verifica la firma (ADR-0020) e si installa.
+- **Evidenza:** unitari in `updates.rs` (versioni, canali, impostazioni, cadenza giornaliera, errori); `update_check_notifies_once_per_version` in `tests/api.rs`; E2E: spento per impostazione, controllo manuale verso un elenco sintetico con versione disponibile.
+- **Documenti interessati:** ACCEPTANCE.md, README.md, ROADMAP.md, contratto `notification`.
+
+### ADR-0035 — Rifinitura grafica della dashboard per macOS e Windows
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario («migliora la grafica della dashboard sia per macOS che per Windows»). Estende l'ADR-0023.
+- **Decisione:**
+  - icone vettoriali in linea (`Icon.tsx`), senza dipendenze o richieste esterne;
+  - barra laterale a gruppi (Operazioni, Dati, Integrazioni, Sistema), riducibile e ricordata nel browser, con il numero di conferme in attesa sulla Chat;
+  - palette comandi con ⌘K su macOS e Ctrl+K su Windows e Linux: sezioni, comandi rapidi e richiesta libera a JARVIS;
+  - Plancia con saluto, riga di indicatori (attività di oggi, riuscite, da confermare, ricordi, nodi in linea), ingresso scaglionato dei pannelli e sfondo con luci in movimento lento;
+  - chat con etichette «Tu»/«JARVIS» via CSS, indicatore di scrittura animato e pulsanti con icona; notifiche a comparsa con icona e barra del tempo;
+  - adattamento alla piattaforma: classe `platform-mac` o `platform-win` sulla radice; caratteri SF su macOS e Segoe UI Variable su Windows; raggi diversi; barre di scorrimento sottili;
+  - app desktop: finestra scura con sfondo coerente fin dall'apertura, parametro `?app=desktop` per le rifiniture dell'app, schermata d'avvio con reattore animato e stato d'errore.
+- **Conseguenze:** il movimento rispetta `prefers-reduced-motion`; gli identificativi del DOM usati dai test restano invariati; nessuna nuova rotta né contratto.
+- **Evidenza:** `tsc` e `npm run build` OK; E2E `tests/e2e/ui_smoke.cjs` superato con il Core 1.3.0 offline; `cargo fmt`, `clippy -D warnings` e `cargo check` dell'app Tauri OK; schermate di Plancia, Chat e palette controllate.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

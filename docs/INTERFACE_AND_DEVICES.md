@@ -19,6 +19,9 @@ Verificare per piattaforma enrollment, revoca, segnalazione dei limiti OS, ripre
 ## Stato del prototipo v0.1
 
 **Dashboard (ADR-0023):** l'interfaccia è un'applicazione React e TypeScript (`apps/web`) con tema HUD olografico: scuro per impostazione, chiaro con il pulsante ◐. La vista iniziale **Plancia** riunisce:
+
+**Rifinitura macOS e Windows (ADR-0035):** icone vettoriali, barra laterale a gruppi riducibile con il conteggio delle conferme, palette comandi (⌘K su macOS, Ctrl+K su Windows e Linux), riga di indicatori in Plancia, etichette e indicatore di scrittura in chat, notifiche con barra del tempo. La radice riceve `platform-mac` o `platform-win` per caratteri di sistema (SF, Segoe UI Variable), raggi e barre di scorrimento; l'app desktop apre la dashboard con `?app=desktop` in una finestra scura e mostra una schermata d'avvio animata.
+
 - il nucleo animato di JARVIS, che segue gli stati pronto, elaborazione, ascolto, trascrizione e risposta vocale;
 - ora, stato di AI, voce, audit e Core, e un comando rapido che apre la chat;
 - le operazioni in attesa di conferma, approvabili o rifiutabili dalla plancia;
@@ -54,7 +57,7 @@ Si adatta al tema chiaro e scuro e allo schermo dello smartphone (verificata a 3
 
 L'interfaccia si installa come app («Aggiungi a schermata Home»). Dal dispositivo sono disponibili chat, attività, notifiche, voce e, se concesso, le conferme. La revoca è immediata. Se il Core o il proxy è irraggiungibile durante la navigazione, la PWA mostra una pagina con «Riprova». Al ritorno della connessione una scheda già aperta aggiorna stato e notifiche. Il service worker evita di salvare pagine, risposte o credenziali.
 
-La chat mostra un avatar astratto con anelli CSS 3D. L'etichetta annuncia gli stati pronto, elaborazione, ascolto, trascrizione e risposta vocale. L'avatar segue l'effettivo avvio della riproduzione. Durante la riproduzione l'apertura della bocca segue l'intensità dell'audio locale e rispetta la preferenza per il movimento ridotto.
+La chat mostra un avatar astratto con anelli CSS 3D. L'etichetta annuncia gli stati pronto, elaborazione, ascolto, trascrizione e risposta vocale. L'avatar segue l'effettivo avvio della riproduzione. Durante la riproduzione la bocca segue i **visemi** della frase (ADR-0029): vocali aperte o arrotondate, labbra chiuse per M/B/P. L'apertura dipende anche dall'intensità dell'audio locale. Rispetta la preferenza per il movimento ridotto.
 
 **Client Android (ADR-0018):** `apps/android` contiene l'app Jetpack Compose con associazione, cronologia, chat e conferme secondo i permessi. Segue le stesse regole del client iOS e conserva la sessione cifrata con l'Android Keystore. La CI produce l'APK di debug.
 
@@ -64,13 +67,17 @@ La chat mostra un avatar astratto con anelli CSS 3D. L'etichetta annuncia gli st
 
 **Programmi di installazione (ADR-0016):** la release contiene l'app desktop pronta da installare. Windows `.msi` e setup `.exe`, macOS `.dmg`, Linux `.deb` e `.AppImage`. Core, runtime AI e Python sono inclusi.
 
-Restano da sviluppare: sincronizzazione labiale basata sui fonemi, funzioni iOS oltre chat e conferme, firma degli installer assegnazione automatica dei lavori ai nodi in base alle risorse.
+Con «nodo auto <strumento>» il Core sceglie da solo il nodo più libero fra quelli in linea (ADR-0031).
+
+Le app iOS e Android hanno tre schede: Chat, Attività e Notifiche (ADR-0032).
+
+Restano da sviluppare: voce nelle app native, firma degli installer
 
 ## App nativa iOS (RF-10, RF-11)
 
 Su macOS, apri `apps/ios/JARVIS.xcodeproj` in Xcode e avvia il target JARVIS su un simulatore iOS 17+ o su un iPhone/iPad. Per il dispositivo fisico seleziona il team di sviluppo in Xcode. Inserisci l'origine HTTPS già autorizzata per il Core, un nome e il codice monouso generato nella sezione **Dispositivi**.
 
-Il client mostra i 50 messaggi più recenti, invia messaggi e mostra le conferme pendenti. Il permesso `confirm` abilita approvazione e rifiuto espliciti. Il token resta nel portachiavi del dispositivo. Il client usa una sessione HTTP effimera, rifiuta i reindirizzamenti e torna alla schermata di associazione quando una richiesta autenticata restituisce 401. L'uscita locale cancella la sessione dal portachiavi. Per revocare il token sul Core usa la sezione **Dispositivi**.
+Il client mostra i 50 messaggi più recenti, invia messaggi e mostra le conferme pendenti. Le schede Attività e Notifiche mostrano lo stato delle richieste e le notifiche, con «Segna lette» (ADR-0032). Il permesso `confirm` abilita approvazione e rifiuto espliciti. Il token resta nel portachiavi del dispositivo. Il client usa una sessione HTTP effimera, rifiuta i reindirizzamenti e torna alla schermata di associazione quando una richiesta autenticata restituisce 401. L'uscita locale cancella la sessione dal portachiavi. Per revocare il token sul Core usa la sezione **Dispositivi**.
 
 La CI compila l'app per simulatore ed esegue i test Swift del protocollo. Le prove sul telefono usano la checklist in [ACCEPTANCE.md](ACCEPTANCE.md).
 

@@ -256,11 +256,15 @@ export class VoiceEngine {
       const res = await fetch("/api/voice/speak", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...AUTH },
-        body: JSON.stringify({ text: clean }),
+        body: JSON.stringify({ text: clean, with_visemes: true }),
         signal: request.signal,
       });
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error?.message || `HTTP ${res.status}`);
-      const blob = await res.blob();
+      // Labiale (ADR-0029): audio e visemi arrivano insieme.
+      const data = await res.json();
+      const bytes = Uint8Array.from(atob(data.audio_b64 || ""), (c) => c.charCodeAt(0));
+      const blob = new Blob([bytes], { type: "audio/wav" });
+      const timeline: Viseme[] = Array.isArray(data.visemes) ? data.visemes : [];
       if (request.signal.aborted) return;
       const audio = new Audio(URL.createObjectURL(blob));
       this.player = audio;
@@ -275,7 +279,7 @@ export class VoiceEngine {
         this.stopSpeaking();
         this.handlers.onError("Riproduzione della risposta vocale interrotta da un errore.");
       };
-      void this.animateSpeech(audio, blob);
+      void this.animateSpeech(audio, blob, timeline);
       await audio.play();
     } catch (e) {
       if (request.signal.aborted) return;
@@ -284,8 +288,11 @@ export class VoiceEngine {
     }
   }
 
-  /** L'apertura della bocca dell'avatar segue l'intensità dell'audio locale. */
-  private async animateSpeech(audio: HTMLAudioElement, blob: Blob) {
+  /**
+   * Bocca dell'avatar: forma dal visema corrente (ADR-0029) e apertura dall'intensità dell'audio locale.
+   * Senza visemi segue solo l'intensità, come prima.
+   */
+  private async animateSpeech(audio: HTMLAudioElement, blob: Blob, timeline: Viseme[] = []) {
     if (typeof OfflineAudioContext !== "function" || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     let decoded: AudioBuffer;
     try {
@@ -296,12 +303,23 @@ export class VoiceEngine {
     }
     if (this.player !== audio) return;
     const samples = decoded.getChannelData(0);
+    let cursor = 0;
     const update = () => {
       const start = Math.floor(audio.currentTime * decoded.sampleRate);
       const end = Math.min(samples.length, start + 480);
       let peak = 0;
       if (!audio.paused) for (let i = start; i < end; i += 4) peak = Math.max(peak, Math.abs(samples[i]));
-      setMouth(Math.min(1, peak * 4).toFixed(2));
+      const energy = Math.min(1, peak * 4);
+      if (timeline.length) {
+        const ms = audio.currentTime * 1000;
+        if (cursor >= timeline.length || timeline[cursor].t > ms) cursor = 0;
+        while (cursor + 1 < timeline.length && timeline[cursor + 1].t <= ms) cursor++;
+        const v = timeline[cursor] && timeline[cursor].t <= ms && ms < timeline[cursor].t + timeline[cursor].d ? timeline[cursor].v : "X";
+        const shape = VISEME_SHAPE[v] || VISEME_SHAPE.X;
+        setMouth((shape[0] * (0.35 + 0.65 * energy)).toFixed(2), v, shape[1].toFixed(2));
+      } else {
+        setMouth(energy.toFixed(2));
+      }
       this.speechFrame = requestAnimationFrame(update);
     };
     this.speechFrame = requestAnimationFrame(update);
@@ -322,10 +340,31 @@ export class VoiceEngine {
   }
 }
 
-function setMouth(value: string | null) {
+export interface Viseme {
+  v: string;
+  t: number;
+  d: number;
+}
+
+/** Apertura e larghezza della bocca per visema: vocali aperte o arrotondate, labbra chiuse per M/B/P. */
+const VISEME_SHAPE: Record<string, [number, number]> = {
+  A: [1, 0.55], E: [0.7, 0.68], I: [0.45, 0.75], O: [0.8, 0.36], U: [0.5, 0.28],
+  M: [0, 0.5], F: [0.2, 0.5], L: [0.45, 0.5], S: [0.3, 0.62], X: [0, 0.45],
+};
+
+function setMouth(value: string | null, viseme?: string, width?: string) {
   document.querySelectorAll<HTMLElement>("[data-avatar]").forEach((a) => {
-    if (value == null) a.style.removeProperty("--mouth-opening");
-    else a.style.setProperty("--mouth-opening", value);
+    if (value == null) {
+      a.style.removeProperty("--mouth-opening");
+      a.style.removeProperty("--mouth-width");
+      delete a.dataset.viseme;
+      return;
+    }
+    a.style.setProperty("--mouth-opening", value);
+    if (viseme) {
+      a.dataset.viseme = viseme;
+      a.style.setProperty("--mouth-width", width || "0.5");
+    }
   });
 }
 

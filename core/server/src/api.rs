@@ -250,6 +250,8 @@ pub fn router(state: Shared) -> Router {
         .route("/api/health", get(health))
         .route("/api/chat", post(chat))
         .route("/api/chat/stream", post(chat_stream))
+        .route("/api/updates", get(updates_get).post(updates_set))
+        .route("/api/updates/check", post(updates_check))
         .route("/api/notify/channels", get(channels_list).post(channel_add))
         .route("/api/notify/channels/{id}", delete(channel_delete))
         .route("/api/notify/channels/{id}/test", post(channel_test))
@@ -497,6 +499,29 @@ async fn oauth_callback(
         html,
     )
         .into_response()
+}
+
+async fn updates_get(State(state): State<Shared>) -> Json<Value> {
+    Json(with_core(&state, |j| j.updates_state()).await)
+}
+
+async fn updates_set(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let enabled = body["enabled"].as_bool().unwrap_or(false);
+    let channel = body["channel"].as_str().unwrap_or("stable").to_string();
+    reply(with_core(&state, move |j| j.updates_configure(enabled, &channel)).await)
+}
+
+/// Controllo manuale: la richiesta a GitHub avviene fuori dal blocco del Core.
+async fn updates_check(State(state): State<Shared>) -> Response {
+    let fetched = fetch_releases(&state).await;
+    reply(with_core(&state, move |j| j.updates_record(fetched)).await)
+}
+
+async fn fetch_releases(state: &Shared) -> Result<Vec<Value>, String> {
+    let dir = with_core(state, |j| j.data_dir()).await;
+    tokio::task::spawn_blocking(move || crate::updates::Updates::new(&dir).fetch())
+        .await
+        .unwrap_or_else(|_| Err("controllo interrotto".into()))
 }
 
 async fn channels_list(State(state): State<Shared>) -> Response {
@@ -750,7 +775,16 @@ async fn voice_speak(State(state): State<Shared>, Json(body): Json<Value>) -> Re
             "campo 'text' mancante",
         );
     };
+    let with_visemes = body["with_visemes"] == true;
     match with_core(&state, move |j| j.voice_speak(&text)).await {
+        // Labiale (ADR-0029): audio e visemi insieme, così l'avatar li sincronizza con la riproduzione.
+        Ok((audio, mut meta)) if with_visemes => {
+            use base64::Engine as _;
+            meta["audio_b64"] = base64::engine::general_purpose::STANDARD
+                .encode(&audio)
+                .into();
+            Json(meta).into_response()
+        }
         Ok((audio, meta)) => {
             let engine = format!(
                 "{}/{}",
@@ -889,6 +923,22 @@ async fn node_next(
         .unwrap_or(20u64)
         .min(25);
     let hub = state.nodes.clone();
+    // Risorse dichiarate dal nodo (ADR-0031): servono alla scelta automatica.
+    hub.report(
+        &id,
+        crate::nodes::Resources {
+            cpus: q
+                .get("cpus")
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1)
+                .clamp(1, 1024),
+            load: q
+                .get("load")
+                .and_then(|v| v.parse::<f64>().ok())
+                .filter(|l| l.is_finite() && *l >= 0.0),
+            mem_free_mb: q.get("mem_free_mb").and_then(|v| v.parse().ok()),
+        },
+    );
     let next =
         tokio::task::spawn_blocking(move || hub.next(&id, std::time::Duration::from_secs(wait)))
             .await
@@ -1085,6 +1135,13 @@ pub fn spawn_scheduler(state: Shared, tick: std::time::Duration) -> tokio::task:
                 runs
             })
             .await;
+            // Aggiornamenti (ADR-0034): una volta al giorno, solo se attivato, con la rete fuori dal blocco.
+            if with_core(&state, |j| j.updates_due()).await {
+                let fetched = fetch_releases(&state).await;
+                if let Err(e) = with_core(&state, move |j| j.updates_record(fetched)).await {
+                    eprintln!("[aggiornamenti] errore: {e:?}");
+                }
+            }
             match result {
                 Ok(runs) => {
                     for run in runs {

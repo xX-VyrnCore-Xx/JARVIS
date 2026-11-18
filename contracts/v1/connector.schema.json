@@ -96,6 +96,12 @@
             "pattern": "^[\\x21\\x23-\\x5B\\x5D-\\x7E]{1,200}$"
           },
           "maxItems": 32
+        },
+        "revoke_url": {
+          "type": "string",
+          "pattern": "^https?://",
+          "maxLength": 2000,
+          "description": "Endpoint di revoca dei token (RFC 7009), facoltativo; il suo host deve comparire in allowed_hosts."
         }
       },
       "allOf": [
