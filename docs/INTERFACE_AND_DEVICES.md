@@ -22,6 +22,9 @@ Verificare per piattaforma enrollment, revoca, segnalazione dei limiti OS, ripre
 
 **Rifinitura macOS e Windows (ADR-0035):** icone vettoriali, barra laterale a gruppi riducibile con il conteggio delle conferme, palette comandi (⌘K su macOS, Ctrl+K su Windows e Linux), riga di indicatori in Plancia, etichette e indicatore di scrittura in chat, notifiche con barra del tempo. La radice riceve `platform-mac` o `platform-win` per caratteri di sistema (SF, Segoe UI Variable), raggi e barre di scorrimento; l'app desktop apre la dashboard con `?app=desktop` in una finestra scura e mostra una schermata d'avvio animata.
 
+**Icona e installatori (ADR-0036):** icona a reattore generata da `scripts/make_brand_assets.py`; `.dmg` con sfondo e istruzioni; setup Windows in italiano con immagini dedicate; su macOS barra del titolo trasparente e rimozione della quarantena del pacchetto dopo il primo avvio autorizzato.
+
+
 - il nucleo animato di JARVIS, che segue gli stati pronto, elaborazione, ascolto, trascrizione e risposta vocale;
 - ora, stato di AI, voce, audit e Core, e un comando rapido che apre la chat;
 - le operazioni in attesa di conferma, approvabili o rifiutabili dalla plancia;

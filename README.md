@@ -37,7 +37,7 @@ Resta pubblicata solo l'ultima versione stabile.
 
 Senza un certificato Apple Developer o Authenticode a pagamento, i sistemi mostrano ancora un avviso al primo avvio:
 - **Windows:** SmartScreen può chiedere «Ulteriori informazioni → Esegui comunque»;
-- **macOS:** l'app ha una firma ad hoc; aprila con clic destro → Apri, oppure da Impostazioni di Sistema → Privacy e sicurezza → «Apri comunque».
+- **macOS:** l'app ha una firma ad hoc: al primo avvio apri Impostazioni di Sistema → Privacy e sicurezza → «Apri comunque» (su macOS 15 il clic destro → Apri non basta più). Se compare «JARVIS è danneggiato», esegui `xattr -cr /Applications/JARVIS.app`. Dopo il primo avvio l'app toglie da sola la quarantena ai propri file (ADR-0036).
 
 Le istruzioni qui sotto valgono per chi usa i sorgenti.
 

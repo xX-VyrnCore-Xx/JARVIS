@@ -82,7 +82,16 @@ jobs:
         # (MODULE_NOT_FOUND su Windows). Il pacchetto nativo dipende dal sistema e npm lo sceglie da solo.
         run: |
           npm install --global --no-audit --no-fund @tauri-apps/cli@2
-          tauri build --config tauri.bundle.conf.json --bundles ${{ matrix.bundles }}
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            # Con CI=true Tauri salta l'impaginazione del .dmg (sfondo, posizione delle icone, ADR-0036): la si
+            # chiede esplicitamente e, se Finder non risponde sul runner, si ripiega sul .dmg senza impaginazione.
+            CI=false tauri build --config tauri.bundle.conf.json --bundles ${{ matrix.bundles }} || {
+              echo "::warning::impaginazione del .dmg non riuscita, nuovo tentativo senza"
+              tauri build --config tauri.bundle.conf.json --bundles ${{ matrix.bundles }}
+            }
+          else
+            tauri build --config tauri.bundle.conf.json --bundles ${{ matrix.bundles }}
+          fi
       - name: Installazione reale e avvio del Core installato (Linux)
         if: runner.os == 'Linux'
         shell: bash
@@ -100,12 +109,15 @@ jobs:
         run: |
           dmg=$(ls apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg | head -1)
           hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg" "$dmg"
+          ls -la "$RUNNER_TEMP/dmg" "$RUNNER_TEMP/dmg/.background" 2>/dev/null || echo "::warning::.dmg senza sfondo"
+          test -L "$RUNNER_TEMP/dmg/Applications" || { echo "manca il collegamento ad Applicazioni nel .dmg"; exit 1; }
           mkdir -p "$RUNNER_TEMP/Applications"
           cp -R "$RUNNER_TEMP/dmg/JARVIS.app" "$RUNNER_TEMP/Applications/"
           hdiutil detach "$RUNNER_TEMP/dmg"
           app="$RUNNER_TEMP/Applications/JARVIS.app"
           # Firma ad hoc dell'app (ADR-0020): sigillo valido su tutto il pacchetto.
-          codesign --verify --verbose=2 "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          plutil -extract LSMinimumSystemVersion raw "$app/Contents/Info.plist"
           codesign -dv "$app" 2>&1 | grep -E "Signature=adhoc|flags=" 
           res="$app/Contents/Resources"
           test -x "$app/Contents/MacOS/jarvis-core" && test -x "$res/python/bin/python3"
@@ -211,7 +223,7 @@ jobs:
               exit 1
             }
           fi
-          gh release create "$TAG" dist/* --verify-tag --generate-notes --title "JARVIS $TAG" $extra --repo "$GITHUB_REPOSITORY" || {
+          gh release create "$TAG" dist/* --verify-tag --notes-file .github/release-notes.md --generate-notes --title "JARVIS $TAG" $extra --repo "$GITHUB_REPOSITORY" || {
             echo "::error::creazione della release rifiutata; diagnosi:"
             gh api "repos/$GITHUB_REPOSITORY/rulesets" || true
             gh api "repos/$GITHUB_REPOSITORY/releases?per_page=3" --jq '.[].tag_name' || true
