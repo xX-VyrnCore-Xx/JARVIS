@@ -78,7 +78,11 @@ jobs:
       - name: Programmi di installazione (Tauri)
         working-directory: apps/desktop/src-tauri
         shell: bash
-        run: npx --yes @tauri-apps/cli@2 build --config tauri.bundle.conf.json --bundles ${{ matrix.bundles }}
+        # CLI installato in modo esplicito: con npx il modulo nativo opzionale a volte non viene scaricato
+        # (MODULE_NOT_FOUND su Windows). Il pacchetto nativo dipende dal sistema e npm lo sceglie da solo.
+        run: |
+          npm install --global --no-audit --no-fund @tauri-apps/cli@2
+          tauri build --config tauri.bundle.conf.json --bundles ${{ matrix.bundles }}
       - name: Installazione reale e avvio del Core installato (Linux)
         if: runner.os == 'Linux'
         shell: bash
