@@ -107,7 +107,9 @@ pub fn create(
     ];
     // Chiave dei segreti dei connettori: senza di essa i segreti ripristinati sarebbero illeggibili.
     // Resta protetta dalla cifratura del backup.
-    if let Ok(key) = fs::read(data_dir.join(".secrets.key")) {
+    // Su macOS e Windows la chiave sta nel portachiavi (ADR-0021): il ripristino la riscrive come file e
+    // l'apertura successiva la sposta di nuovo nel portachiavi.
+    if let Some(key) = crate::secrets::read_key(data_dir) {
         files.push(("data/.secrets.key".into(), key));
     }
     let workspace = data_dir.join("workspace");

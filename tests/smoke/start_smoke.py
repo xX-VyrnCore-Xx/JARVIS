@@ -7,6 +7,7 @@ Solo libreria standard: gira identico su Linux, macOS e Windows.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
@@ -41,6 +42,12 @@ def main() -> int:
         print("✗ il Core non ha risposto entro il tempo previsto", health)
         return 1
     print("✓ Core attivo; AI:", health["ai"]["gateway"]["backend"]["name"])
+    store = health.get("core", {}).get("secrets_store")
+    expected = os.environ.get("JARVIS_EXPECT_SECRETS_STORE")
+    if expected and store != expected:
+        print(f"✗ chiave dei segreti in «{store}», attesa in «{expected}»")
+        return 1
+    print("✓ chiave dei segreti custodita in:", store)
 
     page = get(f"{base}/", {"Host": f"localhost:{port}"})
     token = re.search(r'name="jarvis-token" content="([0-9a-f]{32})"', page).group(1)

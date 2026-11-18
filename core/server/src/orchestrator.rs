@@ -326,7 +326,7 @@ impl Jarvis {
             }));
         }
         json!({
-            "core": {"version": env!("CARGO_PKG_VERSION"), "status": "up"},
+            "core": {"version": env!("CARGO_PKG_VERSION"), "status": "up", "secrets_store": self.secrets.location()},
             "web": self.cfg.web.describe(),
             "ai": ai,
             "audit": {"events": events, "chain_valid": errors.is_empty()},
