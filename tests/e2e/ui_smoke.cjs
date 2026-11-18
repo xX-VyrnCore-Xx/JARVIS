@@ -78,7 +78,7 @@ function check(cond, msg) {
   check(true, "comando rapido dalla plancia eseguito in chat");
   let releaseChat;
   const pendingChat = new Promise((resolve) => { releaseChat = resolve; });
-  await page.route("**/api/chat", async (route) => {
+  await page.route("**/api/chat/stream", async (route) => {
     await pendingChat;
     await route.continue();
   }, { times: 1 });

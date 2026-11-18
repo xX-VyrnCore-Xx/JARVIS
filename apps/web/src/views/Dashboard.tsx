@@ -255,6 +255,10 @@ export function Dashboard({ active }: { active: boolean }) {
             <Gauge value={errs} max={Math.max(reqs, 1)} label="errori" tone={errs ? "bad" : "ok"} />
           </div>
           <Sparkline points={spark} />
+          <div className="hud-tokens" id="dash-tokens">
+            token al modello: <b>{snap?.metrics?.counters?.["ai.tokens.prompt"] ?? 0}</b> in ingresso ·{" "}
+            <b>{snap?.metrics?.counters?.["ai.tokens.output"] ?? 0}</b> generati
+          </div>
         </Panel>
 
         <Panel title="Errori e avvisi" code="ERR" className={failed.length || alerts.length ? "warnline" : ""}>

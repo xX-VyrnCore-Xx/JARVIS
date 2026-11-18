@@ -103,15 +103,17 @@ def _inject_fault() -> None:
         time.sleep(int(fault.split(":", 1)[1]) / 1000)
 
 
-def assistant_handler(delegation: dict) -> dict:
-    """Agente General Assistant: delega all'AI Gateway e valida l'esito (jarvis.agent-result/1)."""
+def assistant_handler(delegation: dict, emit: Callable[[str], None] | None = None) -> dict:
+    """Agente General Assistant: delega all'AI Gateway e valida l'esito (jarvis.agent-result/1).
+
+    Con `emit` i frammenti di testo del modello escono come `delegation.progress` prima dell'esito."""
     _inject_fault()
     global _GATEWAY
     if _GATEWAY is None:
         from jarvis_ai.gateway import Gateway
 
         _GATEWAY = Gateway()
-    result = _GATEWAY.respond(delegation)
+    result = _GATEWAY.respond(delegation, emit)
     schema, semantic = validation_errors("agent-result", result)
     if schema or semantic:
         raise HandlerError("agent.invalid_result", "internal", "Esito dell'agente non conforme", retryable=False)
@@ -150,7 +152,14 @@ def _reply(request: dict | None, status: str, payload: dict, error: dict | None 
     return env
 
 
-def handle_line(line: str, handler: Callable[[dict], dict]) -> dict:
+def _progress(request: dict, delta: str) -> dict:
+    """Frammento di risposta in corso (ADR-0025): stessa correlazione della richiesta, stato running."""
+    env = _reply(request, "running", {"delta": delta[:4000]})
+    env["type"] = "delegation.progress"
+    return env
+
+
+def handle_line(line: str, handler: Callable[..., dict], write: Callable[[dict], None] | None = None) -> dict:
     try:
         request = json.loads(line)
     except json.JSONDecodeError:
@@ -200,6 +209,8 @@ def handle_line(line: str, handler: Callable[[dict], dict]) -> dict:
         err["details"] = {"violations": (schema + semantic)[:10]}
         return _reply(request, "failed", {}, err)
     try:
+        if handler is assistant_handler and write is not None and delegation.get("stream"):
+            return _reply(request, "succeeded", handler(delegation, lambda delta: write(_progress(request, delta))))
         return _reply(request, "succeeded", handler(delegation))
     except HandlerError as exc:
         return _reply(request, "failed", {}, exc.error)
@@ -217,11 +228,14 @@ def main(argv: list[str] | None = None) -> int:
     for stream in (sys.stdin, sys.stdout):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", newline="\n" if stream is sys.stdout else None)
+    def write(env: dict) -> None:
+        sys.stdout.write(json.dumps(env, ensure_ascii=False) + "\n")
+        sys.stdout.flush()
+
     for line in sys.stdin:
         if not line.strip():
             continue
-        sys.stdout.write(json.dumps(handle_line(line, handler), ensure_ascii=False) + "\n")
-        sys.stdout.flush()
+        write(handle_line(line, handler, write))
     return 0
 
 

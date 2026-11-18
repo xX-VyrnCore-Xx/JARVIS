@@ -5,39 +5,126 @@
   "description": "Payload di 'delegation.result' con status succeeded. L'agente risponde oppure propone UNO strumento: l'esecuzione spetta al Core dopo la decisione di policy (ARCHITECTURE.md). AI_SYSTEM.md: registrare runtime, fallback e motivo della degradazione. RF-01, RF-04.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["contract", "kind", "backend"],
+  "required": [
+    "contract",
+    "kind",
+    "backend"
+  ],
   "properties": {
-    "contract": { "const": "jarvis.agent-result/1" },
-    "kind": { "enum": ["reply", "tool_call"] },
-    "text": { "type": "string", "minLength": 1, "maxLength": 16000 },
+    "contract": {
+      "const": "jarvis.agent-result/1"
+    },
+    "kind": {
+      "enum": [
+        "reply",
+        "tool_call"
+      ]
+    },
+    "text": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 16000
+    },
     "tool_call": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["tool", "version", "arguments"],
+      "required": [
+        "tool",
+        "version",
+        "arguments"
+      ],
       "properties": {
-        "tool": { "$ref": "common.schema.json#/$defs/identifier" },
-        "version": { "$ref": "common.schema.json#/$defs/semver" },
-        "arguments": { "type": "object" },
-        "rationale": { "type": "string", "maxLength": 1000 }
+        "tool": {
+          "$ref": "common.schema.json#/$defs/identifier"
+        },
+        "version": {
+          "$ref": "common.schema.json#/$defs/semver"
+        },
+        "arguments": {
+          "type": "object"
+        },
+        "rationale": {
+          "type": "string",
+          "maxLength": 1000
+        }
       }
     },
     "backend": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "model", "location"],
+      "required": [
+        "name",
+        "model",
+        "location"
+      ],
       "properties": {
-        "name": { "enum": ["offline", "ollama"] },
-        "model": { "type": "string", "minLength": 1, "maxLength": 200 },
-        "location": { "enum": ["local", "cloud"] },
-        "degraded_reason": { "type": "string", "maxLength": 500 }
+        "name": {
+          "enum": [
+            "offline",
+            "ollama"
+          ]
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "location": {
+          "enum": [
+            "local",
+            "cloud"
+          ]
+        },
+        "degraded_reason": {
+          "type": "string",
+          "maxLength": 500
+        }
+      }
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Consumo del modello (ADR-0024): conteggi, mai contenuti.",
+      "properties": {
+        "prompt_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tools_sent": {
+          "type": "integer",
+          "minimum": 0
+        }
       }
     }
   },
   "allOf": [
     {
-      "if": { "properties": { "kind": { "const": "reply" } } },
-      "then": { "required": ["text"], "not": { "required": ["tool_call"] } },
-      "else": { "required": ["tool_call"] }
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "reply"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "text"
+        ],
+        "not": {
+          "required": [
+            "tool_call"
+          ]
+        }
+      },
+      "else": {
+        "required": [
+          "tool_call"
+        ]
+      }
     }
   ]
 }

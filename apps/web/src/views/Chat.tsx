@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, fmtTime, post, pref } from "../lib/api";
+import { api, chatStream, fmtTime, post, pref } from "../lib/api";
 import { voice } from "../lib/voice";
 import { Avatar, AVATAR_LABELS, useAvatarState } from "../components/Avatar";
 import { useApp, useVoice } from "../state";
@@ -29,7 +29,7 @@ export interface Confirmation {
   target: string;
   expires_at: string;
 }
-type MsgItem = { id: number; kind: "msg"; role: "user" | "assistant"; text: string; steps?: Step[]; sources?: Source[]; error?: boolean };
+type MsgItem = { id: number; kind: "msg"; role: "user" | "assistant"; text: string; steps?: Step[]; sources?: Source[]; error?: boolean; streaming?: boolean };
 type ConfirmItem = { id: number; kind: "confirm"; c: Confirmation; decided?: boolean; approved?: boolean };
 type Item = MsgItem | ConfirmItem;
 type NewItem = Omit<MsgItem, "id"> | Omit<ConfirmItem, "id">;
@@ -107,12 +107,36 @@ export function Chat({ active }: { active: boolean }) {
       add({ kind: "msg", role: "user", text: message });
       setPending(true);
       setThinking(true);
+      // Il messaggio in arrivo compare al primo frammento e cresce finché l'esito non lo sostituisce.
+      let streamId: number | null = null;
+      let streamed = "";
+      const onDelta = (delta: string) => {
+        streamed += delta;
+        if (streamId == null) {
+          streamId = nextId.current++;
+          const id = streamId;
+          setPending(false);
+          setItems((list) => [...list, { id, kind: "msg", role: "assistant", text: streamed, streaming: true }]);
+        } else {
+          const id = streamId, text = streamed;
+          setItems((list) => list.map((x) => (x.id === id ? { ...x, text } : x)));
+        }
+      };
       try {
-        const out = await post("/api/chat", { message });
-        say(out.reply || "(nessuna risposta)", { steps: out.steps, sources: out.sources, error: out.task && out.task.state === "failed" });
+        const out = await chatStream(message, onDelta);
+        const final = { kind: "msg" as const, role: "assistant" as const, text: out.reply || "(nessuna risposta)", steps: out.steps, sources: out.sources,
+          error: out.task && out.task.state === "failed" };
+        if (streamId != null) {
+          const id = streamId;
+          setItems((list) => list.map((x) => (x.id === id ? { id, ...final } : x)));
+        } else add(final);
         if (out.confirmation) add({ kind: "confirm", c: out.confirmation });
         if (out.reply) void voice.speak(out.reply);
       } catch (e) {
+        if (streamId != null) {
+          const id = streamId;
+          setItems((list) => list.map((x) => (x.id === id && x.kind === "msg" ? { ...x, streaming: false } : x)));
+        }
         say(`Errore: ${(e as Error).message}`, { error: true });
       } finally {
         setPending(false);
@@ -199,7 +223,7 @@ export function Chat({ active }: { active: boolean }) {
       <div className="messages" id="messages" aria-live="polite" ref={box}>
         {items.map((it) =>
           it.kind === "msg" ? (
-            <div key={it.id} className={`msg ${it.role}${it.error ? " error" : ""}`}>
+            <div key={it.id} className={`msg ${it.role}${it.error ? " error" : ""}${it.streaming ? " streaming" : ""}`} aria-busy={it.streaming || undefined}>
               {it.text}
               <Sources sources={it.sources} />
               <StepChips steps={it.steps} />

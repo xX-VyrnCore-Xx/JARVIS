@@ -203,6 +203,7 @@ fn device_route_allowed(method: &str, route: &str, scopes: &[&str]) -> bool {
     let chat = [
         ("GET", "/api/conversation"),
         ("POST", "/api/chat"),
+        ("POST", "/api/chat/stream"),
         ("GET", "/api/tasks"),
         ("GET", "/api/confirmations"),
         ("GET", "/api/notifications"),
@@ -246,6 +247,7 @@ pub fn router(state: Shared) -> Router {
         )
         .route("/api/health", get(health))
         .route("/api/chat", post(chat))
+        .route("/api/chat/stream", post(chat_stream))
         .route("/api/confirmations", get(confirmations))
         .route("/api/confirmations/{id}", post(confirm))
         .route("/api/tasks", get(tasks))
@@ -395,6 +397,55 @@ async fn chat(State(state): State<Shared>, Json(body): Json<Value>) -> Response 
         Ok(out) => Json(out.to_json()).into_response(),
         Err(e) => e.into_response(),
     }
+}
+
+/// Chat in streaming (ADR-0025): risposta NDJSON con righe `{"type":"delta","text":…}` mentre il modello
+/// genera, poi `{"type":"done","result":…}` (lo stesso oggetto di `/api/chat`) oppure `{"type":"error",…}`.
+async fn chat_stream(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let Some(message) = body["message"].as_str().map(str::to_string) else {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "campo 'message' mancante",
+        );
+    };
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let core = state.core.clone();
+    let deltas = tx.clone();
+    tokio::task::spawn_blocking(move || {
+        let mut guard = core.lock().unwrap_or_else(|e| e.into_inner());
+        let sink: crate::orchestrator::StreamSink = Box::new(move |d: &str| {
+            let _ = deltas.send(json!({"type": "delta", "text": d}).to_string() + "\n");
+        });
+        let line = match guard.chat_streaming(&message, sink) {
+            Ok(out) => json!({"type": "done", "result": out.to_json()}),
+            Err(e) => {
+                let (code, message) = match e {
+                    CoreError::BadRequest(m) => ("bad_request", m),
+                    CoreError::Unavailable(m) => ("unavailable", m),
+                    CoreError::NotFound(m) => ("not_found", m),
+                    CoreError::Gone(m) => ("expired", m),
+                    CoreError::Unauthorized(m) => ("unauthorized", m),
+                    CoreError::Internal(m) => ("internal", m),
+                };
+                json!({"type": "error", "error": {"code": code, "message": message}})
+            }
+        };
+        let _ = tx.send(line.to_string() + "\n");
+    });
+    let stream = futures_util::stream::unfold(rx, |mut rx| async move {
+        rx.recv()
+            .await
+            .map(|line| (Ok::<_, std::convert::Infallible>(line), rx))
+    });
+    (
+        [
+            (header::CONTENT_TYPE, "application/x-ndjson; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        axum::body::Body::from_stream(stream),
+    )
+        .into_response()
 }
 
 async fn confirmations(State(state): State<Shared>) -> Json<Value> {

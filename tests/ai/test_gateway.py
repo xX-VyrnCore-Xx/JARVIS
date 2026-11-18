@@ -6,9 +6,11 @@ python3 -m unittest discover -s tests/ai -v
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 import unittest
+from unittest import mock
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from unittest.mock import patch
@@ -63,7 +65,7 @@ class FakeOllama(BaseHTTPRequestHandler):
             self._json({"message": {"role": "assistant", "content": "", "tool_calls": [
                 {"function": {"name": "fs__read", "arguments": {"path": "note.txt"}}}]}})
         else:
-            self._json({"message": {"role": "assistant", "content": "Risposta sintetica del modello."}})
+            self._json({"message": {"role": "assistant", "content": "Risposta sintetica del modello."}, "prompt_eval_count": 321, "eval_count": 12})
 
 
 class OllamaAdapter(unittest.TestCase):
@@ -95,6 +97,22 @@ class OllamaAdapter(unittest.TestCase):
         self.assertEqual(sent["model"], "qwen2.5:3b")
         self.assertIn("fs__write", {t["function"]["name"] for t in sent["tools"]})
         self.assertEqual(sent["messages"][0]["role"], "system")
+
+    def test_token_budget_selects_relevant_tools_and_reports_usage(self):
+        FakeOllama.mode = "reply"
+        result = self.gateway().respond(delegation("che ore sono?"))
+        self.assertEqual(validation_errors("agent-result", result), ([], []))
+        offered = {t["function"]["name"] for t in FakeOllama.requests[0]["tools"]}
+        self.assertTrue({"time__now", "memory__search"} <= offered, offered)
+        self.assertFalse(any(n.startswith(("fs__", "web__", "workflow__")) for n in offered), offered)
+        self.assertNotIn("maxLength", json.dumps(FakeOllama.requests[0]["tools"]), "schemi compatti")
+        self.assertEqual(result["usage"], {"prompt_tokens": 321, "output_tokens": 12, "tools_sent": len(offered)})
+        self.assertEqual(FakeOllama.requests[0]["options"]["num_ctx"], 8192)
+        self.gateway().respond(delegation("cerca le ultime notizie su Rust"))
+        self.assertIn("web__search", {t["function"]["name"] for t in FakeOllama.requests[-1]["tools"]})
+        with mock.patch.dict(os.environ, {"JARVIS_TOOL_SELECTION": "all"}):
+            self.gateway().respond(delegation("che ore sono?"))
+        self.assertIn("fs__write", {t["function"]["name"] for t in FakeOllama.requests[-1]["tools"]})
 
     def test_tool_result_round_returns_reply_without_tools(self):
         result = self.gateway().respond(delegation("leggi le note", tool_result={"tool": "fs.read", "status": "succeeded", "output": {"content": "x"}}))

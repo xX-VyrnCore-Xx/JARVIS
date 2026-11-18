@@ -40,6 +40,24 @@ L'agente propone al massimo una chiamata di strumento per turno (`jarvis.agent-r
 
 Con gli strumenti Web il prompt di sistema chiede di citare le fonti con [n] e l'URL e di non seguire istruzioni contenute nelle pagine. I risultati Web arrivano al modello racchiusi tra marcatori di contenuto non attendibile. Il Core allega comunque le fonti alla risposta (ADR-0007).
 
+## Budget dei token (ADR-0024)
+
+Ogni turno verso il modello locale ha un costo fisso e uno variabile. Il Core e il worker li contengono così:
+- **Cronologia:** al massimo 10 turni entro `JARVIS_CONTEXT_CHARS` (9000 caratteri, circa 2.500 token). L'ultimo messaggio resta intero; i turni precedenti sono accorciati a 700 caratteri e i più vecchi esclusi quando il budget finisce.
+- **Memoria:** prima le preferenze, poi i ricordi pertinenti, fino a 3000 caratteri.
+- **Strumenti:** il modello riceve il nucleo (`time.now`, `system.info`, `memory.remember`, `memory.search`) più i gruppi pertinenti alla richiesta: file, Web, automazioni, memoria, connettori e nodi citati. Al massimo 10. `JARVIS_TOOL_SELECTION=all` li invia tutti.
+- **Schemi compatti:** al modello arrivano gli schemi senza i vincoli di lunghezza, che il Core verifica comunque con i contratti. L'esito dello strumento è serializzato in JSON compatto.
+- **Ollama:** finestra `num_ctx` esplicita (`JARVIS_OLLAMA_NUM_CTX`, 8192) e modello tenuto in memoria per 10 minuti (`keep_alive`), così le richieste ravvicinate non lo ricaricano.
+- **Misura:** l'esito dell'agente riporta `usage` (token in ingresso, generati, strumenti inviati). Il Core li somma nei contatori `ai.tokens.prompt`, `ai.tokens.output` e `ai.tools.sent`, visibili in Plancia, Sistema e nell'esportazione Prometheus.
+
+## Streaming delle risposte (ADR-0025)
+
+La dashboard usa `POST /api/chat/stream`. La risposta è NDJSON:
+- righe `{"type":"delta","text":…}` mentre Ollama genera;
+- in chiusura `{"type":"done","result":…}`, lo stesso oggetto di `POST /api/chat`, oppure `{"type":"error",…}`.
+
+Il Core imposta `stream: true` nella delega. Il worker chiede a Ollama lo streaming e invia ogni frammento come envelope `delegation.progress` (stato `running`, payload `{delta}`) correlato alla richiesta. Il bridge li inoltra e continua ad attendere l'esito entro lo stesso timeout. Se il modello propone uno strumento, non vengono inoltrati frammenti di quel turno: policy, conferme e audit restano invariati e il testo mostrato è quello dell'esito. Il modello offline risponde in un solo blocco. `POST /api/chat` resta disponibile per i client che non leggono lo streaming (app iOS e Android).
+
 ## Voce
 
 Il worker espone `voice.transcribe` e `voice.synthesize` sul bridge, con faster-whisper, Piper e openWakeWord in locale (ADR-0010). La trascrizione entra nella chat come testo, quindi l'agente e la policy non distinguono fra comando scritto e parlato. Lo stato dei motori fa parte della salute del worker.

@@ -26,6 +26,11 @@ const MEMORY_PROCEDURAL: usize = 20;
 const MEMORY_SMALL: usize = 30;
 const MEMORY_RELEVANT: usize = 8;
 const HISTORY_MESSAGES: u32 = 10;
+/// Budget del contesto in caratteri (circa 3,5 caratteri per token): cronologia e memoria (ADR-0024).
+const CONTEXT_CHARS: usize = 9000;
+const MEMORY_CHARS: usize = 3000;
+/// Lunghezza massima dei turni più vecchi: la richiesta corrente resta intera.
+const OLD_TURN_CHARS: usize = 700;
 const MAX_MESSAGE: usize = 8000;
 
 #[derive(Debug)]
@@ -131,7 +136,11 @@ impl Outcome {
     }
 }
 
+/// Destinazione dei frammenti di risposta durante una chat in streaming (ADR-0025).
+pub type StreamSink = Box<dyn Fn(&str) + Send>;
+
 pub struct Jarvis {
+    stream_sink: Option<StreamSink>,
     cfg: Config,
     store: Store,
     audit: AuditLog,
@@ -198,6 +207,7 @@ impl Jarvis {
         let (cfg_setup_dir, cfg_setup_python, cfg_setup_ai) =
             (cfg.data_dir.clone(), cfg.python.clone(), cfg.ai_dir.clone());
         let mut jarvis = Self {
+            stream_sink: None,
             cfg,
             store,
             audit,
@@ -361,6 +371,7 @@ impl Jarvis {
             "issued_at": ts(issued),
             "expires_at": ts(expires),
             "inputs": self.with_dynamic_tools(inputs),
+            "stream": self.stream_sink.is_some(),
         })
     }
 
@@ -396,6 +407,18 @@ impl Jarvis {
         let result = self.call_agent_inner(task, inputs);
         self.obs
             .observe("delegation general_assistant", timer.ms(), result.is_err());
+        if let Ok(r) = &result {
+            // Consumo di token riportato dal backend (ADR-0024): contatori senza contenuti.
+            for (key, counter) in [
+                ("prompt_tokens", "ai.tokens.prompt"),
+                ("output_tokens", "ai.tokens.output"),
+                ("tools_sent", "ai.tools.sent"),
+            ] {
+                if let Some(n) = r["usage"][key].as_u64() {
+                    self.obs.add(counter, n);
+                }
+            }
+        }
         if let Err(e) = &result {
             self.obs.count("delegation.failed");
             self.obs.log(
@@ -411,8 +434,20 @@ impl Jarvis {
     fn call_agent_inner(&mut self, task: &Task, inputs: &Value) -> Result<Value, Value> {
         let delegation = self.delegation(task, inputs);
         let (id, corr) = (task.id(), task.correlation());
-        let worker = self.worker()?;
-        match worker.delegate(&id, &corr, &delegation) {
+        let sink = self.stream_sink.take();
+        let worker = match self.worker() {
+            Ok(w) => w,
+            Err(e) => {
+                self.stream_sink = sink;
+                return Err(e);
+            }
+        };
+        let sent = match &sink {
+            Some(f) => worker.delegate_streaming(&id, &corr, &delegation, &mut |d| f(d)),
+            None => worker.delegate(&id, &corr, &delegation),
+        };
+        self.stream_sink = sink;
+        match sent {
             Ok(env) if env["status"] == "succeeded" => {
                 let report = validate(Contract::AgentResult, &env["payload"]);
                 if report.is_valid() {
@@ -432,13 +467,11 @@ impl Jarvis {
     }
 
     fn inputs(&self) -> Result<Value, CoreError> {
-        let messages: Vec<Value> = self
+        let recent = self
             .store
             .messages_recent(HISTORY_MESSAGES)
-            .map_err(internal)?
-            .into_iter()
-            .map(|m| json!({"role": m["role"], "content": m["content"].as_str().unwrap_or_default().chars().take(MAX_MESSAGE).collect::<String>()}))
-            .collect();
+            .map_err(internal)?;
+        let messages = budget_history(&recent, context_budget());
         let query = messages
             .iter()
             .rev()
@@ -446,7 +479,7 @@ impl Jarvis {
             .and_then(|m| m["content"].as_str())
             .unwrap_or_default()
             .to_string();
-        let memory = self.memory_context(&query)?;
+        let memory = budget_memory(self.memory_context(&query)?, MEMORY_CHARS);
         Ok(json!({"messages": messages, "memory": memory}))
     }
 
@@ -465,6 +498,19 @@ impl Jarvis {
     }
 
     // ------------------------------------------------------------------ chat
+
+    /// Chat con i frammenti della risposta inoltrati a `sink` mentre il modello li genera (ADR-0025).
+    /// L'esito finale è lo stesso di `chat`: policy, conferme e audit non cambiano.
+    pub fn chat_streaming(
+        &mut self,
+        message: &str,
+        sink: StreamSink,
+    ) -> Result<Outcome, CoreError> {
+        self.stream_sink = Some(sink);
+        let out = self.chat(message);
+        self.stream_sink = None;
+        out
+    }
 
     pub fn chat(&mut self, message: &str) -> Result<Outcome, CoreError> {
         let timer = Timer::start();
@@ -2819,4 +2865,102 @@ fn merge(base: &Value, extra: Value) -> Value {
     let mut m = obj(base.clone());
     m.extend(obj(extra));
     Value::Object(m)
+}
+
+/// Budget della cronologia: `JARVIS_CONTEXT_CHARS` o il valore predefinito, mai sotto 1000 caratteri.
+fn context_budget() -> usize {
+    std::env::var("JARVIS_CONTEXT_CHARS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(CONTEXT_CHARS)
+        .max(1000)
+}
+
+fn clip(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let head: String = text.chars().take(max.saturating_sub(1)).collect();
+    format!("{head}…")
+}
+
+/// Cronologia entro il budget (ADR-0024): l'ultimo messaggio resta intero (fino a MAX_MESSAGE), i turni
+/// precedenti sono accorciati e i più vecchi esclusi quando il budget finisce. L'ordine è conservato.
+pub(crate) fn budget_history(recent: &[Value], budget: usize) -> Vec<Value> {
+    let mut kept: Vec<Value> = vec![];
+    let mut used = 0usize;
+    for (i, m) in recent.iter().rev().enumerate() {
+        let content = m["content"].as_str().unwrap_or_default();
+        let text = if i == 0 {
+            clip(content, MAX_MESSAGE)
+        } else {
+            clip(content, OLD_TURN_CHARS)
+        };
+        let len = text.chars().count();
+        if i > 0 && used + len > budget {
+            break;
+        }
+        used += len;
+        kept.push(json!({"role": m["role"], "content": text}));
+    }
+    kept.reverse();
+    kept
+}
+
+/// Memoria entro il budget: gli elementi arrivano già in ordine di priorità (preferenze, poi pertinenti).
+pub(crate) fn budget_memory(items: Vec<Value>, budget: usize) -> Vec<Value> {
+    let mut used = 0usize;
+    items
+        .into_iter()
+        .take_while(|m| {
+            used += m.as_str().map(|s| s.chars().count()).unwrap_or(0);
+            used <= budget
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    #[test]
+    fn history_keeps_latest_message_whole_and_respects_budget() {
+        let long = "x".repeat(5000);
+        let recent: Vec<Value> = (0..10)
+            .map(|i| json!({"role": if i % 2 == 0 { "user" } else { "assistant" }, "content": format!("{i}:{long}")}))
+            .collect();
+        let out = budget_history(&recent, 2500);
+        let last = out.last().unwrap()["content"].as_str().unwrap();
+        assert!(
+            last.starts_with("9:") && last.chars().count() == 5002,
+            "ultimo turno intero"
+        );
+        let older: usize = out[..out.len() - 1]
+            .iter()
+            .map(|m| m["content"].as_str().unwrap().chars().count())
+            .sum();
+        assert!(
+            older + 5002 <= 2500 + 5002 && out.len() < 10,
+            "turni vecchi esclusi oltre il budget"
+        );
+        assert!(out[..out.len() - 1].iter().all(|m| m["content"]
+            .as_str()
+            .unwrap()
+            .chars()
+            .count()
+            <= OLD_TURN_CHARS));
+        let short: Vec<Value> = vec![json!({"role": "user", "content": "ciao"})];
+        assert_eq!(budget_history(&short, 2500), short);
+    }
+
+    #[test]
+    fn memory_stops_at_budget_in_priority_order() {
+        let items: Vec<Value> = vec![
+            "a".repeat(1500).into(),
+            "b".repeat(1000).into(),
+            "c".repeat(1000).into(),
+        ];
+        let out = budget_memory(items, 3000);
+        assert_eq!(out.len(), 2);
+    }
 }
