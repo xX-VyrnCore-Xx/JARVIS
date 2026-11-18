@@ -89,6 +89,7 @@ Cosa osservare:
 - ogni azione mostra agente, strumento, decisione di policy ed esito;
 - scrivere un file o cancellare un ricordo richiede la tua conferma, valida una sola volta e per 5 minuti;
 - i file restano nella cartella `data/workspace`, e ogni tentativo di uscirne viene negato;
+- **Plancia** (ADR-0023): la dashboard iniziale in stile HUD olografico mostra il nucleo animato di JARVIS, le operazioni da confermare, le attività con il loro esecutore, nodi e condizioni offline, prestazioni, errori, memoria, automazioni e dispositivi, con un comando rapido. Il pulsante ◐ passa al tema chiaro;
 - le sezioni Attività, Memoria e Audit mostrano stato, ricordi e la catena di hash verificata;
 - **Memoria** (ADR-0022): fatti («ricorda che …»), preferenze («preferisco …», sempre tenute presenti) ed episodi delle attività, che scadono dopo 30 giorni (`JARVIS_EPISODIC_DAYS`, 0 li disattiva). La ricerca trova i ricordi pertinenti anche con parole flesse o senza accenti. Ogni ricordo si corregge o si cancella; il grafo delle conoscenze mostra le relazioni («mia sorella si chiama Anna»).
 

@@ -66,6 +66,16 @@ function check(cond, msg) {
   check(!(await page.locator("#setup-dialog").evaluate((d) => d.open)), "finestra di configurazione chiusa");
 
   check((await page.locator("#st-ai").innerText()).includes("offline"), "stato AI visibile nell'intestazione");
+  // Plancia (dashboard HUD): vista iniziale con stato, esecutori, conferme e comando rapido.
+  await page.waitForSelector("#view-dashboard.active #avatar-core");
+  check((await page.locator("#view-dashboard").innerText()).includes("IN ATTESA DI CONFERMA") || (await page.locator("#view-dashboard").innerText()).toLowerCase().includes("in attesa di conferma"), "plancia con il pannello delle conferme");
+  check((await page.locator("#dash-conditions").innerText()).includes("modalità offline"), "plancia mostra le condizioni offline");
+  if (shots) await page.screenshot({ path: `${shots}/jarvis-plancia.png` });
+  await page.fill("#dashboard-command input", "info sistema");
+  await page.click("#dashboard-command button");
+  await page.waitForSelector("#view-chat.active");
+  await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant")].some((m) => m.textContent.includes("Informazioni sul sistema")), null, { timeout: 30000 });
+  check(true, "comando rapido dalla plancia eseguito in chat");
   let releaseChat;
   const pendingChat = new Promise((resolve) => { releaseChat = resolve; });
   await page.route("**/api/chat", async (route) => {
@@ -120,6 +130,10 @@ function check(cond, msg) {
   check(true, "contatore notifiche: 1 conferma in attesa");
   await page.waitForSelector(".toast.warning");
   check((await page.locator(".toast.warning").first().innerText()).includes("Conferma richiesta"), "toast della conferma in attesa");
+  await page.click('[data-view="dashboard"]');
+  await page.waitForFunction(() => /fs\.write/.test(document.querySelector("#dash-confirmations").innerText));
+  check((await page.locator("#dash-tasks").innerText()).includes("Core locale"), "plancia: conferma in attesa e attività con l'esecutore");
+  await page.click('[data-view="chat"]');
   await page.click("#bell");
   await page.waitForSelector("#notif-list .notif.unread");
   check((await page.locator("#notif-list").innerText()).includes("fs.write"), "notifica elencata nel pannello con il task");

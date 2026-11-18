@@ -13,7 +13,7 @@ Il repository GitHub privato e il mirror locale conservano codice, documenti e c
 ├── ai/                runtime agenti e adapter Python (jarvis_ai)
 ├── apps/
 │   ├── desktop/       launcher/ (crate jarvis-launcher) e src-tauri/ (app Tauri)
-│   ├── web/           dashboard React
+│   ├── web/           dashboard React e TypeScript (bundle in core/server/static)
 │   └── mobile/        client successivi
 ├── contracts/         schemi, API ed eventi versionati; catalog/tools: descrittori degli strumenti
 ├── integrations/      plugin, connettori e SDK
@@ -30,6 +30,16 @@ Il repository GitHub privato e il mirror locale conservano codice, documenti e c
 3. Aggiornare contratti e compatibilità insieme al codice che li usa. Tenere i cambiamenti coerenti e il diff leggibile.
 4. Eseguire le verifiche già previste dal repository e aggiungere la copertura necessaria al cambiamento. Nei flussi dati provare almeno compatibilità, recovery e ripetizione quando rilevanti.
 5. Registrare esiti reali, limiti, decisioni e prossimo passo in ROADMAP.md. Se cambia una scelta architetturale, aggiornare DECISIONS.md e la specifica associata.
+
+## Dashboard (apps/web, ADR-0023)
+
+La dashboard è in React e TypeScript. Il bundle generato (`core/server/static/app.js` e `app.css`) è versionato, così il Core si compila senza Node. Dopo una modifica in `apps/web/src`:
+
+```bash
+cd apps/web && npm ci && npm run build
+```
+
+La CI ricostruisce il bundle e fallisce se differisce da quello versionato. Gli ID e le classi usati da `tests/e2e/ui_smoke.cjs` fanno parte del contratto dell'interfaccia.
 
 ## Ripresa da remoto con Claude Code
 

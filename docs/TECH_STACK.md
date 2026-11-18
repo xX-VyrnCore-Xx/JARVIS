@@ -35,7 +35,8 @@ Versionare dipendenze e contratti alla loro introduzione. Per Rust/Python, descr
 | rusqlite | 0.32, `bundled` | Memoria, task e conversazione | ADR-0004 |
 | Ollama (opzionale) | API `/api/chat` e `/api/tags` | Backend AI locale; nessuna libreria client, solo `urllib` | ADR-0004 |
 | Playwright | 1.63.0 | Test E2E dell'interfaccia | `tests/e2e/ui_smoke.cjs` |
-| Interfaccia Web | HTML, CSS e JavaScript senza dipendenze | Deviazione temporanea da React (Tauri adottato per il desktop) | ADR-0004, ADR-0009 |
+| Interfaccia Web (dashboard) | React 19.3, TypeScript 5.9, Vite 8 | `apps/web`, bundle `app.js`/`app.css` incluso nel Core; tema HUD olografico | ADR-0023 (sostituisce la deviazione dell'ADR-0004) |
+| keyring (Rust) | 3, nativo su macOS e Windows | Chiave dei segreti nel portachiavi | ADR-0021 |
 | Pianificatore | `tokio::time::interval` nel Core | Automazioni (RF-07) | ADR-0005 |
 | faster-whisper / Piper / openWakeWord | 1.2.1 / 1.8.0 / 0.4.0 (opzionali) | Voce locale | ADR-0010 |
 | argon2 / chacha20poly1305 / tar (Rust) | 0.5 / 0.10 / 0.4 | Backup cifrato | ADR-0012 |

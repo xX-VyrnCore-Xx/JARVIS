@@ -649,6 +649,28 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - E2E: filtro per tipo, ricerca, grafo nella sezione Memoria.
 - **Documenti interessati:** MEMORY_DATA_SYNC.md, README.md, ROADMAP.md, ACCEPTANCE.md.
 
+### ADR-0023 — Dashboard React e TypeScript con tema HUD olografico
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario («crea la dashboard completa moderna e futuristica»); scelte confermate: React + TypeScript, stile HUD olografico. Sostituisce la deviazione temporanea dall'uso di React dell'ADR-0004.
+- **Contesto:** TECH_STACK.md prevede React e TypeScript per la dashboard Web, ma il prototipo usava JavaScript senza dipendenze. INTERFACE_AND_DEVICES.md chiede una dashboard con attività, esecutore, condizioni offline, errori e conferme in attesa.
+- **Opzioni:**
+  - evolvere l'interfaccia esistente: rapido, ma lontano dallo stack documentato;
+  - React e TypeScript con un server di sviluppo separato: complica avvio e CSP;
+  - React e TypeScript compilati in un bundle fisso servito dal Core.
+- **Decisione:**
+  - `apps/web` (Vite 8, React 19.3, TypeScript 5.9 in modalità strict) produce `core/server/static/app.js` (IIFE) e `app.css`, inclusi nel Core con `include_str!`. Restano invariati la CSP (`script-src 'self'`), `boot.js` e l'iniezione del token;
+  - il bundle è versionato: Rust, installer e `jarvis.sh` non richiedono Node. La CI lo ricostruisce, verifica che sia identico e controlla con `npm audit` le dipendenze distribuite;
+  - tutte le funzioni precedenti sono state portate con gli stessi ID e classi: chat, conferme, voce con mani libere e interruzione, avatar, notifiche, attività, automazioni, memoria, workspace, connettori, dispositivi, audit, sistema, backup e configurazione guidata;
+  - nuova vista iniziale «Plancia» per il proprietario; tema scuro HUD con variante chiara; layout adattato fino a 390 px; movimento ridotto rispettato.
+- **Conseguenze:**
+  - modificare l'interfaccia richiede `npm run build` in `apps/web` prima del commit;
+  - il bundle pesa circa 290 kB (90 kB compressi), servito localmente;
+  - il motore vocale è un modulo TypeScript testato con `tests/ui/audio_offline.test.cjs`.
+- **Evidenza:**
+  - E2E `tests/e2e/ui_smoke.cjs`: 66 verifiche, comprese plancia, comando rapido, conferme in attesa ed esecutore;
+  - controllo del bundle nel job e2e; `tsc --noEmit` nel build.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, TECH_STACK.md, DEVELOPMENT.md, CLAUDE.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).
