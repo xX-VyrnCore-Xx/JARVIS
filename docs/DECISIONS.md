@@ -786,6 +786,25 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** unitari in `memory.rs`: sinonimo trovato solo con il modello, embedding degli elementi esistenti, correzione, cancellazione, ricostruzione; client Ollama contro un server sintetico, con pausa dopo un errore.
 - **Documenti interessati:** MEMORY_DATA_SYNC.md, ACCEPTANCE.md, ROADMAP.md.
 
+### ADR-0029 — Labiale con visemi allineati all'audio
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario; voce «sincronizzazione labiale basata sui fonemi» nel checkpoint e in INTERFACE_AND_DEVICES.md.
+- **Contesto:** la bocca dell'avatar seguiva solo il volume, quindi ogni suono aveva la stessa forma.
+- **Opzioni:**
+  - allineamenti dei fonemi di Piper: disponibili solo con alcune voci e versioni;
+  - riconoscimento dei fonemi dall'audio: un modello in più;
+  - conversione grafema→visema dell'italiano, che è quasi fonetico, con tempi allineati all'audio.
+- **Decisione:**
+  - `ai/jarvis_ai/visemes.py` trasforma il testo in visemi (A, E, I, O, U, M, F, L, S, X) con pesi fonetici: vocali lunghe, consonanti brevi, pause alla punteggiatura;
+  - i tempi coprono esattamente il parlato: inizio e fine dopo e prima dei silenzi, pause lunghe agganciate al silenzio più vicino, segmenti distribuiti fra le pause;
+  - campo facoltativo `visemes` nel contratto `voice-synthesis`; `POST /api/voice/speak` con `with_visemes: true` restituisce audio e visemi insieme;
+  - la dashboard imposta forma (`--mouth-width`, `data-viseme`) e apertura (visema × intensità dell'audio) a ogni fotogramma. L'avatar grande ha una bocca olografica, quello piccolo un'ellisse.
+- **Conseguenze:**
+  - l'allineamento è stimato, non misurato fonema per fonema: con frasi lunghe senza pause può anticipare o ritardare di qualche decina di millisecondi;
+  - le parole straniere seguono la pronuncia italiana delle lettere.
+- **Evidenza:** `tests/ai/test_voice.py` (sequenza, allineamento a silenzi e durata, contratto) e `tests/ui/audio_offline.test.cjs` (visema corrente, labbra chiuse, bocca arrotondata, ritorno a riposo).
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md, contratto `voice-synthesis`.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

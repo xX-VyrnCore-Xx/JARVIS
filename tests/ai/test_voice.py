@@ -128,3 +128,39 @@ class RealWakeWord(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Visemes(unittest.TestCase):
+    """Labiale (ADR-0029): visemi dal testo italiano, allineati a durata e silenzi dell'audio."""
+
+    def test_italian_text_becomes_mouth_shapes(self):
+        from jarvis_ai import visemes
+
+        seq = [v for v, _ in visemes.sequence("Mamma, ciao!")]
+        self.assertEqual(seq[0], "M", "labbra chiuse per la m")
+        self.assertIn("X", seq, "pausa alla virgola")
+        self.assertEqual(seq[-1], "O")
+        self.assertEqual(visemes.sequence("   ...  "), [])
+
+    def test_timeline_fills_the_audio_and_lands_pauses_on_silence(self):
+        import math
+
+        from jarvis_ai import visemes
+
+        rate = 16000
+        tone = [int(6000 * math.sin(i / 5)) for i in range(rate)]
+        samples = [0] * (rate // 5) + tone + [0] * rate + tone
+        items = visemes.timeline("Ciao. Sono qui", samples, rate)
+        self.assertEqual(items[0]["t"], 200, "il parlato inizia dopo il silenzio iniziale")
+        pause = next(i for i in items if i["v"] == "X" and i["d"] > 500)
+        self.assertEqual((pause["t"], pause["d"]), (1200, 1000), "la pausa del punto cade sul silenzio")
+        self.assertLessEqual(items[-1]["t"] + items[-1]["d"], 3200)
+        self.assertTrue(all(b["t"] >= a["t"] for a, b in zip(items, items[1:])), "tempi crescenti")
+
+    def test_synthesis_result_carries_valid_visemes(self):
+        from jarvis_ai.contracts import validation_errors
+        from jarvis_ai.voice import VoiceService
+
+        out = VoiceService({"JARVIS_VOICE_ENGINE": "fake"}).synthesize("Buongiorno, sono JARVIS.")
+        self.assertEqual(validation_errors("voice-synthesis", out), ([], []))
+        self.assertGreater(len(out["visemes"]), 5)
