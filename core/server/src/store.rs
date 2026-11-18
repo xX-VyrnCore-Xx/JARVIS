@@ -13,11 +13,20 @@ pub struct Store {
 
 pub type StoreResult<T> = Result<T, rusqlite::Error>;
 
+/// Versione dello schema (ADR-0037): 1 = schema fino a 1.3.x con migrazioni additive.
+pub const SCHEMA_VERSION: i64 = 2;
+
 impl Store {
     pub fn open(path: &Path) -> StoreResult<Self> {
         let conn = Connection::open(path)?;
+        // WAL con sincronizzazione NORMAL (durevole ai crash dell'app, ADR-0037), attesa sui blocchi invece di
+        // errori «database is locked» quando il nodo o il backup leggono in parallelo, temporanei in memoria.
+        conn.busy_timeout(std::time::Duration::from_secs(5))?;
         conn.execute_batch(
             "PRAGMA journal_mode=WAL;
+             PRAGMA synchronous=NORMAL;
+             PRAGMA foreign_keys=ON;
+             PRAGMA temp_store=MEMORY;
              CREATE TABLE IF NOT EXISTS memory (id TEXT PRIMARY KEY, text TEXT NOT NULL, created_at TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS tasks (task_id TEXT PRIMARY KEY, doc TEXT NOT NULL, updated_at TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS messages (seq INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT NOT NULL,
@@ -37,7 +46,10 @@ impl Store {
              CREATE TABLE IF NOT EXISTS metrics_snapshots (at TEXT PRIMARY KEY, doc TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS devices (device_id TEXT PRIMARY KEY, token_sha256 TEXT NOT NULL UNIQUE,
                  doc TEXT NOT NULL);
-             CREATE TABLE IF NOT EXISTS notify_channels (channel_id TEXT PRIMARY KEY, doc TEXT NOT NULL);",
+             CREATE TABLE IF NOT EXISTS notify_channels (channel_id TEXT PRIMARY KEY, doc TEXT NOT NULL);
+             CREATE INDEX IF NOT EXISTS tasks_by_updated ON tasks (updated_at);
+             CREATE INDEX IF NOT EXISTS messages_by_task ON messages (task_id);
+             CREATE INDEX IF NOT EXISTS workflows_due ON workflows (next_run_at);",
         )?;
         // Migrazione additiva: database creati prima delle fonti Web (RF-06).
         let has_sources = conn.prepare("SELECT sources FROM messages LIMIT 0").is_ok();
@@ -49,7 +61,42 @@ impl Store {
             embedder: None,
         };
         store.memory_migrate()?;
+        store
+            .conn
+            .pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        // Statistiche del pianificatore di query aggiornate solo dove servono (raccomandazione di SQLite).
+        store.conn.execute_batch("PRAGMA optimize=0x10002;")?;
         Ok(store)
+    }
+
+    /// Versione dello schema registrata nel file (`PRAGMA user_version`).
+    pub fn schema_version(&self) -> StoreResult<i64> {
+        self.conn.query_row("PRAGMA user_version", [], |r| r.get(0))
+    }
+
+    /// Manutenzione periodica: statistiche del pianificatore e WAL riportato a dimensione zero.
+    pub fn maintenance(&self) -> StoreResult<()> {
+        self.conn
+            .execute_batch("PRAGMA optimize; PRAGMA wal_checkpoint(TRUNCATE);")
+    }
+
+    /// Stato del database per la sezione Sistema: integrità rapida, versione dello schema e dimensioni.
+    pub fn health(&self) -> StoreResult<Value> {
+        let check: String = self
+            .conn
+            .query_row("PRAGMA quick_check", [], |r| r.get(0))?;
+        let pages: i64 = self.conn.query_row("PRAGMA page_count", [], |r| r.get(0))?;
+        let page_size: i64 = self.conn.query_row("PRAGMA page_size", [], |r| r.get(0))?;
+        let count = |table: &str| -> StoreResult<i64> {
+            self.conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+        };
+        Ok(json!({
+            "ok": check == "ok", "check": check, "schema_version": self.schema_version()?,
+            "size_bytes": pages * page_size,
+            "rows": {"memory": count("memory")?, "messages": count("messages")?, "tasks": count("tasks")?,
+                     "workflows": count("workflows")?, "notifications": count("notifications")?},
+        }))
     }
 
     pub fn channel_put(&self, doc: &Value) -> StoreResult<()> {

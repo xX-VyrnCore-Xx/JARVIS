@@ -65,6 +65,23 @@ function UpdatesPanel({ active }: { active: boolean }) {
   );
 }
 
+/** Database locale (ADR-0037): integrità rapida, versione dello schema, dimensione e righe principali. */
+function DatabasePanel({ active }: { active: boolean }) {
+  const { data } = useViewData(active, () => api<{
+    ok: boolean; check: string; schema_version: number; size_bytes: number; rows: Record<string, number>;
+  }>("/api/database"));
+  if (!data) return null;
+  const mb = (data.size_bytes / 1048576).toFixed(data.size_bytes < 10485760 ? 2 : 1);
+  const r = data.rows;
+  return (
+    <div className="grid" id="database">
+      <Stat k="Integrità" v={data.ok ? "verificata ✓" : "da controllare ✗"} d={data.ok ? "SQLite quick_check" : data.check} />
+      <Stat k="Dimensione" v={`${mb} MB`} d={`schema v${data.schema_version} · manutenzione ogni 6 ore`} />
+      <Stat k="Contenuti" v={`${r.memory} ricordi · ${r.messages} messaggi`} d={`${r.tasks} attività · ${r.workflows} automazioni · ${r.notifications} notifiche`} />
+    </div>
+  );
+}
+
 export function System({ active, onSetup }: { active: boolean; onSetup: () => void }) {
   const { data, reload } = useViewData(active, async () => {
     const [h, m, bk, hist] = await Promise.all([
@@ -126,6 +143,8 @@ export function System({ active, onSetup }: { active: boolean; onSetup: () => vo
         ) : null}
       </div>
       <div className="row"><button className="ghost" type="button" id="open-setup" onClick={onSetup}>Configura voce e modello AI</button></div>
+      <h3 className="sub-head">Database locale</h3>
+      <DatabasePanel active={active} />
       <h3 className="sub-head">Aggiornamenti</h3>
       <UpdatesPanel active={active} />
       <h3 className="sub-head">Backup cifrato</h3>

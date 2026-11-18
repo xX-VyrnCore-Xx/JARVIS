@@ -268,6 +268,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/workspace", get(workspace))
         .route("/api/tools", get(tool_catalog))
         .route("/api/metrics", get(metrics))
+        .route("/api/database", get(database))
         .route("/api/metrics/history", get(metrics_history))
         .route("/api/metrics/export", get(metrics_export))
         .route("/api/backups", get(backups))
@@ -704,6 +705,11 @@ async fn create_backup(State(state): State<Shared>, Json(body): Json<Value>) -> 
 
 async fn metrics(State(state): State<Shared>) -> Json<Value> {
     Json(state.obs.snapshot())
+}
+
+/// Stato del database locale (ADR-0037): integrità, versione dello schema, dimensione e righe per tabella.
+async fn database(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.database_health()).await)
 }
 
 async fn metrics_history(

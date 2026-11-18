@@ -54,3 +54,6 @@ Garanzie:
 Dettagli in ADR-0005.
 
 **Modifica (ADR-0008):** nome, frequenza, passi e comportamento in caso di errore si modificano dalla chat («modifica automazione <id> ogni 2 ore», «modifica automazione <id>: info sistema», «rinomina automazione <id> in …») o dall'interfaccia. Ogni modifica crea una nuova versione con una nuova approvazione; le versioni precedenti e il legame fra esecuzione e versione restano consultabili.
+
+
+**Più strumenti per richiesta (ADR-0037).** L'orchestratore esegue fino a 4 strumenti in sequenza per richiesta; ognuno passa da policy, audit ed eventuale conferma, e una proposta ripetuta chiude il ciclo. Con OAuth un 401 provoca un rinnovo immediato e una sola nuova chiamata.

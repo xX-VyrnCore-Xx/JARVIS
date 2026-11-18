@@ -45,3 +45,6 @@ Verificare ripetizione della stessa operazione, crash durante la sincronizzazion
 `./jarvis.sh restore <file>`, eseguito a JARVIS chiuso, verifica cifratura, impronte, catena di audit e integrità del database prima di sostituire i dati; i dati precedenti restano in `<dati>.before-restore-<istante>`.
 
 Una cancellazione eseguita in JARVIS non modifica i backup già creati: per renderla definitiva bisogna eliminare anche i file `.jbak` precedenti.
+
+
+**Database e deduplicazione (ADR-0037).** SQLite in WAL con `synchronous=NORMAL`, `busy_timeout` di 5 secondi e versione dello schema in `user_version`; manutenzione ogni 6 ore e diagnostica in `GET /api/database`. `memory.remember` non duplica un fatto già presente (confronto sul testo normalizzato).

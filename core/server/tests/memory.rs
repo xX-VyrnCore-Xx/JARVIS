@@ -204,3 +204,30 @@ async fn memory_kinds_search_graph_and_episodes() {
     assert!(audit.contains("memory.correct") && audit.contains("memory.reindex"));
     let _ = std::fs::remove_dir_all(&env.data);
 }
+
+#[tokio::test]
+async fn same_fact_is_not_stored_twice_and_database_reports_health() {
+    let env = env();
+    env.chat("ricorda che il mio cane si chiama Fido").await;
+    let again = env.chat("ricorda che il mio cane si chiama fido!").await;
+    assert!(
+        again["reply"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Lo sapevo già"),
+        "{again}"
+    );
+    assert_eq!(
+        env.items("?kind=semantic").await.len(),
+        1,
+        "nessun duplicato (ADR-0037)"
+    );
+
+    let (status, db) = env.api("GET", "/api/database", None).await;
+    assert_eq!(status, StatusCode::OK, "{db}");
+    assert_eq!(db["ok"], true, "{db}");
+    assert_eq!(db["schema_version"], jarvis_core::store::SCHEMA_VERSION);
+    assert_eq!(db["rows"]["memory"], 1);
+    assert!(db["size_bytes"].as_i64().unwrap() > 0);
+    let _ = std::fs::remove_dir_all(&env.data);
+}

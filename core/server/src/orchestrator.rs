@@ -109,6 +109,18 @@ struct Pending {
     version: String,
     arguments: Value,
     inputs: Value,
+    /// Passi già eseguiti nel turno sospeso (ADR-0037).
+    history: Vec<Value>,
+}
+
+/// Passi massimi del ciclo dell'agente per una richiesta (limite `max_steps` della delega).
+const MAX_STEPS: usize = 4;
+/// Caratteri conservati degli esiti precedenti all'ultimo nel contesto dell'agente.
+const EARLIER_OUTPUT_CHARS: usize = 3000;
+
+/// Registro di un passo: strumento, argomenti, impronta (per riconoscere le ripetizioni) ed esito.
+fn step_record(tool: &str, arguments: &Value, digest: &str, status: &str, output: Value) -> Value {
+    json!({"tool": tool, "arguments": arguments, "digest": digest, "status": status, "output": output})
 }
 
 /// Esito restituito al client.
@@ -153,6 +165,8 @@ pub struct Jarvis {
     secrets: crate::secrets::SecretStore,
     /// Ultima istantanea delle metriche salvata (RNF-07).
     metrics_saved: Option<std::time::Instant>,
+    /// Ultima manutenzione del database (ADR-0037): al massimo ogni 6 ore.
+    maintained: Option<std::time::Instant>,
     /// Codici di associazione monouso in attesa (RF-11): codice -> (scadenza, permessi).
     pairings: HashMap<String, (std::time::Instant, Vec<String>)>,
     /// Nodi esecutori (RF-11, ADR-0017): assegnazioni e token, con un blocco proprio.
@@ -221,6 +235,7 @@ impl Jarvis {
             obs: std::sync::Arc::new(Observability::new(Some(&cfg_logs))),
             secrets,
             metrics_saved: None,
+            maintained: None,
             pairings: HashMap::new(),
             nodes: std::sync::Arc::new(crate::nodes::NodeHub::default()),
             setup: std::sync::Arc::new(crate::setup::Setup::new(
@@ -347,7 +362,8 @@ impl Jarvis {
             }));
         }
         json!({
-            "core": {"version": env!("CARGO_PKG_VERSION"), "status": "up", "secrets_store": self.secrets.location(), "memory_embeddings": self.embed_model()},
+            "core": {"version": env!("CARGO_PKG_VERSION"), "status": "up", "secrets_store": self.secrets.location(), "memory_embeddings": self.embed_model(),
+                     "database": {"schema_version": self.store.schema_version().ok()}},
             "web": self.cfg.web.describe(),
             "ai": ai,
             "audit": {"events": events, "chain_valid": errors.is_empty()},
@@ -595,103 +611,197 @@ impl Jarvis {
         };
         out.backend = Some(result["backend"].clone());
         out.steps.push(json!({"kind": "delegation", "agent": "general_assistant", "backend": result["backend"]}));
-        if result["kind"] == "reply" {
-            task.transition("succeeded", "Risposta dell'agente");
-            let text = result["text"].as_str().unwrap_or_default().to_string();
-            return self.finish(task, out, text);
-        }
+        self.drive(task, inputs, result, out, Vec::new())
+    }
 
-        let call = &result["tool_call"];
-        let tool = call["tool"].as_str().unwrap_or_default().to_string();
-        let version = call["version"].as_str().unwrap_or_default().to_string();
-        let arguments = call["arguments"].clone();
-        out.steps.push(json!({"kind": "tool_call", "tool": tool, "arguments": arguments, "rationale": call["rationale"]}));
-        let digest =
-            canonical_digest(&json!({"tool": tool, "version": version, "arguments": arguments}));
-        let (tid, corr) = (task.id(), task.correlation());
-        let decision = policy::decide(
-            &self.catalog,
-            &self.cfg.web,
-            &policy::Request {
-                subject: json!({"kind": "agent", "id": "general_assistant"}),
-                task_id: &tid,
-                correlation_id: &corr,
-                tool: &tool,
-                version: &version,
-                arguments: &arguments,
-                digest: &digest,
+    /// Ciclo dell'agente (ADR-0037): ogni proposta di strumento passa da policy, audit ed eventuale conferma;
+    /// dopo ogni risultato l'agente può chiedere un altro strumento, fino a `MAX_STEPS` passi per richiesta.
+    /// Una proposta identica a una già eseguita in questo turno chiude il ciclo (niente ripetizioni a vuoto).
+    fn drive(
+        &mut self,
+        mut task: Task,
+        inputs: Value,
+        mut result: Value,
+        mut out: Outcome,
+        mut history: Vec<Value>,
+    ) -> Result<Outcome, CoreError> {
+        loop {
+            if result["kind"] == "reply" {
+                let reason = if history.is_empty() {
+                    "Risposta dell'agente"
+                } else {
+                    "Strumenti eseguiti e risposta composta"
+                };
+                task.transition("succeeded", reason);
+                let text = result["text"].as_str().unwrap_or_default().to_string();
+                return self.finish(task, out, text);
+            }
+            let call = &result["tool_call"];
+            let tool = call["tool"].as_str().unwrap_or_default().to_string();
+            let version = call["version"].as_str().unwrap_or_default().to_string();
+            let arguments = call["arguments"].clone();
+            let digest = canonical_digest(
+                &json!({"tool": tool, "version": version, "arguments": arguments}),
+            );
+            if history.iter().any(|h| h["digest"] == digest.as_str()) {
+                out.steps.push(json!({"kind": "loop_guard", "tool": tool}));
+                self.obs.count("agent.loop_guard");
+                result = self.next_step(&task, &inputs, &history, true, &mut out);
+                continue;
+            }
+            out.steps.push(json!({"kind": "tool_call", "tool": tool, "arguments": arguments, "rationale": call["rationale"]}));
+            let (tid, corr) = (task.id(), task.correlation());
+            let decision = policy::decide(
+                &self.catalog,
+                &self.cfg.web,
+                &policy::Request {
+                    subject: json!({"kind": "agent", "id": "general_assistant"}),
+                    task_id: &tid,
+                    correlation_id: &corr,
+                    tool: &tool,
+                    version: &version,
+                    arguments: &arguments,
+                    digest: &digest,
+                },
+            );
+            out.steps.push(json!({"kind": "policy", "decision": decision["decision"], "reasons": decision["reasons"], "risk": decision["risk"]}));
+            let outcome_name = if decision["decision"] == "deny" {
+                "denied"
+            } else {
+                "allowed"
+            };
+            self.audit(json!({
+                "correlation_id": corr, "task_id": tid, "actor": {"kind": "agent", "id": "general_assistant"}, "node": "core-local",
+                "action": decision["request"]["action"]["tool"], "decision_id": decision["decision_id"], "outcome": outcome_name,
+            }))?;
+
+            let (status, output) = match decision["decision"].as_str() {
+                Some("deny") => {
+                    let code = decision["reasons"][0].as_str().unwrap_or("policy.denied");
+                    (
+                        "denied",
+                        json!({"code": code, "message": policy::explain(code)}),
+                    )
+                }
+                Some("require_confirmation") => {
+                    return self.await_confirmation(
+                        task, decision, tool, version, arguments, inputs, history, out,
+                    );
+                }
+                _ => self.run_tool(&task, &tool, &arguments, false, &mut out)?,
+            };
+            history.push(step_record(&tool, &arguments, &digest, status, output));
+            let last = history.len() >= MAX_STEPS || status == "denied";
+            result = self.next_step(&task, &inputs, &history, last, &mut out);
+        }
+    }
+
+    /// Sospende il ciclo in attesa della conferma del proprietario e conserva il contesto per riprenderlo.
+    #[allow(clippy::too_many_arguments)]
+    fn await_confirmation(
+        &mut self,
+        mut task: Task,
+        decision: Value,
+        tool: String,
+        version: String,
+        arguments: Value,
+        inputs: Value,
+        history: Vec<Value>,
+        mut out: Outcome,
+    ) -> Result<Outcome, CoreError> {
+        let conf = decision["confirmation"].clone();
+        task.transition(
+            "waiting_confirmation",
+            "Conferma del proprietario richiesta",
+        );
+        self.save(&task)?;
+        let text = format!(
+            "Prima di procedere mi serve la tua conferma: {}",
+            conf["expected_effect"].as_str().unwrap_or_default()
+        );
+        self.store
+            .message_add("assistant", &text, &task.id(), &now(), None)
+            .map_err(internal)?;
+        out.task = task.doc.clone();
+        out.reply = Some(text);
+        out.confirmation = Some(json!({
+            "confirmation_id": conf["confirmation_id"], "tool": tool, "arguments": arguments,
+            "target": conf["target"], "expected_effect": conf["expected_effect"], "expires_at": conf["expires_at"], "risk": decision["risk"],
+        }));
+        let id = conf["confirmation_id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        self.notify(json!({
+            "severity": "warning", "category": "confirmation", "title": format!("Conferma richiesta: {tool}"),
+            "body": conf["expected_effect"], "source": {"kind": "module", "id": "security"},
+            "correlation_id": task.correlation(), "task_id": task.id(),
+            "dedupe_key": format!("confirmation:{id}"), "link": {"view": "chat", "ref": id},
+        }))?;
+        self.pending.insert(
+            id,
+            Pending {
+                task,
+                decision,
+                tool,
+                version,
+                arguments,
+                inputs,
+                history,
             },
         );
-        out.steps.push(json!({"kind": "policy", "decision": decision["decision"], "reasons": decision["reasons"], "risk": decision["risk"]}));
-        let outcome_name = if decision["decision"] == "deny" {
-            "denied"
-        } else {
-            "allowed"
-        };
-        self.audit(json!({
-            "correlation_id": corr, "task_id": tid, "actor": {"kind": "agent", "id": "general_assistant"}, "node": "core-local",
-            "action": decision["request"]["action"]["tool"], "decision_id": decision["decision_id"], "outcome": outcome_name,
-        }))?;
+        Ok(out)
+    }
 
-        match decision["decision"].as_str() {
-            Some("deny") => {
-                let code = decision["reasons"][0].as_str().unwrap_or("policy.denied");
-                let output = json!({"code": code, "message": policy::explain(code)});
-                let text = self.compose(&task, &inputs, &tool, "denied", output, &mut out);
-                task.transition(
-                    "succeeded",
-                    "Strumento negato dalla policy; risposta fornita",
-                );
-                self.finish(task, out, text)
-            }
-            Some("require_confirmation") => {
-                let conf = decision["confirmation"].clone();
-                task.transition(
-                    "waiting_confirmation",
-                    "Conferma del proprietario richiesta",
-                );
-                self.save(&task)?;
-                let text = format!(
-                    "Prima di procedere mi serve la tua conferma: {}",
-                    conf["expected_effect"].as_str().unwrap_or_default()
-                );
-                self.store
-                    .message_add("assistant", &text, &task.id(), &now(), None)
-                    .map_err(internal)?;
-                out.task = task.doc.clone();
-                out.reply = Some(text);
-                out.confirmation = Some(json!({
-                    "confirmation_id": conf["confirmation_id"], "tool": tool, "arguments": arguments,
-                    "target": conf["target"], "expected_effect": conf["expected_effect"], "expires_at": conf["expires_at"], "risk": decision["risk"],
-                }));
-                let id = conf["confirmation_id"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_string();
-                self.notify(json!({
-                    "severity": "warning", "category": "confirmation", "title": format!("Conferma richiesta: {tool}"),
-                    "body": conf["expected_effect"], "source": {"kind": "module", "id": "security"},
-                    "correlation_id": task.correlation(), "task_id": task.id(),
-                    "dedupe_key": format!("confirmation:{id}"), "link": {"view": "chat", "ref": id},
-                }))?;
-                self.pending.insert(
-                    id,
-                    Pending {
-                        task,
-                        decision,
-                        tool,
-                        version,
-                        arguments,
-                        inputs,
-                    },
-                );
-                Ok(out)
+    /// Passo successivo dell'agente con i risultati raccolti finora. Con `last` l'agente non riceve strumenti
+    /// e deve rispondere. Se l'agente non è raggiungibile si usa un testo locale con l'ultimo esito.
+    fn next_step(
+        &mut self,
+        task: &Task,
+        inputs: &Value,
+        history: &[Value],
+        last: bool,
+        out: &mut Outcome,
+    ) -> Value {
+        let mut inputs = inputs.clone();
+        // I passi precedenti all'ultimo viaggiano ridotti: bastano all'agente per orientarsi e tengono la
+        // delega entro il budget di token (ADR-0024).
+        let visible: Vec<Value> = history
+            .iter()
+            .enumerate()
+            .map(|(i, h)| {
+                let raw = h["output"].to_string();
+                let output = if i + 1 < history.len() && raw.chars().count() > EARLIER_OUTPUT_CHARS {
+                    json!({"truncated": true, "excerpt": raw.chars().take(EARLIER_OUTPUT_CHARS).collect::<String>()})
+                } else {
+                    h["output"].clone()
+                };
+                json!({"tool": h["tool"], "status": h["status"], "output": output, "arguments": h["arguments"]})
+            })
+            .collect();
+        if let Some(latest) = history.last() {
+            inputs["tool_result"] = json!({"tool": latest["tool"], "status": latest["status"], "output": latest["output"]});
+        }
+        inputs["tool_history"] = Value::Array(visible);
+        inputs["steps_left"] = json!(if last {
+            0
+        } else {
+            MAX_STEPS.saturating_sub(history.len())
+        });
+        match self.call_agent(task, &inputs) {
+            Ok(r) if r["kind"] == "reply" || (!last && r["kind"] == "tool_call") => {
+                out.backend = Some(r["backend"].clone());
+                r
             }
             _ => {
-                let (status, output) = self.run_tool(&task, &tool, &arguments, false, &mut out)?;
-                let text = self.compose(&task, &inputs, &tool, status, output, &mut out);
-                task.transition("succeeded", "Strumento eseguito e risposta composta");
-                self.finish(task, out, text)
+                let latest = history.last().cloned().unwrap_or(Value::Null);
+                let raw = latest["output"].to_string();
+                let short: String = raw.chars().take(2000).collect();
+                json!({"kind": "reply", "text": format!(
+                    "Esito di {} ({}): {short}",
+                    latest["tool"].as_str().unwrap_or("strumento"),
+                    latest["status"].as_str().unwrap_or("sconosciuto")
+                )})
             }
         }
     }
@@ -715,6 +825,7 @@ impl Jarvis {
             version,
             arguments,
             inputs,
+            mut history,
         } = self
             .pending
             .remove(confirmation_id)
@@ -762,9 +873,10 @@ impl Jarvis {
                 .push(json!({"kind": "confirmation", "approved": true}));
             task.transition("running", "Confermato dal proprietario");
             let (status, output) = self.run_tool(&task, &tool, &arguments, true, &mut out)?;
-            let text = self.compose(&task, &inputs, &tool, status, output, &mut out);
-            task.transition("succeeded", "Strumento eseguito dopo conferma");
-            self.finish(task, out, text)
+            history.push(step_record(&tool, &arguments, &digest, status, output));
+            let last = history.len() >= MAX_STEPS;
+            let result = self.next_step(&task, &inputs, &history, last, &mut out);
+            self.drive(task, inputs, result, out, history)
         } else {
             self.audit(merge(
                 &base,
@@ -772,14 +884,16 @@ impl Jarvis {
             ))?;
             out.steps
                 .push(json!({"kind": "confirmation", "approved": false}));
-            let text = self.compose(
-                &task,
-                &inputs,
+            // Dopo un rifiuto l'agente risponde soltanto: nessun altro strumento in questo turno.
+            history.push(step_record(
                 &tool,
+                &arguments,
+                &digest,
                 "cancelled",
                 json!({"message": "rifiutato dal proprietario"}),
-                &mut out,
-            );
+            ));
+            let result = self.next_step(&task, &inputs, &history, true, &mut out);
+            let text = result["text"].as_str().unwrap_or_default().to_string();
             task.transition("cancelled", "Rifiutato dal proprietario");
             self.finish(task, out, text)
         }
@@ -849,31 +963,6 @@ impl Jarvis {
                 out.steps.push(json!({"kind": "tool_result", "tool": tool, "status": "failed", "error": e.code, "effect": effect}));
                 self.notify_connector_failure(task, tool, &e, effect)?;
                 Ok(("failed", json!({"code": e.code, "message": e.message})))
-            }
-        }
-    }
-
-    /// Chiede all'agente di comporre la risposta finale; se non riesce, usa un testo locale.
-    fn compose(
-        &mut self,
-        task: &Task,
-        inputs: &Value,
-        tool: &str,
-        status: &str,
-        output: Value,
-        out: &mut Outcome,
-    ) -> String {
-        let mut inputs = inputs.clone();
-        inputs["tool_result"] = json!({"tool": tool, "status": status, "output": output});
-        match self.call_agent(task, &inputs) {
-            Ok(r) if r["kind"] == "reply" => {
-                out.backend = Some(r["backend"].clone());
-                r["text"].as_str().unwrap_or_default().to_string()
-            }
-            _ => {
-                let raw = output.to_string();
-                let short: String = raw.chars().take(2000).collect();
-                format!("Esito di {tool} ({status}): {short}")
             }
         }
     }
@@ -1009,12 +1098,10 @@ impl Jarvis {
         if days <= 0 {
             return;
         }
-        let tool = out
-            .steps
-            .iter()
-            .find(|s| s["kind"] == "tool_call")
-            .and_then(|s| s["tool"].as_str());
-        if tool.is_some_and(|t| t.starts_with("memory.")) {
+        let touches_memory = out.steps.iter().any(|s| {
+            s["kind"] == "tool_call" && s["tool"].as_str().is_some_and(|t| t.starts_with("memory."))
+        });
+        if touches_memory {
             return;
         }
         let objective: String = task.doc["objective"]
@@ -1027,9 +1114,19 @@ impl Jarvis {
             return;
         }
         let state = task.doc["state"].as_str().unwrap_or("unknown");
-        let text = match tool {
-            Some(t) => format!("Richiesta «{objective}»: {t}, esito {state}"),
-            None => format!("Richiesta «{objective}»: risposta diretta, esito {state}"),
+        let tools: Vec<&str> = out
+            .steps
+            .iter()
+            .filter(|s| s["kind"] == "tool_call")
+            .filter_map(|s| s["tool"].as_str())
+            .collect();
+        let text = if tools.is_empty() {
+            format!("Richiesta «{objective}»: risposta diretta, esito {state}")
+        } else {
+            format!(
+                "Richiesta «{objective}»: {}, esito {state}",
+                tools.join(" → ")
+            )
         };
         let at = now();
         let expires = (chrono::Utc::now() + chrono::Duration::days(days))
@@ -1788,6 +1885,11 @@ impl Jarvis {
 
     // ------------------------------------------------------------------ aggiornamenti (ADR-0034)
 
+    /// Stato del database (integrità rapida, schema, dimensioni) per la sezione Sistema.
+    pub fn database_health(&self) -> Result<Value, CoreError> {
+        self.store.health().map_err(internal)
+    }
+
     pub fn data_dir(&self) -> std::path::PathBuf {
         self.cfg.data_dir.clone()
     }
@@ -2266,6 +2368,7 @@ impl Jarvis {
 /// Intervallo fra due istantanee salvate e periodo di conservazione.
 const METRICS_EVERY: std::time::Duration = std::time::Duration::from_secs(300);
 const METRICS_KEEP_DAYS: i64 = 7;
+const DB_MAINTENANCE_EVERY: std::time::Duration = std::time::Duration::from_secs(6 * 3600);
 
 impl Jarvis {
     /// Salva un'istantanea compatta delle metriche (conteggi, errori, p95 per serie) al massimo ogni
@@ -2285,6 +2388,17 @@ impl Jarvis {
             .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         self.store.metrics_put(&at, &doc, &keep).map_err(internal)?;
         self.metrics_saved = Some(std::time::Instant::now());
+        if self
+            .maintained
+            .is_none_or(|t| t.elapsed() >= DB_MAINTENANCE_EVERY)
+        {
+            self.maintained = Some(std::time::Instant::now());
+            let timer = Timer::start();
+            let done = self.store.maintenance();
+            self.obs
+                .observe("db maintenance", timer.ms(), done.is_err());
+            let _ = self.store.memory_purge_expired(&now());
+        }
         Ok(Some(doc))
     }
 
@@ -3042,14 +3156,20 @@ impl Jarvis {
             .map_err(CoreError::Internal)
     }
 
-    /// Rinnovo automatico dell'access token a 60 secondi dalla scadenza.
-    fn oauth_refresh_if_needed(&self, id: &str, manifest: &Value) -> Result<(), String> {
+    /// Rinnovo automatico dell'access token a 60 secondi dalla scadenza, o subito con `force` (token
+    /// rifiutato dal servizio prima della scadenza dichiarata).
+    fn oauth_refresh_if_needed(
+        &self,
+        id: &str,
+        manifest: &Value,
+        force: bool,
+    ) -> Result<(), String> {
         let state: Value = self
             .secrets
             .get(&oauth_name(id))?
             .and_then(|s| serde_json::from_str(&s).ok())
             .ok_or("connettore non autorizzato: premi «Accedi»")?;
-        if !crate::oauth::expiring(&state) {
+        if !force && !crate::oauth::expiring(&state) {
             return Ok(());
         }
         let renewed = crate::oauth::refresh(manifest, &self.cfg.web, &state);
@@ -3095,13 +3215,14 @@ impl Jarvis {
             ));
         }
         if manifest["auth"]["type"] == "oauth2" {
-            self.oauth_refresh_if_needed(id, &manifest)
+            self.oauth_refresh_if_needed(id, &manifest, false)
                 .map_err(|e| tool_error("connector.not_authorized", e))?;
         }
-        let secret = self
+        let mut secret = self
             .secrets
             .get(&token_name(id))
             .map_err(|e| tool_error("connector.unavailable", e))?;
+        let mut renewed = false;
         // Le letture seguono la politica di ripetizione del descrittore (`safe`, 2 tentativi) sugli errori
         // transitori; le scritture non vengono mai ripetute.
         let attempts = if descriptor.descriptor["retry"]["mode"] == "safe" {
@@ -3121,6 +3242,22 @@ impl Jarvis {
             self.obs
                 .observe(&format!("connector {id}"), timer.ms(), result.is_err());
             match result {
+                // Un 401 con OAuth: rinnovo immediato e una sola nuova chiamata (anche per le scritture, perché
+                // il servizio ha rifiutato la richiesta senza eseguirla).
+                Err(e)
+                    if e.code == "connector.token_rejected"
+                        && !renewed
+                        && manifest["auth"]["type"] == "oauth2" =>
+                {
+                    renewed = true;
+                    self.oauth_refresh_if_needed(id, &manifest, true)
+                        .map_err(|e| tool_error("connector.not_authorized", e))?;
+                    secret = self
+                        .secrets
+                        .get(&token_name(id))
+                        .map_err(|e| tool_error("connector.unavailable", e))?;
+                    attempt -= 1;
+                }
                 Err(e) if attempt < attempts && crate::connectors::transient(e.code) => {
                     self.obs.count("connector.retry");
                     self.obs.log(

@@ -326,6 +326,8 @@ function check(cond, msg) {
   check((await page.locator("#system-cards").innerText()).includes("catena integra"), "pannello Sistema con stato dei componenti");
   check((await page.locator("#metrics-table").innerText()).includes("POST /api/chat"), "latenze misurate per endpoint");
   // Aggiornamenti (ADR-0034): spenti per impostazione, controllo manuale verso l'elenco sintetico.
+  await page.waitForSelector("#database .stat");
+  check((await page.locator("#database").innerText()).includes("verificata"), "database locale integro con schema e dimensioni");
   check(!(await page.isChecked('#updates input[name="updates-enabled"]')), "controllo aggiornamenti spento per impostazione");
   await page.click("#updates-check");
   await page.waitForFunction(() => /v99\.0\.0/.test(document.querySelector("#updates-status").textContent));
