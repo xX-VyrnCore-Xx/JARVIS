@@ -64,6 +64,12 @@ jobs:
           "$py" -c "import jsonschema, sys; print('Python incluso', sys.version.split()[0])"
           du -sh apps/desktop/src-tauri/python apps/desktop/src-tauri/binaries || true
           find apps/desktop/src-tauri/python -type l | head -5 | grep . && { echo "collegamenti simbolici residui"; exit 1; } || true
+      - name: La voce si installa con il Python incluso (come fa la configurazione guidata)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then py=apps/desktop/src-tauri/python/python.exe; else py=apps/desktop/src-tauri/python/bin/python3; fi
+          "$py" -m pip install --disable-pip-version-check -q --target "$RUNNER_TEMP/voce" -r ai/requirements-voice.txt
+          PYTHONPATH="$RUNNER_TEMP/voce" "$py" -c "import faster_whisper, piper, openwakeword, onnxruntime; print('pacchetti della voce importati')"
       - name: Programmi di installazione (Tauri)
         working-directory: apps/desktop/src-tauri
         shell: bash

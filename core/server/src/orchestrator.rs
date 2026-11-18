@@ -142,6 +142,8 @@ pub struct Jarvis {
     pairings: HashMap<String, (std::time::Instant, Vec<String>)>,
     /// Nodi esecutori (RF-11, ADR-0017): assegnazioni e token, con un blocco proprio.
     nodes: std::sync::Arc<crate::nodes::NodeHub>,
+    /// Configurazione guidata dei modelli (ADR-0019), con stato proprio fuori dal blocco del Core.
+    setup: std::sync::Arc<crate::setup::Setup>,
     node_timeout: std::time::Duration,
     pair_failures: u32,
     /// Blocco esclusivo sulla cartella dati: un solo Core per volta (rilasciato alla chiusura).
@@ -189,6 +191,8 @@ impl Jarvis {
         let catalog = Catalog::load()?;
         let secrets = crate::secrets::SecretStore::open(&cfg.data_dir)?;
         let cfg_logs = cfg.data_dir.join("logs");
+        let (cfg_setup_dir, cfg_setup_python, cfg_setup_ai) =
+            (cfg.data_dir.clone(), cfg.python.clone(), cfg.ai_dir.clone());
         let mut jarvis = Self {
             cfg,
             store,
@@ -201,6 +205,11 @@ impl Jarvis {
             metrics_saved: None,
             pairings: HashMap::new(),
             nodes: std::sync::Arc::new(crate::nodes::NodeHub::default()),
+            setup: std::sync::Arc::new(crate::setup::Setup::new(
+                &cfg_setup_dir,
+                &cfg_setup_python,
+                &cfg_setup_ai,
+            )),
             node_timeout: std::time::Duration::from_millis(
                 std::env::var("JARVIS_NODE_TIMEOUT_MS")
                     .ok()
@@ -241,8 +250,15 @@ impl Jarvis {
         if self.worker.as_mut().is_some_and(|w| w.has_exited()) {
             self.worker = None;
         }
+        // Dopo la configurazione dei modelli il worker riparte con i nuovi percorsi (voce, Ollama).
+        if self.setup.take_restart() {
+            self.worker = None;
+            self.obs
+                .log("info", "worker.restart", json!({"reason": "setup"}));
+        }
         if self.worker.is_none() {
             let mut cmd = Command::new(&self.cfg.python);
+            crate::hide_console(&mut cmd);
             cmd.args(["-m", "jarvis_ai.worker", "--handler", "assistant"])
                 .current_dir(&self.cfg.ai_dir);
             if let Some(backend) = &self.cfg.ai_backend {
@@ -250,6 +266,9 @@ impl Jarvis {
             }
             if let Some(engine) = &self.cfg.voice_engine {
                 cmd.env("JARVIS_VOICE_ENGINE", engine);
+            }
+            for (k, v) in self.setup.worker_env() {
+                cmd.env(k, v);
             }
             for (k, v) in &self.cfg.worker_env {
                 cmd.env(k, v);
@@ -2083,6 +2102,10 @@ impl Jarvis {
 // ---------------------------------------------------------------------- Nodi esecutori (RF-11)
 
 impl Jarvis {
+    pub fn setup(&self) -> std::sync::Arc<crate::setup::Setup> {
+        self.setup.clone()
+    }
+
     pub fn node_hub(&self) -> std::sync::Arc<crate::nodes::NodeHub> {
         self.nodes.clone()
     }

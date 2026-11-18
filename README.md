@@ -11,7 +11,13 @@ L'inferenza e la persistenza privilegiano l'ambiente locale. Il cloud interviene
 - **macOS** (chip Apple): `JARVIS_<versione>_aarch64.dmg`;
 - **Linux:** `.deb` per Debian/Ubuntu oppure `.AppImage`.
 
-Installalo e apri **JARVIS** dal menu delle applicazioni. Core, runtime AI e Python sono inclusi: non serve installare altro. L'impronta si verifica con il file `.sha256` accanto (`sha256sum -c <file>.sha256`).
+Installalo e apri **JARVIS** dal menu delle applicazioni. Core, runtime AI e Python sono inclusi: non serve installare altro.
+
+Al primo avvio si apre **Configura JARVIS** con le scelte consigliate già selezionate:
+- voce locale con riconoscimento `small`, voce italiana Paola e «Ehi Jarvis»;
+- se [Ollama](https://ollama.com/download) è installato, il modello `qwen2.5:3b`.
+
+Un clic su **Installa** scarica tutto mostrando l'avanzamento (circa 2,7 GB). La configurazione si ripete da Sistema → «Configura voce e modello AI». L'impronta si verifica con il file `.sha256` accanto (`sha256sum -c <file>.sha256`).
 
 I file non sono firmati:
 - **Windows:** SmartScreen può chiedere «Ulteriori informazioni → Esegui comunque»;

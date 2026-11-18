@@ -4,6 +4,7 @@
     "externalBin": ["binaries/jarvis-core"],
     "resources": {
       "../../../ai/jarvis_ai/": "ai/jarvis_ai/",
+      "../../../ai/requirements-voice.txt": "ai/requirements-voice.txt",
       "../../../contracts/": "contracts/",
       "python/": "python/"
     },

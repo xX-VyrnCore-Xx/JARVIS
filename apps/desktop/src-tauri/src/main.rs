@@ -71,6 +71,7 @@ fn main() {
             let core_port = std::sync::Arc::new(Mutex::new(None::<u16>));
             let allowed = core_port.clone();
             let opener = app.handle().clone();
+            let opener_new = app.handle().clone();
             let window =
                 WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                     .title("JARVIS")
@@ -89,6 +90,14 @@ fn main() {
                             let _ = opener.opener().open_url(url.as_str(), None::<&str>);
                         }
                         false
+                    })
+                    // Collegamenti con target=_blank (es. il download di Ollama): browser di sistema, mai una
+                    // nuova finestra dell'app.
+                    .on_new_window(move |url, _features| {
+                        if matches!(url.scheme(), "http" | "https") {
+                            let _ = opener_new.opener().open_url(url.as_str(), None::<&str>);
+                        }
+                        tauri::webview::NewWindowResponse::Deny
                     })
                     .build()?;
 

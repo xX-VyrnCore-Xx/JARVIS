@@ -38,6 +38,8 @@ pub struct AppState {
     pub remote_hosts: Vec<String>,
     /// Assegnazioni ai nodi esecutori: le loro richieste non passano dal blocco del Core.
     pub nodes: Arc<crate::nodes::NodeHub>,
+    /// Configurazione guidata dei modelli: stato letto senza il blocco del Core.
+    pub setup: Arc<crate::setup::Setup>,
 }
 
 type Shared = Arc<AppState>;
@@ -267,6 +269,8 @@ pub fn router(state: Shared) -> Router {
         .route("/api/devices/pairing", post(create_pairing))
         .route("/api/devices/pair", post(pair_device))
         .route("/api/devices/me", get(device_me))
+        .route("/api/setup", get(setup_status))
+        .route("/api/setup/start", post(setup_start))
         .route("/api/nodes", get(list_nodes))
         .route("/api/nodes/next", get(node_next))
         .route("/api/nodes/result/{id}", post(node_result))
@@ -645,6 +649,26 @@ async fn pair_device(State(state): State<Shared>, Json(body): Json<Value>) -> Re
     )
 }
 
+async fn setup_status(State(state): State<Shared>) -> Json<Value> {
+    let setup = state.setup.clone();
+    Json(
+        tokio::task::spawn_blocking(move || setup.status())
+            .await
+            .unwrap_or(Value::Null),
+    )
+}
+
+async fn setup_start(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let plan = match crate::setup::Plan::from_json(&body) {
+        Ok(p) => p,
+        Err(e) => return error(StatusCode::BAD_REQUEST, "bad_request", &e),
+    };
+    match state.setup.start(plan) {
+        Ok(()) => (StatusCode::ACCEPTED, Json(json!({"started": true}))).into_response(),
+        Err(e) => error(StatusCode::CONFLICT, "conflict", &e),
+    }
+}
+
 async fn list_nodes(State(state): State<Shared>, headers: axum::http::HeaderMap) -> Response {
     // Elenco riservato al proprietario: la rotta è esente dal controllo generale, quindi lo si ripete qui.
     if headers.get("x-jarvis-token").and_then(|t| t.to_str().ok()) != Some(state.token.as_str()) {
@@ -908,6 +932,7 @@ pub fn state_with_remote(
 ) -> Shared {
     let obs = core.observability();
     let nodes = core.node_hub();
+    let setup = core.setup();
     Arc::new(AppState {
         core: Arc::new(Mutex::new(core)),
         obs,
@@ -916,5 +941,6 @@ pub fn state_with_remote(
         last_health: Mutex::new(json!({})),
         remote_hosts,
         nodes,
+        setup,
     })
 }

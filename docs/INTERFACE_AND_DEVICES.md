@@ -45,6 +45,8 @@ La chat mostra un avatar astratto con anelli CSS 3D. L'etichetta annuncia gli st
 
 **Nodi esecutori (ADR-0017):** un altro computer associato con un codice «Nodo esecutore» esegue gli strumenti che dichiara (informazioni di sistema, ora, file della propria workspace) quando il Core glieli assegna. Usa `./jarvis.sh node <indirizzo> <codice>` e richieste in uscita, senza aprire porte. Nella sezione Dispositivi compaiono stato in linea, strumenti e comando da usare in chat.
 
+**Configurazione guidata (ADR-0019):** al primo avvio una finestra propone voce e modello AI con le scelte consigliate già selezionate. Mostra la dimensione del download e l'avanzamento, e si riapre dalla sezione Sistema.
+
 **Programmi di installazione (ADR-0016):** la release contiene l'app desktop pronta da installare. Windows `.msi` e setup `.exe`, macOS `.dmg`, Linux `.deb` e `.AppImage`. Core, runtime AI e Python sono inclusi.
 
 Restano da sviluppare: sincronizzazione labiale basata sui fonemi, funzioni iOS oltre chat e conferme, firma degli installer assegnazione automatica dei lavori ai nodi in base alle risorse.

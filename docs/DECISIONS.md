@@ -541,6 +541,43 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `CoreClientTest` (5 test: indirizzi ammessi e rifiutati, associazione con piattaforma `android` e token valido, codice per nodi rifiutato, token del dispositivo su ogni richiesta, conferma senza permesso bloccata prima della rete, identificativo in minuscolo, revoca, messaggi d'errore del Core); build dell'APK nella CI.
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, ACCEPTANCE.md, REQUIREMENTS.md, README.md.
 
+### ADR-0019 — Configurazione guidata dei modelli al primo avvio e rifinitura per macOS e Windows
+
+- **Data:** 2026-11-18 · **Stato:** Accettato. Richiesta del proprietario: «durante l'installazione seleziona già i modelli da scaricare e tutto il resto».
+- **Contesto:**
+  - un `.dmg` di macOS non può eseguire codice durante l'installazione;
+  - l'app installata è in sola lettura;
+  - la voce richiedeva `voice-setup` da terminale, disponibile solo con i sorgenti;
+  - il modello di Ollama andava scaricato a mano.
+- **Decisione:**
+  - **Configurazione guidata al primo avvio**, uguale su macOS, Windows e Linux. La finestra si apre da sola con le scelte consigliate già selezionate e si riapre da Sistema → «Configura voce e modello AI»:
+    - voce: faster-whisper `small`, Piper `it_IT-paola-medium`, openWakeWord «hey_jarvis»;
+    - modello AI: Ollama `qwen2.5:3b`, preselezionato solo se Ollama è attivo; altrimenti la finestra porta a ollama.com/download.
+    
+    La finestra mostra la dimensione stimata e l'avanzamento di ogni passo.
+  - **Backend `setup.rs`:**
+    - passi eseguiti in un thread separato, fuori dal blocco del Core;
+    - pacchetti della voce installati con `pip --target` in `<dati>/python-packages` usando il Python dell'app; modelli in `<dati>/models`;
+    - modello di Ollama scaricato con la sua API `/api/pull`, con avanzamento in byte;
+    - valori accettati solo dagli elenchi noti, quindi nessun argomento arbitrario a pip o a Ollama;
+    - una sola configurazione alla volta;
+    - le scelte vengono salvate in `<dati>/setup.json`;
+    - al termine il worker AI riparte con `PYTHONPATH`, `JARVIS_MODELS_DIR`, `JARVIS_TTS_VOICE`, `JARVIS_STT_MODEL` e `JARVIS_OLLAMA_MODEL`, senza sovrascrivere le variabili del proprietario.
+  - **Nell'app desktop i collegamenti con `target=_blank`** (per esempio il download di Ollama) si aprono nel browser di sistema, mai in una nuova finestra dell'app.
+  - **Windows:** l'app desktop avvia il Core, e il Core il worker Python e pip, con `CREATE_NO_WINDOW`: niente finestre di console accanto all'app.
+  - **Versione nell'intestazione** letta dal Core, non più fissa.
+  - **CI di release:** su macOS, Windows e Linux i pacchetti della voce si installano con il Python incluso e si importano (`faster_whisper`, `piper`, `openwakeword`, `onnxruntime`), come farà la configurazione guidata.
+- **Motivazione:** chi installa l'app ottiene voce e modello con due clic, senza terminale e senza scrivere nell'app installata.
+- **Conseguenze:**
+  - il primo avvio scarica circa 2,7 GB con le scelte consigliate;
+  - Ollama si installa a parte (ha un proprio installer firmato);
+  - la configurazione richiede rete.
+- **Evidenza:**
+  - `core/server/tests/setup.rs` (2: passi, rifiuto di valori non ammessi, configurazione unica, scelte salvate, worker funzionante dopo il riavvio; ambiente del worker) e unitario `plan_accepts_only_known_values`;
+  - E2E con passi simulati: finestra al primo avvio con le scelte consigliate, dimensione stimata, completamento dei passi;
+  - installazione della voce con il Python incluso verificata dalla CI di release sui 3 sistemi.
+- **Documenti interessati:** README.md, ACCEPTANCE.md, INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

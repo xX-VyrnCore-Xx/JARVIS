@@ -170,6 +170,14 @@ pub fn launch(cfg: &LaunchConfig) -> Result<RunningCore, LaunchError> {
         .map_err(|e| LaunchError::Io(e.to_string()))?;
     let port = free_port().map_err(|e| LaunchError::Io(e.to_string()))?;
     let mut cmd = Command::new(&cfg.core_bin);
+    // L'app desktop è un programma grafico: su Windows il Core (programma da console) non deve aprire
+    // una finestra di console.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
     cmd.env("JARVIS_PORT", port.to_string())
         .env("JARVIS_HOST", "127.0.0.1")
         .env("JARVIS_DATA_DIR", &cfg.data_dir)
