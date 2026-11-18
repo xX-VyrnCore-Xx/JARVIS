@@ -469,7 +469,7 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - **Prove nella CI di release:**
     - Linux: installazione reale del `.deb` con `dpkg`;
     - Windows: installazione reale dell'`.msi` con `msiexec /qn`;
-    - macOS: si prova l'app impacchettata;
+    - macOS: l'app viene copiata dal `.dmg` montato, come in un'installazione;
     - in tutti i casi, il Core installato con il Python incluso supera `tests/smoke/start_smoke.py`. Si pubblicano solo gli installer, con un `.sha256` per ciascuno.
 - **Motivazione:** si installa e si avvia senza prerequisiti né terminale. Le prove usano i file installati, non la cartella di build.
 - **Conseguenze:**

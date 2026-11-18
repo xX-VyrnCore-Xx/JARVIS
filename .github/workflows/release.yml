@@ -2,7 +2,7 @@ name: release
 
 # Programmi di installazione per Linux (.deb, .AppImage), macOS (.dmg) e Windows (.msi, setup .exe), con Core,
 # runtime AI e Python autonomo inclusi (ADR-0016). Ogni installer viene installato davvero sul runner (Linux e
-# Windows; su macOS si prova l'app impacchettata) e il Core installato supera la prova di avvio.
+# Windows; su macOS l'app copiata dal .dmg montato) e il Core installato supera la prova di avvio.
 # Con un tag vX.Y.Z pubblica la release con installer e impronte (decisione del proprietario del 2026-11-17); i tag con suffisso, es. v1.0.0-rc.1, restano prerelease.
 on:
   push:
@@ -74,11 +74,16 @@ jobs:
           test -x /usr/bin/jarvis-core && test -x "$root/python/bin/python3"
           JARVIS_HOME="$root" JARVIS_PYTHON="$root/python/bin/python3" JARVIS_DATA_DIR="$RUNNER_TEMP/dati" /usr/bin/jarvis-core > core.log 2>&1 &
           python tests/smoke/start_smoke.py http://127.0.0.1:8765 120 || { cat core.log; exit 1; }
-      - name: Avvio del Core dall'app impacchettata (macOS)
+      - name: Installazione dal .dmg e avvio del Core installato (macOS)
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          app=$(ls -d apps/desktop/src-tauri/target/release/bundle/macos/*.app | head -1)
+          dmg=$(ls apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg | head -1)
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg" "$dmg"
+          mkdir -p "$RUNNER_TEMP/Applications"
+          cp -R "$RUNNER_TEMP/dmg/JARVIS.app" "$RUNNER_TEMP/Applications/"
+          hdiutil detach "$RUNNER_TEMP/dmg"
+          app="$RUNNER_TEMP/Applications/JARVIS.app"
           res="$app/Contents/Resources"
           test -x "$app/Contents/MacOS/jarvis-core" && test -x "$res/python/bin/python3"
           JARVIS_HOME="$res" JARVIS_PYTHON="$res/python/bin/python3" JARVIS_DATA_DIR="$RUNNER_TEMP/dati" "$app/Contents/MacOS/jarvis-core" > core.log 2>&1 &

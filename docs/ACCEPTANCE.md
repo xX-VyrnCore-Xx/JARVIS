@@ -83,7 +83,7 @@ Il test `tests/contracts/test_packaging.py` verifica gli archivi ZIP e TAR.GZ e 
 **Rilascio:**
 1. Aggiornare la versione in `core/server/Cargo.toml`.
 2. Unire la modifica con CI verde.
-3. Su richiesta del proprietario si crea il tag `vX.Y.Z` (con `git push` del tag oppure avviando a mano il workflow «release» con l'input `tag`, che crea tag e release sul commit costruito e rifiuta un tag diverso dalla versione del Core): il workflow di release costruisce i programmi di installazione (Windows `.msi` e setup `.exe`, macOS `.dmg`, Linux `.deb` e `.AppImage`) con Core, runtime AI e Python autonomo inclusi. Li installa davvero sul runner (`.deb` e `.msi`; su macOS prova l'app impacchettata), avvia il Core installato con la prova di avvio e pubblica la release con i file `.sha256`. Gli archivi di `scripts/package.py` restano disponibili per l'uso da terminale ma non vengono pubblicati. I tag con suffisso (`-rc.1`) diventano prerelease.
+3. Su richiesta del proprietario si crea il tag `vX.Y.Z` (con `git push` del tag oppure avviando a mano il workflow «release» con l'input `tag`, che crea tag e release sul commit costruito e rifiuta un tag diverso dalla versione del Core): il workflow di release costruisce i programmi di installazione (Windows `.msi` e setup `.exe`, macOS `.dmg`, Linux `.deb` e `.AppImage`) con Core, runtime AI e Python autonomo inclusi. Li installa davvero sul runner (`.deb` e `.msi`; su macOS copia l'app dal `.dmg` montato), avvia il Core installato con la prova di avvio e pubblica la release con i file `.sha256`. Gli archivi di `scripts/package.py` restano disponibili per l'uso da terminale ma non vengono pubblicati. I tag con suffisso (`-rc.1`) diventano prerelease.
 
 **Verifica di un archivio:**
 
