@@ -158,5 +158,19 @@ jobs:
         run: |
           extra=""
           case "$TAG" in *-*) extra="--prerelease" ;; esac
-          # Con l'avvio manuale il tag non esiste ancora: gh lo crea sul commit costruito.
-          gh release create "$TAG" dist/* --target "$GITHUB_SHA" --generate-notes --title "JARVIS $TAG" $extra --repo "$GITHUB_REPOSITORY"
+          # Con l'avvio manuale il tag non esiste ancora: lo crea qui sul commit costruito (via git, così un
+          # rifiuto riporta la regola che lo blocca), poi la release usa il tag esistente.
+          if ! git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
+            git tag "$TAG" "$GITHUB_SHA"
+            git push origin "refs/tags/$TAG" || {
+              echo "::error::push del tag $TAG rifiutato; regole attive:"
+              gh api "repos/$GITHUB_REPOSITORY/rulesets" || true
+              exit 1
+            }
+          fi
+          gh release create "$TAG" dist/* --verify-tag --generate-notes --title "JARVIS $TAG" $extra --repo "$GITHUB_REPOSITORY" || {
+            echo "::error::creazione della release rifiutata; diagnosi:"
+            gh api "repos/$GITHUB_REPOSITORY/rulesets" || true
+            gh api "repos/$GITHUB_REPOSITORY/releases?per_page=3" --jq '.[].tag_name' || true
+            exit 1
+          }
