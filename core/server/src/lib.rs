@@ -15,6 +15,7 @@ pub mod connectors;
 pub mod memory;
 pub mod node_agent;
 pub mod nodes;
+pub mod oauth;
 pub mod observability;
 pub mod orchestrator;
 pub mod policy;

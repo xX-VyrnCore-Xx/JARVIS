@@ -304,12 +304,25 @@ function ConnectorCard({ c, reload }: { c: any; reload: () => void }) {
           ))}
         </ul>
         <div className="row">
-          {c.auth === "none" ? null : (
+          {c.auth === "none" || c.auth === "oauth2" ? null : (
             <input ref={cred} type="password" autoComplete="off" placeholder="token o chiave API" aria-label={`Credenziale per ${c.name}`} />
           )}
-          <button className="primary" onClick={act(`/api/connectors/${id}/authorize`, "POST", () => ({ credential: cred.current?.value || "" }))}>
-            {c.authorized ? "Aggiorna credenziale" : "Autorizza"}
-          </button>
+          {c.auth === "oauth2" ? (
+            <button className="primary" onClick={guard(async () => {
+              // OAuth (ADR-0027): la pagina di consenso si apre nel browser; il servizio torna a JARVIS da solo.
+              const secret = prompt("Segreto del client, solo se il servizio lo richiede (altrimenti lascia vuoto):", "");
+              if (secret === null) return;
+              const { authorize_url } = await post(`/api/connectors/${id}/oauth/start`, { client_secret: secret || undefined });
+              window.open(authorize_url, "_blank", "noopener");
+              alert("Completa l'accesso nella pagina del servizio, poi premi «Aggiorna».");
+            })}>
+              {c.authorized ? "Accedi di nuovo" : "Accedi"}
+            </button>
+          ) : (
+            <button className="primary" onClick={act(`/api/connectors/${id}/authorize`, "POST", () => ({ credential: cred.current?.value || "" }))}>
+              {c.authorized ? "Aggiorna credenziale" : "Autorizza"}
+            </button>
+          )}
           {c.authorized ? <button className="ghost" onClick={act(`/api/connectors/${id}/revoke`, "POST")}>Revoca</button> : null}
           <button className="danger" onClick={() => {
             if (confirm(`Disinstallare ${c.name}? Credenziale e webhook verranno cancellati.`)) act(`/api/connectors/${id}`, "DELETE")();

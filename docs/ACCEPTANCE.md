@@ -19,7 +19,7 @@ Questo documento raccoglie ciò che serve per l'accettazione finale descritta in
 | RF-11 Dispositivi e nodi | `devices.rs`, `nodes.rs`, E2E | P8, P13 | Verde | mTLS, VPN mesh e assegnazione automatica assenti |
 | RF-12 Dati | backup, rollback | P9 | Verde | Nessuna sincronizzazione fra nodi |
 | RF-13 Notifiche | `notifications.rs`, E2E | P5 | Verde | Nessun canale esterno |
-| RF-14 Connettori | `connectors.rs`, E2E | P10 | Verde | Niente OAuth né plugin con codice |
+| RF-14 Connettori | `connectors.rs`, `oauth.rs`, E2E | P10 | Verde | OAuth 2.0 con PKCE (ADR-0027); niente plugin con codice |
 | RF-15 Miglioramenti | — | — | Non iniziato | Fuori dalla prima release |
 | RNF-01 Contratti | `tests/contracts`, `jarvis-contracts` | — | Verde | — |
 | RNF-02 Guasti | `resilience.rs` (blocco, crash, output non valido) | — | Verde | Perdita di rete fra nodi non provata |

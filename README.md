@@ -113,7 +113,7 @@ Cosa osservare:
 
 Limiti noti della v0.1:
 - un solo utente locale e una richiesta alla volta;
-- PWA su Android/iOS e client nativo iOS per chat e conferme; connettori solo HTTP dichiarativi (niente OAuth né plugin con codice);
+- PWA su Android/iOS e client nativo iOS per chat e conferme; connettori HTTP dichiarativi con token, chiave o OAuth 2.0 (niente plugin con codice);
 - con Ollama la qualità degli strumenti dipende dal modello scelto.
 
 Accettazione e prove da fare sul tuo computer: [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md). Dettagli in [docs/ROADMAP.md](docs/ROADMAP.md) e nell'ADR-0004 in [docs/DECISIONS.md](docs/DECISIONS.md).

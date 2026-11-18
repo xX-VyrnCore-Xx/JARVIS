@@ -381,7 +381,7 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - **Audit:** `connector.install`, `connector.authorize`, `connector.revoke`, `connector.uninstall`, con il campo facoltativo `resource` (aggiunta compatibile di `jarvis.audit-event/1`).
 - **Motivazione:** i connettori dichiarativi coprono le API HTTP comuni senza eseguire codice di terzi. Restano dentro gli stessi controlli di policy, conferma, SSRF e audit degli strumenti statici. La revoca è immediata perché toglie lo strumento dal catalogo.
 - **Conseguenze:**
-  - nessun OAuth, nessuna paginazione, nessun metodo oltre `GET` e `POST`;
+  - nessuna paginazione, nessun metodo oltre `GET` e `POST`; OAuth aggiunto dall'ADR-0027;
   - la chiave dei segreti sta sul disco accanto ai dati: protegge da letture del database, non da chi legge l'intera cartella. Spostata nel portachiavi del sistema su macOS e Windows dall'ADR-0021;
   - i webhook arrivano solo da processi locali o da un tunnel scelto dal proprietario;
   - nessun SDK o plugin con codice.
@@ -741,6 +741,31 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - unitari in `channels.rs`;
   - E2E: canale aggiunto dall'interfaccia e prova ricevuta.
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, SECURITY_AND_PRIVACY.md, README.md, ROADMAP.md.
+
+### ADR-0027 — OAuth 2.0 con PKCE per i connettori
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario («continua a implementare le funzionalità mancanti»); lacuna «OAuth per i connettori» nel checkpoint.
+- **Contesto:** i connettori accettavano solo token o chiavi incollati. Molti servizi (Google, GitHub, Spotify, Microsoft) usano OAuth 2.0 e rilasciano token che scadono.
+- **Opzioni:**
+  - flusso «device code»: non supportato da tutti i servizi;
+  - codice di autorizzazione con un server di callback esterno: espone JARVIS su Internet;
+  - codice di autorizzazione con PKCE e redirect sul loopback del Core: profilo raccomandato per le app native (RFC 8252), senza servizi esterni.
+- **Decisione:**
+  - nuovo tipo `auth.type = "oauth2"` nel contratto `connector` (aggiunta compatibile) con `authorize_url`, `token_url`, `client_id` e `scopes`;
+  - `token_url` deve stare tra gli `allowed_hosts` ed entrambi gli URL devono usare HTTPS (HTTP solo su loopback con la policy di prova);
+  - `POST /api/connectors/{id}/oauth/start` genera `state` (256 bit) e `code_verifier` casuali, validi 10 minuti e una sola volta, e restituisce la pagina di consenso; l'interfaccia la apre nel browser di sistema;
+  - `GET /api/connectors/oauth/callback`, solo da questo computer e senza token di sessione, è autenticato dallo `state`. Scambia il codice sull'endpoint dei token con le protezioni dei connettori (niente redirect, indirizzi privati bloccati, timeout) e mostra una pagina di esito;
+  - access token e stato del rinnovo (refresh token, scadenza, eventuale segreto del client) sono cifrati nell'archivio dei segreti;
+  - rinnovo automatico a 60 secondi dalla scadenza; revoca e disinstallazione cancellano tutto;
+  - audit di avvio, consenso negato, scambio fallito, autorizzazione e revoca; contatori `connector.oauth.*`.
+- **Conseguenze:**
+  - il proprietario registra un'app OAuth presso il servizio con redirect `http://localhost:8765/api/connectors/oauth/callback` e scrive `client_id` nel manifest;
+  - i servizi che richiedono un segreto del client lo ricevono da un campo dell'interfaccia: resta cifrato e non entra nel manifest;
+  - la revoca presso il servizio (endpoint di revoca) non è automatica: JARVIS cancella i token locali.
+- **Evidenza:**
+  - `core/server/tests/oauth.rs` contro un server di autorizzazione sintetico che verifica PKCE: avvio, `state` falso e già usato, scambio, token mai restituiti, rinnovo automatico prima della chiamata, consenso negato, revoca, audit;
+  - unitari in `oauth.rs` (vettore della RFC 7636, `state` monouso).
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, SECURITY_AND_PRIVACY.md, ACCEPTANCE.md, README.md, ROADMAP.md, contratto `connector`.
 
 ### Decisione operativa — Merge automatico con CI verde
 

@@ -157,6 +157,8 @@ async fn guard(State(state): State<Shared>, req: Request, next: Next) -> Respons
         && path != "/api/devices/pair"
         && !path.starts_with("/api/hooks/")
         && !path.starts_with("/api/nodes/")
+        // Ritorno da OAuth (ADR-0027): navigazione del browser senza token, autenticata dallo `state` monouso.
+        && path != "/api/connectors/oauth/callback"
     {
         let token = req
             .headers()
@@ -335,6 +337,8 @@ pub fn router(state: Shared) -> Router {
         .route("/api/connectors/{id}", delete(uninstall_connector))
         .route("/api/connectors/{id}/authorize", post(authorize_connector))
         .route("/api/connectors/{id}/revoke", post(revoke_connector))
+        .route("/api/connectors/{id}/oauth/start", post(oauth_start))
+        .route("/api/connectors/oauth/callback", get(oauth_callback))
         .route(
             "/api/hooks/{id}",
             post(connector_hook).layer(axum::extract::DefaultBodyLimit::max(256 * 1024)),
@@ -447,6 +451,50 @@ async fn chat_stream(State(state): State<Shared>, Json(body): Json<Value>) -> Re
             (header::CACHE_CONTROL, "no-store"),
         ],
         axum::body::Body::from_stream(stream),
+    )
+        .into_response()
+}
+
+async fn oauth_start(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    let secret = body["client_secret"].as_str().map(str::to_string);
+    match with_core(&state, move |j| j.oauth_start(&id, secret)).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+async fn oauth_callback(
+    State(state): State<Shared>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let st = q.get("state").cloned().unwrap_or_default();
+    let code = q.get("code").cloned();
+    let denied = q.get("error").cloned();
+    let result = with_core(&state, move |j| {
+        j.oauth_callback(&st, code.as_deref(), denied.as_deref())
+    })
+    .await;
+    let (status, html) = match result {
+        Ok(name) => (
+            StatusCode::OK,
+            crate::oauth::page(true, &format!("{name} è collegato a JARVIS.")),
+        ),
+        Err(CoreError::BadRequest(m) | CoreError::NotFound(m)) => {
+            (StatusCode::BAD_REQUEST, crate::oauth::page(false, &m))
+        }
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            crate::oauth::page(false, "errore interno"),
+        ),
+    };
+    (
+        status,
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        html,
     )
         .into_response()
 }
