@@ -1,0 +1,16 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "externalBin": ["binaries/jarvis-core"],
+    "resources": {
+      "../../../ai/jarvis_ai/": "ai/jarvis_ai/",
+      "../../../contracts/": "contracts/",
+      "python/": "python/"
+    },
+    "publisher": "JARVIS",
+    "copyright": "Uso privato del proprietario",
+    "longDescription": "JARVIS, assistente personale privato e locale: Core, runtime AI e Python inclusi.",
+    "linux": { "deb": { "depends": [] } },
+    "windows": { "nsis": { "installMode": "currentUser" } }
+  }
+}

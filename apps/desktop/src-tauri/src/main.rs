@@ -6,12 +6,15 @@
 //!   fonti Web) si aprono nel browser di sistema.
 //! - Nessuna capability Tauri è concessa: l'interfaccia remota non ha accesso alle API native.
 //! - Alla chiusura dell'app il Core viene terminato (il worker Python si chiude con il suo stdin).
+//! - Installata con il programma di setup (ADR-0016), l'app usa il Core incluso accanto all'eseguibile
+//!   (`jarvis-core`), il runtime AI e i contratti tra le risorse e un Python autonomo incluso: non serve
+//!   installare altro.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use jarvis_launcher::{launch, LaunchConfig, RunningCore};
+use jarvis_launcher::{launch, LaunchConfig, LaunchError, RunningCore};
 use tauri::{Manager, RunEvent, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_opener::OpenerExt;
 
@@ -22,6 +25,34 @@ fn jarvis_home() -> PathBuf {
     std::env::var_os("JARVIS_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../.."))
+}
+
+/// Configurazione dell'app installata: risorse con `ai/` e `contracts/`, Core e Python inclusi.
+/// `None` quando l'app gira dai sorgenti (sviluppo).
+fn bundled_config(resources: &std::path::Path, data_dir: &std::path::Path) -> Option<LaunchConfig> {
+    if !resources.join("ai/jarvis_ai/worker.py").is_file() {
+        return None;
+    }
+    let exe_dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    let core = exe_dir.join(if cfg!(windows) {
+        "jarvis-core.exe"
+    } else {
+        "jarvis-core"
+    });
+    let python = if cfg!(windows) {
+        resources.join("python/python.exe")
+    } else {
+        resources.join("python/bin/python3")
+    };
+    Some(LaunchConfig {
+        home: resources.to_path_buf(),
+        core_bin: core,
+        data_dir: data_dir.to_path_buf(),
+        python: python.to_string_lossy().into_owned(),
+        // Le risorse installate possono essere in sola lettura: niente cache .pyc accanto ai sorgenti.
+        env: vec![("PYTHONDONTWRITEBYTECODE".into(), "1".into())],
+        startup_timeout: std::time::Duration::from_secs(90),
+    })
 }
 
 fn local_page(url: &url::Url) -> bool {
@@ -62,9 +93,20 @@ fn main() {
                     .build()?;
 
             let handle = app.handle().clone();
+            let bundled = app
+                .path()
+                .resource_dir()
+                .ok()
+                .and_then(|res| bundled_config(&res, &data_dir));
             std::thread::spawn(move || {
-                let started =
-                    LaunchConfig::discover(&jarvis_home(), &data_dir).and_then(|cfg| launch(&cfg));
+                let started = match bundled {
+                    Some(cfg) if !cfg.core_bin.is_file() => {
+                        Err(LaunchError::CoreNotFound(vec![cfg.core_bin.clone()]))
+                    }
+                    Some(cfg) => launch(&cfg),
+                    None => LaunchConfig::discover(&jarvis_home(), &data_dir)
+                        .and_then(|cfg| launch(&cfg)),
+                };
                 match started {
                     Ok(core) => {
                         let url: url::Url = core.url.parse().expect("URL del Core");
