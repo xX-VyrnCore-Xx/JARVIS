@@ -158,6 +158,8 @@ jobs:
     env:
       JARVIS_NO_BROWSER: "1"
       JARVIS_AI_BACKEND: offline
+      # Portachiavi del sistema su macOS e Windows, file 0600 su Linux (ADR-0021).
+      JARVIS_EXPECT_SECRETS_STORE: ${{ matrix.os == 'ubuntu-latest' && 'file' || 'keychain' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

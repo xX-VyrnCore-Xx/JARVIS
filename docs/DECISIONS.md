@@ -366,7 +366,7 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 
 ### ADR-0013 — Integration Engine: connettori dichiarativi e archivio dei segreti
 
-- **Data:** 2026-11-17 · **Stato:** Accettato (Fase 4, RF-14). Resta aperta la custodia della chiave nel portachiavi del sistema operativo.
+- **Data:** 2026-11-17 · **Stato:** Accettato (Fase 4, RF-14). Custodia della chiave nel portachiavi: ADR-0021.
 - **Contesto:** RF-14 chiede che un connettore possa essere installato, autorizzato e revocato. SECURITY_AND_PRIVACY.md chiede segreti centralizzati e fuori da telemetria e checkpoint. AUTONOMY_AND_TOOLS.md chiede che ogni capacità passi da catalogo, policy e conferma.
 - **Opzioni:** plugin con codice eseguibile (richiede un sandbox non ancora disponibile); connettori dichiarativi HTTP senza codice; solo strumenti statici nel catalogo.
 - **Decisione:**
@@ -382,7 +382,7 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Motivazione:** i connettori dichiarativi coprono le API HTTP comuni senza eseguire codice di terzi. Restano dentro gli stessi controlli di policy, conferma, SSRF e audit degli strumenti statici. La revoca è immediata perché toglie lo strumento dal catalogo.
 - **Conseguenze:**
   - nessun OAuth, nessuna paginazione, nessun metodo oltre `GET` e `POST`;
-  - la chiave dei segreti sta sul disco accanto ai dati: protegge da letture del database, non da chi legge l'intera cartella. Da spostare nel portachiavi del sistema (decisione aperta);
+  - la chiave dei segreti sta sul disco accanto ai dati: protegge da letture del database, non da chi legge l'intera cartella. Spostata nel portachiavi del sistema su macOS e Windows dall'ADR-0021;
   - i webhook arrivano solo da processi locali o da un tunnel scelto dal proprietario;
   - nessun SDK o plugin con codice.
 - **Evidenza:**
@@ -397,7 +397,7 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - una scrittura interrotta da timeout o rete è registrata con `effect: unknown` nell'audit e nel passo, e la notifica chiede di verificare prima di ripeterla;
   - ogni fallimento di connettore, da chat o da automazione, produce una notifica `integration` correlata al task e deduplicata per connettore;
   - evidenza: `connector_faults_are_retried_safely_and_notified`.
-- **Custodia della chiave:** il portachiavi del sistema operativo resta da fare. Richiede prove su Windows, macOS e Linux con sessione grafica, non disponibili nel container né nella CI, ed è rinviato alla validazione di sicurezza della Fase 6 sul computer del proprietario.
+- **Custodia della chiave:** risolta dall'ADR-0021 (portachiavi di macOS e Windows; file 0600 su Linux).
 
 ### ADR-0014 — Dispositivi associati e app Web installabile (Fase 5, RF-11 e RF-10 mobile)
 
@@ -598,6 +598,30 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - il ritorno a una versione precedente resta locale (`jarvis rollback`, ADR-0015).
 - **Evidenza:** workflow «release»: verifica `cosign verify-blob` nel job di pubblicazione, `codesign --verify` dell'app installata dal `.dmg`, elenco finale delle release.
 - **Documenti interessati:** README.md, ACCEPTANCE.md, ROADMAP.md.
+
+### ADR-0021 — Chiave dei segreti nel portachiavi del sistema
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** ADR-0013 (decisione aperta), prossima attività del checkpoint.
+- **Contesto:** la chiave che cifra i segreti dei connettori stava in `data/.secrets.key`, accanto al database: chi leggeva l'intera cartella dei dati poteva decifrarli.
+- **Opzioni:**
+  - `keyring` con i portachiavi nativi di macOS e Windows; su Linux Secret Service via D-Bus;
+  - solo macOS e Windows, Linux con il file 0600;
+  - chiave derivata da una passphrase chiesta all'avvio.
+- **Decisione:**
+  - su macOS (portachiavi di login) e Windows (Gestione credenziali) la chiave sta nel portachiavi, nel servizio `JARVIS`, con una voce per cartella dei dati (`secrets-key-` più un'impronta del percorso);
+  - su Linux resta il file 0600: Secret Service richiede D-Bus e una sessione grafica, assenti su server e runner;
+  - un file di chiave trovato all'apertura (versione precedente o ripristino di un backup) viene copiato nel portachiavi, riletto e solo allora cancellato;
+  - se il portachiavi non risponde o la voce manca mentre esistono segreti, il Core non crea una chiave nuova, che li renderebbe illeggibili: l'apertura fallisce con un messaggio esplicito. Senza segreti ripiega sul file;
+  - il backup cifrato include la chiave letta dal file o dal portachiavi; `JARVIS_SECRETS_KEYCHAIN=off` forza il file;
+  - `/api/health` riporta `core.secrets_store` (`keychain` o `file`).
+- **Conseguenze:**
+  - copiare la cartella dei dati non basta più per leggere i segreti su macOS e Windows;
+  - con la firma ad hoc (ADR-0020), dopo un aggiornamento macOS può chiedere di consentire di nuovo l'accesso alla voce del portachiavi;
+  - Linux resta protetto solo dai permessi del file.
+- **Evidenza:**
+  - unitari in `secrets.rs`: spostamento dal file con segreti leggibili, nuova installazione, portachiavi bloccato o voce mancante senza chiave nuova, ripiego sul file, voce distinta per cartella;
+  - CI «avvio reale»: `core.secrets_store` vale `keychain` su macOS e Windows, `file` su Linux.
+- **Documenti interessati:** SECURITY_AND_PRIVACY.md, ACCEPTANCE.md, ROADMAP.md.
 
 ### Decisione operativa — Merge automatico con CI verde
 
