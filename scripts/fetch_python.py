@@ -43,6 +43,8 @@ TRIM_UNIX = [
     "lib/python3.*/test", "lib/python3.*/idlelib", "lib/python3.*/tkinter", "lib/python3.*/turtledemo",
     "lib/python3.*/lib2to3", "lib/python3.*/ensurepip", "lib/tcl8*", "lib/tk8*", "lib/itcl4*", "lib/thread2*",
     "share", "include",
+    # Librerie statiche e file per compilare estensioni C: JARVIS non compila nulla sul computer dell'utente.
+    "lib/python3.*/config-*", "lib/*.a",
 ]
 TRIM_WINDOWS = ["Lib/test", "Lib/idlelib", "Lib/tkinter", "Lib/turtledemo", "Lib/lib2to3", "Lib/ensurepip", "tcl", "include"]
 
