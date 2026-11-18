@@ -6,7 +6,18 @@ L'inferenza e la persistenza privilegiano l'ambiente locale. Il cloud interviene
 
 ## Prova il prototipo (v0.1)
 
-**Senza Rust:** scarica l'archivio per il tuo sistema da una release (sezione Releases di GitHub, quando il proprietario ne pubblica una) e verifica l'impronta con `sha256sum -c jarvis-*.sha256`. Poi estrai l'archivio e avvia `./jarvis.sh` (Windows: `jarvis.cmd`); serve solo Python 3.10+. Le istruzioni qui sotto valgono per i sorgenti.
+**Con il programma di installazione (consigliato):** dalla pagina Releases di GitHub scarica il file per il tuo sistema:
+- **Windows:** `JARVIS_<versione>_x64_en-US.msi` oppure `JARVIS_<versione>_x64-setup.exe`;
+- **macOS** (chip Apple): `JARVIS_<versione>_aarch64.dmg`;
+- **Linux:** `.deb` per Debian/Ubuntu oppure `.AppImage`.
+
+Installalo e apri **JARVIS** dal menu delle applicazioni. Core, runtime AI e Python sono inclusi: non serve installare altro. L'impronta si verifica con il file `.sha256` accanto (`sha256sum -c <file>.sha256`).
+
+I file non sono firmati:
+- **Windows:** SmartScreen può chiedere «Ulteriori informazioni → Esegui comunque»;
+- **macOS:** apri l'app con clic destro → Apri.
+
+Le istruzioni qui sotto valgono per chi usa i sorgenti.
 
 Il prototipo funziona sul tuo computer, senza cloud. Comprende chat, strumenti con permessi, conferme, memoria, workspace e audit.
 

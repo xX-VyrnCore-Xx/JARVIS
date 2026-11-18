@@ -455,6 +455,36 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - `cargo audit` e `pip-audit` puliti dopo l'aggiornamento.
 - **Documenti interessati:** ACCEPTANCE.md, DEVOPS_QA_OBSERVABILITY.md, REQUIREMENTS.md, SECURITY_AND_PRIVACY.md, README.md.
 
+### ADR-0016 — Programmi di installazione al posto degli archivi
+
+- **Data:** 2026-11-18 · **Stato:** Accettato su richiesta del proprietario («pubblica direttamente i file di setup installabili e non i file zip»). Sostituisce, per la pubblicazione, gli archivi dell'ADR-0015.
+- **Contesto:** gli archivi richiedevano Python installato e l'avvio da terminale. Il proprietario vuole file che si installano come qualunque applicazione.
+- **Decisione:**
+  - **Bundler di Tauri sull'app desktop**, con la configurazione aggiuntiva `apps/desktop/src-tauri/tauri.bundle.conf.json`, usata solo per i pacchetti: la build di sviluppo e la CI desktop non ne dipendono. Formati: Windows `.msi` e setup NSIS `.exe` (per l'utente corrente), macOS `.dmg` (Apple Silicon), Linux `.deb` e `.AppImage` (costruiti su Ubuntu 22.04 per compatibilità con glibc più vecchie).
+  - **Contenuto:**
+    - il Core come sidecar `jarvis-core`, chiamato così per non coincidere con l'eseguibile `JARVIS` sui file system che ignorano maiuscole e minuscole;
+    - `ai/jarvis_ai` e `contracts/` tra le risorse;
+    - un **Python autonomo** (python-build-standalone, CPython 3.12) con le dipendenze del runtime AI già installate. `scripts/fetch_python.py` lo sceglie dall'ultima release e ne verifica l'impronta SHA-256 pubblicata.
+  - **Avvio dell'app installata:** se le risorse contengono il runtime AI, l'app usa il Core accanto al proprio eseguibile e il Python incluso, con `PYTHONDONTWRITEBYTECODE=1` (le risorse possono essere in sola lettura). Dai sorgenti resta il comportamento precedente. I dati vanno nella cartella dell'applicazione dell'utente.
+  - **Prove nella CI di release:**
+    - Linux: installazione reale del `.deb` con `dpkg`;
+    - Windows: installazione reale dell'`.msi` con `msiexec /qn`;
+    - macOS: l'app viene copiata dal `.dmg` montato, come in un'installazione;
+    - in tutti i casi, il Core installato con il Python incluso supera `tests/smoke/start_smoke.py`. Si pubblicano solo gli installer, con un `.sha256` per ciascuno.
+- **Motivazione:** si installa e si avvia senza prerequisiti né terminale. Le prove usano i file installati, non la cartella di build.
+- **Conseguenze:**
+  - installer non firmati (avvisi di SmartScreen e Gatekeeper finché il proprietario non fornisce i certificati);
+  - circa 50 MB per installer per via del Python incluso;
+  - macOS solo per Apple Silicon;
+  - i motori vocali reali restano da installare a parte (`voice-setup` vale per i sorgenti).
+- **Evidenza (2026-11-18, container Linux):**
+  - `.deb` costruito con il Core release e un Python sostitutivo (il download di python-build-standalone è bloccato dal proxy della sessione);
+  - installato con `dpkg -i`: Core in `/usr/bin/jarvis-core`, risorse in `/usr/lib/JARVIS`;
+  - Core installato più Python incluso: `start_smoke.py` superato;
+  - app `jarvis-desktop` avviata sotto Xvfb: avvia il Core incluso con il Python incluso e il worker AI; alla chiusura non resta alcun processo;
+  - pacchetto rimosso con `dpkg -r`.
+- **Documenti interessati:** README.md, ACCEPTANCE.md, INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

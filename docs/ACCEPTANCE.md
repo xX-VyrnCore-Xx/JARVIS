@@ -54,7 +54,7 @@ Da eseguire sul proprio computer con una release o con i sorgenti. Annotare esit
 | P4 | Web reale | «cerca Rust linguaggio», poi «apri <link>» | Fonti con link, ora e SHA-256 |
 | P5 | Automazioni e notifiche | «tra 2 minuti che ore sono» | Esecuzione all'ora prevista e notifica nella campanella |
 | P6 | Voce | `./jarvis.sh voice-setup`, poi 🎤 e «Mani libere» | Trascrizione corretta in italiano; «Ehi Jarvis» attiva; interruzione con la voce |
-| P7 | App desktop | `./jarvis.sh desktop` | Finestra propria; chiudendola si fermano Core e worker |
+| P7 | App desktop | Installa dalla release (`.msi`/`.exe`, `.dmg`, `.deb`/`.AppImage`) e apri JARVIS dal menu; dai sorgenti: `./jarvis.sh desktop` | Si apre senza installare Python o Rust; chiudendola si fermano Core e worker; la disinstallazione rimuove l'app ma non i dati |
 | P8 | Telefono | `tailscale serve 8765`, `JARVIS_ALLOWED_HOSTS=<host>`, codice dalla sezione Dispositivi | Associazione, chat dal telefono; dopo la revoca l'accesso cade subito |
 | P8a | App nativa iOS | Avvia il target JARVIS da Xcode, associa al Core, invia un messaggio, verifica conferme con e senza permesso, riapri l’app e revoca dal Core | Cronologia e chat funzionano, l’associazione persiste e la prima richiesta successiva alla revoca torna all’associazione |
 | P9 | Backup e rollback | Sezione Sistema → backup; `./jarvis.sh restore <file>`; dopo un aggiornamento `./jarvis.sh rollback` | Dati ripristinati; i dati sostituiti restano in una cartella a parte |
@@ -83,7 +83,7 @@ Il test `tests/contracts/test_packaging.py` verifica gli archivi ZIP e TAR.GZ e 
 **Rilascio:**
 1. Aggiornare la versione in `core/server/Cargo.toml`.
 2. Unire la modifica con CI verde.
-3. Su richiesta del proprietario si crea il tag `vX.Y.Z` (con `git push` del tag oppure avviando a mano il workflow «release» con l'input `tag`, che crea tag e release sul commit costruito e rifiuta un tag diverso dalla versione del Core): il workflow di release costruisce e prova gli archivi per i 3 sistemi e pubblica la release con i file `.sha256`. I tag con suffisso (`-rc.1`) diventano prerelease.
+3. Su richiesta del proprietario si crea il tag `vX.Y.Z` (con `git push` del tag oppure avviando a mano il workflow «release» con l'input `tag`, che crea tag e release sul commit costruito e rifiuta un tag diverso dalla versione del Core): il workflow di release costruisce i programmi di installazione (Windows `.msi` e setup `.exe`, macOS `.dmg`, Linux `.deb` e `.AppImage`) con Core, runtime AI e Python autonomo inclusi. Li installa davvero sul runner (`.deb` e `.msi`; su macOS copia l'app dal `.dmg` montato), avvia il Core installato con la prova di avvio e pubblica la release con i file `.sha256`. Gli archivi di `scripts/package.py` restano disponibili per l'uso da terminale ma non vengono pubblicati. I tag con suffisso (`-rc.1`) diventano prerelease.
 
 **Verifica di un archivio:**
 
