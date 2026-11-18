@@ -13,7 +13,7 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand"><span class="brand-mark" aria-hidden="true"></span>JARVIS <small>v0.1 prototipo</small></div>
+    <div class="brand"><span class="brand-mark" aria-hidden="true"></span>JARVIS <small id="brand-version"></small></div>
     <div class="status" id="status" role="status" aria-live="polite">
       <span class="pill" id="st-ai">AI: …</span>
       <span class="pill" id="st-audit">Audit: …</span>
@@ -153,6 +153,7 @@
         <div class="view-head"><h2>Sistema</h2><button class="ghost" data-refresh="system">Aggiorna</button></div>
         <p class="hint">Stato dei componenti e latenze misurate dall'avvio. I log strutturati sono in <code>data/logs/core.jsonl</code> e non contengono i tuoi messaggi.</p>
         <div id="system-cards" class="grid"></div>
+        <div class="row"><button class="ghost" type="button" id="open-setup">Configura voce e modello AI</button></div>
         <h3 class="sub-head">Backup cifrato</h3>
         <form id="backup-form" class="form backup-form">
           <p class="hint">Copia cifrata di conversazioni, memoria, automazioni, workspace e audit. Senza passphrase non si può aprire: conservala con cura. Ripristino (a JARVIS chiuso): <code>./jarvis.sh restore &lt;file.jbak&gt;</code>.</p>
@@ -173,5 +174,30 @@
     </main>
   </div>
   <div class="toasts" id="toasts" aria-live="assertive"></div>
+  <dialog id="setup-dialog" class="setup" aria-labelledby="setup-title">
+    <form method="dialog" id="setup-form" class="form">
+      <h2 id="setup-title">Configura JARVIS</h2>
+      <p class="hint">Scegli cosa scaricare ora. Tutto resta su questo computer; puoi ripetere la configurazione dalla sezione Sistema.</p>
+      <fieldset>
+        <legend><label class="check"><input type="checkbox" name="voice" checked> Voce locale</label></legend>
+        <p class="hint">Riconoscimento vocale (faster-whisper), voce di sintesi (Piper) e attivazione con «Ehi Jarvis» (openWakeWord).</p>
+        <div class="row">
+          <label>Riconoscimento <select name="stt_model"></select></label>
+          <label>Voce <select name="tts_voice"></select></label>
+        </div>
+      </fieldset>
+      <fieldset>
+        <legend><label class="check"><input type="checkbox" name="ollama"> Modello AI locale (Ollama)</label></legend>
+        <p class="hint" id="setup-ollama-hint"></p>
+        <label>Modello <select name="ollama_model"></select></label>
+      </fieldset>
+      <p class="hint" id="setup-size"></p>
+      <ol id="setup-steps" class="setup-steps" hidden></ol>
+      <div class="row">
+        <button type="button" class="primary" id="setup-start">Installa</button>
+        <button type="button" class="ghost" id="setup-later">Più tardi</button>
+      </div>
+    </form>
+  </dialog>
 </body>
 </html>

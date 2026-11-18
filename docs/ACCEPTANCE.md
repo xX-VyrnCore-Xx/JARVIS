@@ -53,7 +53,7 @@ Da eseguire sul proprio computer con una release o con i sorgenti. Annotare esit
 | P3 | File | «scrivi prova.txt: ciao», approva, «leggi prova.txt» | Conferma richiesta; file in `data/workspace` |
 | P4 | Web reale | «cerca Rust linguaggio», poi «apri <link>» | Fonti con link, ora e SHA-256 |
 | P5 | Automazioni e notifiche | «tra 2 minuti che ore sono» | Esecuzione all'ora prevista e notifica nella campanella |
-| P6 | Voce | `./jarvis.sh voice-setup`, poi 🎤 e «Mani libere» | Trascrizione corretta in italiano; «Ehi Jarvis» attiva; interruzione con la voce |
+| P6 | Voce | Dall'app installata: al primo avvio «Configura JARVIS» → Installa (dai sorgenti anche `./jarvis.sh voice-setup`), poi 🎤 e «Mani libere» | Trascrizione corretta in italiano; «Ehi Jarvis» attiva; interruzione con la voce |
 | P7 | App desktop | Installa dalla release (`.msi`/`.exe`, `.dmg`, `.deb`/`.AppImage`) e apri JARVIS dal menu; dai sorgenti: `./jarvis.sh desktop` | Si apre senza installare Python o Rust; chiudendola si fermano Core e worker; la disinstallazione rimuove l'app ma non i dati |
 | P8 | Telefono | `tailscale serve 8765`, `JARVIS_ALLOWED_HOSTS=<host>`, codice dalla sezione Dispositivi | Associazione, chat dal telefono; dopo la revoca l'accesso cade subito |
 | P8a | App nativa iOS | Avvia il target JARVIS da Xcode, associa al Core, invia un messaggio, verifica conferme con e senza permesso, riapri l’app e revoca dal Core | Cronologia e chat funzionano, l’associazione persiste e la prima richiesta successiva alla revoca torna all’associazione |

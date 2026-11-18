@@ -427,7 +427,7 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 
 ### ADR-0015 — Release precompilata, rollback di release e audit delle dipendenze (Fasi 6 e 7)
 
-- **Data:** 2026-11-17 · **Stato:** Accettato. Restano decisioni del proprietario: firma dei binari e degli installatori, canali Stable/Beta. Prima release: `v0.1.0`, richiesta dal proprietario e pubblicata subito, prima delle prove P1–P12 (prototipo, non 1.0.0).
+- **Data:** 2026-11-17 · **Stato:** Accettato. Restano decisioni del proprietario: firma dei binari e degli installatori, canali Stable/Beta. Prima release: `v0.1.0`, richiesta dal proprietario e pubblicata subito, prima delle prove P1–P12 (prototipo, non 1.0.0). Il 2026-11-18 il proprietario sceglie `v1.0.0` per la release finale con la configurazione guidata. La CI installa e prova l'app sui 3 sistemi; le prove manuali P1–P13 restano da fare e gli eventuali difetti andranno in una 1.0.x.
 - **Contesto:**
   - RNF-08 chiede il rollback di release;
   - DEVOPS_QA_OBSERVABILITY.md chiede release riproducibili e verifica crittografica;
@@ -540,6 +540,43 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - l'app non è verificata su un dispositivo reale fino alla prova P8b.
 - **Evidenza:** `CoreClientTest` (5 test: indirizzi ammessi e rifiutati, associazione con piattaforma `android` e token valido, codice per nodi rifiutato, token del dispositivo su ogni richiesta, conferma senza permesso bloccata prima della rete, identificativo in minuscolo, revoca, messaggi d'errore del Core); build dell'APK nella CI.
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, ACCEPTANCE.md, REQUIREMENTS.md, README.md.
+
+### ADR-0019 — Configurazione guidata dei modelli al primo avvio e rifinitura per macOS e Windows
+
+- **Data:** 2026-11-18 · **Stato:** Accettato. Richiesta del proprietario: «durante l'installazione seleziona già i modelli da scaricare e tutto il resto».
+- **Contesto:**
+  - un `.dmg` di macOS non può eseguire codice durante l'installazione;
+  - l'app installata è in sola lettura;
+  - la voce richiedeva `voice-setup` da terminale, disponibile solo con i sorgenti;
+  - il modello di Ollama andava scaricato a mano.
+- **Decisione:**
+  - **Configurazione guidata al primo avvio**, uguale su macOS, Windows e Linux. La finestra si apre da sola con le scelte consigliate già selezionate e si riapre da Sistema → «Configura voce e modello AI»:
+    - voce: faster-whisper `small`, Piper `it_IT-paola-medium`, openWakeWord «hey_jarvis»;
+    - modello AI: Ollama `qwen2.5:3b`, preselezionato solo se Ollama è attivo; altrimenti la finestra porta a ollama.com/download.
+    
+    La finestra mostra la dimensione stimata e l'avanzamento di ogni passo.
+  - **Backend `setup.rs`:**
+    - passi eseguiti in un thread separato, fuori dal blocco del Core;
+    - pacchetti della voce installati con `pip --target` in `<dati>/python-packages` usando il Python dell'app; modelli in `<dati>/models`;
+    - modello di Ollama scaricato con la sua API `/api/pull`, con avanzamento in byte;
+    - valori accettati solo dagli elenchi noti, quindi nessun argomento arbitrario a pip o a Ollama;
+    - una sola configurazione alla volta;
+    - le scelte vengono salvate in `<dati>/setup.json`;
+    - al termine il worker AI riparte con `PYTHONPATH`, `JARVIS_MODELS_DIR`, `JARVIS_TTS_VOICE`, `JARVIS_STT_MODEL` e `JARVIS_OLLAMA_MODEL`, senza sovrascrivere le variabili del proprietario.
+  - **Nell'app desktop i collegamenti con `target=_blank`** (per esempio il download di Ollama) si aprono nel browser di sistema, mai in una nuova finestra dell'app.
+  - **Windows:** l'app desktop avvia il Core, e il Core il worker Python e pip, con `CREATE_NO_WINDOW`: niente finestre di console accanto all'app.
+  - **Versione nell'intestazione** letta dal Core, non più fissa.
+  - **CI di release:** su macOS, Windows e Linux i pacchetti della voce si installano con il Python incluso e si importano (`faster_whisper`, `piper`, `openwakeword`, `onnxruntime`), come farà la configurazione guidata.
+- **Motivazione:** chi installa l'app ottiene voce e modello con due clic, senza terminale e senza scrivere nell'app installata.
+- **Conseguenze:**
+  - il primo avvio scarica circa 2,7 GB con le scelte consigliate;
+  - Ollama si installa a parte (ha un proprio installer firmato);
+  - la configurazione richiede rete.
+- **Evidenza:**
+  - `core/server/tests/setup.rs` (2: passi, rifiuto di valori non ammessi, configurazione unica, scelte salvate, worker funzionante dopo il riavvio; ambiente del worker) e unitario `plan_accepts_only_known_values`;
+  - E2E con passi simulati: finestra al primo avvio con le scelte consigliate, dimensione stimata, completamento dei passi;
+  - installazione della voce con il Python incluso verificata dalla CI di release sui 3 sistemi.
+- **Documenti interessati:** README.md, ACCEPTANCE.md, INTERFACE_AND_DEVICES.md, ROADMAP.md.
 
 ### Decisione operativa — Merge automatico con CI verde
 

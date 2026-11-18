@@ -43,6 +43,7 @@ const fmtTime = (iso) => (iso ? new Date(iso).toLocaleString("it-IT") : "");
 async function refreshStatus() {
   try {
     const h = await api("/api/health");
+    if (h.core && h.core.version) $("#brand-version").textContent = `v${h.core.version}`;
     const ai = $("#st-ai");
     const b = h.ai && h.ai.gateway && h.ai.gateway.backend;
     if (h.ai && h.ai.status === "up" && b) {
@@ -829,3 +830,100 @@ window.addEventListener("online", () => {
   refreshStatus();
   pollNotifications();
 });
+
+
+// ------------------------------------------------------------------ configurazione guidata (ADR-0019)
+
+const STT_LABEL = { tiny: "tiny (veloce, meno preciso)", base: "base", small: "small (consigliato)", medium: "medium (più preciso, più lento)" };
+let setupTimer = null;
+
+function setupSize(status) {
+  const f = $("#setup-form");
+  const mb = status.sizes_mb;
+  let total = 0;
+  if (f.voice.checked) total += mb.voice_packages + (mb.stt[f.stt_model.value] || 0) + mb.tts;
+  if (f.ollama.checked && !f.ollama.disabled) total += mb.ollama[f.ollama_model.value] || 0;
+  $("#setup-size").textContent = total ? `Download stimato: circa ${(total / 1024).toFixed(1)} GB.` : "Niente da scaricare.";
+}
+
+function renderSetupSteps(steps) {
+  const icon = { pending: "○", running: "◐", done: "✓", failed: "✗", skipped: "–" };
+  $("#setup-steps").hidden = false;
+  $("#setup-steps").replaceChildren(...steps.map((s) => el("li", { class: `step ${s.status}` },
+    el("span", { class: "icon", "aria-hidden": "true" }, icon[s.status] || "○"), " ", s.label,
+    s.progress != null && s.status === "running" ? el("progress", { max: "100", value: String(s.progress) }) : null,
+    s.detail ? el("div", { class: "sub" }, s.detail) : null)));
+}
+
+async function openSetup() {
+  const status = await api("/api/setup");
+  const f = $("#setup-form");
+  const fill = (select, items, label, chosen) => select.replaceChildren(...items.map((v) => {
+    const o = el("option", { value: v }, label ? label(v) : v);
+    if (v === chosen) o.selected = true;
+    return o;
+  }));
+  const saved = (status.saved && status.saved.plan) || {};
+  fill(f.stt_model, status.choices.stt_models, (v) => STT_LABEL[v] || v, saved.stt_model || "small");
+  fill(f.tts_voice, status.choices.tts_voices, null, saved.tts_voice || "it_IT-paola-medium");
+  fill(f.ollama_model, status.choices.ollama_models, null, saved.ollama_model || "qwen2.5:3b");
+  const hint = $("#setup-ollama-hint");
+  if (status.detected.ollama) {
+    f.ollama.disabled = false;
+    f.ollama.checked = true;
+    hint.textContent = status.detected.ollama_models.length ? `Ollama è attivo. Modelli già presenti: ${status.detected.ollama_models.join(", ")}.` : "Ollama è attivo: il modello scelto verrà scaricato.";
+  } else {
+    f.ollama.checked = false;
+    f.ollama.disabled = true;
+    hint.replaceChildren("Ollama non è attivo. Installalo da ", el("a", { href: "https://ollama.com/download", target: "_blank", rel: "noopener" }, "ollama.com/download"),
+      ", aprilo e riapri questa finestra. Senza Ollama JARVIS funziona in modalità offline con comandi semplici.");
+  }
+  if (status.running) { renderSetupSteps(status.steps); watchSetup(); } else { $("#setup-steps").hidden = true; }
+  $("#setup-start").disabled = status.running;
+  setupSize(status);
+  f.onchange = () => setupSize(status);
+  const dialog = $("#setup-dialog");
+  if (!dialog.open) dialog.showModal();
+}
+
+function watchSetup() {
+  clearInterval(setupTimer);
+  setupTimer = setInterval(async () => {
+    const s = await api("/api/setup").catch(() => null);
+    if (!s) return;
+    renderSetupSteps(s.steps);
+    if (!s.running) {
+      clearInterval(setupTimer);
+      $("#setup-start").disabled = false;
+      const failed = s.steps.filter((x) => x.status === "failed").length;
+      $("#setup-size").textContent = failed ? `Configurazione terminata con ${failed} passi non riusciti: leggi i dettagli e riprova.` : "Configurazione completata: voce e modello sono pronti.";
+      $("#setup-later").textContent = "Chiudi";
+      refreshStatus();
+    }
+  }, 700);
+}
+
+if (!DEVICE_MODE) {
+  $("#setup-start").addEventListener("click", async () => {
+    const f = $("#setup-form");
+    const plan = { voice: f.voice.checked, stt_model: f.stt_model.value, tts_voice: f.tts_voice.value,
+      ollama_model: f.ollama.checked && !f.ollama.disabled ? f.ollama_model.value : null };
+    try {
+      await api("/api/setup/start", { method: "POST", body: JSON.stringify(plan) });
+      $("#setup-start").disabled = true;
+      renderSetupSteps([]);
+      watchSetup();
+    } catch (e) { alert(e.message); }
+  });
+  $("#setup-later").addEventListener("click", () => {
+    try { sessionStorage.setItem("jarvis-setup-later", "1"); } catch { /* niente */ }
+    $("#setup-dialog").close();
+  });
+  $("#open-setup").addEventListener("click", () => openSetup().catch((e) => alert(e.message)));
+  // Primo avvio: la finestra si apre da sola con le scelte consigliate già selezionate.
+  api("/api/setup").then((s) => {
+    let later = false;
+    try { later = sessionStorage.getItem("jarvis-setup-later") === "1"; } catch { /* niente */ }
+    if (s.first_run && !later) openSetup();
+  }).catch(() => {});
+}
