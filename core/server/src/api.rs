@@ -36,6 +36,8 @@ pub struct AppState {
     pub last_health: Mutex<Value>,
     /// Host pubblicati da un proxy fidato (es. `tailscale serve`) per i dispositivi associati (RF-11).
     pub remote_hosts: Vec<String>,
+    /// Assegnazioni ai nodi esecutori: le loro richieste non passano dal blocco del Core.
+    pub nodes: Arc<crate::nodes::NodeHub>,
 }
 
 type Shared = Arc<AppState>;
@@ -113,7 +115,8 @@ async fn guard(State(state): State<Shared>, req: Request, next: Next) -> Respons
         // Dispositivo associato (RF-11): token del dispositivo, solo le rotte dei suoi permessi.
         let public = !path.starts_with("/api/")
             || path == "/api/devices/pair"
-            || path.starts_with("/api/hooks/");
+            || path.starts_with("/api/hooks/")
+            || path.starts_with("/api/nodes/");
         if !public {
             let token = req
                 .headers()
@@ -145,10 +148,13 @@ async fn guard(State(state): State<Shared>, req: Request, next: Next) -> Respons
         }
     }
     // I webhook dei connettori si autenticano con la firma HMAC del corpo, non con il token di sessione.
+    // I nodi si autenticano con il proprio token nell'hub; l'associazione con il codice monouso.
     if local
         && path.starts_with("/api/")
         && path != "/api/health"
+        && path != "/api/devices/pair"
         && !path.starts_with("/api/hooks/")
+        && !path.starts_with("/api/nodes/")
     {
         let token = req
             .headers()
@@ -261,6 +267,9 @@ pub fn router(state: Shared) -> Router {
         .route("/api/devices/pairing", post(create_pairing))
         .route("/api/devices/pair", post(pair_device))
         .route("/api/devices/me", get(device_me))
+        .route("/api/nodes", get(list_nodes))
+        .route("/api/nodes/next", get(node_next))
+        .route("/api/nodes/result/{id}", post(node_result))
         .route("/api/devices/{id}/revoke", post(revoke_device))
         .route(
             "/manifest.webmanifest",
@@ -622,7 +631,109 @@ async fn pair_device(State(state): State<Shared>, Json(body): Json<Value>) -> Re
     let code = body["code"].as_str().unwrap_or_default().to_string();
     let name = body["name"].as_str().unwrap_or_default().to_string();
     let platform = body["platform"].as_str().unwrap_or("other").to_string();
-    reply(with_core(&state, move |j| j.pair_device(&code, &name, &platform)).await)
+    let capabilities: Vec<String> = body["capabilities"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|c| c.as_str().map(str::to_string))
+        .collect();
+    reply(
+        with_core(&state, move |j| {
+            j.pair_device(&code, &name, &platform, &capabilities)
+        })
+        .await,
+    )
+}
+
+async fn list_nodes(State(state): State<Shared>, headers: axum::http::HeaderMap) -> Response {
+    // Elenco riservato al proprietario: la rotta è esente dal controllo generale, quindi lo si ripete qui.
+    if headers.get("x-jarvis-token").and_then(|t| t.to_str().ok()) != Some(state.token.as_str()) {
+        return error(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "token di sessione mancante o errato",
+        );
+    }
+    reply(with_core(&state, |j| j.nodes().map(|items| json!({"items": items}))).await)
+}
+
+fn node_id(state: &Shared, headers: &axum::http::HeaderMap) -> Option<String> {
+    let token = headers
+        .get("x-jarvis-device")
+        .and_then(|t| t.to_str().ok())?;
+    state.nodes.authenticate(token)
+}
+
+/// Attesa lunga del nodo (al massimo 25 s): 200 con l'assegnazione oppure 204.
+async fn node_next(
+    State(state): State<Shared>,
+    headers: axum::http::HeaderMap,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let Some(id) = node_id(&state, &headers) else {
+        return error(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "nodo non associato o revocato",
+        );
+    };
+    let wait = q
+        .get("wait")
+        .and_then(|w| w.parse().ok())
+        .unwrap_or(20u64)
+        .min(25);
+    let hub = state.nodes.clone();
+    let next =
+        tokio::task::spawn_blocking(move || hub.next(&id, std::time::Duration::from_secs(wait)))
+            .await
+            .ok()
+            .flatten();
+    match next {
+        Some(a) => Json(a.to_json()).into_response(),
+        None => StatusCode::NO_CONTENT.into_response(),
+    }
+}
+
+async fn node_result(
+    State(state): State<Shared>,
+    Path(assignment): Path<String>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    let Some(id) = node_id(&state, &headers) else {
+        return error(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "nodo non associato o revocato",
+        );
+    };
+    let outcome = if body["ok"] == true {
+        Ok(body["output"].clone())
+    } else {
+        Err((
+            body["code"]
+                .as_str()
+                .unwrap_or("node.tool_failed")
+                .chars()
+                .take(64)
+                .collect(),
+            body["message"]
+                .as_str()
+                .unwrap_or("errore sul nodo")
+                .chars()
+                .take(500)
+                .collect(),
+        ))
+    };
+    if state.nodes.complete(&id, &assignment, outcome) {
+        Json(json!({"accepted": true})).into_response()
+    } else {
+        error(
+            StatusCode::NOT_FOUND,
+            "not_found",
+            "assegnazione sconosciuta o scaduta",
+        )
+    }
 }
 
 async fn device_me(State(state): State<Shared>, headers: axum::http::HeaderMap) -> Response {
@@ -796,6 +907,7 @@ pub fn state_with_remote(
     remote_hosts: Vec<String>,
 ) -> Shared {
     let obs = core.observability();
+    let nodes = core.node_hub();
     Arc::new(AppState {
         core: Arc::new(Mutex::new(core)),
         obs,
@@ -803,5 +915,6 @@ pub fn state_with_remote(
         port,
         last_health: Mutex::new(json!({})),
         remote_hosts,
+        nodes,
     })
 }

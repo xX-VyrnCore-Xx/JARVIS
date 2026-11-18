@@ -64,6 +64,14 @@ fn resource_uri(tool: &str, args: &Value) -> String {
             c
         }
     };
+    if let Some((slug, base)) = tool.strip_prefix("node.").and_then(|r| r.split_once('.')) {
+        return match args["path"].as_str() {
+            Some(p) if base.starts_with("fs.") => {
+                format!("jarvis://node/{}/workspace/{}", clean(slug), clean(p))
+            }
+            _ => format!("jarvis://node/{}/tool/{}", clean(slug), clean(base)),
+        };
+    }
     match args["path"].as_str() {
         Some(p) if tool.starts_with("fs.") => format!("jarvis://file/workspace/{}", clean(p)),
         _ if tool == "web.fetch" => {
@@ -153,6 +161,13 @@ fn expected_effect(tool: &str, args: &Value) -> String {
             "Inviare al servizio esterno del connettore ({t}) i dati: {}",
             args.to_string().chars().take(300).collect::<String>()
         ),
+        t if t.starts_with("node.") => {
+            let (slug, base) = t["node.".len()..].split_once('.').unwrap_or(("?", t));
+            format!(
+                "Sul nodo «{slug}»: {}",
+                expected_effect(base, args).replace("della workspace", "della workspace del nodo")
+            )
+        }
         _ => format!("Eseguire {tool} con argomenti {args}"),
     }
 }

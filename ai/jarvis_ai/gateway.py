@@ -69,7 +69,13 @@ class Backend(Protocol):
 
 
 def _describe_tool_result(result: dict) -> str:
-    tool, status, output = result["tool"], result["status"], result["output"]
+    tool = result["tool"]
+    node = re.match(r"^node\.([a-z][a-z0-9-]*)\.(.+)$", tool)
+    if node:
+        # Strumento eseguito da un nodo esecutore: stessa descrizione dello strumento locale, con il nodo.
+        inner = _describe_tool_result({**result, "tool": node.group(2)})
+        return f"[nodo {node.group(1)}] {inner}"
+    status, output = result["status"], result["output"]
     if status == "denied":
         return f"Non posso eseguire {tool}: la policy lo ha negato ({_reason(output)})."
     if status == "cancelled":
@@ -159,6 +165,23 @@ def _coerce(value: str, schema: dict) -> Any:
     if kind == "boolean":
         return value.lower() in {"true", "si", "sì", "1"}
     return value
+
+
+_NODE_CALL = re.compile(r"^\s*(?:sul\s+)?nodo\s+([a-z][a-z0-9-]*)\s+([a-z]+\.[a-z]+)\s*(.*)$", re.IGNORECASE | re.DOTALL)
+
+
+def _parse_node_call(message: str, catalog: dict[str, dict]) -> tuple[str, dict] | None:
+    """«nodo <nome> <strumento> chiave=valore …» → strumento eseguito da un nodo esecutore."""
+    match = _NODE_CALL.match(message)
+    if not match:
+        return None
+    tool = f"node.{match.group(1).lower()}.{match.group(2).lower()}"
+    if tool not in catalog:
+        return None
+    props = catalog[tool].get("input_schema", {}).get("properties", {})
+    args = {m.group(1): _coerce(m.group(2) if m.group(2) is not None else m.group(3), props.get(m.group(1), {}))
+            for m in _ARG.finditer(match.group(3))}
+    return tool, args
 
 
 def _parse_connector_call(message: str, catalog: dict[str, dict]) -> tuple[str, dict] | None:
@@ -321,6 +344,7 @@ Prova con:
 • "modifica automazione <id> ogni 2 ore" · "modifica automazione <id>: info sistema" · "rinomina automazione <id> in Report"
 • "cerca intelligenza artificiale" · "apri https://it.wikipedia.org/wiki/Rust"
 • "connettore <id> <operazione> chiave=valore" (connettori installati nella sezione Connettori)
+• "nodo <nome> system.info" · "nodo <nome> fs.list path=." (nodi esecutori associati nella sezione Dispositivi)
 Con Ollama attivo sul tuo computer posso conversare liberamente."""
 
 
@@ -339,6 +363,10 @@ class OfflineBackend:
         if "tool_result" in inputs:
             return _result("reply", self.backend, text=_describe_tool_result(inputs["tool_result"]))
         message = _last_user_message(delegation)
+        node_call = _parse_node_call(message, catalog)
+        if node_call:
+            return _result("tool_call", self.backend, tool=node_call[0], arguments=node_call[1], catalog=catalog,
+                           rationale="Chiamata a un nodo esecutore riconosciuta dal modello offline")
         connector_call = _parse_connector_call(message, catalog)
         if connector_call:
             return _result("tool_call", self.backend, tool=connector_call[0], arguments=connector_call[1], catalog=catalog,
@@ -502,7 +530,7 @@ class Gateway:
         catalog = {k: v for k, v in self.catalog.items() if k in allowed}
         # Strumenti dinamici (connettori RF-14): descritti dal Core nella delega, mai dal catalogo statico.
         for d in delegation.get("inputs", {}).get("tool_descriptors", []):
-            if d["name"].startswith("connector.") and d["name"] not in self.catalog:
+            if d["name"].startswith(("connector.", "node.")) and d["name"] not in self.catalog:
                 catalog[d["name"]] = d
         self._recover_ollama()
         if self.ollama:

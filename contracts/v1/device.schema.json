@@ -2,18 +2,76 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://jarvis.local/contracts/v1/device.schema.json",
   "title": "Dispositivo associato v1",
-  "description": "RF-11 e INTERFACE_AND_DEVICES.md: un dispositivo client associato con codice monouso, con permessi limitati e revocabile. Il token del dispositivo non fa mai parte del documento: il Core ne conserva solo l'impronta.",
+  "description": "RF-11 e INTERFACE_AND_DEVICES.md: un dispositivo client associato con codice monouso, con permessi limitati e revocabile. Il token del dispositivo non fa mai parte del documento: il Core ne conserva solo l'impronta. Con il permesso `node` il dispositivo è un nodo esecutore (ADR-0017): `slug` e `capabilities` indicano il nome breve e gli strumenti che esegue.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["contract", "device_id", "name", "platform", "scopes", "enrolled_at"],
+  "required": [
+    "contract",
+    "device_id",
+    "name",
+    "platform",
+    "scopes",
+    "enrolled_at"
+  ],
   "properties": {
-    "contract": { "const": "jarvis.device/1" },
-    "device_id": { "$ref": "common.schema.json#/$defs/uuid" },
-    "name": { "type": "string", "minLength": 1, "maxLength": 80 },
-    "platform": { "enum": ["android", "ios", "desktop", "web", "other"] },
-    "scopes": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "enum": ["chat", "confirm"] } },
-    "enrolled_at": { "$ref": "common.schema.json#/$defs/timestamp" },
-    "last_seen_at": { "$ref": "common.schema.json#/$defs/timestamp" },
-    "revoked_at": { "$ref": "common.schema.json#/$defs/timestamp" }
+    "contract": {
+      "const": "jarvis.device/1"
+    },
+    "device_id": {
+      "$ref": "common.schema.json#/$defs/uuid"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "platform": {
+      "enum": [
+        "android",
+        "ios",
+        "desktop",
+        "web",
+        "other"
+      ]
+    },
+    "scopes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "chat",
+          "confirm",
+          "node"
+        ]
+      }
+    },
+    "enrolled_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "last_seen_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "revoked_at": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,40}$"
+    },
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "maxItems": 16,
+      "items": {
+        "enum": [
+          "system.info",
+          "time.now",
+          "fs.list",
+          "fs.read",
+          "fs.write"
+        ]
+      }
+    }
   }
 }

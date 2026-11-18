@@ -41,9 +41,11 @@ L'interfaccia si installa come app («Aggiungi a schermata Home»). Dal disposit
 
 La chat mostra un avatar astratto con anelli CSS 3D. L'etichetta annuncia gli stati pronto, elaborazione, ascolto, trascrizione e risposta vocale. L'avatar segue l'effettivo avvio della riproduzione. Durante la riproduzione l'apertura della bocca segue l'intensità dell'audio locale e rispetta la preferenza per il movimento ridotto.
 
+**Nodi esecutori (ADR-0017):** un altro computer associato con un codice «Nodo esecutore» esegue gli strumenti che dichiara (informazioni di sistema, ora, file della propria workspace) quando il Core glieli assegna. Usa `./jarvis.sh node <indirizzo> <codice>` e richieste in uscita, senza aprire porte. Nella sezione Dispositivi compaiono stato in linea, strumenti e comando da usare in chat.
+
 **Programmi di installazione (ADR-0016):** la release contiene l'app desktop pronta da installare. Windows `.msi` e setup `.exe`, macOS `.dmg`, Linux `.deb` e `.AppImage`. Core, runtime AI e Python sono inclusi.
 
-Restano da sviluppare: sincronizzazione labiale basata sui fonemi, client nativo Android, funzioni iOS oltre chat e conferme, firma degli installer e nodi esecutori distribuiti.
+Restano da sviluppare: sincronizzazione labiale basata sui fonemi, client nativo Android, funzioni iOS oltre chat e conferme, firma degli installer assegnazione automatica dei lavori ai nodi in base alle risorse.
 
 ## App nativa iOS (RF-10, RF-11)
 

@@ -379,6 +379,20 @@ impl Store {
         Ok(())
     }
 
+    /// Dispositivi con l'impronta del token (per registrare i nodi all'avvio).
+    pub fn devices_with_hash(&self) -> StoreResult<Vec<(Value, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT doc, token_sha256 FROM devices ORDER BY device_id")?;
+        let rows = stmt.query_map([], |r| {
+            Ok((
+                serde_json::from_str(&r.get::<_, String>(0)?).unwrap_or(Value::Null),
+                r.get(1)?,
+            ))
+        })?;
+        rows.collect()
+    }
+
     pub fn devices(&self) -> StoreResult<Vec<Value>> {
         let mut stmt = self
             .conn
