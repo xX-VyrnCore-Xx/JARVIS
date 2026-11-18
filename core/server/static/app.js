@@ -191,11 +191,13 @@ if (DEVICE_MODE) document.querySelectorAll("[data-owner]").forEach((n) => n.remo
 const PLATFORM = { android: "Android", ios: "iOS", desktop: "desktop", web: "browser", other: "altro" };
 const views = {
   async devices() {
-    const { items } = await api("/api/devices");
+    const [{ items }, nodes] = await Promise.all([api("/api/devices"), api("/api/nodes")]);
+    const online = new Map(nodes.items.map((n) => [n.device_id, n.online]));
     $("#devices").replaceChildren(...(items.length ? items.map((d) => el("div", { class: "card" },
       el("div", { class: "body" },
         el("div", { class: "title" }, `${d.name} `, el("span", { class: "sub" }, PLATFORM[d.platform] || d.platform)),
-        el("div", { class: "sub" }, `associato ${fmtTime(d.enrolled_at)} · ultimo accesso ${d.last_seen_at ? fmtTime(d.last_seen_at) : "mai"} · permessi: ${d.scopes.join(", ")}`)),
+        d.slug ? el("div", { class: "sub" }, `nodo esecutore «${d.slug}» · ${online.get(d.device_id) ? "in linea" : "non in linea"} · strumenti: ${(d.capabilities || []).join(", ")} · in chat: «nodo ${d.slug} system.info»`)
+          : el("div", { class: "sub" }, `associato ${fmtTime(d.enrolled_at)} · ultimo accesso ${d.last_seen_at ? fmtTime(d.last_seen_at) : "mai"} · permessi: ${d.scopes.join(", ")}`)),
       d.revoked_at ? el("span", { class: "badge denied" }, `revocato ${fmtTime(d.revoked_at)}`) :
         el("button", { class: "danger", onclick: async () => {
           if (!confirm(`Revocare «${d.name}»? Perderà subito l'accesso.`)) return;
@@ -469,10 +471,16 @@ $("#backup-form").addEventListener("submit", async (e) => {
 $("#pairing-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   try {
-    const out = await api("/api/devices/pairing", { method: "POST", body: JSON.stringify({ scopes: e.target.confirm.checked ? ["chat", "confirm"] : ["chat"] }) });
+    const node = e.target.node.checked;
+    const scopes = node ? ["node"] : (e.target.confirm.checked ? ["chat", "confirm"] : ["chat"]);
+    const out = await api("/api/devices/pairing", { method: "POST", body: JSON.stringify({ scopes }) });
     const box = $("#pairing-code");
     box.hidden = false;
-    box.replaceChildren(el("strong", {}, `${out.code.slice(0, 4)}-${out.code.slice(4)}`), ` valido fino alle ${new Date(out.expires_at).toLocaleTimeString("it-IT")}, una sola volta.`);
+    const code = `${out.code.slice(0, 4)}-${out.code.slice(4)}`;
+    box.replaceChildren(el("strong", {}, code), ` valido fino alle ${new Date(out.expires_at).toLocaleTimeString("it-IT")}, una sola volta.`,
+      node ? el("span", { class: "sub node-cmd" }, ` Sull'altro computer, nella cartella di JARVIS: `,
+        el("code", {}, `./jarvis.sh node <indirizzo del Core> ${code}`),
+        " (Windows: ", el("code", {}, `jarvis.cmd node <indirizzo> ${code}`), "). L'indirizzo è quello del proxy fidato, per esempio https://<computer>.ts.net.") : null);
   } catch (err) { alert(err.message); }
 });
 

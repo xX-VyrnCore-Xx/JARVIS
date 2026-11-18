@@ -485,6 +485,37 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - pacchetto rimosso con `dpkg -r`.
 - **Documenti interessati:** README.md, ACCEPTANCE.md, INTERFACE_AND_DEVICES.md, ROADMAP.md.
 
+### ADR-0017 — Nodi esecutori (Fase 5, RF-11)
+
+- **Data:** 2026-11-18 · **Stato:** Accettato. Restano aperte l'identità crittografica con mTLS (sostituirà il token del nodo), la VPN mesh, l'assegnazione automatica in base alle risorse e le capacità oltre file e sistema.
+- **Contesto:** il piano prevede nodi autorizzati che eseguono il lavoro assegnato dal Core. RF-11 chiede che un dispositivo revocato perda accesso e assegnazioni.
+- **Opzioni:**
+  - il Core si collega al nodo (porte aperte sul nodo, firewall e NAT da gestire);
+  - il nodo chiede lavoro al Core con richieste in uscita, attraverso lo stesso proxy fidato dei dispositivi;
+  - una coda esterna (servizio in più da gestire).
+- **Decisione:**
+  - **Associazione:** il proprietario genera un codice con il solo permesso `node`. Sull'altro computer si esegue `./jarvis.sh node <indirizzo-del-Core> <codice>` (stesso binario del Core, comando `jarvis node`). Il nodo dichiara gli strumenti che offre fra `system.info`, `time.now`, `fs.list`, `fs.read` e `fs.write`, e conserva il token in `node.json` con permessi 0600. Il documento `jarvis.device/1` aggiunge `slug` e `capabilities` (aggiunta compatibile).
+  - **Strumenti** `node.<slug>.<strumento>` nel catalogo dinamico: stessi schema, rischio e conferma dello strumento locale, ambito `node`. Policy, conferme e audit sono quelli del Core; i percorsi fuori dalla workspace sono negati dal Core prima della consegna e di nuovo dal nodo in esecuzione. L'effetto atteso nella conferma indica il nodo.
+  - **Trasporto:** richiesta lunga `GET /api/nodes/next` (fino a 25 s) ed esito su `POST /api/nodes/result/{id}`. Il nodo non apre porte.
+  - **Hub delle assegnazioni** (`nodes.rs`) con blocco proprio e impronte dei token. Il Core attende l'esito tenendo il proprio blocco: le richieste dei nodi non possono passare da quel blocco senza bloccarsi a vicenda. L'hub accetta solo esiti di assegnazioni consegnate a quel nodo.
+  - **Guasti:**
+    - nodo non in linea (nessuna richiesta nell'ultimo minuto): `node.offline` immediato;
+    - nessuna risposta entro `JARVIS_NODE_TIMEOUT_MS` (30 s): `node.timeout`, assegnazione ritirata, effetto `unknown` per le scritture;
+    - uno strumento non dichiarato viene rifiutato anche dal nodo.
+  - **Revoca:** il token smette di valere, la coda si svuota, le assegnazioni in attesa falliscono con `node.revoked`, gli strumenti escono dal catalogo e l'agente del nodo si ferma alla richiesta successiva.
+  - **Comando offline:** «nodo <slug> <strumento> chiave=valore». Con Ollama gli strumenti del nodo arrivano all'agente come descrittori dinamici.
+- **Motivazione:** il nodo funziona anche dietro NAT senza aprire porte e senza servizi aggiuntivi, e riusa associazione, revoca e permessi minimi già verificati per i dispositivi.
+- **Conseguenze:**
+  - il Core serve una richiesta alla volta mentre attende un nodo (limite già noto del prototipo);
+  - le scritture interrotte da un timeout hanno esito da verificare;
+  - il nodo non ha memoria, Web né automazioni propri.
+- **Evidenza:**
+  - `core/server/tests/nodes.rs`: 3 test con Core HTTP reale e agente in un altro thread (strumenti nel catalogo, lettura eseguita dal nodo, scrittura con conferma nella workspace del nodo e non in quella del Core, uscita dalla workspace negata, audit, permessi 0600 del token, revoca con agente fermato e strumenti rimossi, token revocato rifiutato, codice per chat che non associa un nodo, token del nodo che non apre l'API del proprietario, nodo non in linea);
+  - unitari in `nodes.rs` (2): attesa, ritiro, esito da un altro nodo rifiutato, revoca durante l'attesa;
+  - prova manuale: `./jarvis.sh node` come secondo processo, «nodo laboratorio system.info» dalla chat, revoca con uscita del processo («il nodo è stato revocato»);
+  - E2E: codice per nodo con il comando da eseguire.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, SECURITY_AND_PRIVACY.md, REQUIREMENTS.md, ACCEPTANCE.md, README.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

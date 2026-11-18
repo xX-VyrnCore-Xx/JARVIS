@@ -8,6 +8,7 @@
 #      ./jarvis.sh backup        backup cifrato dei dati (passphrase richiesta)
 #      ./jarvis.sh restore FILE  ripristina un backup .jbak (con JARVIS chiuso)
 #      ./jarvis.sh rollback      riporta i dati alla copia fatta prima dell'ultimo aggiornamento
+#      ./jarvis.sh node URL CODICE  questo computer diventa un nodo esecutore del Core all'indirizzo URL
 # In una release scaricata il Core è già compilato (bin/jarvis) e Rust non serve.
 # Su Windows usa jarvis.cmd (doppio clic) oppure jarvis.ps1.
 # Se il file non è eseguibile (es. scaricato come ZIP): bash jarvis.sh
@@ -135,7 +136,7 @@ open_browser() {
     sleep 1
   done
 }
-if [ "$CMD" = "backup" ] || [ "$CMD" = "restore" ] || [ "$CMD" = "rollback" ]; then
+if [ "$CMD" = "backup" ] || [ "$CMD" = "restore" ] || [ "$CMD" = "rollback" ] || [ "$CMD" = "node" ]; then
   # Manutenzione da terminale: il Core esegue l'operazione ed esce (restore e rollback richiedono JARVIS chiuso).
   exec "$CORE_BIN" "$@"
 fi

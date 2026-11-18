@@ -256,3 +256,15 @@ class OfflineBackend(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NodeCommandTest(unittest.TestCase):
+    """Comando offline per i nodi esecutori (ADR-0017): solo strumenti presenti nella delega."""
+
+    def test_node_call_is_parsed_only_for_delegated_tools(self):
+        from jarvis_ai import gateway as g
+        catalog = {"node.studio.fs.list": {"version": "1.0.0", "input_schema": {"properties": {"path": {"type": "string"}}}}}
+        self.assertEqual(g._parse_node_call("nodo studio fs.list path=docs", catalog), ("node.studio.fs.list", {"path": "docs"}))
+        self.assertIsNone(g._parse_node_call("nodo altro fs.list", catalog))
+        text = g._describe_tool_result({"tool": "node.studio.fs.list", "status": "denied", "output": {"reason": "policy"}})
+        self.assertTrue(text.startswith("[nodo studio]"), text)

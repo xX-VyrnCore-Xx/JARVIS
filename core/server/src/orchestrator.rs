@@ -140,6 +140,9 @@ pub struct Jarvis {
     metrics_saved: Option<std::time::Instant>,
     /// Codici di associazione monouso in attesa (RF-11): codice -> (scadenza, permessi).
     pairings: HashMap<String, (std::time::Instant, Vec<String>)>,
+    /// Nodi esecutori (RF-11, ADR-0017): assegnazioni e token, con un blocco proprio.
+    nodes: std::sync::Arc<crate::nodes::NodeHub>,
+    node_timeout: std::time::Duration,
     pair_failures: u32,
     /// Blocco esclusivo sulla cartella dati: un solo Core per volta (rilasciato alla chiusura).
     _lock: std::fs::File,
@@ -197,10 +200,18 @@ impl Jarvis {
             secrets,
             metrics_saved: None,
             pairings: HashMap::new(),
+            nodes: std::sync::Arc::new(crate::nodes::NodeHub::default()),
+            node_timeout: std::time::Duration::from_millis(
+                std::env::var("JARVIS_NODE_TIMEOUT_MS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(30_000),
+            ),
             pair_failures: 0,
             _lock: lock,
         };
         jarvis.register_authorized_connectors()?;
+        jarvis.register_nodes()?;
         crate::rollback::mark(&jarvis.cfg.data_dir)?;
         if let Some(up) = upgraded {
             jarvis.obs.log(
@@ -334,7 +345,7 @@ impl Jarvis {
     /// (limite di 32 del contratto di delega).
     fn delegated_tools(&self) -> impl Iterator<Item = &crate::catalog::Tool> {
         fn dynamic(t: &&crate::catalog::Tool) -> bool {
-            t.name().starts_with("connector.")
+            t.name().starts_with("connector.") || t.name().starts_with("node.")
         }
         self.catalog
             .iter()
@@ -347,7 +358,7 @@ impl Jarvis {
     fn with_dynamic_tools(&self, inputs: &Value) -> Value {
         let dynamic: Vec<Value> = self
             .delegated_tools()
-            .filter(|t| t.name().starts_with("connector."))
+            .filter(|t| t.name().starts_with("connector.") || t.name().starts_with("node."))
             .map(|t| json!({"name": t.name(), "version": t.version(), "summary": t.descriptor["summary"], "input_schema": t.descriptor["input_schema"]}))
             .collect();
         if dynamic.is_empty() || !inputs.is_object() {
@@ -931,6 +942,7 @@ impl Jarvis {
                 Ok(json!({"id": short(&doc), "name": doc["name"]}))
             }
             t if t.starts_with("connector.") => self.call_connector(t, arguments, confirmed),
+            t if t.starts_with("node.") => self.call_node(t, arguments, confirmed),
             _ => {
                 let workspace = self.cfg.workspace();
                 tools::execute(
@@ -1893,10 +1905,13 @@ impl Jarvis {
     pub fn create_pairing(&mut self, scopes: &[String]) -> Result<Value, CoreError> {
         let mut scopes: Vec<String> = scopes
             .iter()
-            .filter(|s| matches!(s.as_str(), "chat" | "confirm"))
+            .filter(|s| matches!(s.as_str(), "chat" | "confirm" | "node"))
             .cloned()
             .collect();
-        if !scopes.iter().any(|s| s == "chat") {
+        if scopes.iter().any(|s| s == "node") {
+            // Un nodo esecutore non chatta e non conferma: riceve solo assegnazioni.
+            scopes = vec!["node".into()];
+        } else if !scopes.iter().any(|s| s == "chat") {
             scopes.insert(0, "chat".into());
         }
         scopes.dedup();
@@ -1924,6 +1939,7 @@ impl Jarvis {
         code: &str,
         name: &str,
         platform: &str,
+        capabilities: &[String],
     ) -> Result<Value, CoreError> {
         let code = code.trim().to_ascii_uppercase().replace(['-', ' '], "");
         let now_i = std::time::Instant::now();
@@ -1956,11 +1972,39 @@ impl Jarvis {
         let mut raw = [0u8; 32];
         getrandom::getrandom(&mut raw).map_err(internal)?;
         let token = hex::encode(raw);
-        let doc = json!({
+        let mut doc = json!({
             "contract": "jarvis.device/1", "device_id": uuid::Uuid::new_v4().to_string(),
             "name": if name.is_empty() { "Dispositivo".to_string() } else { name },
             "platform": platform, "scopes": scopes, "enrolled_at": now(),
         });
+        let is_node = scopes.iter().any(|s| s == "node");
+        if is_node {
+            let taken: Vec<String> = self
+                .store
+                .devices()
+                .map_err(internal)?
+                .iter()
+                .filter(|d| d.get("revoked_at").is_none())
+                .filter_map(|d| d["slug"].as_str().map(str::to_string))
+                .collect();
+            let base = crate::nodes::slug(doc["name"].as_str().unwrap_or("nodo"));
+            let mut slug = base.clone();
+            let mut n = 2;
+            while taken.contains(&slug) {
+                slug = format!("{base}-{n}");
+                n += 1;
+            }
+            let mut caps: Vec<&str> = crate::nodes::NODE_TOOLS
+                .iter()
+                .copied()
+                .filter(|t| capabilities.iter().any(|c| c == t))
+                .collect();
+            if caps.is_empty() {
+                caps = vec!["system.info", "time.now"];
+            }
+            doc["slug"] = slug.into();
+            doc["capabilities"] = json!(caps);
+        }
         let report = validate(Contract::Device, &doc);
         if !report.is_valid() {
             return Err(CoreError::Internal(format!(
@@ -1971,6 +2015,10 @@ impl Jarvis {
             .device_put(&doc, &sha256_hex(&token))
             .map_err(internal)?;
         let id = doc["device_id"].as_str().unwrap_or_default().to_string();
+        if is_node {
+            self.register_node(&doc, &sha256_hex(&token))
+                .map_err(CoreError::Internal)?;
+        }
         self.device_audit("device.pair", &id, "succeeded")?;
         self.notify(json!({"severity": "info", "category": "security", "title": format!("Nuovo dispositivo associato: {}", doc["name"].as_str().unwrap_or("")),
             "body": format!("Permessi: {}. Puoi revocarlo dalla sezione Dispositivi.", scopes.join(", ")),
@@ -2021,9 +2069,154 @@ impl Jarvis {
             self.store.device_put(&doc, "").map_err(internal)?;
             // L'impronta viene cancellata: il vecchio token non trova più alcun dispositivo.
             self.store.device_retire_token(id).map_err(internal)?;
+            if let Some(slug) = doc["slug"].as_str() {
+                // Nodo: token, coda e assegnazioni in attesa annullati, strumenti tolti dal catalogo.
+                self.nodes.revoke(id);
+                self.catalog.remove_prefix(&format!("node.{slug}."));
+            }
             self.device_audit("device.revoke", id, "revoked")?;
         }
         Ok(doc)
+    }
+}
+
+// ---------------------------------------------------------------------- Nodi esecutori (RF-11)
+
+impl Jarvis {
+    pub fn node_hub(&self) -> std::sync::Arc<crate::nodes::NodeHub> {
+        self.nodes.clone()
+    }
+
+    fn register_node(&mut self, doc: &Value, hash: &str) -> Result<(), String> {
+        let id = doc["device_id"].as_str().unwrap_or_default();
+        let slug = doc["slug"].as_str().unwrap_or_default();
+        let name = doc["name"].as_str().unwrap_or(slug);
+        self.nodes.register(id, hash);
+        self.catalog.remove_prefix(&format!("node.{slug}."));
+        for cap in doc["capabilities"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+        {
+            let base = self
+                .catalog
+                .get(cap)
+                .ok_or_else(|| format!("strumento di base sconosciuto: {cap}"))?
+                .descriptor
+                .clone();
+            self.catalog
+                .insert_dynamic(crate::nodes::tool_descriptor(&base, slug, name))?;
+        }
+        Ok(())
+    }
+
+    fn register_nodes(&mut self) -> Result<(), String> {
+        for (doc, hash) in self.store.devices_with_hash().map_err(|e| e.to_string())? {
+            if doc.get("revoked_at").is_none()
+                && doc["scopes"]
+                    .as_array()
+                    .is_some_and(|s| s.iter().any(|x| x == "node"))
+            {
+                self.register_node(&doc, &hash)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Nodi associati con lo stato di connessione (in linea se hanno chiesto lavoro nell'ultimo minuto).
+    pub fn nodes(&self) -> Result<Vec<Value>, CoreError> {
+        Ok(self
+            .store
+            .devices()
+            .map_err(internal)?
+            .into_iter()
+            .filter(|d| {
+                d["scopes"]
+                    .as_array()
+                    .is_some_and(|s| s.iter().any(|x| x == "node"))
+            })
+            .map(|mut d| {
+                let id = d["device_id"].as_str().unwrap_or_default().to_string();
+                d["online"] = (d.get("revoked_at").is_none()
+                    && self.nodes.online(&id, std::time::Duration::from_secs(60)))
+                .into();
+                d
+            })
+            .collect())
+    }
+
+    /// Assegna lo strumento al nodo e attende l'esito. Policy e conferma sono già state applicate dal
+    /// Core come per gli strumenti locali; qui si ricontrolla la conferma per le scritture.
+    fn call_node(
+        &mut self,
+        tool: &str,
+        arguments: &Value,
+        confirmed: bool,
+    ) -> Result<Value, tools::ToolError> {
+        let rest = tool.strip_prefix("node.").unwrap_or_default();
+        let (slug, base) = rest.split_once('.').unwrap_or((rest, ""));
+        let descriptor = self
+            .catalog
+            .get(tool)
+            .ok_or_else(|| tool_error("node.revoked", "nodo non associato o revocato"))?;
+        if descriptor.needs_confirmation() && !confirmed {
+            return Err(tool_error(
+                "node.not_confirmed",
+                "l'operazione sul nodo richiede la conferma del proprietario",
+            ));
+        }
+        let node = self
+            .store
+            .devices()
+            .map_err(|e| tool_error("node.unavailable", e.to_string()))?
+            .into_iter()
+            .find(|d| d["slug"] == slug && d.get("revoked_at").is_none())
+            .ok_or_else(|| tool_error("node.revoked", "nodo non associato o revocato"))?;
+        let id = node["device_id"].as_str().unwrap_or_default().to_string();
+        if !self.nodes.online(&id, std::time::Duration::from_secs(60)) {
+            return Err(tool_error(
+                "node.offline",
+                format!(
+                    "il nodo {} non è in linea",
+                    node["name"].as_str().unwrap_or(slug)
+                ),
+            ));
+        }
+        let timer = Timer::start();
+        let assignment = self.nodes.enqueue(&id, base, arguments);
+        let outcome = self.nodes.wait_result(&assignment, self.node_timeout);
+        self.obs
+            .observe(&format!("node {slug}"), timer.ms(), outcome.is_err());
+        self.obs.log("info", "node.assignment", json!({"node": slug, "tool": base, "ok": outcome.is_ok(), "duration_ms": (timer.ms() * 10.0).round() / 10.0}));
+        outcome.map_err(|(code, message)| {
+            // I codici del nodo passano solo se ben formati; il messaggio resta testo.
+            const PASSTHROUGH: [&str; 10] = [
+                "node.timeout",
+                "node.revoked",
+                "fs.outside_workspace",
+                "fs.not_found",
+                "fs.not_a_directory",
+                "fs.not_a_file",
+                "fs.too_large",
+                "fs.not_text",
+                "fs.is_directory",
+                "fs.unavailable",
+            ];
+            let known: &'static str = PASSTHROUGH
+                .iter()
+                .find(|c| **c == code)
+                .copied()
+                .unwrap_or("node.tool_failed");
+            tool_error(
+                known,
+                format!(
+                    "{}: {}",
+                    node["name"].as_str().unwrap_or(slug),
+                    message.chars().take(500).collect::<String>()
+                ),
+            )
+        })
     }
 }
 
@@ -2309,7 +2502,13 @@ impl Jarvis {
             .catalog
             .get(tool)
             .is_some_and(|t| t.descriptor["effects"] == "write_external");
-        if write_external && matches!(code, "web.timeout" | "web.unreachable") {
+        let node_write = tool.starts_with("node.")
+            && self.catalog.get(tool).is_some_and(|t| {
+                t.descriptor["effects"] != "read" && t.descriptor["effects"] != "none"
+            });
+        if (write_external && matches!(code, "web.timeout" | "web.unreachable"))
+            || (node_write && code == "node.timeout")
+        {
             "unknown"
         } else {
             "not_applied"

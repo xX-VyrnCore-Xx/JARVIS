@@ -16,7 +16,7 @@ Questo documento raccoglie ciò che serve per l'accettazione finale descritta in
 | RF-08 Memoria | `api.rs`, E2E | P1 | Verde | Nessun indice semantico |
 | RF-09 Voce | `voice.rs`, `tests/ai/test_voice.py`, E2E con motori finti | P6 | Verde (finti) | Motori reali solo sul tuo computer |
 | RF-10 Client | E2E Web e telefono simulato, CI desktop su 3 sistemi | P7, P8 | Verde | iOS nativo compilato; prova dispositivo, Android e sincronizzazione fonetica in sospeso |
-| RF-11 Dispositivi | `devices.rs`, E2E | P8 | Verde | Nodi esecutori, mTLS e VPN mesh assenti |
+| RF-11 Dispositivi e nodi | `devices.rs`, `nodes.rs`, E2E | P8, P13 | Verde | mTLS, VPN mesh e assegnazione automatica assenti |
 | RF-12 Dati | backup, rollback | P9 | Verde | Nessuna sincronizzazione fra nodi |
 | RF-13 Notifiche | `notifications.rs`, E2E | P5 | Verde | Nessun canale esterno |
 | RF-14 Connettori | `connectors.rs`, E2E | P10 | Verde | Niente OAuth né plugin con codice |
@@ -61,6 +61,7 @@ Da eseguire sul proprio computer con una release o con i sorgenti. Annotare esit
 | P10 | Connettore | Installa un connettore verso un servizio tuo, autorizza, revoca | Chiamata riuscita; dopo la revoca la chiamata è negata |
 | P11 | Prestazioni | `python tests/perf/latency.py http://127.0.0.1:8765 30` con Ollama attivo | p95 entro `tests/perf/slo.json` per le serie senza modello; registrare quelle con il modello |
 | P12 | Sicurezza | Dal telefono prova sezioni del proprietario; apri l'indirizzo da un host non ammesso | Accesso negato; host rifiutato |
+| P13 | Nodo esecutore | Su un secondo computer con Tailscale: codice «Nodo esecutore» dalla sezione Dispositivi, `./jarvis.sh node https://<core>.ts.net <codice>`, poi in chat «nodo <nome> system.info» e «nodo <nome> fs.write path=prova.txt content=ciao»; infine revoca | Informazioni del secondo computer; scrittura solo dopo conferma e nella workspace del nodo; dopo la revoca il nodo si ferma e i suoi strumenti spariscono |
 
 ## Criteri di rilascio
 

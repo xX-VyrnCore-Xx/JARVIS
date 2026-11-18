@@ -205,7 +205,14 @@ function check(cond, msg) {
 
   // Dispositivi (RF-11): un secondo contesto fa da telefono su un host remoto ammesso (JARVIS_ALLOWED_HOSTS=jarvis.test).
   await page.click('[data-view="devices"]');
+  // Nodo esecutore: il codice mostra il comando da eseguire sull'altro computer.
+  await page.check('#pairing-form input[name="node"]');
   await page.click('#pairing-form button[type="submit"]');
+  await page.waitForSelector("#pairing-code .node-cmd");
+  check((await page.locator("#pairing-code").innerText()).includes("jarvis.sh node"), "codice per un nodo esecutore con il comando da eseguire");
+  await page.uncheck('#pairing-form input[name="node"]');
+  await page.click('#pairing-form button[type="submit"]');
+  await page.waitForFunction(() => !document.querySelector("#pairing-code .node-cmd"));
   const code = (await page.locator("#pairing-code strong").innerText()).trim();
   const phoneCtx = await browser.newContext({ viewport: { width: 390, height: 800 } });
   const phone = await phoneCtx.newPage();

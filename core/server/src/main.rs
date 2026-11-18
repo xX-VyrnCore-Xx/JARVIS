@@ -21,6 +21,48 @@ fn passphrase() -> String {
 /// `jarvis backup` e `jarvis restore <file>` (RNF-08). Restituisce il codice di uscita.
 fn maintenance(cfg: &Config, args: &[String]) -> Option<i32> {
     match args.first().map(String::as_str) {
+        Some("node") => {
+            // Nodo esecutore (RF-11): jarvis node <url-del-core> [--code C] [--name N] [--tools a,b]
+            let Some(core_url) = args.get(1).filter(|a| a.starts_with("http")) else {
+                eprintln!("Uso: jarvis node <url-del-core> <codice> [--name <nome>] [--tools system.info,fs.list,...]");
+                return Some(2);
+            };
+            let opt = |flag: &str| {
+                args.iter()
+                    .position(|a| a == flag)
+                    .and_then(|i| args.get(i + 1))
+                    .cloned()
+            };
+            let host_name = std::env::var("HOSTNAME")
+                .or_else(|_| std::env::var("COMPUTERNAME"))
+                .unwrap_or_else(|_| "Nodo".into());
+            let agent_cfg = jarvis_core::node_agent::AgentConfig {
+                core_url: core_url.trim_end_matches('/').to_string(),
+                dir: std::env::var_os("JARVIS_NODE_DIR")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|| cfg.data_dir.join("node")),
+                name: opt("--name").unwrap_or(host_name),
+                // Il codice si può passare anche come secondo argomento (comodo da PowerShell).
+                code: opt("--code")
+                    .or_else(|| args.get(2).filter(|a| !a.starts_with("--")).cloned()),
+                capabilities: opt("--tools")
+                    .map(|t| t.split(',').map(|x| x.trim().to_string()).collect())
+                    .unwrap_or_default(),
+                poll_wait_s: 20,
+            };
+            let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            Some(match jarvis_core::node_agent::run(&agent_cfg, stop) {
+                Ok(()) => 0,
+                Err(e) => {
+                    eprintln!("✗ {e}");
+                    if matches!(e, jarvis_core::node_agent::AgentError::Revoked) {
+                        3
+                    } else {
+                        1
+                    }
+                }
+            })
+        }
         Some("--version") => {
             println!("jarvis {}", env!("CARGO_PKG_VERSION"));
             Some(0)

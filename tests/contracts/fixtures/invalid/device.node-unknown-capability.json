@@ -1,0 +1,14 @@
+{
+  "contract": "jarvis.device/1",
+  "device_id": "7a1c2d3e-4b5a-4c6d-8e7f-901234567891",
+  "name": "Nodo",
+  "platform": "desktop",
+  "scopes": [
+    "node"
+  ],
+  "slug": "nodo",
+  "capabilities": [
+    "terminal.exec"
+  ],
+  "enrolled_at": "2026-11-18T06:00:00.000Z"
+}

@@ -89,7 +89,7 @@ impl Catalog {
     /// così un manifest non può sostituire uno strumento statico.
     pub fn insert_dynamic(&mut self, descriptor: Value) -> Result<(), String> {
         let name = descriptor["name"].as_str().unwrap_or_default().to_string();
-        if !name.starts_with("connector.") {
+        if !name.starts_with("connector.") && !name.starts_with("node.") {
             return Err(format!(
                 "strumento dinamico fuori dallo spazio dei connettori: {name}"
             ));
@@ -109,9 +109,13 @@ impl Catalog {
 
     /// Rimuove gli strumenti di un connettore; restituisce quanti ne ha tolti.
     pub fn remove_connector(&mut self, id: &str) -> usize {
-        let prefix = format!("connector.{id}.");
+        self.remove_prefix(&format!("connector.{id}."))
+    }
+
+    /// Rimuove gli strumenti dinamici con il prefisso indicato (connettori o nodi).
+    pub fn remove_prefix(&mut self, prefix: &str) -> usize {
         let before = self.tools.len();
-        self.tools.retain(|name, _| !name.starts_with(&prefix));
+        self.tools.retain(|name, _| !name.starts_with(prefix));
         before - self.tools.len()
     }
 }
