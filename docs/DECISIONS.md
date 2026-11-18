@@ -908,6 +908,20 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `tsc` e `npm run build` OK; E2E `tests/e2e/ui_smoke.cjs` superato con il Core 1.3.0 offline; `cargo fmt`, `clippy -D warnings` e `cargo check` dell'app Tauri OK; schermate di Plancia, Chat e palette controllate.
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
 
+### ADR-0036 — Icona, installatori e finestra dell'app per macOS e Windows
+
+- **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario («migliora la grafica dell'app macOS e il file di installazione, fai sì che funzioni e migliora anche per Windows»). Estende ADR-0016, ADR-0020 e ADR-0035.
+- **Decisione:**
+  - nuova icona disegnata in modo riproducibile da `scripts/make_brand_assets.py` (Pillow, nessuna risorsa esterna): lastra arrotondata scura con emblema a reattore; su macOS margini e ombra della griglia Apple, su Windows e Linux lastra a tutta superficie;
+  - `.dmg` impaginato: sfondo con istruzioni («Trascina JARVIS nella cartella Applicazioni», percorso «Apri comunque»), lastra chiara dietro le icone perché le etichette di Finder restino leggibili in modalità chiara e scura, posizioni fisse di app e Applicazioni. In CI la build macOS gira con `CI=false` (altrimenti Tauri salta l'impaginazione) e ripiega sul `.dmg` semplice se Finder non risponde;
+  - macOS 11 come versione minima dichiarata; barra del titolo trasparente senza testo sopra lo sfondo scuro della finestra;
+  - all'avvio, dopo l'autorizzazione del proprietario, l'app toglie l'attributo di quarantena dal proprio pacchetto in `/Applications`, così Core e Python inclusi non vengono bloccati come programmi scaricati; nessun effetto se l'app gira dal `.dmg` montato o da una copia traslocata;
+  - Windows: setup NSIS in italiano con immagini laterale e d'intestazione, icona dell'installer e cartella del menu Start «JARVIS»; MSI con banner e immagine di dialogo; finestra con tema scuro (ADR-0035);
+  - note di installazione per ogni sistema in testa alla release (`.github/release-notes.md`); la verifica in CI controlla anche il sigillo profondo (`codesign --deep --strict`) e il collegamento ad Applicazioni nel `.dmg`.
+- **Conseguenze:** senza certificati commerciali restano gli avvisi di Gatekeeper e SmartScreen al primo avvio, ora spiegati nel `.dmg` e nella release. La versione passa a 1.3.2.
+- **Evidenza:** anteprima delle risorse generate; `cargo fmt` e `clippy -D warnings` dell'app su Linux; build degli installatori e prove di installazione nel workflow `release` sui 3 sistemi (il codice solo macOS si compila lì).
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md, README.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).
