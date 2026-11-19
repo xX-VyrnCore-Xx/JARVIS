@@ -57,3 +57,6 @@ Dettagli in ADR-0005.
 
 
 **Più strumenti per richiesta (ADR-0037).** L'orchestratore esegue fino a 4 strumenti in sequenza per richiesta; ognuno passa da policy, audit ed eventuale conferma, e una proposta ripetuta chiude il ciclo. Con OAuth un 401 provoca un rinnovo immediato e una sola nuova chiamata.
+
+
+**Processi, terminale e specializzazioni (ADR-0038).** `process.list` elenca i processi senza conferma; `shell.run` esegue un comando nella workspace solo dopo la conferma del proprietario, con limite di 60 secondi, output troncato e negazione dei comandi distruttivi noti (`JARVIS_SHELL=off` lo disattiva). Il Core affida le richieste di un solo ambito a uno specialista (`research`, `system`, `automation`, `memory`, `coding`) che riceve solo gli strumenti di quell'ambito.

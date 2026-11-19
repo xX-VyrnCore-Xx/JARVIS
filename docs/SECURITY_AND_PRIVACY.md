@@ -54,3 +54,6 @@ Da completare:
 - chiave dei segreti nel portachiavi del sistema operativo;
 - cifratura dei dati a riposo e dei backup;
 - firma o ancoraggio esterno dell'audit.
+
+
+**Terminale (ADR-0038).** Ogni comando di `shell.run` richiede la conferma del proprietario con il testo esatto del comando; nessuna variabile `JARVIS_*` passa al processo; comandi con `sudo` o distruttivi noti sono negati dalla policy; il terminale non è ammesso in automazioni e nodi e si disattiva con `JARVIS_SHELL=off`.

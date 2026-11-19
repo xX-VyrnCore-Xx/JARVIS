@@ -163,6 +163,9 @@ function check(cond, msg) {
   check((await send("leggi diario.txt")).includes("nota creata dal test E2E"), "lettura del file scritto");
   check((await send("leggi ../../etc/passwd")).includes("negato"), "uscita dalla workspace negata");
   await send("ricorda che il test E2E è passato");
+  check((await page.locator(".msg.assistant").last().locator(".step.specialist").innerText()).includes("memoria"), "richiesta di memoria affidata allo specialista della memoria");
+  const procs = await send("quali processi usano più memoria?");
+  check(procs.startsWith("Processi con più uso di memoria") && /pid \d+/.test(procs), "processi in esecuzione elencati senza conferma");
   if (shots) await page.screenshot({ path: `${shots}/jarvis-chat.png` });
 
   await page.click('[data-view="memory"]');

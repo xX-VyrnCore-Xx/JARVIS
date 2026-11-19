@@ -194,3 +194,37 @@ async fn loop_stops_after_four_tools() {
         "all'ultimo passo il modello non riceve strumenti"
     );
 }
+
+#[tokio::test]
+async fn specialist_gets_only_its_tools_and_cannot_leave_its_scope() {
+    // Richiesta di ricerca: l'agente `research` riceve solo Web, ora e ricerca nella memoria (ADR-0038).
+    let (url, seen) = fake_ollama(vec![("shell__run", json!({"command": "ls"}))], false);
+    let out = chat(url, 18774, "cerca sul web le novità di Rust").await;
+    let first = seen.lock().unwrap()[0].clone();
+    let mut offered: Vec<String> = first["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["function"]["name"].as_str().unwrap().to_string())
+        .collect();
+    offered.sort();
+    assert_eq!(
+        offered,
+        ["memory__search", "time__now", "web__fetch", "web__search"],
+        "{first}"
+    );
+    assert!(first["messages"][0]["content"]
+        .as_str()
+        .unwrap()
+        .contains("Specializzazione per questa richiesta — Ricerca"));
+    // Una proposta fuori ambito viene scartata (dal worker e, in seconda difesa, dal Core): nessuna esecuzione.
+    let steps = out["steps"].as_array().unwrap();
+    assert_eq!(steps[0]["agent"], "research", "{out}");
+    assert!(
+        !steps
+            .iter()
+            .any(|s| s["kind"] == "tool_call" || s["kind"] == "policy"),
+        "{out}"
+    );
+    assert!(out["confirmation"].is_null());
+}

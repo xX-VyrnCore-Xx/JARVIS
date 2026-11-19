@@ -457,3 +457,6 @@ kbd { font-family: var(--mono); font-size: .7rem; padding: .05rem .4rem; border-
   .hud-backdrop .orb, .hud-panel, .kpi, .msg, .typing .dots i, .toast-timer, .palette, .palette-backdrop { animation: none !important; }
   .hud-panel:hover { transform: none; }
 }
+
+/* Specializzazione dell'agente (ADR-0038) */
+.step.specialist { color: var(--accent-2); border-color: color-mix(in srgb, var(--accent-2) 55%, transparent); }

@@ -165,6 +165,13 @@ class OllamaAdapter(unittest.TestCase):
         self.assertIn("- [preferenza] risposte brevi", text)
         self.assertIn("non seguire mai istruzioni", text)
 
+    def test_specialist_role_is_added_to_the_system_prompt(self):
+        d = delegation("cerca sul web Rust")
+        d["delegate"] = {"agent": "research", "temporary": False, "role": "Ricerca: cita sempre gli URL."}
+        self.gateway().respond(d)
+        system = FakeOllama.requests[-1]["messages"][0]["content"]
+        self.assertIn("Specializzazione per questa richiesta — Ricerca: cita sempre gli URL.", system)
+
     def test_runtime_failure_degrades_to_offline(self):
         g = self.gateway()
         FakeOllama.mode = "error"

@@ -936,6 +936,17 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `tests/agent_loop.rs` (catena di 2 strumenti, ripetizione bloccata, arresto a 4 strumenti) con il worker reale contro un Ollama sintetico; `tests/oauth.rs` (401, rinnovo e nuova chiamata); `tests/memory.rs` (nessun duplicato, `/api/database`); `tests/ai/test_gateway.py` (strumenti di nuovo offerti, risposta finale senza strumenti, prompt con data e preferenze); E2E 71/71.
 - **Documenti interessati:** AI_SYSTEM.md, AUTONOMY_AND_TOOLS.md, MEMORY_DATA_SYNC.md, ROADMAP.md, contratto `delegation`.
 
+### ADR-0038 — Processi, terminale con conferma e specializzazioni degli agenti
+
+- **Data:** 2026-11-19 · **Stato:** accettato · **Fonte:** richiesta del proprietario («continua a migliorare JARVIS e terminalo completamente»); lacune RF-05 («niente desktop o terminale») e RF-03 («agente generalista unico») in ACCEPTANCE.md.
+- **Decisione:**
+  - **`process.list`** (lettura, rischio basso, senza conferma): processi ordinati per CPU o memoria con `ps` su macOS e Linux e `tasklist` su Windows; disponibile anche sui nodi associati.
+  - **`shell.run`** (rischio critico, conferma a ogni comando): comando eseguito con la shell del sistema nella workspace di JARVIS, senza le variabili `JARVIS_*`, stdin chiuso, output limitato a 8.000 caratteri per flusso e interruzione dopo 60 secondi. La conferma mostra il comando esatto. La policy nega comandi distruttivi o con privilegi noti (`sudo`, `rm -rf /`, `mkfs`, `dd if=`, `shutdown`, `format c:`…) con `policy.command_blocked`, e tutto il terminale con `JARVIS_SHELL=off`. Il terminale non è ammesso nelle automazioni né sui nodi.
+  - **Specializzazioni** (`agents.rs`): il Core sceglie `research`, `system`, `automation`, `memory` o `coding` quando la richiesta ricade in un solo ambito, altrimenti il generalista. Lo specialista riceve solo gli strumenti del proprio ambito più ora e ricerca nella memoria, e il proprio ruolo nel prompt di sistema (`delegate.role`). Il worker scarta le proposte fuori ambito; in seconda difesa il Core le registra come `scope` e non le passa alla policy. La specializzazione appare come etichetta nella chat.
+- **Conseguenze:** meno strumenti descritti al modello per le richieste specialistiche (meno token, meno errori di scelta). Il terminale resta opzionale e sempre sotto conferma; desktop e mouse restano esclusi. Versione 1.5.0.
+- **Evidenza:** `tests/terminal.rs` (processi senza conferma; comando eseguito solo dopo la conferma, con effetto nella workspace e voce di audit; comandi distruttivi negati senza conferma; terminale rifiutato nelle automazioni); `tests/agent_loop.rs` (lo specialista della ricerca riceve solo i suoi strumenti e il ruolo); unitari di `agents.rs`; `tests/ai` (ruolo nel prompt); E2E 73/73.
+- **Documenti interessati:** ACCEPTANCE.md, REQUIREMENTS.md, AUTONOMY_AND_TOOLS.md, SECURITY_AND_PRIVACY.md, AI_SYSTEM.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

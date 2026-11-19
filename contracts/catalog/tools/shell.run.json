@@ -1,0 +1,47 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "shell.run",
+  "version": "1.0.0",
+  "summary": "Esegue un comando del terminale nella workspace di JARVIS, dopo la conferma del proprietario; restituisce codice d'uscita e output",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "command"
+    ],
+    "properties": {
+      "command": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 2000,
+        "description": "Comando completo, eseguito con la shell del sistema (sh su macOS e Linux, cmd su Windows)"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "node",
+  "prerequisites": [
+    "Conferma del proprietario per ogni comando",
+    "Cartella di lavoro: la workspace di JARVIS",
+    "Comandi distruttivi noti negati dalla policy",
+    "Disattivabile con JARVIS_SHELL=off"
+  ],
+  "effects": "write_local",
+  "risk": "critical",
+  "permissions": [
+    "node.terminal:execute"
+  ],
+  "errors": [
+    "shell.not_confirmed",
+    "shell.timeout",
+    "shell.unavailable"
+  ],
+  "timeout_ms": 60000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "required"
+}
