@@ -474,3 +474,22 @@ kbd { font-family: var(--mono); font-size: .7rem; padding: .05rem .4rem; border-
 .span-row.task .span-bar { background: color-mix(in srgb, var(--accent) 35%, transparent); }
 .span-ms { font-family: var(--mono); color: var(--muted); text-align: right; }
 @media (max-width: 720px) { .span-row { grid-template-columns: 1fr 52px; } .span-track { grid-column: 1 / -1; grid-row: 2; } }
+
+/* App desktop (ADR-0044): su macOS barra laterale e intestazione traslucide come le app di sistema; su Windows
+   superfici piene in stile Fluent. L'interfaccia non si seleziona come testo, i contenuti sì. */
+:root.app-desktop .topbar, :root.app-desktop .nav { -webkit-user-select: none; user-select: none; }
+:root.app-desktop.platform-mac .nav {
+  background: color-mix(in srgb, var(--panel-solid) 55%, transparent);
+  backdrop-filter: blur(28px) saturate(1.5); -webkit-backdrop-filter: blur(28px) saturate(1.5);
+  border-right: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+:root.app-desktop.platform-mac .topbar {
+  background: color-mix(in srgb, var(--panel-solid) 50%, transparent);
+  backdrop-filter: blur(24px) saturate(1.4); -webkit-backdrop-filter: blur(24px) saturate(1.4);
+}
+:root.app-desktop.platform-mac .nav-item { border-radius: 8px; }
+:root.app-desktop.platform-mac .hud-panel { border-radius: 14px; }
+:root.app-desktop.platform-win .nav { background: var(--panel-solid); }
+:root.app-desktop.platform-win .nav-item.active { box-shadow: inset 3px 0 0 var(--accent); border-radius: 6px; }
+:root.app-desktop.platform-win .hud-panel, :root.app-desktop.platform-win .kpi { border-radius: 8px; }
+:root.app-desktop.platform-win button { border-radius: 6px; }

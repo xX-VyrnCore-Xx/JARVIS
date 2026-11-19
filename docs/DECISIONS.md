@@ -1020,6 +1020,20 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `tests/browser.rs` con il browser reale contro un sito sintetico (JavaScript eseguito, collegamento seguito, modulo inviato, immagine verso host negato bloccata e mai ricevuta, campo inesistente, indirizzo privato rifiutato prima dell'avvio; dalla chat: lettura senza conferma con fonte, invio solo dopo la conferma con password mascherata); in CI il browser è obbligatorio (`google-chrome` dei runner Ubuntu).
 - **Documenti interessati:** ACCEPTANCE.md, AUTONOMY_AND_TOOLS.md, SECURITY_AND_PRIVACY.md, ROADMAP.md.
 
+### ADR-0044 — App desktop nativa: barra dei menu, scorciatoia globale e notifiche di sistema
+
+- **Data:** 2026-11-19 · **Stato:** accettato · **Fonte:** richiesta del proprietario («migliora la grafica dell'app Windows e soprattutto dell'app macOS»).
+- **Decisione:**
+  - icona nella barra dei menu (macOS) o nell'area di notifica (Windows, Linux) con «Apri JARVIS», «Nascondi», «Esci da JARVIS»; clic sinistro per mostrare o nascondere;
+  - su macOS menu dell'applicazione in italiano (Informazioni, Nascondi, Modifica con copia e incolla, Finestra, Schermo intero) e riapertura dal Dock;
+  - chiudere la finestra la nasconde: voce, automazioni e notifiche restano attive; solo «Esci da JARVIS» ferma Core e worker;
+  - scorciatoia globale ⌘⇧J (macOS) o Ctrl+Maiusc+J (Windows, Linux) per mostrare o nascondere JARVIS da qualunque app; istanza singola; posizione e dimensioni della finestra ricordate;
+  - notifiche native del sistema: l'app legge le notifiche non lette del Core ogni 10 secondi e mostra le nuove quando la finestra non è in primo piano (la WebView di macOS non offre le notifiche Web); il launcher genera il token di sessione (128 bit) e lo passa al Core con `JARVIS_TOKEN`;
+  - dashboard nell'app: su macOS barra laterale e intestazione traslucide, raggi morbidi; su Windows superfici piene in stile Fluent con indicatore della voce attiva; interfaccia non selezionabile come testo.
+- **Conseguenze:** JARVIS si comporta come un assistente residente. La scorciatoia può essere già occupata da un'altra app: in quel caso resta l'icona. La prova P7 è aggiornata.
+- **Evidenza:** `cargo clippy -D warnings` e build bloccata dell'app su Linux; build dell'app su macOS e Windows nella CI; `launches_core_on_free_port_and_stops_it` verifica che il token del launcher apra le notifiche del Core.
+- **Documenti interessati:** ACCEPTANCE.md, INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

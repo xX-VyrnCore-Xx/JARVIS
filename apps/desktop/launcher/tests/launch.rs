@@ -39,6 +39,16 @@ fn launches_core_on_free_port_and_stops_it() {
         .into_string()
         .unwrap();
     assert!(page.contains("jarvis-token"));
+    // Il token generato dal launcher è quello del Core: l'app lo usa per le notifiche native (ADR-0044).
+    assert_eq!(core.token.len(), 32);
+    assert!(page.contains(&core.token), "la pagina usa il token del launcher");
+    let notifications = ureq::get(&format!("http://127.0.0.1:{}/api/notifications?limit=5", core.port))
+        .set("X-Jarvis-Token", &core.token)
+        .call()
+        .unwrap()
+        .into_string()
+        .unwrap();
+    assert!(notifications.contains("\"items\""), "{notifications}");
     assert!(
         cfg.data_dir.join("jarvis.sqlite3").exists(),
         "i dati vanno nella cartella dell'utente"
