@@ -1105,6 +1105,14 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `bundle_is_gzipped_and_revalidated_with_etag` in `tests/api.rs`; `history_keeps_the_latest_runs_and_recent_todos` in `store.rs`; suite Core completa (183 test).
 - **Documenti interessati:** ROADMAP.md.
 
+### ADR-0050 — Installer per Mac Intel e Linux ARM64
+
+- **Data:** 2026-11-19 · **Stato:** accettato · **Fonte:** richiesta del proprietario («migliora le build e crea le release nuove»).
+- **Decisione:** il workflow `release` aggiunge alla matrice `.dmg` per Mac con processore Intel (runner `macos-15-intel`) e `.deb` per Linux ARM64 (runner `ubuntu-22.04-arm`, es. Raspberry Pi 5), con le stesse prove degli altri installer (installazione reale e avvio del Core installato). Le due piattaforme sono facoltative (`continue-on-error`): se il runner non è disponibile per il repository, la release esce con le piattaforme principali; un limite di 90 minuti per job evita esecuzioni bloccate. Ogni file pubblicato riceve impronta, attestazione di provenienza e firma Sigstore come gli altri.
+- **Conseguenze:** gli installer coprono Apple Silicon, Intel, Windows x64, Linux x64 e Linux ARM64. L'AppImage resta solo x64.
+- **Evidenza:** esecuzione del workflow `release` per `v1.11.0`.
+- **Documenti interessati:** README.md, note di rilascio, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

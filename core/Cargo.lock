@@ -1363,7 +1363,7 @@ dependencies = [
 
 [[package]]
 name = "jarvis-core"
-version = "1.10.0"
+version = "1.11.0"
 dependencies = [
  "argon2",
  "axum",
