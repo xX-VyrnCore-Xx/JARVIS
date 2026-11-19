@@ -9,6 +9,7 @@ pub mod api;
 pub mod audit;
 pub mod automation;
 pub mod backup;
+pub mod browser;
 pub mod catalog;
 pub mod channels;
 pub mod config;

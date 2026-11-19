@@ -101,6 +101,8 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
             }))
         }
         "process.list" => process_list(args),
+        "web.browse" => crate::browser::browse(ctx.web, args),
+        "web.form" => crate::browser::submit_form(ctx.web, args),
         "system.info" => Ok(json!({
             "sistema operativo": std::env::consts::OS,
             "famiglia": std::env::consts::FAMILY,

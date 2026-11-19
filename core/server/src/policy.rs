@@ -87,7 +87,7 @@ fn resource_uri(tool: &str, args: &Value) -> String {
     match args["path"].as_str() {
         Some(p) if tool.starts_with("fs.") => format!("jarvis://file/workspace/{}", clean(p)),
         _ if tool == "shell.run" => "jarvis://terminal/workspace".to_string(),
-        _ if tool == "web.fetch" => {
+        _ if matches!(tool, "web.fetch" | "web.browse" | "web.form") => {
             let host = args["url"]
                 .as_str()
                 .and_then(|u| url::Url::parse(u).ok())
@@ -107,6 +107,28 @@ fn resource_uri(tool: &str, args: &Value) -> String {
 
 fn expected_effect(tool: &str, args: &Value) -> String {
     match tool {
+        "web.form" => {
+            let fields: Vec<String> = args["fields"]
+                .as_object()
+                .map(|m| {
+                    m.iter()
+                        .map(|(k, v)| {
+                            let secret = ["pass", "pwd", "token", "secret", "card", "cvv", "iban"]
+                                .iter()
+                                .any(|s| k.to_lowercase().contains(s));
+                            if secret { format!("{k}=•••") } else { format!("{k}={}", v.as_str().map_or_else(|| v.to_string(), str::to_string).chars().take(80).collect::<String>()) }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            format!(
+                "Compilare{} il modulo {} della pagina {} con: {}. Il sito riceverà questi dati.",
+                if args["submit"] == false { "" } else { " e inviare" },
+                args["form"].as_u64().unwrap_or(0),
+                args["url"].as_str().unwrap_or("?"),
+                fields.join(", ")
+            )
+        }
         "shell.run" => format!(
             "Eseguire nel terminale, nella workspace di JARVIS, il comando: «{}». Può modificare file e avviare programmi con i tuoi permessi; si interrompe dopo 60 secondi.",
             args["command"].as_str().unwrap_or("?")
@@ -229,7 +251,7 @@ pub fn decide(catalog: &Catalog, web: &WebConfig, req: &Request) -> Value {
             ("deny", vec!["policy.web_disabled"], t.risk().into())
         }
         Some(t)
-            if t.name() == "web.fetch"
+            if matches!(t.name(), "web.fetch" | "web.browse" | "web.form")
                 && check_url(web, req.arguments["url"].as_str().unwrap_or_default()).is_err() =>
         {
             (

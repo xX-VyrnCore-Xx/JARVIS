@@ -2515,6 +2515,10 @@ fn sources_of(tool: &str, output: &Value) -> Vec<Value> {
             "kind": "page", "title": output["title"], "url": output["final_url"], "requested_url": output["url"],
             "retrieved_at": output["retrieved_at"], "content_sha256": output["content_sha256"],
         })],
+        "web.browse" | "web.form" => vec![json!({
+            "kind": "page", "title": output["title"], "url": output["url"], "requested_url": output["requested_url"],
+            "retrieved_at": output["retrieved_at"], "content_sha256": output["content_sha256"],
+        })],
         "web.search" => output["results"]
             .as_array()
             .map(|r| {

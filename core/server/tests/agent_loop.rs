@@ -210,7 +210,14 @@ async fn specialist_gets_only_its_tools_and_cannot_leave_its_scope() {
     offered.sort();
     assert_eq!(
         offered,
-        ["memory__search", "time__now", "web__fetch", "web__search"],
+        [
+            "memory__search",
+            "time__now",
+            "web__browse",
+            "web__fetch",
+            "web__form",
+            "web__search"
+        ],
         "{first}"
     );
     assert!(first["messages"][0]["content"]

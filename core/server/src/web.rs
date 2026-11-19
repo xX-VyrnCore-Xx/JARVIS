@@ -187,7 +187,10 @@ fn err(code: &'static str, message: impl Into<String>) -> ToolError {
     }
 }
 
-fn resolve_checked(url: &Url, allow_private: bool) -> Result<Vec<SocketAddr>, ToolError> {
+pub(crate) fn resolve_checked(
+    url: &Url,
+    allow_private: bool,
+) -> Result<Vec<SocketAddr>, ToolError> {
     let host = url
         .host_str()
         .ok_or_else(|| err("web.invalid_url", "URL senza host"))?;
