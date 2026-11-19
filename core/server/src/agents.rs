@@ -24,25 +24,25 @@ pub const SPECIALISTS: [Agent; 5] = [
         name: "system",
         role: "Sistema: controlla processi, risorse e terminale del computer; spiega l'effetto di ogni comando prima di proporlo.",
         keywords: &["processi", "processo", "terminale", "cpu", " ram", "task manager", "rallent", "che sistema", "info sistema", "informazioni di sistema", "informazioni sul sistema"],
-        tools: &["system.info", "process.list", "shell.run", "fs.list", "fs.read"],
+        tools: &["system.info", "system.disks", "process.list", "shell.run", "fs.list", "fs.read", "fs.search"],
     },
     Agent {
         name: "automation",
         role: "Automazioni: crea, modifica ed esegue automazioni pianificate; descrivi chiaramente quando e cosa eseguiranno.",
         keywords: &["automazion", "pianific", "ogni giorno", "ogni ora", "ogni settimana", "tra 1", "tra 2", "tra 3", "tra 5", "tra 10", "tra un", "tra mezz"],
-        tools: &["workflow.create", "workflow.list", "workflow.run", "workflow.update", "workflow.delete", "system.info", "fs.write"],
+        tools: &["workflow.create", "workflow.list", "workflow.run", "workflow.update", "workflow.delete", "system.info", "fs.write", "todo.add", "todo.list", "todo.done"],
     },
     Agent {
         name: "memory",
         role: "Memoria: salva, cerca, corregge e dimentica ciò che il proprietario ti chiede; frasi brevi e autonome.",
         keywords: &["ricorda che", "ricordati", "cosa ricordi", "dimentica", "nella memoria", "preferisco"],
-        tools: &["memory.remember", "memory.list", "memory.forget"],
+        tools: &["memory.remember", "memory.list", "memory.forget", "memory.update", "notes.add", "notes.list", "notes.search", "notes.delete"],
     },
     Agent {
         name: "coding",
         role: "Codice: scrivi, leggi ed esegui script e programmi nella workspace; proponi comandi verificabili.",
         keywords: &["codice", "script", "programma in", "python", "javascript", "compila", "git ", "npm "],
-        tools: &["fs.list", "fs.read", "fs.write", "shell.run"],
+        tools: &["fs.list", "fs.read", "fs.write", "fs.search", "fs.mkdir", "fs.move", "fs.delete", "shell.run", "math.calc"],
     },
 ];
 

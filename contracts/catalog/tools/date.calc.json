@@ -1,0 +1,53 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "date.calc",
+  "version": "1.0.0",
+  "summary": "Calcoli sulle date: giorni tra due date, data più o meno giorni/settimane/mesi, giorno della settimana",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "date"
+    ],
+    "properties": {
+      "date": {
+        "type": "string",
+        "minLength": 10,
+        "maxLength": 10
+      },
+      "until": {
+        "type": "string",
+        "minLength": 10,
+        "maxLength": 10
+      },
+      "add_days": {
+        "type": "integer",
+        "minimum": -36500,
+        "maximum": 36500
+      },
+      "add_months": {
+        "type": "integer",
+        "minimum": -1200,
+        "maximum": 1200
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "none",
+  "risk": "low",
+  "permissions": [
+    "core.compute:execute"
+  ],
+  "errors": [
+    "date.invalid"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

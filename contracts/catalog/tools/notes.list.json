@@ -1,0 +1,41 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "notes.list",
+  "version": "1.0.0",
+  "summary": "Elenca le note più recenti, facoltativamente per etichetta",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {
+      "tag": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 40
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 50
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.notes:read"
+  ],
+  "errors": [
+    "notes.unavailable"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

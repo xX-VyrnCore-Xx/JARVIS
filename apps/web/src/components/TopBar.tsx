@@ -7,7 +7,7 @@ import { SHORTCUT } from "./CommandPalette";
 import { Icon } from "./Icon";
 
 const CATEGORY: Record<string, string> = {
-  automation: "automazione", confirmation: "conferma", system: "sistema", security: "sicurezza", integration: "integrazione",
+  automation: "automazione", reminder: "promemoria", confirmation: "conferma", system: "sistema", security: "sicurezza", integration: "integrazione",
 };
 const VOICE_LABELS: Record<string, string> = {
   idle: "pronta", listening: "in ascolto", transcribing: "trascrizione…", speaking: "risposta vocale",

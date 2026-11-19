@@ -1046,6 +1046,20 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `invalid_arguments_are_explained_and_the_model_can_retry` in `tests/agent_loop.rs`; `test_arguments_are_coerced_to_the_schema`, `test_tool_calls_written_in_text_are_recognised` in `tests/ai`; unitario della raccomandazione in `setup.rs`.
 - **Documenti interessati:** AI_SYSTEM.md, ROADMAP.md.
 
+### ADR-0046 — Strumenti quotidiani: calcolo, unità, date, note, cose da fare, file, dischi, meteo
+
+- **Data:** 2026-11-19 · **Stato:** accettato · **Fonte:** richiesta del proprietario («migliora la sua memoria e i suoi tools e aggiungine di nuovi tanti»).
+- **Decisione:** 17 nuovi strumenti nel catalogo (38 in totale), tutti con policy, audit e tracce:
+  - `math.calc` (parser a discesa ricorsiva, niente eval: operatori, potenza, percentuale, funzioni, costanti), `units.convert` (lunghezza, massa, volume, velocità, area, dati, tempo, temperatura), `date.calc` (giorni fra date, somma di giorni e mesi, giorno della settimana);
+  - `notes.add/list/search/delete` e `todo.add/list/done` in SQLite (schema v5); le cose da fare con scadenza generano una notifica una sola volta (nuova categoria `reminder`, aggiunta compatibile al contratto);
+  - `fs.search` (nome e testo, senza seguire collegamenti simbolici, al massimo 5.000 voci), `fs.mkdir`, `fs.move` e `fs.delete` con conferma (cartelle solo se vuote, mai la workspace stessa, percorsi fuori negati dalla policy);
+  - `system.disks`; `weather.forecast` con Open-Meteo (senza chiavi, solo i suoi host, negato con il Web spento);
+  - `memory.update` per correggere un ricordo per id;
+  - selezione degli strumenti per pertinenza (parole chiave per strumento, fino a 12 descrizioni), limite del contratto di delega portato a 64 strumenti (aggiunta compatibile); nuovi strumenti assegnati agli specialisti; comandi offline in italiano per tutti.
+- **Conseguenze:** JARVIS copre le richieste quotidiane senza modelli remoti né servizi a pagamento.
+- **Evidenza:** unitari di `toolbox.rs` (calcolatore, unità, date, file, dischi); `tests/everyday.rs` (dalla chat: calcolo, conversione, note, cose da fare con notifica unica, file con conferma, percorsi fuori negati, dischi; meteo contro un Open-Meteo sintetico e negato con il Web spento); `tests/ai`; E2E 77/77.
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, MEMORY_DATA_SYNC.md, ROADMAP.md, contratti `delegation` e `notification`.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

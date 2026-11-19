@@ -1,0 +1,30 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "system.disks",
+  "version": "1.0.0",
+  "summary": "Spazio dei dischi del computer: totale, usato e libero per volume",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {}
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "node",
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "node.system:read"
+  ],
+  "errors": [
+    "system.unavailable"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

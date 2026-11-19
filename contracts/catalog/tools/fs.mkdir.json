@@ -1,0 +1,39 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "fs.mkdir",
+  "version": "1.0.0",
+  "summary": "Crea una cartella nella workspace",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "path"
+    ],
+    "properties": {
+      "path": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "node",
+  "effects": "write_local",
+  "risk": "low",
+  "permissions": [
+    "node.filesystem:write"
+  ],
+  "errors": [
+    "fs.outside_workspace",
+    "fs.exists"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "none"
+}

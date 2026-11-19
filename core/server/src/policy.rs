@@ -129,6 +129,15 @@ fn expected_effect(tool: &str, args: &Value) -> String {
                 fields.join(", ")
             )
         }
+        "fs.move" => format!(
+            "Spostare «{}» in «{}» nella workspace di JARVIS.",
+            args["from"].as_str().unwrap_or("?"),
+            args["to"].as_str().unwrap_or("?")
+        ),
+        "fs.delete" => format!(
+            "Eliminare definitivamente «{}» dalla workspace di JARVIS (le cartelle solo se vuote).",
+            args["path"].as_str().unwrap_or("?")
+        ),
         "shell.run" => format!(
             "Eseguire nel terminale, nella workspace di JARVIS, il comando: «{}». Può modificare file e avviare programmi con i tuoi permessi; si interrompe dopo 60 secondi.",
             args["command"].as_str().unwrap_or("?")
@@ -236,6 +245,18 @@ pub fn decide(catalog: &Catalog, web: &WebConfig, req: &Request) -> Value {
                 t.risk().into(),
             )
         }
+        Some(t)
+            if t.name() == "fs.move"
+                && [&req.arguments["from"], &req.arguments["to"]]
+                    .iter()
+                    .any(|p| p.as_str().is_some_and(|p| !lexically_inside(p))) =>
+        {
+            (
+                "deny",
+                vec!["policy.path_outside_workspace"],
+                t.risk().into(),
+            )
+        }
         Some(t) if t.name() == "shell.run" && shell_disabled() => {
             ("deny", vec!["policy.shell_disabled"], t.risk().into())
         }
@@ -247,7 +268,10 @@ pub fn decide(catalog: &Catalog, web: &WebConfig, req: &Request) -> Value {
         {
             ("deny", vec!["policy.command_blocked"], t.risk().into())
         }
-        Some(t) if t.name().starts_with("web.") && !web.enabled => {
+        // Web spento: anche gli strumenti con ambito Web fuori dal prefisso (es. il meteo, ADR-0046).
+        Some(t)
+            if (t.name().starts_with("web.") || t.descriptor["scope"] == "web") && !web.enabled =>
+        {
             ("deny", vec!["policy.web_disabled"], t.risk().into())
         }
         Some(t)

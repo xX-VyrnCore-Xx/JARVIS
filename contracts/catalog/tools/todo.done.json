@@ -1,0 +1,38 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "todo.done",
+  "version": "1.0.0",
+  "summary": "Segna come completata un'attività da fare per id",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "id"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 40
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "write_local",
+  "risk": "low",
+  "permissions": [
+    "core.todo:write"
+  ],
+  "errors": [
+    "todo.not_found"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "none"
+}

@@ -1,0 +1,49 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "todo.add",
+  "version": "1.0.0",
+  "summary": "Aggiunge un'attività da fare, con scadenza facoltativa (data e ora locali): alla scadenza arriva una notifica",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "text"
+    ],
+    "properties": {
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      },
+      "due": {
+        "type": "string",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}([ T]\\d{2}:\\d{2})?$"
+      },
+      "priority": {
+        "enum": [
+          "bassa",
+          "normale",
+          "alta"
+        ]
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "write_local",
+  "risk": "low",
+  "permissions": [
+    "core.todo:write"
+  ],
+  "errors": [
+    "todo.invalid"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "none"
+}

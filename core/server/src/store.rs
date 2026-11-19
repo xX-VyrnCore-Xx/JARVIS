@@ -13,8 +13,8 @@ pub struct Store {
 
 pub type StoreResult<T> = Result<T, rusqlite::Error>;
 
-/// Versione dello schema (ADR-0037): 1 = schema fino a 1.3.x con migrazioni additive; 3 = tracce dei task (ADR-0039); 4 = passkey (ADR-0042).
-pub const SCHEMA_VERSION: i64 = 4;
+/// Versione dello schema (ADR-0037): 1 = schema fino a 1.3.x con migrazioni additive; 3 = tracce dei task (ADR-0039); 4 = passkey (ADR-0042); 5 = note e cose da fare (ADR-0046).
+pub const SCHEMA_VERSION: i64 = 5;
 
 impl Store {
     pub fn open(path: &Path) -> StoreResult<Self> {
@@ -55,7 +55,12 @@ impl Store {
              CREATE INDEX IF NOT EXISTS task_spans_by_task ON task_spans (task_id, seq);
              CREATE TABLE IF NOT EXISTS passkeys (credential_id TEXT PRIMARY KEY, device_id TEXT NOT NULL,
                  public_key BLOB NOT NULL, sign_count INTEGER NOT NULL, created_at TEXT NOT NULL, last_used_at TEXT);
-             CREATE INDEX IF NOT EXISTS passkeys_by_device ON passkeys (device_id);",
+             CREATE INDEX IF NOT EXISTS passkeys_by_device ON passkeys (device_id);
+             CREATE TABLE IF NOT EXISTS notes (id TEXT PRIMARY KEY, title TEXT NOT NULL, text TEXT NOT NULL,
+                 tags TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS todos (id TEXT PRIMARY KEY, text TEXT NOT NULL, due_at TEXT, priority TEXT NOT NULL,
+                 created_at TEXT NOT NULL, done_at TEXT, notified_at TEXT);
+             CREATE INDEX IF NOT EXISTS todos_open ON todos (done_at, due_at);",
         )?;
         // Migrazione additiva: database creati prima delle fonti Web (RF-06).
         let has_sources = conn.prepare("SELECT sources FROM messages LIMIT 0").is_ok();
@@ -174,7 +179,7 @@ impl Store {
         Ok(json!({
             "ok": check == "ok", "check": check, "schema_version": self.schema_version()?,
             "size_bytes": pages * page_size,
-            "rows": {"memory": count("memory")?, "messages": count("messages")?, "tasks": count("tasks")?, "spans": count("task_spans")?,
+            "rows": {"notes": count("notes")?, "todos": count("todos")?, "memory": count("memory")?, "messages": count("messages")?, "tasks": count("tasks")?, "spans": count("task_spans")?,
                      "workflows": count("workflows")?, "notifications": count("notifications")?},
         }))
     }

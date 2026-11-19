@@ -1,0 +1,38 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "todo.list",
+  "version": "1.0.0",
+  "summary": "Elenca le attività da fare (aperte, completate o tutte), in ordine di scadenza",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {
+      "status": {
+        "enum": [
+          "aperte",
+          "completate",
+          "tutte"
+        ]
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.todo:read"
+  ],
+  "errors": [
+    "todo.unavailable"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

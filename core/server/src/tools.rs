@@ -101,6 +101,39 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
             }))
         }
         "process.list" => process_list(args),
+        "math.calc" => crate::toolbox::calc(s("expression")),
+        "units.convert" => {
+            crate::toolbox::convert(args["value"].as_f64().unwrap_or(0.0), s("from"), s("to"))
+        }
+        "date.calc" => crate::toolbox::date_calc(args),
+        "fs.search" => crate::toolbox::fs_search(ctx.workspace, args),
+        "fs.mkdir" => crate::toolbox::fs_mkdir(ctx.workspace, s("path")),
+        "fs.move" => crate::toolbox::fs_move(ctx.workspace, s("from"), s("to")),
+        "fs.delete" => crate::toolbox::fs_delete(ctx.workspace, s("path")),
+        "system.disks" => crate::toolbox::disks(),
+        "weather.forecast" => {
+            crate::toolbox::weather(ctx.web, s("place"), args["days"].as_u64().unwrap_or(3))
+        }
+        "notes.add" => crate::toolbox::notes_add(ctx.store, args),
+        "notes.list" => crate::toolbox::notes_list(ctx.store, args),
+        "notes.search" => crate::toolbox::notes_search(ctx.store, args),
+        "notes.delete" => crate::toolbox::notes_delete(ctx.store, s("id")),
+        "todo.add" => crate::toolbox::todo_add(ctx.store, args),
+        "todo.list" => crate::toolbox::todo_list(ctx.store, args),
+        "todo.done" => crate::toolbox::todo_done(ctx.store, s("id")),
+        "memory.update" => {
+            let ok = ctx
+                .store
+                .memory_update(s("id"), s("text"), &crate::now())
+                .map_err(|e| ToolError::new("memory.unavailable", e.to_string()))?;
+            if !ok {
+                return Err(ToolError::new(
+                    "memory.not_found",
+                    format!("nessun ricordo con id {}", s("id")),
+                ));
+            }
+            Ok(json!({"id": s("id"), "text": s("text"), "updated": true}))
+        }
         "web.browse" => crate::browser::browse(ctx.web, args),
         "web.form" => crate::browser::submit_form(ctx.web, args),
         "system.info" => Ok(json!({

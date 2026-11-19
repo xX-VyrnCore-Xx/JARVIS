@@ -434,7 +434,7 @@ impl Jarvis {
     }
 
     /// Strumenti delegati all'agente: prima il catalogo statico, poi al massimo 16 strumenti dei connettori
-    /// (limite di 32 del contratto di delega).
+    /// (limite di 64 del contratto di delega, ADR-0046).
     fn delegated_tools(&self) -> impl Iterator<Item = &crate::catalog::Tool> {
         fn dynamic(t: &&crate::catalog::Tool) -> bool {
             t.name().starts_with("connector.") || t.name().starts_with("node.")
@@ -443,7 +443,7 @@ impl Jarvis {
             .iter()
             .filter(|t| !dynamic(t))
             .chain(self.catalog.iter().filter(dynamic).take(16))
-            .take(32)
+            .take(64)
     }
 
     /// Registra un intervallo nella traccia del task (ADR-0039): nome, tipo, inizio, durata, esito e attributi
@@ -2073,6 +2073,17 @@ impl Jarvis {
     ) -> Result<Vec<Value>, CoreError> {
         let tolerance = chrono::Duration::seconds(self.cfg.scheduler_tick_s as i64 * 2 + 60);
         let mut runs = Vec::new();
+        // Cose da fare scadute (ADR-0046): una notifica per ciascuna, una sola volta.
+        let now_s = now_t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        for t in crate::toolbox::todos_due(&self.store, &now_s) {
+            self.notify(json!({
+                "severity": if t["priority"] == "alta" { "warning" } else { "info" }, "category": "reminder",
+                "title": format!("Da fare: {}", t["text"].as_str().unwrap_or_default().chars().take(80).collect::<String>()),
+                "body": "Scadenza raggiunta. Scrivi «fatto <id>» quando l'hai completata.",
+                "source": {"kind": "module", "id": "todo"}, "dedupe_key": format!("todo:{}", t["id"].as_str().unwrap_or_default()),
+                "link": {"view": "chat"},
+            }))?;
+        }
         for (doc, scheduled) in self
             .store
             .workflows_due(&automation::ts(now_t))

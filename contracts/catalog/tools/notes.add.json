@@ -1,0 +1,52 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "notes.add",
+  "version": "1.0.0",
+  "summary": "Salva una nota del proprietario con titolo facoltativo ed etichette",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "text"
+    ],
+    "properties": {
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 10000
+      },
+      "title": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "tags": {
+        "type": "array",
+        "maxItems": 10,
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        }
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "write_local",
+  "risk": "low",
+  "permissions": [
+    "core.notes:write"
+  ],
+  "errors": [
+    "notes.unavailable"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "none"
+}

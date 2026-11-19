@@ -66,3 +66,6 @@ Dettagli in ADR-0005.
 
 
 **Navigazione con il browser (ADR-0043).** `web.browse` apre una pagina con il browser del sistema (JavaScript incluso) e segue fino a 3 collegamenti; `web.form` compila e invia un modulo solo dopo la conferma del proprietario. Ogni richiesta di rete del browser passa dalla policy Web; il profilo è temporaneo.
+
+
+**Strumenti quotidiani (ADR-0046).** Calcolo, conversioni di unità, date, note, cose da fare con promemoria, ricerca e gestione dei file nella workspace (spostare ed eliminare con conferma), dischi, meteo da Open-Meteo, correzione di un ricordo.
