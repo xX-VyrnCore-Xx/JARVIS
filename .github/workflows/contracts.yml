@@ -98,7 +98,14 @@ jobs:
         run: cargo build --release --locked -p jarvis-core
       - run: node --test tests/ui/audio_offline.test.cjs
       - run: npm install --no-save --no-package-lock playwright@1.63.0
-      - run: npx playwright install --with-deps chromium
+      # Le dipendenze di sistema arrivano dai server Ubuntu, a volte irraggiungibili: al massimo 3 tentativi.
+      - run: |
+          for i in 1 2 3; do
+            npx playwright install --with-deps chromium && exit 0
+            echo "::warning::installazione di Chromium non riuscita (tentativo $i), nuovo tentativo"; sleep 30
+            sudo apt-get update || true
+          done
+          exit 1
       - name: Avvia JARVIS in modalità offline
         run: |
           JARVIS_AI_BACKEND=offline JARVIS_PYTHON=python JARVIS_DATA_DIR="$RUNNER_TEMP/jarvis" JARVIS_PORT=8765 \
