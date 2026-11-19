@@ -150,6 +150,13 @@ class OllamaAdapter(unittest.TestCase):
         self.assertEqual(result["tool_call"]["arguments"], {"citta": "San Donà", "giorni": [1, 3]})
         self.assertEqual(result["tool_call"]["version"], "2.0.0")
         self.assertEqual(validation_errors("agent-result", result), ([], []))
+        d["inputs"]["tool_history"] = [{"tool": name, "status": "succeeded",
+                                         "output": {"data": {"cielo": "sereno"}}}]
+        d["inputs"]["steps_left"] = 3
+        final = gateway.respond(d)
+        self.assertEqual(final["kind"], "reply")
+        self.assertIn("sereno", final["text"])
+        d["inputs"].pop("tool_history")
         d["tools"].pop()
         self.assertIn("non disponibile", gateway.respond(d)["text"])
         self.assertFalse(FakeOllama.requests)

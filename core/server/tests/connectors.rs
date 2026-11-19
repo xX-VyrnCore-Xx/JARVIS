@@ -270,8 +270,9 @@ fn writes_need_confirmation_and_revoke_denies_immediately() {
     j.install_connector(&manifest(port, false)).unwrap();
     j.authorize_connector("meteo", TOKEN).unwrap();
 
+    let arguments = json!({"testo":"strada allagata https://example.org"});
     let out = j
-        .chat(r#"connettore meteo segnala {"testo":"strada allagata https://example.org"}"#)
+        .chat(&format!("connettore meteo segnala {arguments}"))
         .unwrap();
     let pending = out
         .confirmation
@@ -299,8 +300,7 @@ fn writes_need_confirmation_and_revoke_denies_immediately() {
     );
     let calls = seen.lock().unwrap().clone();
     assert!(
-        calls[0].starts_with("POST /v1/segnalazioni")
-            && calls[0].ends_with(r#"{"testo":"strada allagata"}"#),
+        calls[0].starts_with("POST /v1/segnalazioni") && calls[0].ends_with(&arguments.to_string()),
         "{calls:?}"
     );
 
