@@ -1,0 +1,90 @@
+{
+  "contract": "jarvis.connector/1",
+  "id": "slack",
+  "name": "Slack",
+  "version": "1.0.0",
+  "description": "Canali e messaggi Slack con il token di un'app (xoxb-…) installata nel tuo workspace.",
+  "base_url": "https://slack.com/api",
+  "allowed_hosts": [
+    "slack.com"
+  ],
+  "auth": {
+    "type": "bearer"
+  },
+  "operations": [
+    {
+      "name": "canali",
+      "summary": "Canali visibili all'app",
+      "method": "GET",
+      "path": "/conversations.list",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          },
+          "types": {
+            "type": "string",
+            "maxLength": 100
+          }
+        }
+      }
+    },
+    {
+      "name": "messaggi",
+      "summary": "Messaggi recenti di un canale",
+      "method": "GET",
+      "path": "/conversations.history",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "channel"
+        ],
+        "properties": {
+          "channel": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      }
+    },
+    {
+      "name": "invia",
+      "summary": "Invia un messaggio in un canale",
+      "method": "POST",
+      "path": "/chat.postMessage",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "channel",
+          "text"
+        ],
+        "properties": {
+          "channel": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 4000
+          }
+        }
+      },
+      "risk": "high"
+    }
+  ]
+}

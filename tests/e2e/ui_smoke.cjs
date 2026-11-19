@@ -253,6 +253,15 @@ function check(cond, msg) {
 
   // Connettori (RF-14): installazione dal manifest, autorizzazione con credenziale cifrata, chiamata dalla chat.
   await page.click('[data-view="connectors"]');
+  // Catalogo (ADR-0047): Gmail chiede l'ID client OAuth; GitHub si aggiunge subito e attende il token.
+  await page.waitForSelector('#connector-catalog [data-template="gmail"]');
+  check(await page.locator('#connector-catalog [data-template="gmail"] button.primary').isDisabled(), "Gmail dal catalogo richiede l'ID client OAuth");
+  await page.fill('#connector-catalog [data-template="google_calendar"] input[name="client_id"]', "123-abc.apps.googleusercontent.com");
+  await page.click('#connector-catalog [data-template="google_calendar"] button.primary');
+  await page.click('#connector-catalog [data-template="github"] button.primary');
+  await page.waitForFunction(() => document.querySelector("#connectors").innerText.includes("GitHub") && document.querySelector("#connectors").innerText.includes("Google Calendar"));
+  check((await page.locator("#connectors").innerText()).includes("connector.google_calendar.crea_evento"), "Google Calendar e GitHub aggiunti dal catalogo con le loro operazioni");
+  if (shots) await page.screenshot({ path: `${shots}/jarvis-catalogo.png` });
   await page.fill('#connector-form textarea[name="manifest"]', JSON.stringify({
     contract: "jarvis.connector/1", id: "stato", name: "Stato servizi", version: "1.0.0", description: "Servizio sintetico",
     base_url: `http://127.0.0.1:${WEB_PORT}/svc`, allowed_hosts: ["127.0.0.1"], auth: { type: "bearer" },
@@ -260,10 +269,10 @@ function check(cond, msg) {
       input_schema: { type: "object", additionalProperties: false, required: ["nome"], properties: { nome: { type: "string" } } } }],
   }));
   await page.click('#connector-form button[type="submit"]');
-  await page.waitForSelector("#connectors .card");
-  await page.fill('#connectors input[type="password"]', "token-e2e-sintetico");
-  await page.click('#connectors button.primary');
-  await page.waitForFunction(() => document.querySelector("#connectors .badge").textContent === "autorizzato");
+  await page.waitForSelector('#connectors [data-connector="stato"]');
+  await page.fill('#connectors [data-connector="stato"] input[type="password"]', "token-e2e-sintetico");
+  await page.click('#connectors [data-connector="stato"] button.primary');
+  await page.waitForFunction(() => document.querySelector('#connectors [data-connector="stato"] .badge').textContent === "autorizzato");
   check(!(await page.locator("#connectors").innerText()).includes("token-e2e-sintetico"), "connettore autorizzato, credenziale non mostrata");
   if (shots) await page.screenshot({ path: `${shots}/jarvis-connettori.png` });
   await page.click('[data-view="chat"]');

@@ -423,6 +423,8 @@ pub fn router(state: Shared) -> Router {
             get(|| async { ([(header::CONTENT_TYPE, "image/svg+xml")], ICON) }),
         )
         .route("/api/connectors", get(connectors).post(install_connector))
+        .route("/api/connectors/templates", get(connector_templates))
+        .route("/api/connectors/templates/{id}", post(install_template))
         .route("/api/connectors/{id}", delete(uninstall_connector))
         .route("/api/connectors/{id}/authorize", post(authorize_connector))
         .route("/api/connectors/{id}/revoke", post(revoke_connector))
@@ -904,6 +906,24 @@ async fn passkey_delete(
         })
         .await,
     )
+}
+
+/// Catalogo dei connettori pronti (ADR-0047).
+async fn connector_templates() -> Json<Value> {
+    Json(crate::connector_catalog::index())
+}
+
+/// Installa un connettore del catalogo con l'ID client OAuth del proprietario.
+async fn install_template(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    let manifest = match crate::connector_catalog::manifest(&id, body["client_id"].as_str()) {
+        Ok(m) => m,
+        Err(e) => return error(StatusCode::BAD_REQUEST, "bad_request", &e),
+    };
+    reply(with_core(&state, move |j| j.install_connector(&manifest)).await)
 }
 
 fn limit(q: &Value, default: u32) -> u32 {

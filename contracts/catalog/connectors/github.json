@@ -1,0 +1,133 @@
+{
+  "contract": "jarvis.connector/1",
+  "id": "github",
+  "name": "GitHub",
+  "version": "1.0.0",
+  "description": "Repository, issue e notifiche GitHub con un token personale (fine-grained consigliato).",
+  "base_url": "https://api.github.com",
+  "allowed_hosts": [
+    "api.github.com"
+  ],
+  "auth": {
+    "type": "bearer"
+  },
+  "operations": [
+    {
+      "name": "repository",
+      "summary": "I tuoi repository, dal più aggiornato",
+      "method": "GET",
+      "path": "/user/repos",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "sort": {
+            "enum": [
+              "updated",
+              "pushed",
+              "full_name"
+            ]
+          },
+          "per_page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        }
+      }
+    },
+    {
+      "name": "issue",
+      "summary": "Issue e pull request assegnate o create da te",
+      "method": "GET",
+      "path": "/issues",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "filter": {
+            "enum": [
+              "assigned",
+              "created",
+              "mentioned",
+              "all"
+            ]
+          },
+          "state": {
+            "enum": [
+              "open",
+              "closed",
+              "all"
+            ]
+          },
+          "per_page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        }
+      }
+    },
+    {
+      "name": "notifiche",
+      "summary": "Notifiche non lette",
+      "method": "GET",
+      "path": "/notifications",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "all": {
+            "type": "boolean"
+          },
+          "per_page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        }
+      }
+    },
+    {
+      "name": "crea_issue",
+      "summary": "Apre una issue in un repository",
+      "method": "POST",
+      "path": "/repos/{owner}/{repo}/issues",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "repo",
+          "title"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "repo": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 20000
+          }
+        }
+      },
+      "risk": "high"
+    }
+  ]
+}

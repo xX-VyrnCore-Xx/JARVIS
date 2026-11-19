@@ -203,6 +203,14 @@
           },
           "input_schema": {
             "type": "object"
+          },
+          "body_encoding": {
+            "description": "Come il Core compone il corpo della richiesta (ADR-0047). «json» (predefinito): gli argomenti restanti in JSON. «gmail_raw» / «gmail_draft»: il Core costruisce un messaggio RFC 822 da to, subject, body (e cc) e lo invia come {raw} o {message:{raw}}. Aggiunta compatibile (facoltativa) della v1.",
+            "enum": [
+              "json",
+              "gmail_raw",
+              "gmail_draft"
+            ]
           }
         }
       }

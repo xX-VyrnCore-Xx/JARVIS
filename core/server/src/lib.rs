@@ -13,6 +13,7 @@ pub mod browser;
 pub mod catalog;
 pub mod channels;
 pub mod config;
+pub mod connector_catalog;
 pub mod connectors;
 pub mod memory;
 pub mod node_agent;

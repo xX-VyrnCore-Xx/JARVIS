@@ -1060,6 +1060,24 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** unitari di `toolbox.rs` (calcolatore, unità, date, file, dischi); `tests/everyday.rs` (dalla chat: calcolo, conversione, note, cose da fare con notifica unica, file con conferma, percorsi fuori negati, dischi; meteo contro un Open-Meteo sintetico e negato con il Web spento); `tests/ai`; E2E 77/77.
 - **Documenti interessati:** AUTONOMY_AND_TOOLS.md, MEMORY_DATA_SYNC.md, ROADMAP.md, contratti `delegation` e `notification`.
 
+### ADR-0047 — Catalogo dei connettori: Gmail, Google Calendar, Outlook, GitHub, Todoist, Slack
+
+- **Data:** 2026-11-19 · **Stato:** accettato · **Fonte:** richiesta del proprietario («fai sì che si possa collegare Gmail e Calendar e tutto il resto»); decisione 81 (opzione D: framework completo con catalogo iniziale prioritario), il cui catalogo concreto viene così definito dal proprietario.
+- **Decisione:**
+  - modelli di manifest in `contracts/catalog/connectors/` incorporati nel Core, con indice (fornitore, categoria, tipo di accesso, istruzioni di configurazione e collegamento alla console):
+    - **Gmail** (OAuth Google): cerca, leggi, etichette, bozza e invio con conferma;
+    - **Google Calendar** (OAuth Google): eventi, calendari, nuovo evento con conferma;
+    - **Outlook** (OAuth Microsoft, Graph): posta, invio, eventi, nuovo evento;
+    - **GitHub** (token personale): repository, issue, notifiche, nuova issue;
+    - **Todoist** (token, API v1): attività, nuova attività, completamento;
+    - **Slack** (token del bot): canali, messaggi, invio;
+  - l'OAuth usa il motore dell'ADR-0027 (PKCE, token cifrati, rinnovo e revoca); l'ID client è quello creato dal proprietario nella console del servizio (JARVIS non distribuisce credenziali proprie), il client secret di Google si inserisce all'accesso;
+  - nuovo campo facoltativo `body_encoding` delle operazioni (aggiunta compatibile al contratto): con `gmail_raw` e `gmail_draft` il Core costruisce un messaggio RFC 822 UTF-8 da `to`, `subject`, `body`, `cc` (oggetto in codifica MIME, a capo nelle intestazioni rifiutati) e lo codifica in base64url, invece di chiederlo al modello;
+  - `GET /api/connectors/templates`, `POST /api/connectors/templates/{id}` (solo il proprietario); nella pagina Connettori la sezione «Catalogo» con istruzioni e pulsante «Aggiungi»; parole come «email», «calendario», «evento» rendono pertinenti gli strumenti dei connettori.
+- **Conseguenze:** collegare un servizio richiede solo la registrazione di un'app nella sua console (pochi minuti) e il consenso. Le API dei servizi possono cambiare: in particolare l'API v1 di Todoist va verificata con un account reale.
+- **Evidenza:** unitario `every_template_is_a_valid_manifest` (tutti validi contro il contratto, ID client obbligatorio per OAuth); `rfc822_builds_a_utf8_message_and_refuses_header_injection`; `mail_is_sent_as_rfc822_only_after_confirmation` in `tests/connectors.rs`; E2E: Gmail senza ID client disabilitato, Google Calendar e GitHub aggiunti dal catalogo (79/79).
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ACCEPTANCE.md, ROADMAP.md, contratto `connector`.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

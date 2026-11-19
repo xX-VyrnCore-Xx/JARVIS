@@ -19,7 +19,7 @@ Questo documento raccoglie ciò che serve per l'accettazione finale descritta in
 | RF-11 Dispositivi e nodi | `devices.rs`, `nodes.rs`, `node_tls.rs`, E2E | P8, P13 | Verde | Scelta automatica (ADR-0031); mTLS con certificati fissati (ADR-0041); VPN mesh affidata a Tailscale |
 | RF-12 Dati | backup, rollback | P9 | Verde | Nessuna sincronizzazione fra nodi |
 | RF-13 Notifiche | `notifications.rs`, `channels.rs`, E2E | P5 | Verde | Canali esterni ntfy e Telegram (ADR-0026) |
-| RF-14 Connettori | `connectors.rs`, `oauth.rs`, E2E | P10 | Verde | OAuth 2.0 con PKCE (ADR-0027); niente plugin con codice |
+| RF-14 Connettori | `connectors.rs`, `oauth.rs`, `connector_catalog.rs`, E2E | P10, P16 | Verde | OAuth 2.0 con PKCE (ADR-0027); catalogo Gmail, Calendar, Outlook, GitHub, Todoist, Slack (ADR-0047); niente plugin con codice |
 | RF-15 Miglioramenti | — | — | Non iniziato | Fuori dalla prima release |
 | RNF-01 Contratti | `tests/contracts`, `jarvis-contracts` | — | Verde | — |
 | RNF-02 Guasti | `resilience.rs` (blocco, crash, output non valido) | — | Verde | Perdita di rete fra nodi non provata |
@@ -65,12 +65,13 @@ Da eseguire sul proprio computer con una release o con i sorgenti. Annotare esit
 | P13 | Nodo esecutore | Su un secondo computer con Tailscale: codice «Nodo esecutore» dalla sezione Dispositivi, `./jarvis.sh node https://<core>.ts.net <codice>`, poi in chat «nodo <nome> system.info» e «nodo <nome> fs.write path=prova.txt content=ciao»; infine revoca | Informazioni del secondo computer; scrittura solo dopo conferma e nella workspace del nodo; dopo la revoca il nodo si ferma e i suoi strumenti spariscono |
 | P14 | Processi e terminale | «quali processi usano più memoria?», poi «terminale: ls» e approva; prova «terminale: sudo ls» | Elenco dei processi senza conferma; il comando chiede conferma e mostra l'output; `sudo` viene negato |
 | P15 | Navigazione Web | Con Chrome o Edge installato: «naviga https://it.wikipedia.org e clicca Storia», poi «compila modulo <pagina con un modulo di prova>: campo=valore» e approva | Testo della pagina seguita con fonte; il modulo chiede conferma, mostra i campi e viene inviato solo dopo l'approvazione |
+| P16 | Gmail e Calendar | Crea un ID client OAuth «App desktop» in Google Cloud (Gmail API e Calendar API abilitate), poi in Connettori → Catalogo aggiungi Gmail e Google Calendar e premi «Accedi»; in chat: «connettore gmail cerca q=is:unread», «connettore google_calendar eventi timeMin=<oggi>» | Elenco reale delle email e degli eventi; invio di una bozza o di un evento solo dopo la conferma |
 
 ## Criteri di rilascio
 
 Una release `v1.0.0` si pubblica quando:
 1. tutti i job delle due CI sono verdi sul commit da rilasciare;
-2. le prove P1–P15, incluse P8a e P8b per i client nativi, sono superate o i difetti aperti sono registrati come non bloccanti;
+2. le prove P1–P16, incluse P8a e P8b per i client nativi, sono superate o i difetti aperti sono registrati come non bloccanti;
 3. il proprietario accetta esplicitamente.
 
 Restano decisioni del proprietario, perché richiedono suoi account, certificati o scelte:
