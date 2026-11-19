@@ -118,6 +118,14 @@ const MAX_STEPS: usize = 4;
 /// Caratteri conservati degli esiti precedenti all'ultimo nel contesto dell'agente.
 const EARLIER_OUTPUT_CHARS: usize = 3000;
 
+/// Identificativi W3C Trace Context (ADR-0039): traccia = correlation_id del task (32 esadecimali), intervallo
+/// radice = prime 16 cifre dell'id del task, intervalli figli casuali.
+fn trace_ids(task: &Task) -> (String, String) {
+    let hex = |s: String| s.replace('-', "");
+    let root: String = hex(task.id()).chars().take(16).collect();
+    (hex(task.correlation()), root)
+}
+
 /// Registro di un passo: strumento, argomenti, impronta (per riconoscere le ripetizioni) ed esito.
 fn step_record(tool: &str, arguments: &Value, digest: &str, status: &str, output: Value) -> Value {
     json!({"tool": tool, "arguments": arguments, "digest": digest, "status": status, "output": output})
@@ -414,6 +422,45 @@ impl Jarvis {
             .take(32)
     }
 
+    /// Registra un intervallo nella traccia del task (ADR-0039): nome, tipo, inizio, durata, esito e attributi
+    /// senza contenuti dell'utente. Un errore di scrittura non interrompe la richiesta.
+    fn span(&self, task: &Task, name: &str, kind: &str, ms: f64, status: &str, attrs: Value) {
+        let (trace_id, root) = trace_ids(task);
+        let end = chrono::Utc::now();
+        let start = end - chrono::Duration::microseconds((ms * 1000.0) as i64);
+        let (span_id, parent) = if kind == "task" {
+            (root, Value::Null)
+        } else {
+            (
+                uuid::Uuid::new_v4().simple().to_string()[..16].to_string(),
+                Value::String(root),
+            )
+        };
+        let doc = json!({
+            "trace_id": trace_id, "span_id": span_id, "parent_span_id": parent, "name": name, "kind": kind,
+            "start": start.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            "duration_ms": (ms * 10.0).round() / 10.0, "status": status, "attributes": attrs,
+        });
+        let _ = self.store.span_add(&task.id(), &now(), &doc);
+    }
+
+    /// Traccia di un task: intervalli in ordine e durata complessiva.
+    pub fn task_trace(&self, task_id: &str) -> Result<Value, CoreError> {
+        let spans = self.store.spans(task_id).map_err(internal)?;
+        if spans.is_empty() {
+            return Err(CoreError::NotFound(
+                "nessuna traccia per questo task".into(),
+            ));
+        }
+        let total = spans
+            .iter()
+            .find(|s| s["kind"] == "task")
+            .and_then(|s| s["duration_ms"].as_f64());
+        Ok(
+            json!({"task_id": task_id, "trace_id": spans[0]["trace_id"], "total_ms": total, "spans": spans}),
+        )
+    }
+
     /// Strumento concesso all'agente del task: la specializzazione scelta dalla richiesta (ADR-0038) limita
     /// gli strumenti al proprio ambito; il generalista li riceve tutti.
     fn task_allows(&self, task: &Task, tool: &str) -> bool {
@@ -440,6 +487,22 @@ impl Jarvis {
         let result = self.call_agent_inner(task, inputs);
         self.obs
             .observe("delegation general_assistant", timer.ms(), result.is_err());
+        let agent = crate::agents::route(task.doc["objective"].as_str().unwrap_or_default())
+            .map_or(crate::agents::GENERAL, |a| a.name);
+        let attrs = match &result {
+            Ok(r) => json!({"agent": agent, "backend": r["backend"]["name"], "result": r["kind"],
+                            "prompt_tokens": r["usage"]["prompt_tokens"], "output_tokens": r["usage"]["output_tokens"],
+                            "tools_sent": r["usage"]["tools_sent"], "steps_left": inputs["steps_left"]}),
+            Err(e) => json!({"agent": agent, "error_code": e["code"]}),
+        };
+        self.span(
+            task,
+            agent,
+            "agent",
+            timer.ms(),
+            if result.is_ok() { "ok" } else { "error" },
+            attrs,
+        );
         if let Ok(r) = &result {
             // Consumo di token riportato dal backend (ADR-0024): contatori senza contenuti.
             for (key, counter) in [
@@ -596,7 +659,7 @@ impl Jarvis {
         self.store
             .message_add("user", message, &task.id(), &now(), None)
             .map_err(internal)?;
-        task.transition("planned", "Delega al General Assistant");
+        task.transition("planned", "Delega all'agente");
         task.transition("running", "Agente in esecuzione");
         self.save(&task)?;
 
@@ -674,6 +737,7 @@ impl Jarvis {
                 continue;
             }
             let (tid, corr) = (task.id(), task.correlation());
+            let policy_timer = Timer::start();
             let decision = policy::decide(
                 &self.catalog,
                 &self.cfg.web,
@@ -688,6 +752,14 @@ impl Jarvis {
                 },
             );
             out.steps.push(json!({"kind": "policy", "decision": decision["decision"], "reasons": decision["reasons"], "risk": decision["risk"]}));
+            self.span(
+                &task,
+                &tool,
+                "policy",
+                policy_timer.ms(),
+                decision["decision"].as_str().unwrap_or("unknown"),
+                json!({"tool": tool, "risk": decision["risk"], "reasons": decision["reasons"]}),
+            );
             let outcome_name = if decision["decision"] == "deny" {
                 "denied"
             } else {
@@ -890,6 +962,26 @@ impl Jarvis {
             ));
         }
         let mut out = Outcome::default();
+        let waited = task.doc["history"]
+            .as_array()
+            .and_then(|h| h.iter().rev().find(|x| x["to"] == "waiting_confirmation"))
+            .and_then(|x| x["at"].as_str())
+            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+            .map(|t| {
+                (chrono::Utc::now() - t.with_timezone(&chrono::Utc))
+                    .num_microseconds()
+                    .unwrap_or(0) as f64
+                    / 1000.0
+            })
+            .unwrap_or(0.0);
+        self.span(
+            &task,
+            "conferma del proprietario",
+            "confirmation",
+            waited,
+            if approve { "approved" } else { "rejected" },
+            json!({"tool": tool}),
+        );
         if approve {
             self.audit(merge(&base, json!({"outcome": "confirmed"})))?;
             out.steps
@@ -963,7 +1055,29 @@ impl Jarvis {
         confirmed: bool,
         out: &mut Outcome,
     ) -> Result<(&'static str, Value), CoreError> {
+        let tool_timer = Timer::start();
         let result = self.execute_tool(tool, arguments, confirmed);
+        let kind = match tool {
+            t if t.starts_with("connector.") => "connector",
+            t if t.starts_with("node.") => "node",
+            "shell.run" => "terminal",
+            t if t.starts_with("web.") => "web",
+            _ => "tool",
+        };
+        let attrs = match &result {
+            Ok(_) => json!({"tool": tool, "confirmed": confirmed}),
+            Err(e) => {
+                json!({"tool": tool, "confirmed": confirmed, "error_code": e.code, "effect": self.failure_effect(tool, e.code)})
+            }
+        };
+        self.span(
+            task,
+            tool,
+            kind,
+            tool_timer.ms(),
+            if result.is_ok() { "ok" } else { "error" },
+            attrs,
+        );
         let base = json!({"correlation_id": task.correlation(), "task_id": task.id(), "actor": {"kind": "module", "id": "core"},
                           "node": "core-local", "action": tool});
         match result {
@@ -992,6 +1106,29 @@ impl Jarvis {
 
     fn finish(&mut self, task: Task, mut out: Outcome, text: String) -> Result<Outcome, CoreError> {
         self.save(&task)?;
+        let created = task.doc["created_at"]
+            .as_str()
+            .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+            .map(|t| {
+                (chrono::Utc::now() - t.with_timezone(&chrono::Utc))
+                    .num_microseconds()
+                    .unwrap_or(0) as f64
+                    / 1000.0
+            })
+            .unwrap_or(0.0);
+        let tools = out
+            .steps
+            .iter()
+            .filter(|s| s["kind"] == "tool_call")
+            .count();
+        self.span(
+            &task,
+            "richiesta",
+            "task",
+            created,
+            task.doc["state"].as_str().unwrap_or("unknown"),
+            json!({"steps": out.steps.len(), "tools": tools}),
+        );
         self.record_episode(&task, &out);
         self.store
             .message_add(
@@ -2411,6 +2548,8 @@ impl Jarvis {
 /// Intervallo fra due istantanee salvate e periodo di conservazione.
 const METRICS_EVERY: std::time::Duration = std::time::Duration::from_secs(300);
 const METRICS_KEEP_DAYS: i64 = 7;
+/// Giorni di conservazione delle tracce dei task (ADR-0039).
+const TRACE_KEEP_DAYS: i64 = 30;
 const DB_MAINTENANCE_EVERY: std::time::Duration = std::time::Duration::from_secs(6 * 3600);
 
 impl Jarvis {
@@ -2441,6 +2580,9 @@ impl Jarvis {
             self.obs
                 .observe("db maintenance", timer.ms(), done.is_err());
             let _ = self.store.memory_purge_expired(&now());
+            let keep = (chrono::Utc::now() - chrono::Duration::days(TRACE_KEEP_DAYS))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            let _ = self.store.spans_prune(&keep);
         }
         Ok(Some(doc))
     }

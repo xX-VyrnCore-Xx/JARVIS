@@ -27,7 +27,7 @@ Questo documento raccoglie ciò che serve per l'accettazione finale descritta in
 | RNF-04 Sicurezza | token, host, CSP, policy, conferme, audit, revoca | P8, P12 | Verde | Passkey e mTLS assenti; portachiavi su macOS, Windows e Linux con sessione grafica |
 | RNF-05 Local-first | nessun backend cloud | — | Verde | — |
 | RNF-06 Offline | backend offline in tutta la CI | P2 | Verde | — |
-| RNF-07 Osservabilità | metriche, log, esportazione | — | Verde | Trace distribuite assenti |
+| RNF-07 Osservabilità | metriche, log, esportazione, tracce dei task (`api.rs`) | — | Verde | Tracce W3C locali per task (ADR-0039); nessun esportatore OTLP |
 | RNF-08 Backup e rollback | `backup.rs`, `rollback.rs` | P9 | Verde | Installatori firmati assenti |
 
 ## Controlli automatici a ogni modifica

@@ -450,3 +450,67 @@ async fn update_check_notifies_once_per_version() {
         (StatusCode::OK, Some("beta"))
     );
 }
+
+#[tokio::test]
+async fn every_task_has_a_w3c_trace_with_agent_policy_and_tool_spans() {
+    let e = env();
+    let out = e.chat("che ore sono").await;
+    let id = out["task"]["task_id"].as_str().unwrap();
+    let (status, trace) = e.api("GET", &format!("/api/tasks/{id}/trace"), None).await;
+    assert_eq!(status, StatusCode::OK, "{trace}");
+    let corr = out["task"]["correlation_id"]
+        .as_str()
+        .unwrap()
+        .replace('-', "");
+    assert_eq!(
+        trace["trace_id"],
+        corr.as_str(),
+        "traccia = correlation_id (ADR-0039)"
+    );
+    let spans = trace["spans"].as_array().unwrap();
+    let kinds: Vec<&str> = spans.iter().map(|s| s["kind"].as_str().unwrap()).collect();
+    for k in ["agent", "policy", "tool", "task"] {
+        assert!(kinds.contains(&k), "manca l'intervallo {k}: {kinds:?}");
+    }
+    let root = spans.iter().find(|s| s["kind"] == "task").unwrap();
+    assert!(root["parent_span_id"].is_null());
+    assert_eq!(root["span_id"].as_str().unwrap().len(), 16);
+    for s in spans.iter().filter(|s| s["kind"] != "task") {
+        assert_eq!(s["parent_span_id"], root["span_id"], "{s}");
+        assert_eq!(s["trace_id"], trace["trace_id"]);
+    }
+    assert!(trace["total_ms"].as_f64().unwrap() >= 0.0);
+    // Nessun contenuto dell'utente nella traccia.
+    assert!(!trace.to_string().contains("che ore sono"), "{trace}");
+
+    // Con la conferma la traccia include l'attesa del proprietario.
+    let out = e.chat("scrivi traccia.txt: ciao").await;
+    let cid = out["confirmation"]["confirmation_id"].as_str().unwrap();
+    let id = out["task"]["task_id"].as_str().unwrap().to_string();
+    let (status, _) = e
+        .api(
+            "POST",
+            &format!("/api/confirmations/{cid}"),
+            Some(json!({"approve": true})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, trace) = e.api("GET", &format!("/api/tasks/{id}/trace"), None).await;
+    let spans = trace["spans"].as_array().unwrap();
+    assert!(
+        spans
+            .iter()
+            .any(|s| s["kind"] == "confirmation" && s["status"] == "approved"),
+        "{trace}"
+    );
+    assert!(
+        spans
+            .iter()
+            .any(|s| s["name"] == "fs.write" && s["status"] == "ok"),
+        "{trace}"
+    );
+
+    let (status, _) = e.api("GET", "/api/tasks/inesistente/trace", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let _ = std::fs::remove_dir_all(&e.data);
+}

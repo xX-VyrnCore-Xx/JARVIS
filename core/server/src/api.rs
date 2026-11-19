@@ -259,6 +259,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/confirmations", get(confirmations))
         .route("/api/confirmations/{id}", post(confirm))
         .route("/api/tasks", get(tasks))
+        .route("/api/tasks/{id}/trace", get(task_trace))
         .route("/api/conversation", get(conversation))
         .route("/api/memory", get(memory))
         .route("/api/memory/graph", get(memory_graph))
@@ -608,6 +609,11 @@ async fn tasks(
         Ok(items) => Json(json!({"items": items})).into_response(),
         Err(e) => e.into_response(),
     }
+}
+
+/// Traccia di un task (ADR-0039): intervalli W3C con durata ed esito, senza contenuti.
+async fn task_trace(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    reply(with_core(&state, move |j| j.task_trace(&id)).await)
 }
 
 async fn conversation(

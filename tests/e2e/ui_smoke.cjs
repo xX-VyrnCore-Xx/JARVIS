@@ -194,6 +194,10 @@ function check(cond, msg) {
   await page.click('[data-view="tasks"]');
   await page.waitForSelector("#tasks .card");
   check((await page.locator("#tasks .badge").first().innerText()) === "succeeded", "attività con stato verificato");
+  await page.locator("#tasks .trace-toggle").first().click();
+  await page.waitForSelector("#tasks .trace .span-row.task");
+  check(await page.locator("#tasks .trace .span-row.agent").count() >= 1, "traccia del task con agente, durate ed esiti (ADR-0039)");
+  if (shots) await page.screenshot({ path: `${shots}/jarvis-traccia.png` });
 
   // Automazioni (RF-07): creazione dalla chat con conferma, esecuzione manuale, cronologia.
   await page.click('[data-view="chat"]');
