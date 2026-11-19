@@ -13,8 +13,8 @@ pub struct Store {
 
 pub type StoreResult<T> = Result<T, rusqlite::Error>;
 
-/// Versione dello schema (ADR-0037): 1 = schema fino a 1.3.x con migrazioni additive.
-pub const SCHEMA_VERSION: i64 = 2;
+/// Versione dello schema (ADR-0037): 1 = schema fino a 1.3.x con migrazioni additive; 3 = tracce dei task (ADR-0039).
+pub const SCHEMA_VERSION: i64 = 3;
 
 impl Store {
     pub fn open(path: &Path) -> StoreResult<Self> {
@@ -49,7 +49,10 @@ impl Store {
              CREATE TABLE IF NOT EXISTS notify_channels (channel_id TEXT PRIMARY KEY, doc TEXT NOT NULL);
              CREATE INDEX IF NOT EXISTS tasks_by_updated ON tasks (updated_at);
              CREATE INDEX IF NOT EXISTS messages_by_task ON messages (task_id);
-             CREATE INDEX IF NOT EXISTS workflows_due ON workflows (next_run_at);",
+             CREATE INDEX IF NOT EXISTS workflows_due ON workflows (next_run_at);
+             CREATE TABLE IF NOT EXISTS task_spans (seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL,
+                 at TEXT NOT NULL, span TEXT NOT NULL);
+             CREATE INDEX IF NOT EXISTS task_spans_by_task ON task_spans (task_id, seq);",
         )?;
         // Migrazione additiva: database creati prima delle fonti Web (RF-06).
         let has_sources = conn.prepare("SELECT sources FROM messages LIMIT 0").is_ok();
@@ -67,6 +70,32 @@ impl Store {
         // Statistiche del pianificatore di query aggiornate solo dove servono (raccomandazione di SQLite).
         store.conn.execute_batch("PRAGMA optimize=0x10002;")?;
         Ok(store)
+    }
+
+    /// Aggiunge un intervallo alla traccia di un task (ADR-0039). Le tracce più vecchie di `keep_since`
+    /// vengono rimosse insieme, così la tabella non cresce senza limite.
+    pub fn span_add(&self, task_id: &str, at: &str, span: &Value) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT INTO task_spans (task_id, at, span) VALUES (?1, ?2, ?3)",
+            params![task_id, at, span.to_string()],
+        )?;
+        Ok(())
+    }
+
+    /// Intervalli registrati per un task, in ordine.
+    pub fn spans(&self, task_id: &str) -> StoreResult<Vec<Value>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT span FROM task_spans WHERE task_id = ?1 ORDER BY seq")?;
+        let rows = stmt.query_map([task_id], |r| r.get::<_, String>(0))?;
+        rows.map(|r| r.map(|s| serde_json::from_str(&s).unwrap_or(Value::Null)))
+            .collect()
+    }
+
+    /// Elimina le tracce registrate prima di `before` (conservazione).
+    pub fn spans_prune(&self, before: &str) -> StoreResult<usize> {
+        self.conn
+            .execute("DELETE FROM task_spans WHERE at < ?1", [before])
     }
 
     /// Versione dello schema registrata nel file (`PRAGMA user_version`).
@@ -94,7 +123,7 @@ impl Store {
         Ok(json!({
             "ok": check == "ok", "check": check, "schema_version": self.schema_version()?,
             "size_bytes": pages * page_size,
-            "rows": {"memory": count("memory")?, "messages": count("messages")?, "tasks": count("tasks")?,
+            "rows": {"memory": count("memory")?, "messages": count("messages")?, "tasks": count("tasks")?, "spans": count("task_spans")?,
                      "workflows": count("workflows")?, "notifications": count("notifications")?},
         }))
     }

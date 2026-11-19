@@ -8,7 +8,7 @@ Questo documento raccoglie ciò che serve per l'accettazione finale descritta in
 |---|---|---|---|---|
 | RF-01 Conversazione | `core/server/tests/api.rs`, E2E | P1, P2 | Verde | Qualità con modelli reali da valutare |
 | RF-02 Orchestrazione | `api.rs`, `agent_loop.rs`, contratti task | — | Verde | Ciclo fino a 4 strumenti per richiesta (ADR-0037) |
-| RF-03 Agenti | contratti delega, `agents.rs`, `agent_loop.rs`, `tests/ai` | — | Verde | 5 specializzazioni con ambito di strumenti (ADR-0038); niente agenti temporanei né sottodeleghe |
+| RF-03 Agenti | contratti delega, `agents.rs`, `agent_loop.rs`, `subagents.rs`, `tests/ai` | — | Verde | 5 specializzazioni con ambito di strumenti (ADR-0038); agenti temporanei di sola lettura, un livello (ADR-0040) |
 | RF-04 AI Gateway | `tests/ai/test_gateway.py`, guasti in `resilience.rs` | P2 | Verde | Solo backend locali |
 | RF-05 Computer Use | strumenti file, sistema, processi e terminale; `api.rs`, `terminal.rs` | P3, P14 | Verde | Terminale con conferma a ogni comando (ADR-0038); niente controllo di desktop e mouse |
 | RF-06 Web | `web.rs` (SSRF, iniezioni), E2E | P4 | Verde | Navigazione interattiva assente |
@@ -27,7 +27,7 @@ Questo documento raccoglie ciò che serve per l'accettazione finale descritta in
 | RNF-04 Sicurezza | token, host, CSP, policy, conferme, audit, revoca | P8, P12 | Verde | Passkey e mTLS assenti; portachiavi su macOS, Windows e Linux con sessione grafica |
 | RNF-05 Local-first | nessun backend cloud | — | Verde | — |
 | RNF-06 Offline | backend offline in tutta la CI | P2 | Verde | — |
-| RNF-07 Osservabilità | metriche, log, esportazione | — | Verde | Trace distribuite assenti |
+| RNF-07 Osservabilità | metriche, log, esportazione, tracce dei task (`api.rs`) | — | Verde | Tracce W3C locali per task (ADR-0039); nessun esportatore OTLP |
 | RNF-08 Backup e rollback | `backup.rs`, `rollback.rs` | P9 | Verde | Installatori firmati assenti |
 
 ## Controlli automatici a ogni modifica

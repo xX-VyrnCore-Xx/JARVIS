@@ -46,6 +46,7 @@ Stile
 Strumenti
 - Usa gli strumenti solo quando servono; uno per volta. Dopo ogni risultato decidi se ne serve un altro o se rispondere (al massimo {max_steps} strumenti per richiesta).
 - Il Core verifica ogni strumento con la policy; le azioni che modificano file, servizi esterni o automazioni chiedono la conferma del proprietario: non chiederla tu a parole, proponi direttamente lo strumento.
+- Per un sotto-compito autonomo (es. analizzare dei file mentre tu prepari la risposta) puoi usare agent.delegate: l'agente temporaneo ha un ruolo, pochi strumenti di sola lettura e risponde solo a te.
 - Non inventare mai risultati: se uno strumento fallisce o viene negato, dillo e proponi un'alternativa.
 - Per domande sul proprietario consulta prima la memoria qui sotto, poi memory.search. Quando il proprietario dichiara un fatto stabile o una preferenza, salvala con memory.remember in una frase breve e autonoma.
 
@@ -114,6 +115,9 @@ def _describe_tool_result(result: dict) -> str:
         return f"{tool} non è riuscito: {_reason(output)}."
     if tool == "time.now":
         return f"Sono le {output.get('local', '?')} (UTC {output.get('utc', '?')})."
+    if tool == "agent.delegate":
+        used = ", ".join(f"{t['tool']} ({t['status']})" for t in output.get("tools_used", [])) or "nessuno"
+        return f"L'agente temporaneo «{output.get('role')}» ha risposto:\n{output.get('reply')}\n(strumenti usati: {used})"
     if tool == "process.list":
         procs = output.get("processes", [])
         if not procs:
@@ -257,6 +261,9 @@ def _reason(output: Any) -> str:
 
 
 _RULES: list[tuple[re.Pattern[str], str, Any]] = [
+    # Agente temporaneo (ADR-0040): «delega a un agente <ruolo>: <compito>».
+    (re.compile(r"^\s*(?:delega a un agente|agente temporaneo|sotto-?agente)\s+(?:come\s+)?(.{3,200}?)\s*:\s*(.{3,2000})$", re.I | re.S), "agent.delegate",
+     lambda m: {"role": m.group(1).strip(), "objective": m.group(2).strip()}),
     # Terminale (ADR-0038): solo con il prefisso esplicito; il Core chiede sempre la conferma.
     (re.compile(r"^\s*(?:terminale|esegui(?: il)? comando|shell|\$)\s*:?\s+(.+)$", re.I | re.S), "shell.run",
      lambda m: {"command": m.group(1).strip()[:2000]}),
@@ -399,6 +406,7 @@ Prova con:
 • "che ore sono"
 • "info sistema"
 • "elenca file"
+• "delega a un agente analista: che ore sono" (agente temporaneo con strumenti di sola lettura)
 • "processi" · "processi per memoria" · "terminale: ls -la" (ogni comando chiede conferma)
 • "scrivi note.txt: testo da salvare" (chiede conferma)
 • "leggi note.txt"
@@ -497,6 +505,7 @@ TOOL_HINTS: list[tuple[tuple[str, ...], tuple[str, ...]]] = [
     (("ricord", "memoria", "dimentic", "sai di", "preferisc"), ("memory.",)),
     (("connettor", "servizio", "api"), ("connector.",)),
     (("nodo", "computer", "pc ", "portatile"), ("node.",)),
+    (("agente temporaneo", "sotto-agente", "sottoagente", "delega a", "sotto-compit", "in parallelo"), ("agent.",)),
     (("processi", "processo", "programmi", "cpu", "ram", "task manager", "rallent"), ("process.",)),
     (("terminale", "comando", "shell", "script", "esegui", "installa", "git ", "npm ", "python"), ("shell.",)),
 ]

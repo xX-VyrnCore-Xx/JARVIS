@@ -460,3 +460,17 @@ kbd { font-family: var(--mono); font-size: .7rem; padding: .05rem .4rem; border-
 
 /* Specializzazione dell'agente (ADR-0038) */
 .step.specialist { color: var(--accent-2); border-color: color-mix(in srgb, var(--accent-2) 55%, transparent); }
+
+/* Traccia del task (ADR-0039) */
+.trace-toggle { margin-top: .5rem; }
+.trace { margin-top: .6rem; display: grid; gap: .3rem; }
+.span-row { display: grid; grid-template-columns: minmax(140px, 32%) 1fr 64px; align-items: center; gap: .6rem; font-size: .8rem; }
+.span-label { font-family: var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.span-row.task .span-label { color: var(--text); }
+.span-track { position: relative; height: 10px; border-radius: 6px; background: rgba(63, 208, 255, .07); overflow: hidden; }
+.span-bar { position: absolute; top: 0; bottom: 0; border-radius: 6px; background: linear-gradient(90deg, var(--accent), var(--accent-2)); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 50%, transparent); }
+.span-bar.error, .span-bar.deny, .span-bar.rejected, .span-bar.failed { background: var(--bad); }
+.span-bar.require_confirmation, .span-bar.waiting_confirmation { background: var(--warn); }
+.span-row.task .span-bar { background: color-mix(in srgb, var(--accent) 35%, transparent); }
+.span-ms { font-family: var(--mono); color: var(--muted); text-align: right; }
+@media (max-width: 720px) { .span-row { grid-template-columns: 1fr 52px; } .span-track { grid-column: 1 / -1; grid-row: 2; } }

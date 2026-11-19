@@ -947,6 +947,33 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `tests/terminal.rs` (processi senza conferma; comando eseguito solo dopo la conferma, con effetto nella workspace e voce di audit; comandi distruttivi negati senza conferma; terminale rifiutato nelle automazioni); `tests/agent_loop.rs` (lo specialista della ricerca riceve solo i suoi strumenti e il ruolo); unitari di `agents.rs`; `tests/ai` (ruolo nel prompt); E2E 73/73.
 - **Documenti interessati:** ACCEPTANCE.md, REQUIREMENTS.md, AUTONOMY_AND_TOOLS.md, SECURITY_AND_PRIVACY.md, AI_SYSTEM.md, ROADMAP.md.
 
+### ADR-0039 — Traccia di ogni task (W3C Trace Context)
+
+- **Data:** 2026-11-19 · **Stato:** accettato · **Fonte:** richiesta del proprietario («continua con le funzionalità mancanti»); lacuna RNF-07 «trace distribuite assenti» in ACCEPTANCE.md.
+- **Decisione:**
+  - ogni task ha una traccia con identificativi compatibili con W3C Trace Context: `trace_id` = `correlation_id` senza trattini (32 esadecimali), intervallo radice = prime 16 cifre del `task_id`, intervalli figli con id casuali di 16 cifre;
+  - intervalli registrati dal Core: delega all'agente (specializzazione, backend, token, passi residui), decisione della policy (rischio, motivi), esecuzione dello strumento (tipo `tool`, `web`, `connector`, `node`, `terminal`; codice d'errore ed effetto), attesa della conferma del proprietario (approvata o rifiutata) e richiesta completa;
+  - nessun contenuto dell'utente: solo nomi di strumenti, tempi, esiti e contatori;
+  - tabella `task_spans` (schema v3), conservazione di 30 giorni con la manutenzione periodica; `GET /api/tasks/{id}/trace`;
+  - sezione Attività: «Mostra traccia» apre la cronologia con barre proporzionali alla durata e colori per esito.
+- **Conseguenze:** si vede dove si spende il tempo di una richiesta (modello, strumenti, connettori, attesa della conferma). Le tracce restano locali: nessun esportatore OTLP verso servizi esterni. Versione 1.6.0.
+- **Evidenza:** `every_task_has_a_w3c_trace_with_agent_policy_and_tool_spans` in `tests/api.rs` (identificativi, gerarchia, assenza di contenuti, intervallo di conferma, 404 per task senza traccia); E2E con la cronologia nella sezione Attività.
+- **Documenti interessati:** ACCEPTANCE.md, DEVOPS_QA_OBSERVABILITY.md, ROADMAP.md.
+
+### ADR-0040 — Agenti temporanei
+
+- **Data:** 2026-11-19 · **Stato:** accettato · **Fonte:** richiesta del proprietario («procedi con gli agenti temporanei»); lacuna RF-03 «niente agenti temporanei né sottodeleghe».
+- **Decisione:**
+  - nuovo strumento `agent.delegate` (`role`, `objective`, `tools` facoltativi; rischio medio, senza conferma): l'agente principale affida un sotto-compito a un agente temporaneo;
+  - l'agente temporaneo è un task figlio (`parent_task_id`, stessa `correlation_id`, richiedente `agent`) con delega `agent: "temporary"`, ruolo nel prompt, al massimo 3 strumenti e nessuna sottodelega; il principale ne può creare al massimo 2 per richiesta (`limits.max_subdelegations`);
+  - strumenti concessi: solo quelli senza conferma e non ad alto rischio (predefiniti di sola lettura: ora, sistema, file in lettura, ricerca nella memoria, Web); una richiesta con strumenti non concedibili viene rifiutata con `agent.invalid_tools` prima di creare il figlio;
+  - ogni strumento del figlio passa da ambito, policy e audit (soggetto `agent/temporary`); ciò che richiederebbe una conferma viene negato e resta all'agente principale;
+  - traccia unica: la radice del figlio è figlia della radice del principale e i suoi intervalli stanno nella stessa traccia (ADR-0039);
+  - interfaccia: etichetta «agente temporaneo · ruolo» in chat; nella sezione Attività il figlio indica il task principale.
+- **Conseguenze:** l'agente principale può scomporre una richiesta in sotto-compiti di sola lettura senza aumentare i permessi. Le esecuzioni sono sequenziali (il Core resta single-thread). Versione 1.7.0.
+- **Evidenza:** `tests/subagents.rs` (figlio con ruolo, stessa correlazione e traccia; nessuna scrittura né conferma); `temporary_agents_only_get_tools_without_confirmation` in `tests/agent_loop.rs`; E2E 75/75.
+- **Documenti interessati:** ACCEPTANCE.md, AI_SYSTEM.md, AUTONOMY_AND_TOOLS.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

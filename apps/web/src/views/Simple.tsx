@@ -1,6 +1,6 @@
 // Viste elenco: Attività, Workspace, Audit, Dispositivi e Connettori.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, fmtTime, guard, post } from "../lib/api";
 import { useApp, useViewData } from "../state";
 
@@ -15,10 +15,52 @@ export function ViewHead({ title, onRefresh, refreshKey }: { title: string; onRe
 
 export const Empty = ({ children }: { children: React.ReactNode }) => <p className="empty">{children}</p>;
 
+interface Span {
+  span_id: string; name: string; kind: string; start: string; duration_ms: number; status: string;
+  attributes?: Record<string, unknown>;
+}
+const SPAN_KIND: Record<string, string> = {
+  task: "richiesta", agent: "agente", policy: "policy", tool: "strumento", connector: "connettore",
+  node: "nodo", web: "web", terminal: "terminale", confirmation: "conferma",
+};
+
+/** Traccia del task (ADR-0039): cronologia degli intervalli con durata ed esito. */
+function TraceView({ taskId }: { taskId: string }) {
+  const [trace, setTrace] = useState<{ total_ms: number | null; spans: Span[] } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    api<{ total_ms: number | null; spans: Span[] }>(`/api/tasks/${taskId}/trace`).then(setTrace, (e) => setError((e as Error).message));
+  }, [taskId]);
+  if (error) return <p className="sub">{error}</p>;
+  if (!trace) return <p className="sub">Caricamento della traccia…</p>;
+  const spans = [...trace.spans].sort((a, b) => Date.parse(a.start) - Date.parse(b.start) || (a.kind === "task" ? -1 : 1));
+  const t0 = Math.min(...spans.map((s) => Date.parse(s.start)));
+  const end = Math.max(...spans.map((s) => Date.parse(s.start) + s.duration_ms));
+  const total = Math.max(end - t0, 1);
+  return (
+    <div className="trace" role="list" aria-label="Traccia del task">
+      {spans.map((s) => {
+        const left = ((Date.parse(s.start) - t0) / total) * 100;
+        const width = Math.max((s.duration_ms / total) * 100, 0.8);
+        return (
+          <div className={`span-row ${s.kind}`} role="listitem" key={s.span_id}>
+            <span className="span-label">{s.kind === "task" ? "richiesta completa" : `${SPAN_KIND[s.kind] || s.kind} · ${s.name}`}</span>
+            <span className="span-track">
+              <i className={`span-bar ${s.status}`} style={{ left: `${Math.min(left, 99.2)}%`, width: `${Math.min(width, 100 - left)}%` }} />
+            </span>
+            <span className="span-ms">{s.duration_ms < 1 ? "<1" : Math.round(s.duration_ms)} ms</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 export function Tasks({ active }: { active: boolean }) {
   const { activity } = useApp();
   const { data, reload } = useViewData(active, () => api("/api/tasks?limit=50"), [activity]);
   const items: any[] = data?.items || [];
+  const [open, setOpen] = useState<string | null>(null);
   return (
     <section className={`view${active ? " active" : ""}`} id="view-tasks" aria-label="Attività">
       <ViewHead title="Attività" refreshKey="tasks" onRefresh={reload} />
@@ -29,11 +71,15 @@ export function Tasks({ active }: { active: boolean }) {
           <div className="card" key={t.task_id}>
             <div className="body">
               <div className="title">{t.objective}</div>
-              <div className="sub">{t.task_id} · {fmtTime(t.created_at)}</div>
+              <div className="sub">{t.task_id} · {fmtTime(t.created_at)}{t.parent_task_id ? ` · agente temporaneo del task ${t.parent_task_id.slice(0, 8)}` : ""}</div>
               <ol className="history">
                 {t.history.map((h: any, i: number) => <li key={i}>{h.to} — {h.reason || ""}</li>)}
               </ol>
               {t.error ? <div className="sub">errore: {t.error.code} — {t.error.message}</div> : null}
+              <button type="button" className="ghost small trace-toggle" onClick={() => setOpen(open === t.task_id ? null : t.task_id)}>
+                {open === t.task_id ? "Nascondi traccia" : "Mostra traccia"}
+              </button>
+              {open === t.task_id ? <TraceView taskId={t.task_id} /> : null}
             </div>
             <span className={`badge ${t.state}`}>{t.state}</span>
           </div>

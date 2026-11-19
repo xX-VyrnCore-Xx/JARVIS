@@ -95,3 +95,6 @@ Gli obiettivi sono volutamente larghi per i runner CI: servono a rilevare regres
 - `.github/workflows/release.yml` costruisce e prova gli archivi sui 3 sistemi; con un tag `vX.Y.Z` prepara una bozza di release.
 - All'avvio di una versione diversa il Core copia i dati in `<dati>-rollback/`; `./jarvis.sh rollback` ripristina l'ultima copia.
 - Checklist di accettazione e criteri di rilascio: [ACCEPTANCE.md](ACCEPTANCE.md).
+
+
+**Tracce dei task (ADR-0039).** Ogni richiesta registra intervalli compatibili con W3C Trace Context (delega, policy, strumenti, connettori, nodi, terminale, conferma) senza contenuti dell'utente; `GET /api/tasks/{id}/trace` e la sezione Attività li mostrano. Conservazione 30 giorni.

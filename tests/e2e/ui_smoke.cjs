@@ -164,6 +164,8 @@ function check(cond, msg) {
   check((await send("leggi ../../etc/passwd")).includes("negato"), "uscita dalla workspace negata");
   await send("ricorda che il test E2E è passato");
   check((await page.locator(".msg.assistant").last().locator(".step.specialist").innerText()).includes("memoria"), "richiesta di memoria affidata allo specialista della memoria");
+  const sub = await send("delega a un agente analista: che ore sono");
+  check(sub.startsWith("L'agente temporaneo «analista» ha risposto") && (await page.locator(".msg.assistant").last().innerText()).includes("agente temporaneo · analista"), "agente temporaneo con ruolo e strumenti di sola lettura (ADR-0040)");
   const procs = await send("quali processi usano più memoria?");
   check(procs.startsWith("Processi con più uso di memoria") && /pid \d+/.test(procs), "processi in esecuzione elencati senza conferma");
   if (shots) await page.screenshot({ path: `${shots}/jarvis-chat.png` });
@@ -194,6 +196,10 @@ function check(cond, msg) {
   await page.click('[data-view="tasks"]');
   await page.waitForSelector("#tasks .card");
   check((await page.locator("#tasks .badge").first().innerText()) === "succeeded", "attività con stato verificato");
+  await page.locator("#tasks .trace-toggle").first().click();
+  await page.waitForSelector("#tasks .trace .span-row.task");
+  check(await page.locator("#tasks .trace .span-row.agent").count() >= 1, "traccia del task con agente, durate ed esiti (ADR-0039)");
+  if (shots) await page.screenshot({ path: `${shots}/jarvis-traccia.png` });
 
   // Automazioni (RF-07): creazione dalla chat con conferma, esecuzione manuale, cronologia.
   await page.click('[data-view="chat"]');

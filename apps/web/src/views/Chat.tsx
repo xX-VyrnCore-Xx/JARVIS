@@ -8,6 +8,7 @@ import { useApp, useVoice } from "../state";
 interface Step {
   kind: string;
   agent?: string;
+  role?: string;
   backend?: { name: string };
   tool?: string;
   decision?: string;
@@ -54,6 +55,8 @@ function StepChips({ steps }: { steps?: Step[] }) {
     if (s.kind === "delegation" && s.backend) chips.push(<span key={i} className="step">agente · {s.backend.name}</span>);
     if (s.kind === "delegation" && s.agent && AGENTS[s.agent])
       chips.push(<span key={`${i}-a`} className="step specialist">specialista · {AGENTS[s.agent]}</span>);
+    if (s.kind === "subagent")
+      chips.push(<span key={i} className={`step specialist ${s.status}`}>agente temporaneo · {s.role}</span>);
     if (s.kind === "loop_guard") chips.push(<span key={i} className="step deny">ripetizione bloccata · {s.tool}</span>);
     if (s.kind === "scope") chips.push(<span key={i} className="step deny">fuori ambito · {s.tool}</span>);
     if (s.kind === "tool_call") chips.push(<span key={i} className="step">strumento · {s.tool}</span>);

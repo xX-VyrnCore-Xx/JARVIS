@@ -60,3 +60,6 @@ Dettagli in ADR-0005.
 
 
 **Processi, terminale e specializzazioni (ADR-0038).** `process.list` elenca i processi senza conferma; `shell.run` esegue un comando nella workspace solo dopo la conferma del proprietario, con limite di 60 secondi, output troncato e negazione dei comandi distruttivi noti (`JARVIS_SHELL=off` lo disattiva). Il Core affida le richieste di un solo ambito a uno specialista (`research`, `system`, `automation`, `memory`, `coding`) che riceve solo gli strumenti di quell'ambito.
+
+
+**Agenti temporanei (ADR-0040).** `agent.delegate` non amplia i permessi: il figlio riceve solo strumenti senza conferma, passa da ambito, policy e audit, e ciò che richiederebbe una conferma resta all'agente principale.

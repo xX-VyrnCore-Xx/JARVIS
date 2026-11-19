@@ -17,7 +17,8 @@ macro_rules! tool_file {
     };
 }
 
-const SOURCES: [&str; 18] = [
+const SOURCES: [&str; 19] = [
+    tool_file!("agent.delegate"),
     tool_file!("fs.list"),
     tool_file!("fs.read"),
     tool_file!("fs.write"),
