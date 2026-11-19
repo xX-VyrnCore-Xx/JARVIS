@@ -19,6 +19,7 @@ pub mod nodes;
 pub mod oauth;
 pub mod observability;
 pub mod orchestrator;
+pub mod passkeys;
 pub mod policy;
 pub mod rollback;
 pub mod secrets;

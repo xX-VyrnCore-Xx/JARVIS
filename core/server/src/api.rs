@@ -41,6 +41,77 @@ pub struct AppState {
     device_db: std::path::PathBuf,
     /// Configurazione guidata dei modelli: stato letto senza il blocco del Core.
     pub setup: Arc<crate::setup::Setup>,
+    /// Sfide WebAuthn in corso (ADR-0042): sfida -> dispositivo, scopo e scadenza.
+    challenges: Mutex<std::collections::HashMap<String, Challenge>>,
+}
+
+/// Sfida monouso di una passkey: registrazione o approvazione di una conferma precisa.
+struct Challenge {
+    device_id: String,
+    purpose: String,
+    expires: std::time::Instant,
+}
+
+/// Dispositivo associato autenticato dal middleware (assente per il proprietario sul computer del Core).
+#[derive(Clone)]
+struct DeviceCtx(Value);
+
+/// Nome RP e origini ammesse per una passkey: l'host della richiesta, senza porta per l'RP.
+fn webauthn_site(headers: &axum::http::HeaderMap) -> (String, Vec<String>) {
+    let host = headers
+        .get(header::HOST)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or_default()
+        .to_string();
+    let rp = host
+        .rsplit_once(':')
+        .filter(|(_, p)| p.chars().all(|c| c.is_ascii_digit()))
+        .map_or(host.as_str(), |(h, _)| h)
+        .trim_matches(['[', ']'])
+        .to_string();
+    (
+        rp,
+        vec![format!("https://{host}"), format!("http://{host}")],
+    )
+}
+
+/// Nuova sfida casuale (32 byte) registrata per 5 minuti.
+fn new_challenge(state: &Shared, device_id: &str, purpose: &str) -> String {
+    let mut raw = [0u8; 32];
+    getrandom::getrandom(&mut raw).expect("generatore casuale");
+    let challenge = crate::passkeys::b64url(&raw);
+    let mut map = state.challenges.lock().unwrap_or_else(|e| e.into_inner());
+    let now = std::time::Instant::now();
+    map.retain(|_, c| c.expires > now);
+    map.insert(
+        challenge.clone(),
+        Challenge {
+            device_id: device_id.into(),
+            purpose: purpose.into(),
+            expires: now + std::time::Duration::from_secs(300),
+        },
+    );
+    challenge
+}
+
+/// Consuma una sfida se appartiene al dispositivo e allo scopo indicati e non è scaduta.
+fn take_challenge(state: &Shared, challenge: &str, device_id: &str, purpose: &str) -> bool {
+    let mut map = state.challenges.lock().unwrap_or_else(|e| e.into_inner());
+    match map.remove(challenge) {
+        Some(c) => {
+            c.device_id == device_id
+                && c.purpose == purpose
+                && c.expires > std::time::Instant::now()
+        }
+        None => false,
+    }
+}
+
+/// Sfida contenuta in un clientDataJSON in base64url (per ritrovare lo scopo prima della verifica completa).
+fn client_challenge(client_data_b64: &str) -> Option<String> {
+    let raw = crate::passkeys::from_b64url(client_data_b64).ok()?;
+    let v: Value = serde_json::from_slice(&raw).ok()?;
+    v["challenge"].as_str().map(str::to_string)
 }
 
 type Shared = Arc<AppState>;
@@ -80,7 +151,7 @@ async fn with_core<T: Send + 'static>(
     .expect("operazione del Core interrotta")
 }
 
-async fn guard(State(state): State<Shared>, req: Request, next: Next) -> Response {
+async fn guard(State(state): State<Shared>, mut req: Request, next: Next) -> Response {
     let host = req
         .headers()
         .get(header::HOST)
@@ -148,6 +219,7 @@ async fn guard(State(state): State<Shared>, req: Request, next: Next) -> Respons
                     "operazione disponibile solo dal computer del proprietario",
                 );
             }
+            req.extensions_mut().insert(DeviceCtx(device.clone()));
         }
     }
     // I webhook dei connettori si autenticano con la firma HMAC del corpo, non con il token di sessione.
@@ -215,6 +287,10 @@ fn device_route_allowed(method: &str, route: &str, scopes: &[&str]) -> bool {
         ("POST", "/api/voice/transcribe"),
         ("POST", "/api/voice/speak"),
         ("GET", "/api/devices/me"),
+        ("GET", "/api/passkeys"),
+        ("POST", "/api/passkeys/register/options"),
+        ("POST", "/api/passkeys/register"),
+        ("POST", "/api/passkeys/assert/options"),
         ("GET", "/api/health"),
     ];
     let allowed = chat.iter().any(|(m, r)| *m == method && *r == route);
@@ -258,6 +334,14 @@ pub fn router(state: Shared) -> Router {
         .route("/api/notify/channels/{id}/test", post(channel_test))
         .route("/api/confirmations", get(confirmations))
         .route("/api/confirmations/{id}", post(confirm))
+        .route("/api/passkeys", get(passkeys_list))
+        .route(
+            "/api/passkeys/register/options",
+            post(passkey_register_options),
+        )
+        .route("/api/passkeys/register", post(passkey_register))
+        .route("/api/passkeys/assert/options", post(passkey_assert_options))
+        .route("/api/passkeys/{id}", axum::routing::delete(passkey_delete))
         .route("/api/tasks", get(tasks))
         .route("/api/tasks/{id}/trace", get(task_trace))
         .route("/api/conversation", get(conversation))
@@ -576,6 +660,8 @@ async fn confirmations(State(state): State<Shared>) -> Json<Value> {
 
 async fn confirm(
     State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    headers: axum::http::HeaderMap,
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
@@ -586,10 +672,238 @@ async fn confirm(
             "campo 'approve' booleano mancante",
         );
     };
+    // Passkey (ADR-0042): da un dispositivo con passkey registrata, approvare richiede un'asserzione legata
+    // a questa conferma. Rifiutare resta sempre possibile senza passkey.
+    if let (true, Some(axum::Extension(DeviceCtx(device)))) = (approve, device) {
+        let device_id = device["device_id"].as_str().unwrap_or_default().to_string();
+        let did = device_id.clone();
+        let has = with_core(&state, move |j| j.passkeys(&did)).await;
+        if has.is_ok_and(|k| !k.is_empty()) {
+            let p = &body["passkey"];
+            let (Some(cid), Some(cd), Some(ad), Some(sig)) = (
+                p["id"].as_str(),
+                p["clientDataJSON"].as_str(),
+                p["authenticatorData"].as_str(),
+                p["signature"].as_str(),
+            ) else {
+                return error(
+                    StatusCode::UNAUTHORIZED,
+                    "passkey_required",
+                    "conferma con la passkey di questo dispositivo",
+                );
+            };
+            let challenge = client_challenge(cd).unwrap_or_default();
+            if !take_challenge(&state, &challenge, &device_id, &format!("confirm:{id}")) {
+                return error(
+                    StatusCode::UNAUTHORIZED,
+                    "passkey_invalid",
+                    "sfida della passkey scaduta o non valida per questa conferma",
+                );
+            }
+            let decoded = (
+                crate::passkeys::from_b64url(cd),
+                crate::passkeys::from_b64url(ad),
+                crate::passkeys::from_b64url(sig),
+            );
+            let (Ok(cd), Ok(ad), Ok(sig)) = decoded else {
+                return error(
+                    StatusCode::BAD_REQUEST,
+                    "bad_request",
+                    "asserzione non codificata in base64url",
+                );
+            };
+            let (rp, origins) = webauthn_site(&headers);
+            let cid = cid.to_string();
+            let checked = with_core(&state, move |j| {
+                j.passkey_check(&device_id, &cid, &cd, &ad, &sig, &challenge, &origins, &rp)
+            })
+            .await;
+            if let Err(e) = checked {
+                let msg = match e {
+                    CoreError::Unauthorized(m) => m,
+                    other => format!("{other:?}"),
+                };
+                return error(StatusCode::UNAUTHORIZED, "passkey_invalid", &msg);
+            }
+        }
+    }
     match with_core(&state, move |j| j.confirm(&id, approve)).await {
         Ok(out) => Json(out.to_json()).into_response(),
         Err(e) => e.into_response(),
     }
+}
+
+/// Passkey: del dispositivo che chiede, oppure di tutti i dispositivi per il proprietario.
+async fn passkeys_list(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+) -> Response {
+    match device {
+        Some(axum::Extension(DeviceCtx(d))) => {
+            let id = d["device_id"].as_str().unwrap_or_default().to_string();
+            reply(
+                with_core(&state, move |j| {
+                    j.passkeys(&id).map(|items| json!({"items": items}))
+                })
+                .await,
+            )
+        }
+        None => reply(
+            with_core(&state, |j| {
+                let devices = j.devices()?;
+                let mut items = Vec::new();
+                for d in devices {
+                    let id = d["device_id"].as_str().unwrap_or_default().to_string();
+                    for mut k in j.passkeys(&id)? {
+                        k["device_id"] = id.clone().into();
+                        k["device_name"] = d["name"].clone();
+                        items.push(k);
+                    }
+                }
+                Ok(json!({"items": items}))
+            })
+            .await,
+        ),
+    }
+}
+
+fn device_only(device: Option<axum::Extension<DeviceCtx>>) -> Option<Value> {
+    device.map(|axum::Extension(DeviceCtx(d))| d)
+}
+
+fn not_a_device() -> Response {
+    error(
+        StatusCode::BAD_REQUEST,
+        "device_only",
+        "le passkey si registrano dal dispositivo associato",
+    )
+}
+
+/// Opzioni per `navigator.credentials.create` (ES256, verifica dell'utente obbligatoria).
+async fn passkey_register_options(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    let Some(d) = device_only(device) else {
+        return not_a_device();
+    };
+    let id = d["device_id"].as_str().unwrap_or_default();
+    let (rp, _) = webauthn_site(&headers);
+    let challenge = new_challenge(&state, id, "register");
+    let did = id.to_string();
+    let existing = with_core(&state, move |j| j.passkeys(&did))
+        .await
+        .unwrap_or_default();
+    Json(json!({
+        "challenge": challenge,
+        "rp": {"id": rp, "name": "JARVIS"},
+        "user": {"id": crate::passkeys::b64url(id.as_bytes()), "name": d["name"], "displayName": d["name"]},
+        "pubKeyCredParams": [{"type": "public-key", "alg": -7}],
+        "authenticatorSelection": {"userVerification": "required", "residentKey": "preferred"},
+        "excludeCredentials": existing.iter().map(|k| json!({"type": "public-key", "id": k["credential_id"]})).collect::<Vec<_>>(),
+        "attestation": "none",
+        "timeout": 120000,
+    }))
+    .into_response()
+}
+
+/// Verifica e salva la passkey creata dal dispositivo.
+async fn passkey_register(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    let Some(d) = device_only(device) else {
+        return not_a_device();
+    };
+    let id = d["device_id"].as_str().unwrap_or_default().to_string();
+    let (Some(cd), Some(att)) = (
+        body["clientDataJSON"].as_str(),
+        body["attestationObject"].as_str(),
+    ) else {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "risposta della passkey incompleta",
+        );
+    };
+    let challenge = client_challenge(cd).unwrap_or_default();
+    if !take_challenge(&state, &challenge, &id, "register") {
+        return error(
+            StatusCode::UNAUTHORIZED,
+            "passkey_invalid",
+            "sfida di registrazione scaduta o non valida",
+        );
+    }
+    let (Ok(cd), Ok(att)) = (
+        crate::passkeys::from_b64url(cd),
+        crate::passkeys::from_b64url(att),
+    ) else {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "risposta non codificata in base64url",
+        );
+    };
+    let (rp, origins) = webauthn_site(&headers);
+    let reg = match crate::passkeys::verify_registration(&cd, &att, &challenge, &origins, &rp) {
+        Ok(r) => r,
+        Err(e) => return error(StatusCode::BAD_REQUEST, "passkey_invalid", &e),
+    };
+    reply(with_core(&state, move |j| j.passkey_register(&id, &reg)).await)
+}
+
+/// Opzioni per `navigator.credentials.get`, legate a una conferma in attesa.
+async fn passkey_assert_options(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    headers: axum::http::HeaderMap,
+    Json(body): Json<Value>,
+) -> Response {
+    let Some(d) = device_only(device) else {
+        return not_a_device();
+    };
+    let Some(conf) = body["confirmation_id"].as_str() else {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "confirmation_id mancante",
+        );
+    };
+    let id = d["device_id"].as_str().unwrap_or_default().to_string();
+    let challenge = new_challenge(&state, &id, &format!("confirm:{conf}"));
+    let (rp, _) = webauthn_site(&headers);
+    let keys = with_core(&state, move |j| j.passkeys(&id))
+        .await
+        .unwrap_or_default();
+    Json(json!({
+        "challenge": challenge, "rpId": rp, "userVerification": "required", "timeout": 120000,
+        "allowCredentials": keys.iter().map(|k| json!({"type": "public-key", "id": k["credential_id"]})).collect::<Vec<_>>(),
+    }))
+    .into_response()
+}
+
+/// Eliminazione di una passkey: solo il proprietario dal computer del Core.
+async fn passkey_delete(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Path(id): Path<String>,
+) -> Response {
+    if device.is_some() {
+        return error(
+            StatusCode::FORBIDDEN,
+            "owner_only",
+            "operazione disponibile solo dal computer del proprietario",
+        );
+    }
+    reply(
+        with_core(&state, move |j| {
+            j.passkey_delete(&id).map(|_| json!({"deleted": true}))
+        })
+        .await,
+    )
 }
 
 fn limit(q: &Value, default: u32) -> u32 {
@@ -1257,5 +1571,6 @@ pub fn state_with_remote(
         nodes,
         device_db,
         setup,
+        challenges: Mutex::new(std::collections::HashMap::new()),
     })
 }

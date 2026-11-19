@@ -989,6 +989,22 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `tests/node_tls.rs` (associazione con certificato, chiave privata mai inviata, esecuzione via TLS, token senza certificato rifiutato, certificato estraneo rifiutato all'handshake, Core con impronta diversa rifiutato dal nodo, revoca che ferma il nodo); unitari di `tls.rs`.
 - **Documenti interessati:** ACCEPTANCE.md, SECURITY_AND_PRIVACY.md, INTERFACE_AND_DEVICES.md, ROADMAP.md, contratto `device`.
 
+### ADR-0042 — Passkey per le approvazioni dai dispositivi associati
+
+- **Data:** 2026-11-19 · **Stato:** accettato · **Fonte:** scelta del proprietario («Passkey»); lacuna RNF-04 «passkey assenti» in ACCEPTANCE.md.
+- **Contesto:** un dispositivo associato con permesso di conferma approvava le azioni rischiose con il solo token salvato nel browser: chi ottiene il telefono sbloccato o copia il token può approvare.
+- **Decisione:**
+  - WebAuthn con chiave ES256 (P-256), verifica dell'utente obbligatoria (impronta, volto o PIN), attestazione «none»; RP = host da cui il dispositivo raggiunge il Core, origine `https://` o `http://` dello stesso host;
+  - verifica nel Core senza nuove librerie crittografiche (`passkeys.rs`: CBOR minimo, `authenticatorData`, chiave COSE, firma con ring); tabella `passkeys` (schema v4) con sola chiave pubblica e contatore;
+  - sfide monouso di 5 minuti, legate al dispositivo e allo scopo (registrazione, oppure approvazione di una conferma precisa);
+  - da un dispositivo con passkey registrata, `POST /api/confirmations/{id}` con `approve: true` richiede un'asserzione valida per quella conferma (`passkey_required`, `passkey_invalid`); rifiutare non la richiede; il proprietario sul computer del Core non ne ha bisogno;
+  - contatore non crescente rifiutato (passkey clonata); registrazione, uso, rifiuti ed eliminazione nell'audit;
+  - rotte: `GET /api/passkeys`, `POST /api/passkeys/register/options`, `POST /api/passkeys/register`, `POST /api/passkeys/assert/options`, `DELETE /api/passkeys/{id}` (solo il proprietario);
+  - interfaccia: sul dispositivo «Proteggi le approvazioni con una passkey» in chat; «Approva» chiede la passkey quando serve; un 401 da passkey non disconnette il dispositivo.
+- **Conseguenze:** il token da solo non basta più ad approvare dal dispositivo protetto. WebAuthn richiede un contesto sicuro: HTTPS (es. `tailscale serve`) o `localhost`. Versione 1.9.0.
+- **Evidenza:** unitari di `passkeys.rs` (andata e ritorno, firma alterata, verifica dell'utente assente, sfida/origine/RP diversi, contatore, CBOR malformato); `tests/passkeys.rs` con autenticatore sintetico (passkey obbligatoria, sfida monouso e legata alla conferma, chiave diversa rifiutata, rifiuto libero, gestione del proprietario, audit); E2E con l'autenticatore virtuale di Chromium sul telefono simulato (`jarvis.localhost`), 77/77.
+- **Documenti interessati:** ACCEPTANCE.md, SECURITY_AND_PRIVACY.md, INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

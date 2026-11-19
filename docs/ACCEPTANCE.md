@@ -24,7 +24,7 @@ Questo documento raccoglie ciò che serve per l'accettazione finale descritta in
 | RNF-01 Contratti | `tests/contracts`, `jarvis-contracts` | — | Verde | — |
 | RNF-02 Guasti | `resilience.rs` (blocco, crash, output non valido) | — | Verde | Perdita di rete fra nodi non provata |
 | RNF-03 Risorse | `tests/perf` (p95 in CI) | P11 | Verde | Misure con modelli reali da fare |
-| RNF-04 Sicurezza | token, host, CSP, policy, conferme, audit, revoca | P8, P12 | Verde | Passkey assenti; mTLS dei nodi con `JARVIS_NODE_TLS_ADDR` (ADR-0041); portachiavi su macOS, Windows e Linux con sessione grafica |
+| RNF-04 Sicurezza | token, host, CSP, policy, conferme, audit, revoca, passkey (`passkeys.rs`) | P8, P12 | Verde | Passkey per le approvazioni dai dispositivi (ADR-0042); mTLS dei nodi con `JARVIS_NODE_TLS_ADDR` (ADR-0041); portachiavi su macOS, Windows e Linux con sessione grafica |
 | RNF-05 Local-first | nessun backend cloud | — | Verde | — |
 | RNF-06 Offline | backend offline in tutta la CI | P2 | Verde | — |
 | RNF-07 Osservabilità | metriche, log, esportazione, tracce dei task (`api.rs`) | — | Verde | Tracce W3C locali per task (ADR-0039); nessun esportatore OTLP |

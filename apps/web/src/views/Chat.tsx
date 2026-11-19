@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, chatStream, fmtTime, post, pref } from "../lib/api";
+import { api, chatStream, fmtTime, pref } from "../lib/api";
 import { voice } from "../lib/voice";
 import { Avatar, AVATAR_LABELS, useAvatarState } from "../components/Avatar";
 import { Icon } from "../components/Icon";
 import { useApp, useVoice } from "../state";
+import { PASSKEY_SUPPORTED, decideConfirmation, registerPasskey } from "../lib/passkey";
 
 interface Step {
   kind: string;
@@ -42,6 +43,39 @@ const SUGGESTIONS = [
   "ricorda che preferisco risposte brevi", "cosa ricordi", "ogni ora info sistema", "elenca automazioni",
   "cerca intelligenza artificiale",
 ];
+
+/** Passkey del dispositivo associato (ADR-0042): con una passkey le approvazioni richiedono impronta, volto o PIN. */
+function PasskeySetup() {
+  const [count, setCount] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  useEffect(() => {
+    if (!PASSKEY_SUPPORTED) return;
+    api<{ items: unknown[] }>("/api/passkeys").then((d) => setCount(d.items.length), () => setCount(null));
+  }, []);
+  if (!PASSKEY_SUPPORTED || count === null) return null;
+  if (count > 0) return <span className="pill ok" id="passkey-status" title="Le approvazioni da questo dispositivo richiedono la passkey">Passkey attiva ✓</span>;
+  return (
+    <span className="passkey-setup">
+      <button type="button" className="ghost small" id="passkey-setup" disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setMsg("");
+          try {
+            await registerPasskey();
+            setCount(1);
+          } catch (e) {
+            setMsg((e as Error).message);
+          } finally {
+            setBusy(false);
+          }
+        }}>
+        <Icon name="shield" size={14} /> Proteggi le approvazioni con una passkey
+      </button>
+      {msg ? <span className="sub" role="alert"> {msg}</span> : null}
+    </span>
+  );
+}
 
 /** Specializzazioni degli agenti (ADR-0038). */
 const AGENTS: Record<string, string> = {
@@ -206,7 +240,7 @@ export function Chat({ active }: { active: boolean }) {
     setItems((list) => list.map((x) => (x.id === item.id ? { ...item, decided: true } : x)));
     dismissToast(`confirmation:${item.c.confirmation_id}`);
     try {
-      const out = await post(`/api/confirmations/${encodeURIComponent(item.c.confirmation_id)}`, { approve });
+      const out = await decideConfirmation<any>(item.c.confirmation_id, approve);
       setItems((list) => list.map((x) => (x.id === item.id ? { ...item, decided: true, approved: approve } : x)));
       say(out.reply, { steps: out.steps, sources: out.sources });
     } catch (e) {
@@ -292,6 +326,7 @@ export function Chat({ active }: { active: boolean }) {
           <Icon name="stop" size={14} /> Interrompi
         </button>
         <span className="mic-live" id="mic-live" hidden={!voice.micOpen} aria-live="polite">● Microfono attivo</span>
+        <PasskeySetup />
       </div>
       <form className="composer" id="composer" onSubmit={submit}>
         <button

@@ -95,3 +95,6 @@ Le conferme restano un clic.
 
 
 **Nodi con mTLS (ADR-0041).** Avvia il Core con `JARVIS_NODE_TLS_ADDR=0.0.0.0:8766` (o l'indirizzo della rete privata), poi associa il nodo come sempre: riceve la porta e l'impronta del Core e da lì usa solo la connessione TLS reciproca. `JARVIS_NODE_TLS_URL` sul nodo sostituisce l'indirizzo se il Core è raggiungibile con un altro nome.
+
+
+**Passkey sul telefono (ADR-0042).** Dalla chat del dispositivo associato: «Proteggi le approvazioni con una passkey». Dopo, «Approva» chiede impronta, volto o PIN. Serve HTTPS (es. `tailscale serve`). Il proprietario elimina una passkey con `DELETE /api/passkeys/{id}` dal computer del Core.
