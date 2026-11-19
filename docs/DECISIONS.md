@@ -1034,6 +1034,18 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `cargo clippy -D warnings` e build bloccata dell'app su Linux; build dell'app su macOS e Windows nella CI; `launches_core_on_free_port_and_stops_it` verifica che il token del launcher apra le notifiche del Core.
 - **Documenti interessati:** ACCEPTANCE.md, INTERFACE_AND_DEVICES.md, ROADMAP.md.
 
+### ADR-0045 — Tool calling più robusto e modelli consigliati
+
+- **Data:** 2026-11-19 · **Stato:** accettato · **Fonte:** richiesta del proprietario («migliora il modello di JARVIS e la tool calling»).
+- **Decisione:**
+  - argomenti non validi: il Core restituisce all'agente i difetti (percorso del campo e motivo, al massimo 4) e lo schema atteso; il turno non si chiude e l'agente può ripetere la chiamata corretta (il blocco delle ripetizioni resta per le chiamate identiche);
+  - correzione dei tipi prima dell'invio al Core: numeri e booleani scritti come testo (anche «0,5», «sì»), oggetti o liste in forma di stringa JSON, valore singolo per un campo lista, campi non previsti scartati quando lo schema non li ammette; il Core valida comunque;
+  - chiamate scritte nel testo invece che nel campo dedicato: `<tool_call>{…}</tool_call>`, blocco ```json``` o oggetto con `name` e `arguments`/`parameters`, accettate solo per strumenti delegati;
+  - modelli proposti nella configurazione guidata: `qwen3:4b`, `qwen3:8b`, `llama3.1:8b` in testa ai precedenti; raccomandazione automatica in base alla memoria (≥ 16 GB → `qwen3:8b`, altrimenti `qwen3:4b`).
+- **Conseguenze:** meno turni persi per errori di formato dei modelli locali piccoli.
+- **Evidenza:** `invalid_arguments_are_explained_and_the_model_can_retry` in `tests/agent_loop.rs`; `test_arguments_are_coerced_to_the_schema`, `test_tool_calls_written_in_text_are_recognised` in `tests/ai`; unitario della raccomandazione in `setup.rs`.
+- **Documenti interessati:** AI_SYSTEM.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

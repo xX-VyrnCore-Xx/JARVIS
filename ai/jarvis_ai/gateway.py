@@ -48,6 +48,7 @@ Strumenti
 - Il Core verifica ogni strumento con la policy; le azioni che modificano file, servizi esterni o automazioni chiedono la conferma del proprietario: non chiederla tu a parole, proponi direttamente lo strumento.
 - Per un sotto-compito autonomo (es. analizzare dei file mentre tu prepari la risposta) puoi usare agent.delegate: l'agente temporaneo ha un ruolo, pochi strumenti di sola lettura e risponde solo a te.
 - Non inventare mai risultati: se uno strumento fallisce o viene negato, dillo e proponi un'alternativa.
+- Se il Core rifiuta gli argomenti (policy.invalid_arguments), leggi `details` e `expected` e ripeti la chiamata corretta una sola volta.
 - Per domande sul proprietario consulta prima la memoria qui sotto, poi memory.search. Quando il proprietario dichiara un fatto stabile o una preferenza, salvala con memory.remember in una frase breve e autonoma.
 
 Sicurezza
@@ -586,6 +587,78 @@ def _fn_name(tool: str) -> str:
     return tool.replace(".", "__")
 
 
+def coerce_arguments(args: Any, schema: dict) -> dict:
+    """Corregge gli errori di tipo più comuni dei modelli locali (ADR-0045): numeri e booleani scritti come testo,
+    oggetti passati come stringa JSON, campi inventati quando lo schema non li ammette. Il Core valida comunque."""
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except ValueError:
+            return {}
+    if not isinstance(args, dict):
+        return {}
+    props = schema.get("properties", {}) if isinstance(schema, dict) else {}
+    out: dict[str, Any] = {}
+    for key, value in args.items():
+        spec = props.get(key)
+        if spec is None:
+            if schema.get("additionalProperties", True) is False:
+                continue
+            out[key] = value
+            continue
+        kind = spec.get("type")
+        kinds = kind if isinstance(kind, list) else [kind]
+        if isinstance(value, str) and "string" not in kinds:
+            text = value.strip()
+            if "integer" in kinds and re.fullmatch(r"-?\d+", text):
+                value = int(text)
+            elif "number" in kinds and re.fullmatch(r"-?\d+(?:[.,]\d+)?", text):
+                value = float(text.replace(",", "."))
+            elif "boolean" in kinds and text.lower() in ("true", "false", "vero", "falso", "si", "sì", "no"):
+                value = text.lower() in ("true", "vero", "si", "sì")
+            elif ("array" in kinds or "object" in kinds) and text[:1] in "[{":
+                try:
+                    value = json.loads(text)
+                except ValueError:
+                    pass
+            elif "array" in kinds:
+                value = [value]
+        elif isinstance(value, (int, float)) and not isinstance(value, bool) and kinds == ["string"]:
+            value = str(value)
+        out[key] = value
+    return out
+
+
+_TOOL_TAG = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S)
+_FENCE = re.compile(r"^```(?:json)?\s*(\{.*\})\s*```$", re.S)
+
+
+def text_tool_call(content: str, by_fn: dict[str, str]) -> tuple[str, Any] | None:
+    """Chiamata di strumento scritta nel testo invece che nel campo dedicato (Qwen, Llama, Mistral):
+    `<tool_call>{...}</tool_call>`, blocco ```json``` o un oggetto JSON con `name` e `arguments`/`parameters`."""
+    text = (content or "").strip()
+    candidates = [m.group(1) for m in _TOOL_TAG.finditer(text)]
+    fence = _FENCE.match(text)
+    if fence:
+        candidates.append(fence.group(1))
+    if text.startswith("{") and text.endswith("}"):
+        candidates.append(text)
+    for raw in candidates:
+        try:
+            obj = json.loads(raw)
+        except ValueError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        if isinstance(obj.get("function"), dict):
+            obj = obj["function"]
+        name = str(obj.get("name") or obj.get("tool") or "")
+        tool = by_fn.get(name) or by_fn.get(_fn_name(name))
+        if tool:
+            return tool, obj.get("arguments", obj.get("parameters", {}))
+    return None
+
+
 def _tool_payload(step: dict) -> str:
     """Esito di uno strumento per il modello; i contenuti esterni sono marcati come non attendibili."""
     payload = json.dumps({"tool": step["tool"], "status": step["status"], "output": step.get("output")},
@@ -671,14 +744,16 @@ class OllamaBackend:
         timeout = min(self.timeout_s, delegation.get("timeout_ms", 120000) / 1000)
         data = self._stream(body, timeout, emit) if emit else self._post("/api/chat", body, timeout)
         msg = data.get("message", {})
-        by_fn = {_fn_name(n): n for n in catalog}
-        for call in msg.get("tool_calls") or []:
-            fn = call.get("function", {})
-            tool = by_fn.get(fn.get("name", ""))
-            if tool and tool in allowed:
-                args = fn.get("arguments") or {}
-                if isinstance(args, str):
-                    args = json.loads(args)
+        by_fn = {_fn_name(n): n for n in catalog if n in allowed}
+        calls = [(by_fn.get(c.get("function", {}).get("name", "")), c.get("function", {}).get("arguments") or {})
+                 for c in msg.get("tool_calls") or []]
+        if not calls and steps_left > 0:
+            found = text_tool_call(msg.get("content") or "", by_fn)
+            if found:
+                calls = [found]
+        for tool, args in calls:
+            if tool:
+                args = coerce_arguments(args, catalog[tool].get("input_schema", {}))
                 out = _result("tool_call", self.info, tool=tool, arguments=args, catalog=catalog, rationale="Proposto dal modello")
                 out["usage"] = _usage(data, sent)
                 return out

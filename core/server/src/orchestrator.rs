@@ -807,10 +807,29 @@ impl Jarvis {
             let (status, output) = match decision["decision"].as_str() {
                 Some("deny") => {
                     let code = decision["reasons"][0].as_str().unwrap_or("policy.denied");
-                    (
-                        "denied",
-                        json!({"code": code, "message": policy::explain(code)}),
-                    )
+                    let mut output = json!({"code": code, "message": policy::explain(code)});
+                    // Argomenti non validi (ADR-0045): l'agente riceve i difetti precisi e lo schema atteso
+                    // e può correggere la chiamata nel passo successivo invece di chiudere il turno.
+                    if code == "policy.invalid_arguments" {
+                        if let Some(t) = self.catalog.get(&tool) {
+                            let details: Vec<String> = t
+                                .input
+                                .iter_errors(&arguments)
+                                .take(4)
+                                .map(|e| {
+                                    let at = e.instance_path.to_string();
+                                    if at.is_empty() {
+                                        e.to_string()
+                                    } else {
+                                        format!("{at}: {e}")
+                                    }
+                                })
+                                .collect();
+                            output["details"] = json!(details);
+                            output["expected"] = t.descriptor["input_schema"].clone();
+                        }
+                    }
+                    ("denied", output)
                 }
                 Some("require_confirmation") => {
                     return self.await_confirmation(
@@ -820,8 +839,9 @@ impl Jarvis {
                 _ if tool == "agent.delegate" => self.run_subagent(&task, &arguments, &mut out)?,
                 _ => self.run_tool(&task, &tool, &arguments, false, &mut out)?,
             };
+            let retryable = output["code"] == "policy.invalid_arguments";
             history.push(step_record(&tool, &arguments, &digest, status, output));
-            let last = history.len() >= MAX_STEPS || status == "denied";
+            let last = history.len() >= MAX_STEPS || (status == "denied" && !retryable);
             result = self.next_step(&task, &inputs, &history, last, &mut out);
         }
     }

@@ -172,6 +172,25 @@ class OllamaAdapter(unittest.TestCase):
         system = FakeOllama.requests[-1]["messages"][0]["content"]
         self.assertIn("Specializzazione per questa richiesta — Ricerca: cita sempre gli URL.", system)
 
+    def test_arguments_are_coerced_to_the_schema(self):
+        from jarvis_ai.gateway import coerce_arguments
+        schema = {"type": "object", "additionalProperties": False, "properties": {
+            "limit": {"type": "integer"}, "ratio": {"type": "number"}, "deep": {"type": "boolean"},
+            "path": {"type": "string"}, "follow": {"type": "array"}}}
+        out = coerce_arguments('{"limit": "5", "ratio": "0,5", "deep": "sì", "path": 7, "follow": "Contatti", "inventato": 1}', schema)
+        self.assertEqual(out, {"limit": 5, "ratio": 0.5, "deep": True, "path": "7", "follow": ["Contatti"]})
+        self.assertEqual(coerce_arguments("non json", schema), {})
+
+    def test_tool_calls_written_in_text_are_recognised(self):
+        from jarvis_ai.gateway import text_tool_call
+        by_fn = {"time__now": "time.now", "fs__read": "fs.read"}
+        self.assertEqual(text_tool_call('<tool_call>{"name": "fs__read", "arguments": {"path": "a.txt"}}</tool_call>', by_fn),
+                         ("fs.read", {"path": "a.txt"}))
+        self.assertEqual(text_tool_call('```json\n{"name": "time.now", "parameters": {}}\n```', by_fn), ("time.now", {}))
+        self.assertEqual(text_tool_call('{"function": {"name": "time__now", "arguments": {}}}', by_fn), ("time.now", {}))
+        self.assertIsNone(text_tool_call('{"name": "shell__run", "arguments": {}}', by_fn), "strumento non delegato")
+        self.assertIsNone(text_tool_call("Sono le 10.", by_fn))
+
     def test_runtime_failure_degrades_to_offline(self):
         g = self.gateway()
         FakeOllama.mode = "error"

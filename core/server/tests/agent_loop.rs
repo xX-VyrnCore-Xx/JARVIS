@@ -264,3 +264,35 @@ async fn temporary_agents_only_get_tools_without_confirmation() {
         reqs[1]
     );
 }
+
+#[tokio::test]
+async fn invalid_arguments_are_explained_and_the_model_can_retry() {
+    // Primo tentativo con un campo sbagliato; il modello riceve i difetti e riprova correttamente (ADR-0045).
+    let (url, seen) = fake_ollama(
+        vec![
+            ("memory__search", json!({"domanda": "caffè"})),
+            ("memory__search", json!({"query": "caffè"})),
+        ],
+        false,
+    );
+    let out = chat(url, 18779, "cerca nella memoria il caffè").await;
+    let calls = tools_called(&out);
+    assert_eq!(calls, ["memory.search", "memory.search"], "{out}");
+    let results: Vec<&Value> = out["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|s| s["kind"] == "tool_result")
+        .collect();
+    assert_eq!(
+        results.len(),
+        1,
+        "solo il secondo tentativo viene eseguito: {out}"
+    );
+    let second = seen.lock().unwrap()[1].clone();
+    let text = second["messages"].to_string();
+    assert!(
+        text.contains("policy.invalid_arguments") && text.contains("expected"),
+        "{text}"
+    );
+}
