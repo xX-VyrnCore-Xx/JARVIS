@@ -28,6 +28,73 @@ const PAIR_HTML: &str = include_str!("../static/pair.html");
 const PAIR_JS: &str = include_str!("../static/pair.js");
 const BOOT_JS: &str = include_str!("../static/boot.js");
 
+/// Asset statico servito con ETag (revalida con 304) e, se il client la accetta, compressione gzip calcolata
+/// una sola volta: il bundle passa da ~320 KB a ~100 KB per telefoni e tablet in rete locale.
+struct Asset {
+    body: &'static str,
+    ctype: &'static str,
+    prepared: std::sync::LazyLock<(String, Vec<u8>)>,
+}
+
+fn prepare(body: &str) -> (String, Vec<u8>) {
+    use std::io::Write;
+    let digest = ring::digest::digest(&ring::digest::SHA256, body.as_bytes());
+    let etag = format!(
+        "\"{}\"",
+        digest.as_ref()[..8]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    );
+    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
+    let _ = gz.write_all(body.as_bytes());
+    (etag, gz.finish().unwrap_or_default())
+}
+
+static JS_ASSET: Asset = Asset {
+    body: APP_JS,
+    ctype: "text/javascript; charset=utf-8",
+    prepared: std::sync::LazyLock::new(|| prepare(APP_JS)),
+};
+static CSS_ASSET: Asset = Asset {
+    body: APP_CSS,
+    ctype: "text/css; charset=utf-8",
+    prepared: std::sync::LazyLock::new(|| prepare(APP_CSS)),
+};
+
+fn asset(headers: &axum::http::HeaderMap, a: &'static Asset) -> Response {
+    let (etag, gz) = &*a.prepared;
+    let common = [
+        (header::ETAG, etag.as_str()),
+        (header::CACHE_CONTROL, "no-cache"),
+        (header::VARY, "Accept-Encoding"),
+    ];
+    let matches = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.split(',').any(|t| t.trim() == etag));
+    if matches {
+        return (StatusCode::NOT_MODIFIED, common).into_response();
+    }
+    let gzip = headers
+        .get(header::ACCEPT_ENCODING)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.split(',').any(|e| e.trim().starts_with("gzip")));
+    if gzip && !gz.is_empty() {
+        (
+            common,
+            [
+                (header::CONTENT_TYPE, a.ctype),
+                (header::CONTENT_ENCODING, "gzip"),
+            ],
+            gz.clone(),
+        )
+            .into_response()
+    } else {
+        (common, [(header::CONTENT_TYPE, a.ctype)], a.body).into_response()
+    }
+}
+
 pub struct AppState {
     pub core: Arc<Mutex<Jarvis>>,
     pub obs: Arc<crate::observability::Observability>,
@@ -304,16 +371,11 @@ pub fn router(state: Shared) -> Router {
         .route("/", get(index))
         .route(
             "/app.js",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    APP_JS,
-                )
-            }),
+            get(|h: axum::http::HeaderMap| async move { asset(&h, &JS_ASSET) }),
         )
         .route(
             "/app.css",
-            get(|| async { ([(header::CONTENT_TYPE, "text/css; charset=utf-8")], APP_CSS) }),
+            get(|h: axum::http::HeaderMap| async move { asset(&h, &CSS_ASSET) }),
         )
         .route(
             "/voice-worklet.js",

@@ -392,6 +392,59 @@ async fn index_embeds_session_token_and_csp() {
 }
 
 #[tokio::test]
+async fn bundle_is_gzipped_and_revalidated_with_etag() {
+    use std::io::Read;
+    let e = env();
+    let get = |enc: Option<&str>, etag: Option<&str>| {
+        let mut b = Request::builder()
+            .uri("/app.js")
+            .header("host", format!("localhost:{PORT}"));
+        if let Some(v) = enc {
+            b = b.header("accept-encoding", v);
+        }
+        if let Some(v) = etag {
+            b = b.header("if-none-match", v);
+        }
+        b.body(Body::empty()).unwrap()
+    };
+    let plain = e.app.clone().oneshot(get(None, None)).await.unwrap();
+    assert!(plain.headers().get("content-encoding").is_none());
+    let etag = plain.headers()["etag"].to_str().unwrap().to_string();
+    let plain = plain.into_body().collect().await.unwrap().to_bytes();
+
+    let gz = e
+        .app
+        .clone()
+        .oneshot(get(Some("br, gzip"), None))
+        .await
+        .unwrap();
+    assert_eq!(gz.headers()["content-encoding"], "gzip");
+    assert_eq!(gz.headers()["vary"], "Accept-Encoding");
+    let packed = gz.into_body().collect().await.unwrap().to_bytes();
+    assert!(packed.len() * 2 < plain.len(), "compressione efficace");
+    let mut unpacked = Vec::new();
+    flate2::read::GzDecoder::new(&packed[..])
+        .read_to_end(&mut unpacked)
+        .unwrap();
+    assert_eq!(unpacked, plain);
+
+    let cached = e
+        .app
+        .clone()
+        .oneshot(get(Some("gzip"), Some(&etag)))
+        .await
+        .unwrap();
+    assert_eq!(cached.status(), StatusCode::NOT_MODIFIED);
+    assert!(cached
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes()
+        .is_empty());
+}
+
+#[tokio::test]
 async fn conversation_and_tasks_persist_across_restart() {
     let e = env();
     e.chat("ciao").await;

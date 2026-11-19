@@ -407,6 +407,12 @@ impl Jarvis {
         let ts = |t: chrono::DateTime<chrono::Utc>| {
             t.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
         };
+        let scope = self.task_scope(task);
+        let tools: Vec<Value> = self
+            .delegated_tools()
+            .filter(|t| scope(t.name()))
+            .map(|t| json!({"name": t.name(), "version": t.version()}))
+            .collect();
         json!({
             "contract": "jarvis.delegation/1",
             "delegation_id": uuid::Uuid::new_v4().to_string(),
@@ -418,7 +424,7 @@ impl Jarvis {
                 (None, None) => json!({"agent": crate::agents::GENERAL, "temporary": false}),
             },
             "context": {"refs": [format!("jarvis://task/{}", task.id())]},
-            "tools": self.delegated_tools().filter(|t| self.task_allows(task, t.name())).map(|t| json!({"name": t.name(), "version": t.version()})).collect::<Vec<_>>(),
+            "tools": tools,
             "limits": if self.temporary.contains_key(&task.id()) {
                 json!({"max_steps": SUBAGENT_STEPS, "max_subdelegations": 0, "allow_cloud": false})
             } else {
@@ -495,20 +501,38 @@ impl Jarvis {
     /// Strumento concesso all'agente del task: la specializzazione scelta dalla richiesta (ADR-0038) limita
     /// gli strumenti al proprio ambito; il generalista li riceve tutti.
     fn task_allows(&self, task: &Task, tool: &str) -> bool {
-        if let Some((_, tools)) = self.temporary.get(&task.id()) {
-            return tools.iter().any(|t| t == tool);
-        }
-        let objective = task.doc["objective"].as_str().unwrap_or_default();
+        self.task_scope(task)(tool)
+    }
+
+    /// Ambito degli strumenti del task, calcolato una volta (le competenze attive richiedono una query).
+    fn task_scope(&self, task: &Task) -> impl Fn(&str) -> bool + '_ {
+        let temporary = self
+            .temporary
+            .get(&task.id())
+            .map(|(_, tools)| tools.clone());
+        let objective = task.doc["objective"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        let specialist = crate::agents::route(&objective);
         // Una competenza attiva rende disponibili i suoi strumenti anche fuori dall'ambito dello specialista
         // (ADR-0048); policy, conferme e audit restano quelli di ogni strumento.
-        crate::agents::route(objective).is_none_or(|a| crate::agents::allows(a, tool))
-            || crate::skills::active(&self.store, objective)
+        let skill_tools: Vec<String> = if temporary.is_some() || specialist.is_none() {
+            Vec::new()
+        } else {
+            crate::skills::active(&self.store, &objective)
                 .iter()
-                .any(|s| {
-                    s["tools"]
-                        .as_array()
-                        .is_some_and(|ts| ts.iter().any(|t| t == tool))
-                })
+                .flat_map(|s| s["tools"].as_array().cloned().unwrap_or_default())
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        };
+        move |tool: &str| match &temporary {
+            Some(tools) => tools.iter().any(|t| t == tool),
+            None => {
+                specialist.is_none_or(|a| crate::agents::allows(a, tool))
+                    || skill_tools.iter().any(|t| t == tool)
+            }
+        }
     }
 
     /// Aggiunge agli input i descrittori dei connettori autorizzati, che il catalogo statico dell'agente non conosce.
@@ -2850,6 +2874,9 @@ impl Jarvis {
             let keep = (chrono::Utc::now() - chrono::Duration::days(TRACE_KEEP_DAYS))
                 .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
             let _ = self.store.spans_prune(&keep);
+            let done = (chrono::Utc::now() - chrono::Duration::days(90))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            let _ = self.store.history_prune(RUNS_KEEP_PER_WORKFLOW, &done);
         }
         Ok(Some(doc))
     }
@@ -2864,6 +2891,9 @@ impl Jarvis {
 }
 
 // ---------------------------------------------------------------------- Dispositivi associati (RF-11)
+
+/// Esecuzioni conservate per ogni automazione.
+pub const RUNS_KEEP_PER_WORKFLOW: u32 = 200;
 
 const PAIRING_TTL: std::time::Duration = std::time::Duration::from_secs(600);
 const PAIRING_MAX_FAILURES: u32 = 5;

@@ -155,6 +155,21 @@ impl Store {
             .execute("DELETE FROM task_spans WHERE at < ?1", [before])
     }
 
+    /// Conserva le ultime `keep` esecuzioni di ogni automazione (un workflow ogni minuto ne produrrebbe
+    /// oltre 500 000 l'anno) e le cose da fare completate da più di 90 giorni vengono eliminate.
+    pub fn history_prune(&self, keep: u32, done_before: &str) -> StoreResult<usize> {
+        let runs = self.conn.execute(
+            "DELETE FROM workflow_runs WHERE run_id IN (SELECT run_id FROM (SELECT run_id, ROW_NUMBER() OVER
+                 (PARTITION BY workflow_id ORDER BY started_at DESC) AS n FROM workflow_runs) WHERE n > ?1)",
+            [keep],
+        )?;
+        let todos = self.conn.execute(
+            "DELETE FROM todos WHERE done_at IS NOT NULL AND done_at < ?1",
+            [done_before],
+        )?;
+        Ok(runs + todos)
+    }
+
     /// Versione dello schema registrata nel file (`PRAGMA user_version`).
     pub fn schema_version(&self) -> StoreResult<i64> {
         self.conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -589,5 +604,60 @@ impl Store {
         self.conn
             .execute("VACUUM INTO ?1", [path.to_string_lossy()])?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn history_keeps_the_latest_runs_and_recent_todos() {
+        let dir =
+            std::env::temp_dir().join(format!("jarvis-store-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let s = Store::open(&dir.join("jarvis.db")).unwrap();
+        for wf in ["a", "b"] {
+            for i in 0..5 {
+                s.conn
+                    .execute(
+                        "INSERT INTO workflow_runs (run_id, workflow_id, started_at, doc) VALUES (?1, ?2, ?3, '{}')",
+                        params![format!("{wf}{i}"), wf, format!("2026-01-0{}T00:00:00.000Z", i + 1)],
+                    )
+                    .unwrap();
+            }
+        }
+        for (id, done) in [
+            ("old", Some("2020-01-01T00:00:00.000Z")),
+            ("new", Some("2026-11-01T00:00:00.000Z")),
+            ("open", None),
+        ] {
+            s.conn
+                .execute(
+                    "INSERT INTO todos (id, text, priority, created_at, done_at) VALUES (?1, 'x', 'normale', '2020-01-01T00:00:00.000Z', ?2)",
+                    params![id, done],
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            s.history_prune(2, "2026-08-01T00:00:00.000Z").unwrap(),
+            6 + 1
+        );
+        let mut runs: Vec<String> = s
+            .conn
+            .prepare("SELECT run_id FROM workflow_runs ORDER BY run_id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        runs.sort();
+        assert_eq!(runs, ["a3", "a4", "b3", "b4"]);
+        let todos: i64 = s
+            .conn
+            .query_row("SELECT COUNT(*) FROM todos", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(todos, 2);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

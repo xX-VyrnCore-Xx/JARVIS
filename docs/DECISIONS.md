@@ -1094,6 +1094,17 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `tests/skills.rs` (incluse, validazione, attivazione per parola e per nome, disattivazione, eliminazione, audit); `active_skills_enter_the_prompt_and_widen_only_the_offered_tools` in `tests/agent_loop.rs`; test Python del prompt e dell'ordine degli strumenti; E2E: competenza creata dalla dashboard e attivata in chat (84/84).
 - **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ACCEPTANCE.md, ROADMAP.md, contratto `delegation`.
 
+### ADR-0049 — Backend: bundle compresso, ambito degli strumenti calcolato una volta, conservazione dello storico
+
+- **Data:** 2026-11-19 · **Stato:** accettato · **Fonte:** richiesta del proprietario («migliora il backend»).
+- **Decisione:**
+  - `app.js` e `app.css` vengono serviti con ETag (hash SHA-256 del contenuto), `Cache-Control: no-cache` e revalida con 304; con `Accept-Encoding: gzip` la versione compressa, calcolata una sola volta all'avvio (bundle da circa 320 KB a circa 100 KB, utile per telefoni e tablet in rete locale);
+  - l'ambito degli strumenti di una delega (specialista, agente temporaneo, competenze attive) viene calcolato una volta per delega invece che per ciascuno dei 64 strumenti;
+  - nella manutenzione periodica del database: per ogni automazione si conservano le ultime 200 esecuzioni; le cose da fare completate da più di 90 giorni vengono eliminate. Conversazione, attività, memoria e audit non cambiano conservazione.
+- **Conseguenze:** meno traffico e avvio più rapido della dashboard dai dispositivi; il database non cresce senza limite con automazioni frequenti.
+- **Evidenza:** `bundle_is_gzipped_and_revalidated_with_etag` in `tests/api.rs`; `history_keeps_the_latest_runs_and_recent_todos` in `store.rs`; suite Core completa (183 test).
+- **Documenti interessati:** ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).
