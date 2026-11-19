@@ -17,7 +17,7 @@ macro_rules! tool_file {
     };
 }
 
-const SOURCES: [&str; 19] = [
+const SOURCES: [&str; 21] = [
     tool_file!("agent.delegate"),
     tool_file!("fs.list"),
     tool_file!("fs.read"),
@@ -30,7 +30,9 @@ const SOURCES: [&str; 19] = [
     tool_file!("shell.run"),
     tool_file!("system.info"),
     tool_file!("time.now"),
+    tool_file!("web.browse"),
     tool_file!("web.fetch"),
+    tool_file!("web.form"),
     tool_file!("web.search"),
     tool_file!("workflow.create"),
     tool_file!("workflow.delete"),

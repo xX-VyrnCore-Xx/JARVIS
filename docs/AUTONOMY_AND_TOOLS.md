@@ -63,3 +63,6 @@ Dettagli in ADR-0005.
 
 
 **Agenti temporanei (ADR-0040).** `agent.delegate` non amplia i permessi: il figlio riceve solo strumenti senza conferma, passa da ambito, policy e audit, e ciò che richiederebbe una conferma resta all'agente principale.
+
+
+**Navigazione con il browser (ADR-0043).** `web.browse` apre una pagina con il browser del sistema (JavaScript incluso) e segue fino a 3 collegamenti; `web.form` compila e invia un modulo solo dopo la conferma del proprietario. Ogni richiesta di rete del browser passa dalla policy Web; il profilo è temporaneo.

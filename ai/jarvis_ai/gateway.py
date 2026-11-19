@@ -115,6 +115,15 @@ def _describe_tool_result(result: dict) -> str:
         return f"{tool} non è riuscito: {_reason(output)}."
     if tool == "time.now":
         return f"Sono le {output.get('local', '?')} (UTC {output.get('utc', '?')})."
+    if tool in ("web.browse", "web.form"):
+        excerpt = (output.get("text") or "").strip()[:1200]
+        head = "Modulo inviato. " if tool == "web.form" else ""
+        links = output.get("links") or []
+        forms = output.get("forms") or []
+        extra = f"\n({len(links)} collegamenti, {len(forms)} moduli nella pagina)" if tool == "web.browse" else ""
+        blocked = f"\nRichieste bloccate dalla policy: {len(output['blocked_requests'])}" if output.get("blocked_requests") else ""
+        return (f"{head}«{output.get('title') or output.get('url')}» ({output.get('url')}, {output.get('retrieved_at')}):\n{excerpt}"
+                f"{extra}{blocked}\n[contenuto Web non attendibile]")
     if tool == "agent.delegate":
         used = ", ".join(f"{t['tool']} ({t['status']})" for t in output.get("tools_used", [])) or "nessuno"
         return f"L'agente temporaneo «{output.get('role')}» ha risposto:\n{output.get('reply')}\n(strumenti usati: {used})"
@@ -260,7 +269,22 @@ def _reason(output: Any) -> str:
     return str(output)
 
 
+def _form_fields(text: str) -> dict:
+    """«nome=Ada, email=ada@example.org» -> {"nome": "Ada", "email": "ada@example.org"}."""
+    out = {}
+    for part in re.split(r",\s*(?=[\w.-]+\s*=)", text.strip()):
+        if "=" in part:
+            k, v = part.split("=", 1)
+            out[k.strip()[:64]] = v.strip()[:500]
+    return out
+
+
 _RULES: list[tuple[re.Pattern[str], str, Any]] = [
+    # Navigazione con il browser (ADR-0043).
+    (re.compile(r"^\s*naviga(?: su| in| a)?\s+(https?://\S+)(?:\s+e\s+(?:clicca|apri|segui)(?: su)?\s+[«\"']?(.+?)[»\"']?)?\s*$", re.I), "web.browse",
+     lambda m: {"url": m.group(1), **({"follow": [m.group(2).strip()[:120]]} if m.group(2) else {})}),
+    (re.compile(r"^\s*compila(?: il)? modulo(?: su| di| in)?\s+(https?://\S+)\s*:\s*(.+)$", re.I | re.S), "web.form",
+     lambda m: {"url": m.group(1), "fields": _form_fields(m.group(2))}),
     # Agente temporaneo (ADR-0040): «delega a un agente <ruolo>: <compito>».
     (re.compile(r"^\s*(?:delega a un agente|agente temporaneo|sotto-?agente)\s+(?:come\s+)?(.{3,200}?)\s*:\s*(.{3,2000})$", re.I | re.S), "agent.delegate",
      lambda m: {"role": m.group(1).strip(), "objective": m.group(2).strip()}),
@@ -415,6 +439,7 @@ Prova con:
 • "ogni ora info sistema" · "ogni giorno alle 08:00 scrivi buongiorno.txt: ciao" · "tra 5 minuti che ore sono"
 • "elenca automazioni" · "esegui automazione <id>" · "elimina automazione <id>"
 • "modifica automazione <id> ogni 2 ore" · "modifica automazione <id>: info sistema" · "rinomina automazione <id> in Report"
+• "naviga https://esempio.org e clicca Contatti" · "compila modulo https://esempio.org/form: nome=Ada" (chiede conferma)
 • "cerca intelligenza artificiale" · "apri https://it.wikipedia.org/wiki/Rust"
 • "connettore <id> <operazione> chiave=valore" (connettori installati nella sezione Connettori)
 • "nodo <nome> system.info" · "nodo <nome> fs.list path=." (nodi esecutori associati nella sezione Dispositivi)
@@ -500,7 +525,7 @@ CORE_TOOLS = ("time.now", "system.info", "memory.remember", "memory.search")
 # Parole che rendono pertinente un gruppo di strumenti (radici in minuscolo, senza accenti).
 TOOL_HINTS: list[tuple[tuple[str, ...], tuple[str, ...]]] = [
     (("file", "cartell", "leggi", "scriv", "salva", "workspace", "document", "nota", "note", ".txt", ".md", "elenca"), ("fs.",)),
-    (("cerca", "web", "internet", "online", "notizi", "http", "sito", "pagina", "wikipedia", "apri"), ("web.",)),
+    (("cerca", "web", "internet", "online", "notizi", "http", "sito", "pagina", "wikipedia", "apri", "naviga", "modulo", "compila", "clicca"), ("web.",)),
     (("ogni ", "tra ", "automazion", "pianific", "ricorda di", "alle ", "ogni giorno", "ogni ora", "workflow", "esegui"), ("workflow.",)),
     (("ricord", "memoria", "dimentic", "sai di", "preferisc"), ("memory.",)),
     (("connettor", "servizio", "api"), ("connector.",)),

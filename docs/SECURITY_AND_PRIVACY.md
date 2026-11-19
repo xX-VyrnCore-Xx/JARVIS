@@ -63,3 +63,6 @@ Da completare:
 
 
 **Passkey (ADR-0042).** Un dispositivo associato può registrare una passkey (WebAuthn, ES256, verifica dell'utente obbligatoria). Da quel momento ogni approvazione da quel dispositivo richiede un'asserzione legata alla singola conferma; il Core conserva solo la chiave pubblica, rifiuta contatori non crescenti e registra tutto nell'audit. Rifiutare un'azione resta sempre possibile.
+
+
+**Browser (ADR-0043).** Profilo temporaneo cancellato a ogni uso, nessuna estensione o sincronizzazione, nessun cookie del proprietario. Tutte le richieste della pagina sono intercettate e verificate con la policy Web (indirizzi privati vietati anche dopo la risoluzione DNS). Nella conferma di `web.form` i valori dei campi sensibili (password, token, carte, IBAN) sono mascherati.

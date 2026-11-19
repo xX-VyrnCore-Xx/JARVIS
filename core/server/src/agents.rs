@@ -17,8 +17,8 @@ pub const SPECIALISTS: [Agent; 5] = [
     Agent {
         name: "research",
         role: "Ricerca: trova informazioni sul Web, confronta le fonti e cita sempre gli URL.",
-        keywords: &["cerca sul web", "cerca online", "cerca in rete", "notizi", "wikipedia", "http://", "https://", "fonti", "fai una ricerca"],
-        tools: &["web.search", "web.fetch"],
+        keywords: &["cerca sul web", "cerca online", "cerca in rete", "notizi", "wikipedia", "http://", "https://", "fonti", "fai una ricerca", "naviga"],
+        tools: &["web.search", "web.fetch", "web.browse", "web.form"],
     },
     Agent {
         name: "system",

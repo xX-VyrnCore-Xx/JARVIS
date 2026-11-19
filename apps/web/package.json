@@ -1,7 +1,7 @@
 {
   "name": "jarvis-web",
   "private": true,
-  "version": "1.9.0",
+  "version": "1.10.0",
   "description": "Dashboard di JARVIS (React e TypeScript). Il bundle va in core/server/static ed è incluso nel Core.",
   "type": "module",
   "scripts": {

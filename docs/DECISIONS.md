@@ -1005,6 +1005,21 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** unitari di `passkeys.rs` (andata e ritorno, firma alterata, verifica dell'utente assente, sfida/origine/RP diversi, contatore, CBOR malformato); `tests/passkeys.rs` con autenticatore sintetico (passkey obbligatoria, sfida monouso e legata alla conferma, chiave diversa rifiutata, rifiuto libero, gestione del proprietario, audit); E2E con l'autenticatore virtuale di Chromium sul telefono simulato (`jarvis.localhost`), 77/77.
 - **Documenti interessati:** ACCEPTANCE.md, SECURITY_AND_PRIVACY.md, INTERFACE_AND_DEVICES.md, ROADMAP.md.
 
+### ADR-0043 — Navigazione Web interattiva con il browser del sistema
+
+- **Data:** 2026-11-19 · **Stato:** accettato · **Fonte:** scelta del proprietario («Navigazione Web»); lacuna RF-06 «navigazione interattiva assente» in ACCEPTANCE.md.
+- **Opzioni:** includere un Chromium nell'app (oltre 150 MB per sistema, aggiornamenti di sicurezza a carico di JARVIS); usare Playwright tramite Python; pilotare direttamente il browser già installato con il DevTools Protocol. Scelta l'ultima: nessun download, browser aggiornato dal sistema, Edge presente su ogni Windows.
+- **Decisione:**
+  - modulo `browser.rs`: avvia Chrome, Chromium o Edge (oppure `JARVIS_BROWSER`) in headless con un profilo temporaneo cancellato alla fine, senza estensioni né sincronizzazione, e lo pilota via WebSocket locale (`tungstenite`, senza TLS);
+  - ogni richiesta di rete della pagina (sotto-risorse comprese) è intercettata (`Fetch.requestPaused`) e passa dalla policy Web: domini consentiti e negati, indirizzi privati vietati anche dopo la risoluzione DNS; le richieste bloccate sono riportate nell'esito;
+  - `web.browse` (rischio medio, senza conferma): apre la pagina eseguendo JavaScript, segue fino a 3 collegamenti per testo o indice, restituisce titolo, testo visibile (20.000 caratteri), collegamenti, moduli con i nomi dei campi, ora e SHA-256 del testo;
+  - `web.form` (rischio alto, conferma obbligatoria): compila un modulo per nome dei campi e lo invia; la conferma mostra indirizzo e campi, con i valori di password, token, carte e IBAN mascherati;
+  - contenuto marcato come non attendibile per il modello; fonti allegate alla risposta come per `web.fetch`; lo specialista della ricerca riceve anche i due nuovi strumenti;
+  - comandi offline: «naviga <url> e clicca <testo>», «compila modulo <url>: campo=valore, …».
+- **Conseguenze:** pagine dinamiche e moduli diventano utilizzabili senza installare nulla oltre a un browser comune. Il DNS risolto dal browser può in teoria differire da quello controllato dal Core (finestra di rebinding): resta mitigato dal controllo per richiesta e dal divieto degli host privati. Niente sessioni persistenti né accessi con le credenziali del proprietario. Versione 1.10.0.
+- **Evidenza:** `tests/browser.rs` con il browser reale contro un sito sintetico (JavaScript eseguito, collegamento seguito, modulo inviato, immagine verso host negato bloccata e mai ricevuta, campo inesistente, indirizzo privato rifiutato prima dell'avvio; dalla chat: lettura senza conferma con fonte, invio solo dopo la conferma con password mascherata); in CI il browser è obbligatorio (`google-chrome` dei runner Ubuntu).
+- **Documenti interessati:** ACCEPTANCE.md, AUTONOMY_AND_TOOLS.md, SECURITY_AND_PRIVACY.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).
