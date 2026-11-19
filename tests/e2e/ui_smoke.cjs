@@ -164,6 +164,8 @@ function check(cond, msg) {
   check((await send("leggi ../../etc/passwd")).includes("negato"), "uscita dalla workspace negata");
   await send("ricorda che il test E2E è passato");
   check((await page.locator(".msg.assistant").last().locator(".step.specialist").innerText()).includes("memoria"), "richiesta di memoria affidata allo specialista della memoria");
+  const sub = await send("delega a un agente analista: che ore sono");
+  check(sub.startsWith("L'agente temporaneo «analista» ha risposto") && (await page.locator(".msg.assistant").last().innerText()).includes("agente temporaneo · analista"), "agente temporaneo con ruolo e strumenti di sola lettura (ADR-0040)");
   const procs = await send("quali processi usano più memoria?");
   check(procs.startsWith("Processi con più uso di memoria") && /pid \d+/.test(procs), "processi in esecuzione elencati senza conferma");
   if (shots) await page.screenshot({ path: `${shots}/jarvis-chat.png` });

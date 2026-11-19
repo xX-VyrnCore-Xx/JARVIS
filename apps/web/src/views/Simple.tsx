@@ -71,7 +71,7 @@ export function Tasks({ active }: { active: boolean }) {
           <div className="card" key={t.task_id}>
             <div className="body">
               <div className="title">{t.objective}</div>
-              <div className="sub">{t.task_id} · {fmtTime(t.created_at)}</div>
+              <div className="sub">{t.task_id} · {fmtTime(t.created_at)}{t.parent_task_id ? ` · agente temporaneo del task ${t.parent_task_id.slice(0, 8)}` : ""}</div>
               <ol className="history">
                 {t.history.map((h: any, i: number) => <li key={i}>{h.to} — {h.reason || ""}</li>)}
               </ol>

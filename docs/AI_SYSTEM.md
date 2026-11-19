@@ -66,3 +66,6 @@ Il worker espone `voice.transcribe` e `voice.synthesize` sul bridge, con faster-
 
 
 **Specializzazioni (ADR-0038).** Il Core sceglie lo specialista dalla richiesta (`research`, `system`, `automation`, `memory`, `coding`) o il generalista se gli ambiti sono zero o più di uno; lo specialista riceve il proprio ruolo nel prompt e solo gli strumenti del proprio ambito più `time.now` e `memory.search`.
+
+
+**Agenti temporanei (ADR-0040).** Con `agent.delegate` l'agente principale crea un agente temporaneo con un ruolo e pochi strumenti senza conferma (predefiniti di sola lettura): task figlio con la stessa traccia, al massimo 3 strumenti, nessuna sottodelega, al massimo 2 per richiesta.

@@ -228,3 +228,32 @@ async fn specialist_gets_only_its_tools_and_cannot_leave_its_scope() {
     );
     assert!(out["confirmation"].is_null());
 }
+
+#[tokio::test]
+async fn temporary_agents_only_get_tools_without_confirmation() {
+    // Il principale chiede un agente temporaneo con fs.write: il Core rifiuta prima di crearlo (ADR-0040).
+    let (url, seen) = fake_ollama(
+        vec![(
+            "agent__delegate",
+            json!({"role": "scrittore", "objective": "scrivi un file", "tools": ["fs.write"]}),
+        )],
+        false,
+    );
+    let out = chat(url, 18778, "usa un agente temporaneo per scrivere il file").await;
+    assert!(
+        !out["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["kind"] == "subagent"),
+        "{out}"
+    );
+    let reqs = seen.lock().unwrap();
+    assert!(
+        reqs[1]["messages"]
+            .to_string()
+            .contains("agent.invalid_tools"),
+        "{}",
+        reqs[1]
+    );
+}

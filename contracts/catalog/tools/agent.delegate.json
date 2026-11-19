@@ -1,0 +1,63 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "agent.delegate",
+  "version": "1.0.0",
+  "summary": "Affida un sotto-compito a un agente temporaneo con un ruolo e pochi strumenti di sola lettura; restituisce la sua risposta",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "role",
+      "objective"
+    ],
+    "properties": {
+      "role": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 200,
+        "description": "Ruolo dell'agente temporaneo, es. «analista dei file di log»"
+      },
+      "objective": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 2000,
+        "description": "Sotto-compito da svolgere, autonomo e verificabile"
+      },
+      "tools": {
+        "type": "array",
+        "maxItems": 6,
+        "uniqueItems": true,
+        "items": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "description": "Strumenti concessi (solo quelli senza conferma); vuoto = strumenti di lettura predefiniti"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "prerequisites": [
+    "Un solo livello: un agente temporaneo non può crearne altri",
+    "Solo strumenti che non richiedono conferma",
+    "Al massimo 3 strumenti per sotto-compito"
+  ],
+  "effects": "read",
+  "risk": "medium",
+  "permissions": [
+    "core.agents:execute"
+  ],
+  "errors": [
+    "agent.limit",
+    "agent.invalid_tools",
+    "agent.unavailable"
+  ],
+  "timeout_ms": 120000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "none"
+}
