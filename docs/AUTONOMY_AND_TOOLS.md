@@ -21,6 +21,8 @@ Nel prototipo il framework è l'Integration Engine dichiarativo (ADR-0013): un m
 
 Le competenze (ADR-0048) sono procedure del proprietario: istruzioni, parole di attivazione e strumenti suggeriti. Quando una richiesta le attiva, al massimo due, entrano nel prompt dell'agente e i loro strumenti vengono offerti per primi. Non concedono permessi: ogni strumento passa comunque da policy, conferma e audit.
 
+La sezione Connettori mostra lo schema dei parametri di ogni operazione. Il modulo genera un comando `connettore <id> <operazione> {...}` trattato in modo deterministico anche con Ollama attivo. Il Core valida lo schema e decide se procedere o chiedere conferma. Per le richieste in linguaggio naturale, i nomi di connettori e operazioni citati hanno precedenza nel budget di delega. Ollama può proporre una chiamata soltanto per le funzioni incluse nel proprio prompt.
+
 Le proposte di auto-evoluzione passano attraverso modifiche versionate, test isolati e i controlli di rilascio. La configurazione di sicurezza resta sotto controllo del proprietario.
 
 ## Stato del prototipo v0.1

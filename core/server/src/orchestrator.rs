@@ -407,12 +407,8 @@ impl Jarvis {
         let ts = |t: chrono::DateTime<chrono::Utc>| {
             t.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
         };
-        let scope = self.task_scope(task);
-        let tools: Vec<Value> = self
-            .delegated_tools()
-            .filter(|t| scope(t.name()))
-            .map(|t| json!({"name": t.name(), "version": t.version()}))
-            .collect();
+        let objective = task.doc["objective"].as_str().unwrap_or_default();
+        let tools = self.delegated_tools(objective, self.task_scope(task));
         json!({
             "contract": "jarvis.delegation/1",
             "delegation_id": uuid::Uuid::new_v4().to_string(),
@@ -424,7 +420,7 @@ impl Jarvis {
                 (None, None) => json!({"agent": crate::agents::GENERAL, "temporary": false}),
             },
             "context": {"refs": [format!("jarvis://task/{}", task.id())]},
-            "tools": tools,
+            "tools": tools.iter().map(|t| json!({"name": t.name(), "version": t.version()})).collect::<Vec<_>>(),
             "limits": if self.temporary.contains_key(&task.id()) {
                 json!({"max_steps": SUBAGENT_STEPS, "max_subdelegations": 0, "allow_cloud": false})
             } else {
@@ -434,22 +430,45 @@ impl Jarvis {
             "completion_conditions": ["Esito jarvis.agent-result/1 valido"],
             "issued_at": ts(issued),
             "expires_at": ts(expires),
-            "inputs": self.with_dynamic_tools(inputs),
+            "inputs": Self::with_dynamic_tools(inputs, &tools),
             "stream": self.stream_sink.is_some(),
         })
     }
 
-    /// Strumenti delegati all'agente: prima il catalogo statico, poi al massimo 16 strumenti dei connettori
-    /// (limite di 64 del contratto di delega, ADR-0046).
-    fn delegated_tools(&self) -> impl Iterator<Item = &crate::catalog::Tool> {
-        fn dynamic(t: &&crate::catalog::Tool) -> bool {
+    /// Gli strumenti dinamici citati nella richiesta hanno precedenza dentro il budget di delega.
+    fn delegated_tools(
+        &self,
+        objective: &str,
+        in_scope: impl Fn(&str) -> bool,
+    ) -> Vec<&crate::catalog::Tool> {
+        let dynamic = |t: &&crate::catalog::Tool| {
             t.name().starts_with("connector.") || t.name().starts_with("node.")
-        }
+        };
+        let objective = objective.to_ascii_lowercase();
+        let explicit = explicit_connector_tool(&objective);
+        let words: std::collections::HashSet<_> = objective
+            .split(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
+            .collect();
+        let mut ranked: Vec<_> = self
+            .catalog
+            .iter()
+            .filter(|t| in_scope(t.name()))
+            .filter(dynamic)
+            .collect();
+        ranked.sort_by_cached_key(|t| {
+            let mut parts = t.name().splitn(3, '.').skip(1);
+            let namespace = parts.next().unwrap_or_default();
+            let operation = parts.next().unwrap_or_default();
+            let named = words.contains(namespace);
+            let specific = named && operation.split('.').all(|part| words.contains(part));
+            std::cmp::Reverse((explicit.as_deref() == Some(t.name()), specific, named))
+        });
         self.catalog
             .iter()
-            .filter(|t| !dynamic(t))
-            .chain(self.catalog.iter().filter(dynamic).take(16))
+            .filter(|t| in_scope(t.name()) && !dynamic(t))
+            .chain(ranked.into_iter().take(16))
             .take(64)
+            .collect()
     }
 
     /// Registra un intervallo nella traccia del task (ADR-0039): nome, tipo, inizio, durata, esito e attributi
@@ -515,6 +534,7 @@ impl Jarvis {
             .unwrap_or_default()
             .to_string();
         let specialist = crate::agents::route(&objective);
+        let explicit = explicit_connector_tool(&objective.to_ascii_lowercase());
         // Una competenza attiva rende disponibili i suoi strumenti anche fuori dall'ambito dello specialista
         // (ADR-0048); policy, conferme e audit restano quelli di ogni strumento.
         let skill_tools: Vec<String> = if temporary.is_some() || specialist.is_none() {
@@ -529,16 +549,17 @@ impl Jarvis {
         move |tool: &str| match &temporary {
             Some(tools) => tools.iter().any(|t| t == tool),
             None => {
-                specialist.is_none_or(|a| crate::agents::allows(a, tool))
+                explicit.as_deref() == Some(tool)
+                    || specialist.is_none_or(|a| crate::agents::allows(a, tool))
                     || skill_tools.iter().any(|t| t == tool)
             }
         }
     }
 
-    /// Aggiunge agli input i descrittori dei connettori autorizzati, che il catalogo statico dell'agente non conosce.
-    fn with_dynamic_tools(&self, inputs: &Value) -> Value {
-        let dynamic: Vec<Value> = self
-            .delegated_tools()
+    /// Include i descrittori dinamici della stessa lista inviata nel campo `tools`.
+    fn with_dynamic_tools(inputs: &Value, tools: &[&crate::catalog::Tool]) -> Value {
+        let dynamic: Vec<Value> = tools
+            .iter()
             .filter(|t| t.name().starts_with("connector.") || t.name().starts_with("node."))
             .map(|t| json!({"name": t.name(), "version": t.version(), "summary": t.descriptor["summary"], "input_schema": t.descriptor["input_schema"]}))
             .collect();
@@ -3523,6 +3544,7 @@ impl Jarvis {
             "operations": manifest["operations"].as_array().map(|ops| ops.iter().map(|o| json!({
                 "tool": crate::connectors::tool_name(id, o["name"].as_str().unwrap_or_default()),
                 "summary": o["summary"], "method": o["method"], "effects": o["effects"], "risk": o["risk"],
+                "input_schema": o["input_schema"],
             })).collect::<Vec<_>>()),
         })
     }
@@ -4060,6 +4082,16 @@ fn clip(text: &str, max: usize) -> String {
     }
     let head: String = text.chars().take(max.saturating_sub(1)).collect();
     format!("{head}…")
+}
+
+fn explicit_connector_tool(objective: &str) -> Option<String> {
+    let mut command = objective.split_whitespace();
+    match (command.next(), command.next(), command.next()) {
+        (Some("connettore"), Some(id), Some(operation)) => {
+            Some(crate::connectors::tool_name(id, operation))
+        }
+        _ => None,
+    }
 }
 
 /// Cronologia entro il budget (ADR-0024): l'ultimo messaggio resta intero (fino a MAX_MESSAGE), i turni

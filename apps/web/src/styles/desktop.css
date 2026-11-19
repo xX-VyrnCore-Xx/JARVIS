@@ -1,0 +1,133 @@
+.hero-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 1rem; }
+.hero-heading h1 { margin: 0; font: 680 clamp(1.8rem, 4vw, 3.15rem)/1.05 var(--display); letter-spacing: -.05em; }
+.hero-heading .hud-clock .time { font-size: clamp(1.3rem, 2vw, 2rem); letter-spacing: -.04em; text-shadow: none; }
+.hero-heading .hud-clock .date { letter-spacing: 0; text-transform: none; }
+.hero-heading .hud-clock { text-align: right; }
+.hero-core { order: 1; }
+
+.connector-card { display: flex; flex-direction: column; align-items: stretch; gap: .85rem; }
+.connector-head { display: flex; align-items: center; gap: .8rem; }
+.connector-mark { color: var(--accent); box-sizing: content-box; background: var(--user); border-radius: 12px; padding: .65rem; }
+.connector-head .title { font-size: 1.06rem; }
+.connector-head .title .sub { margin-left: .25rem; }
+.connector-endpoint { overflow-wrap: anywhere; }
+.connector-operations { padding: 0; margin: 0; list-style: none; border: 1px solid var(--border); border-radius: 12px; }
+.connector-operations li { display: flex; align-items: center; gap: .65rem; padding: .65rem .8rem; }
+.connector-operations li + li { border-top: 1px solid var(--border); }
+.operation-method { color: var(--accent); background: var(--user); border-radius: 6px; padding: .2em .45em; font: 650 .72rem/1.4 var(--mono); }
+.form-error { margin: .2rem 0; color: var(--bad); }
+.connector-dialog { overflow: auto; max-height: calc(100% - 2rem); }
+.connector-dialog form { display: grid; gap: .7rem; }
+dialog.connector-dialog h2 { margin: 0; font-size: 1.25rem; letter-spacing: -.02em; text-transform: none; }
+.connector-dialog .hint { margin: 0; overflow-wrap: anywhere; }
+.operation-parameters { margin: 0; max-height: 24vh; overflow: auto; }
+.operation-parameters div { display: flex; gap: .65rem; padding: .35rem 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
+.operation-parameters dd { margin: 0; color: var(--muted); font-size: .85rem; }
+.operation-input { display: grid; gap: .35rem; }
+.operation-input textarea { resize: vertical; font: .9rem/1.55 var(--mono); }
+.operation-actions { justify-content: flex-end; }
+
+:root.app-desktop {
+  --bg: #0c1423;
+  --text: #eef5ff;
+  --muted: #a6b7cd;
+  --accent: #83d7ff;
+  --accent-2: #ac9cff;
+  --panel: #151f30;
+  --panel-solid: #192538;
+  --panel-2: #202d43;
+  --border: #29394e;
+  --border-strong: #526a86;
+  --user: #233d55;
+  --glow: 0 0 0 2px color-mix(in srgb, var(--accent) 28%, transparent);
+  --glow-soft: 0 12px 36px #060e1a35;
+  --desktop-bar: #121c2c;
+  --desktop-sidebar: #101a2a;
+  --desktop-field: #0f1929;
+  --desktop-hero: #182c4b;
+}
+:root.app-desktop[data-theme="light"] {
+  --bg: #f3f6fa;
+  --text: #18263a;
+  --muted: #4b6079;
+  --accent: #126490;
+  --accent-2: #6255a4;
+  --panel: #fff;
+  --panel-solid: #fff;
+  --panel-2: #e9eff8;
+  --border: #d6e0eb;
+  --border-strong: #8ca6c0;
+  --user: #e1eff9;
+  --ok: #117951;
+  --warn: #885400;
+  --bad: #ad263b;
+  --glow-soft: 0 12px 32px #33528313;
+  --desktop-bar: #fdfdfe;
+  --desktop-sidebar: #eaf0f7;
+  --desktop-field: #fff;
+  --desktop-hero: #dce7fa;
+}
+:root.platform-mac.app-desktop { --display: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif; }
+
+.app-desktop body { background: var(--bg); font-size: 14px; }
+.app-desktop .hud-backdrop { display: none; }
+:root.app-desktop .topbar { min-height: 56px; background: var(--desktop-bar); padding: .6rem 1.15rem; }
+.app-desktop .topbar::after { display: none; }
+.app-desktop .brand-name { letter-spacing: .16em; }
+.app-desktop .brand-mark { width: 18px; height: 18px; box-shadow: 0 0 10px #83d7ff75; animation: none; }
+.app-desktop .pill { background: transparent; font: 540 .76rem/1.4 var(--display); }
+.app-desktop .palette-trigger { background: var(--desktop-field); border-radius: 9px; }
+.app-desktop .nav { flex-shrink: 0; width: 190px; background: var(--desktop-sidebar); padding: 1rem .65rem; }
+.app-desktop .nav-group-title { font-family: var(--display); letter-spacing: .03em; font-size: .72rem; text-transform: none; opacity: 1; }
+.app-desktop .nav-item { letter-spacing: 0; font-size: .89rem; padding: .4rem .65rem; }
+.app-desktop .nav-item.active { background: var(--user); border-color: transparent; }
+.app-desktop .nav-item.active::before { display: none; }
+.app-desktop .nav-item.active .glyph { filter: none; }
+.app-desktop .view { padding: clamp(1rem, 2.5vw, 2.1rem); }
+.app-desktop .view-head h2 { font-size: 1.85rem; font-weight: 670; letter-spacing: -.045em; text-transform: none; }
+.app-desktop .view-head h2::after { display: none; }
+.app-desktop .hud-grid { gap: 1rem; }
+:root.app-desktop .hud-hero {
+  background: radial-gradient(ellipse at 86% 44%, var(--desktop-hero), transparent 62%), var(--panel);
+  padding: clamp(1.2rem, 2.6vw, 2.4rem);
+  box-shadow: var(--glow-soft);
+  gap: clamp(1rem, 3.5vw, 3.2rem);
+}
+.app-desktop .hud-hero::before { display: none; }
+.app-desktop .hero-core { flex-basis: clamp(130px, 21vw, 270px); }
+.app-desktop .avatar-large { width: clamp(124px, 18vw, 220px); height: clamp(124px, 18vw, 220px); }
+.app-desktop .avatar-large .iris { box-shadow: 0 0 24px color-mix(in srgb, currentColor 65%, transparent); }
+.app-desktop .avatar-large .halo { box-shadow: 0 0 20px color-mix(in srgb, currentColor 16%, transparent) inset; }
+.app-desktop .hero-state { font: 630 .86rem/1.2 var(--display); letter-spacing: .04em; text-transform: none; text-shadow: none; }
+.app-desktop .hero-readouts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.app-desktop .hero-readouts div { background: var(--desktop-field); }
+.app-desktop .hero-readouts span, .app-desktop .kpi span { font-family: var(--display); font-size: .76rem; color: var(--muted); letter-spacing: 0; text-transform: none; }
+.app-desktop .kpi, .app-desktop .hud-panel { backdrop-filter: none; box-shadow: var(--glow-soft); }
+.app-desktop .hud-panel { transform: none; }
+.app-desktop .hud-panel h3 { font-size: .96rem; letter-spacing: 0; text-transform: none; }
+.app-desktop .avatar-panel { font-family: var(--display); text-transform: none; letter-spacing: 0; }
+.app-desktop .messages, .app-desktop .composer, .app-desktop .suggestions, .app-desktop .voice-bar {
+  padding-inline: max(1.1rem, calc((100% - 900px) / 2));
+}
+.app-desktop .msg { box-shadow: none; }
+.app-desktop .msg.assistant { border-left: 1px solid var(--border); align-self: flex-start; }
+:root.app-desktop .composer { background: var(--desktop-bar); }
+.app-desktop :is(input, select, textarea) { background: var(--desktop-field); }
+.app-desktop button:not(:disabled) { transition: background .16s ease, border-color .16s ease, transform .16s ease; }
+.app-desktop button:not(:disabled):active { transform: scale(.97); }
+.app-desktop .notif-panel:not([hidden]), .connector-dialog[open] { animation: pop .18s ease-out; }
+
+@media (max-width: 760px) {
+  .app-desktop #st-audit, .app-desktop #st-voice { display: none; }
+}
+@media (max-width: 720px) {
+  .app-desktop .nav, .app-desktop .layout.nav-collapsed .nav { width: auto; padding: .4rem .6rem; }
+  .app-desktop .hero-core { flex-basis: auto; }
+  .hero-heading .hud-clock { text-align: left; }
+  .hero-side { width: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hud-hero::before, .msg.streaming::after, .app-desktop .notif-panel:not([hidden]), .connector-dialog[open] { animation: none; }
+  .app-desktop button:not(:disabled), .nav, .gauge .arc, .avatar-large .mouth { transition: none; }
+  .app-desktop button:not(:disabled):active { transform: none; }
+}

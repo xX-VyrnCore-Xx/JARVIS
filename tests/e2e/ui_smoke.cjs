@@ -302,6 +302,17 @@ function check(cond, msg) {
   await page.click('[data-view="chat"]');
   check((await send("connettore stato leggi nome=posta")).includes("operativo"), "chiamata al connettore dalla chat");
 
+  await page.click('[data-view="connectors"]');
+  await page.getByRole("button", { name: "Prepara Stato di un servizio" }).click();
+  const operation = page.getByRole("dialog", { name: "Stato di un servizio" });
+  await operation.getByRole("button", { name: "Invia alla chat" }).click();
+  check((await operation.getByRole("alert").innerText()).includes("nome"), "parametro obbligatorio indicato prima dell’invio");
+  await operation.getByLabel("Parametri JSON").fill(JSON.stringify({ nome: "posta di Roma" }));
+  await operation.getByRole("button", { name: "Invia alla chat" }).click();
+  await page.waitForSelector("#view-chat.active");
+  await page.locator(".msg.assistant").filter({ hasText: /posta di Roma.*operativo/s }).waitFor();
+  check(!(await operation.isVisible()), "chiamata strutturata dal modulo del connettore, con risultato in chat");
+
   // Dispositivi (RF-11): un secondo contesto fa da telefono su un host remoto ammesso (JARVIS_ALLOWED_HOSTS).
   // Un sottodominio di .localhost è un contesto sicuro anche in HTTP: serve a WebAuthn per le passkey (ADR-0042).
   await page.click('[data-view="devices"]');
@@ -407,6 +418,23 @@ function check(cond, msg) {
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
   check(!overflow, "nessuno scorrimento orizzontale a 390 px");
   if (shots) await page.screenshot({ path: `${shots}/jarvis-mobile.png` });
+
+  const desktop = await browser.newPage({
+    viewport: { width: 760, height: 760 },
+    reducedMotion: "reduce",
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/605.1.15 Version/17.0 Safari/605.1.15",
+  });
+  const desktopUrl = new (require("url").URL)(URL);
+  desktopUrl.searchParams.set("app", "desktop");
+  await desktop.goto(desktopUrl.href);
+  await desktop.getByRole("heading", { name: "Plancia" }).waitFor();
+  check(await desktop.locator("html").evaluate((el) => el.classList.contains("app-desktop") && el.classList.contains("platform-mac")), "stili desktop macOS attivi");
+  check(await desktop.locator(".hud-hero").evaluate((el) => getComputedStyle(el, "::before").animationName === "none"), "movimento ridotto nella plancia desktop");
+  await desktop.locator("#theme-toggle").click();
+  check(await desktop.locator("html").getAttribute("data-theme") === "light", "tema chiaro nella finestra desktop");
+  await desktop.setViewportSize({ width: 390, height: 720 });
+  check(await desktop.locator("html").evaluate((el) => el.scrollWidth <= el.clientWidth), "plancia desktop adattata alla finestra stretta");
+  if (shots) await desktop.screenshot({ path: `${shots}/jarvis-desktop-chiaro.png` });
 
   check(errors.length === 0, "nessun errore JavaScript o CSP in console" + (errors.length ? ": " + errors.join(" | ") : ""));
   await browser.close();

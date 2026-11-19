@@ -196,6 +196,19 @@ fn install_authorize_call_and_secret_never_leaks() {
     assert!(step(&before, "tool_call").is_none(), "{before}");
     assert!(seen.lock().unwrap().is_empty());
 
+    let mut more = manifest(port, false);
+    more["id"] = json!("aaa");
+    more["auth"] = json!({"type": "none"});
+    let sample = more["operations"][0].clone();
+    more["operations"] = json!((0..18)
+        .map(|i| {
+            let mut operation = sample.clone();
+            operation["name"] = json!(format!("azione_{i:02}"));
+            operation
+        })
+        .collect::<Vec<_>>());
+    j.install_connector(&more).unwrap();
+
     let auth = j.authorize_connector("meteo", TOKEN).unwrap();
     assert_eq!(auth["authorized"], true);
     assert_eq!(auth["has_credential"], true);
@@ -239,7 +252,7 @@ fn install_authorize_call_and_secret_never_leaks() {
     // Dopo il riavvio gli strumenti autorizzati tornano disponibili.
     let mut j = Jarvis::new(config(&data, web())).unwrap();
     let again = j
-        .chat("connettore meteo previsioni citta=Milano")
+        .chat(r#"connettore meteo previsioni {"citta":"Milano"}"#)
         .unwrap()
         .to_json();
     assert_eq!(
@@ -258,7 +271,7 @@ fn writes_need_confirmation_and_revoke_denies_immediately() {
     j.authorize_connector("meteo", TOKEN).unwrap();
 
     let out = j
-        .chat("connettore meteo segnala testo=\"strada allagata\"")
+        .chat(r#"connettore meteo segnala {"testo":"strada allagata https://example.org"}"#)
         .unwrap();
     let pending = out
         .confirmation

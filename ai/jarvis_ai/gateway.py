@@ -324,6 +324,27 @@ def _parse_connector_call(message: str, catalog: dict[str, dict]) -> tuple[str, 
     return tool, args
 
 
+_STRUCTURED_CONNECTOR = re.compile(
+    r"^connettore\s+([a-z][a-z0-9_]*)\s+([a-z][a-z0-9_]*)\s+(\{.*)$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _structured_connector(message: str, catalog: dict[str, dict], backend: dict) -> dict | None:
+    match = _STRUCTURED_CONNECTOR.fullmatch(message.strip())
+    if not match:
+        return None
+    tool = f"connector.{match[1].lower()}.{match[2].lower()}"
+    if tool not in catalog:
+        return _result("reply", backend, text="Operazione del connettore non disponibile. Verifica l’autorizzazione in Connettori.")
+    try:
+        args = json.loads(match[3])
+    except ValueError:
+        return _result("reply", backend, text="I parametri del connettore devono essere un oggetto JSON valido.")
+    return _result("tool_call", backend, tool=tool, arguments=args, catalog=catalog,
+                   rationale="Operazione del connettore indicata esplicitamente")
+
+
 def _reason(output: Any) -> str:
     if isinstance(output, dict):
         return str(output.get("message") or output.get("reason") or output.get("code") or output)
@@ -654,25 +675,32 @@ def select_tools(message: str, names: list[str]) -> list[str]:
         return names
     text = _fold(message)
     prefixes = [p for hints, ps in TOOL_HINTS if any(h in text for h in hints) for p in ps]
-    # Strumenti dinamici citati per nome (es. «connettore meteo», «nodo studio»).
-    chosen = [n for n in names if n in CORE_TOOLS]
+    words = set(re.findall(r"[\w-]+", text))
+    named, relevant = [], []
     for n in names:
-        if n in chosen:
+        if n in CORE_TOOLS:
             continue
-        dynamic = n.split(".")[1] if n.startswith(("connector.", "node.")) and n.count(".") >= 1 else None
-        if any(n.startswith(p) for p in prefixes) or (dynamic and dynamic in text):
-            chosen.append(n)
-    core = [n for n in chosen if n in CORE_TOOLS]
-    rest = [n for n in chosen if n not in CORE_TOOLS]
-    rest.sort(key=lambda n: -sum(w in text for w in TOOL_WORDS.get(n, ())))
-    chosen = core + rest
-    return chosen[:MAX_TOOLS] if len(chosen) > MAX_TOOLS else chosen
+        if n.startswith(("connector.", "node.")):
+            _, namespace, operation = n.split(".", 2)
+            if namespace in words:
+                named.append((all(part in words for part in operation.split(".")), n))
+                continue
+        if any(n.startswith(p) for p in prefixes):
+            relevant.append(n)
+    named.sort(key=lambda entry: entry[0], reverse=True)
+    relevant.sort(key=lambda n: -sum(w in text for w in TOOL_WORDS.get(n, ())))
+    return ([n for _, n in named] + [n for n in names if n in CORE_TOOLS] + relevant)[:MAX_TOOLS]
 
 
 def compact_schema(schema: Any) -> Any:
     """Schema JSON senza i vincoli che il modello non usa: il Core li verifica comunque (contratti)."""
     if isinstance(schema, dict):
-        return {k: compact_schema(v) for k, v in schema.items() if k not in _SCHEMA_DROP}
+        definitions = {"properties", "patternProperties", "$defs", "definitions", "dependentSchemas"}
+        return {
+            key: {name: compact_schema(value) for name, value in entry.items()}
+            if key in definitions and isinstance(entry, dict) else compact_schema(entry)
+            for key, entry in schema.items() if key not in _SCHEMA_DROP
+        }
     if isinstance(schema, list):
         return [compact_schema(v) for v in schema]
     return schema
@@ -759,7 +787,7 @@ def text_tool_call(content: str, by_fn: dict[str, str]) -> tuple[str, Any] | Non
         if isinstance(obj.get("function"), dict):
             obj = obj["function"]
         name = str(obj.get("name") or obj.get("tool") or "")
-        tool = by_fn.get(name) or by_fn.get(_fn_name(name))
+        tool = name if name in by_fn.values() else by_fn.get(name)
         if tool:
             return tool, obj.get("arguments", obj.get("parameters", {}))
     return None
@@ -812,12 +840,14 @@ class OllamaBackend:
                 msg = chunk.get("message") or {}
                 if msg.get("content"):
                     content.append(msg["content"])
-                    if not tool_calls:
+                    if not tool_calls and not msg.get("tool_calls"):
                         emit(msg["content"])
                 tool_calls += msg.get("tool_calls") or []
                 if chunk.get("done"):
                     final = chunk
                     break
+        if not final:
+            raise ValueError("stream Ollama interrotto")
         return {**final, "message": {"role": "assistant", "content": "".join(content), "tool_calls": tool_calls}}
 
     def respond(self, delegation: dict, catalog: dict[str, dict], emit: Callable[[str], None] | None = None) -> dict:
@@ -825,52 +855,73 @@ class OllamaBackend:
         role = (delegation.get("delegate") or {}).get("role")
         messages = [{"role": "system", "content": system_prompt(inputs, role=role)}]
         messages += [{"role": m["role"], "content": m["content"]} for m in inputs.get("messages", [])]
-        allowed = {t["name"] for t in delegation.get("tools", [])}
         options: dict[str, Any] = {"temperature": 0.2, "num_ctx": self.num_ctx}
         body: dict[str, Any] = {"model": self.model, "messages": messages, "stream": False, "options": options, "keep_alive": "10m"}
-        # Ciclo dell'agente (ADR-0037): i passi già eseguiti tornano al modello come chiamate e risultati.
+        # I passi già eseguiti tornano al modello come chiamate e risultati (ADR-0037).
         history = inputs.get("tool_history") or ([inputs["tool_result"]] if inputs.get("tool_result") else [])
+        aliases: dict[str, str] = {}
+        occupied: set[str] = set()
+        for name in dict.fromkeys([*catalog, *(step["tool"] for step in history)]):
+            alias = _fn_name(name)
+            while alias in occupied:
+                alias += "_"
+            aliases[name] = alias
+            occupied.add(alias)
         for step in history:
             messages.append({"role": "assistant", "content": "", "tool_calls": [
-                {"function": {"name": _fn_name(step["tool"]), "arguments": step.get("arguments") or {}}}]})
+                {"function": {"name": aliases[step["tool"]], "arguments": step.get("arguments") or {}}}]})
             messages.append({"role": "tool", "content": _tool_payload(step)})
         steps_left = inputs.get("steps_left", 0 if history else MAX_STEPS)
-        sent = 0
-        if history and steps_left <= 0:
+        names: list[str] = []
+        if steps_left <= 0:
             messages.append({"role": "user", "content": "Rispondi ora alla mia richiesta usando i risultati degli strumenti, senza chiamarne altri."})
         else:
-            names = select_tools(_last_user_message(delegation), [n for n in catalog if n in allowed])
+            names = select_tools(_last_user_message(delegation), list(catalog))
             # Gli strumenti delle competenze attive vengono offerti per primi (ADR-0048).
-            preferred = [n for n in skill_tools(inputs) if n in catalog and n in allowed]
+            preferred = [n for n in skill_tools(inputs) if n in catalog]
             names = preferred + [n for n in names if n not in preferred]
             if os.environ.get("JARVIS_TOOL_SELECTION") != "all":
                 names = names[:max(MAX_TOOLS, len(preferred))]
-            used = [s["tool"] for s in history if s["tool"] in catalog and s["tool"] in allowed and s["tool"] not in names]
-            names = names + used
-            body["tools"] = [
-                {"type": "function", "function": {"name": _fn_name(n), "description": catalog[n]["summary"], "parameters": compact_schema(catalog[n]["input_schema"])}}
-                for n in names
-            ]
-            sent = len(names)
+            names = list(dict.fromkeys([*names, *(step["tool"] for step in history if step["tool"] in catalog)]))
+            if names:
+                body["tools"] = [
+                    {"type": "function", "function": {"name": aliases[n], "description": catalog[n]["summary"],
+                                                      "parameters": compact_schema(catalog[n]["input_schema"])}}
+                    for n in names
+                ]
+        by_fn = {aliases[n]: n for n in names}
         timeout = min(self.timeout_s, delegation.get("timeout_ms", 120000) / 1000)
         data = self._stream(body, timeout, emit) if emit else self._post("/api/chat", body, timeout)
-        msg = data.get("message", {})
-        by_fn = {_fn_name(n): n for n in catalog if n in allowed}
-        calls = [(by_fn.get(c.get("function", {}).get("name", "")), c.get("function", {}).get("arguments") or {})
-                 for c in msg.get("tool_calls") or []]
-        if not calls and steps_left > 0:
+        msg = data.get("message") or {}
+        if not isinstance(msg, dict):
+            raise ValueError("messaggio Ollama non valido")
+        calls = msg.get("tool_calls") or []
+        candidates = []
+        for call in calls:
+            fn = call.get("function") if isinstance(call, dict) else None
+            if isinstance(fn, dict) and isinstance(fn.get("name"), str) and fn["name"] in by_fn:
+                candidates.append((by_fn[fn["name"]], fn.get("arguments")))
+        if not candidates and by_fn:
             found = text_tool_call(msg.get("content") or "", by_fn)
             if found:
-                calls = [found]
-        for tool, args in calls:
-            if tool:
-                args = coerce_arguments(args, catalog[tool].get("input_schema", {}))
-                out = _result("tool_call", self.info, tool=tool, arguments=args, catalog=catalog, rationale="Proposto dal modello")
-                out["usage"] = _usage(data, sent)
-                return out
+                candidates.append(found)
+        for tool, args in candidates:
+            if args is None:
+                args = {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except ValueError:
+                    continue
+            if not isinstance(args, dict):
+                continue
+            args = coerce_arguments(args, catalog[tool].get("input_schema", {}))
+            out = _result("tool_call", self.info, tool=tool, arguments=args, catalog=catalog, rationale="Proposto dal modello")
+            out["usage"] = _usage(data, len(by_fn))
+            return out
         text = (msg.get("content") or "").strip()
-        out = _result("reply", self.info, text=text or "(risposta vuota dal modello)")
-        out["usage"] = _usage(data, sent)
+        out = _result("reply", self.info, text=text or ("Il modello non ha proposto uno strumento disponibile con parametri leggibili." if calls else "(risposta vuota dal modello)"))
+        out["usage"] = _usage(data, len(by_fn))
         return out
 
 
@@ -931,12 +982,21 @@ class Gateway:
 
     def respond(self, delegation: dict, emit: Callable[[str], None] | None = None) -> dict:
         """`emit` riceve i frammenti di testo man mano che il modello li genera (streaming, ADR-0025)."""
-        allowed = {t["name"] for t in delegation.get("tools", [])}
-        catalog = {k: v for k, v in self.catalog.items() if k in allowed}
+        allowed = {(t["name"], t["version"]) for t in delegation.get("tools", [])}
+        catalog = {k: v for k, v in self.catalog.items() if (k, v["version"]) in allowed}
         # Strumenti dinamici (connettori RF-14): descritti dal Core nella delega, mai dal catalogo statico.
         for d in delegation.get("inputs", {}).get("tool_descriptors", []):
-            if d["name"].startswith(("connector.", "node.")) and d["name"] not in self.catalog:
+            if (d["name"].startswith(("connector.", "node."))
+                    and (d["name"], d["version"]) in allowed):
                 catalog[d["name"]] = d
+        inputs = delegation.get("inputs", {})
+        message = _last_user_message(delegation)
+        if _STRUCTURED_CONNECTOR.fullmatch(message.strip()):
+            history = inputs.get("tool_history") or []
+            result = inputs.get("tool_result") or (history[-1] if history else None)
+            if result:
+                return _result("reply", self.offline.backend, text=_describe_tool_result(result))
+            return _structured_connector(message, catalog, self.offline.backend)
         self._recover_ollama()
         if self.ollama:
             try:

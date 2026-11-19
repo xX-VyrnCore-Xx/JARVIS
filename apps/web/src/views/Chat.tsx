@@ -127,9 +127,10 @@ function Sources({ sources }: { sources?: Source[] }) {
 
 export function Chat({ active }: { active: boolean }) {
   const app = useApp();
-  const { refreshStatus, pollNotifications, dismissToast, setThinking, sendRef, bumpActivity } = app;
+  const { refreshStatus, pollNotifications, dismissToast, thinking, setThinking, sendRef, bumpActivity } = app;
   const [items, setItems] = useState<Item[]>([]);
   const [pending, setPending] = useState(false);
+  const sending = useRef(false);
   const [text, setText] = useState("");
   const nextId = useRef(1);
   const box = useRef<HTMLDivElement>(null);
@@ -153,7 +154,8 @@ export function Chat({ active }: { active: boolean }) {
   const send = useCallback(
     async (raw: string) => {
       const message = raw.trim();
-      if (!message) return;
+      if (!message || sending.current) return;
+      sending.current = true;
       add({ kind: "msg", role: "user", text: message });
       setPending(true);
       setThinking(true);
@@ -189,6 +191,7 @@ export function Chat({ active }: { active: boolean }) {
         }
         say(`Errore: ${(e as Error).message}`, { error: true });
       } finally {
+        sending.current = false;
         setPending(false);
         setThinking(false);
         refreshStatus();
@@ -256,6 +259,7 @@ export function Chat({ active }: { active: boolean }) {
 
   const submit = (e?: React.FormEvent) => {
     e?.preventDefault();
+    if (sending.current) return;
     const t = text;
     setText("");
     if (input.current) input.current.style.height = "";
@@ -355,7 +359,7 @@ export function Chat({ active }: { active: boolean }) {
             }
           }}
         />
-        <button type="submit" id="send" className="primary send" disabled={pending}><Icon name="send" size={16} /> Invia</button>
+        <button type="submit" id="send" className="primary send" disabled={thinking}><Icon name="send" size={16} /> Invia</button>
       </form>
     </section>
   );

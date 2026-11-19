@@ -40,12 +40,11 @@ function executor(t: any): string {
   return "Core locale";
 }
 
-function Panel({ title, code, icon, children, className = "" }: { title: string; code: string; icon: string; children: React.ReactNode; className?: string }) {
+function Panel({ title, icon, children, className = "" }: { title: string; icon: string; children: React.ReactNode; className?: string }) {
   return (
     <section className={`hud-panel ${className}`} aria-label={title}>
       <header>
         <h3><Icon name={icon} size={16} className="panel-icon" />{title}</h3>
-        <span className="hud-code" aria-hidden="true">{code}</span>
       </header>
       <div className="hud-body">{children}</div>
     </section>
@@ -79,10 +78,6 @@ function Sparkline({ points }: { points: number[] }) {
   );
 }
 
-function greeting(h: number) {
-  return h < 5 ? "Buonanotte" : h < 13 ? "Buongiorno" : h < 18 ? "Buon pomeriggio" : "Buonasera";
-}
-
 function Kpi({ icon, label, value, tone = "" }: { icon: string; label: string; value: React.ReactNode; tone?: string }) {
   return (
     <div className={`kpi ${tone}`}>
@@ -103,7 +98,6 @@ function Clock() {
   }, []);
   return (
     <div className="hud-clock">
-      <span className="greet">{greeting(now.getHours())}.</span>
       <span className="time">{now.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}</span>
       <span className="date">{now.toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" })}</span>
     </div>
@@ -161,7 +155,7 @@ export function Dashboard({ active }: { active: boolean }) {
   const runCommand = (e: React.FormEvent) => {
     e.preventDefault();
     const t = command.trim();
-    if (!t) return;
+    if (!t || app.thinking) return;
     setCommand("");
     show("chat");
     sendRef.current(t);
@@ -182,8 +176,8 @@ export function Dashboard({ active }: { active: boolean }) {
   const devicesActive = (snap?.devices || []).filter((d) => !d.revoked_at && !d.slug).length;
   const nextRuns = (snap?.workflows || []).filter((w) => w.enabled).slice(0, 5);
 
-  const today = new Date().toISOString().slice(0, 10);
-  const todays = (snap?.tasks || []).filter((t) => (t.created_at || "").startsWith(today));
+  const today = new Date().toDateString();
+  const todays = (snap?.tasks || []).filter((t) => new Date(t.created_at).toDateString() === today);
   const done = (snap?.tasks || []).filter((t) => t.state === "succeeded" || t.state === "failed");
   const okRate = done.length ? Math.round((100 * done.filter((t) => t.state === "succeeded").length) / done.length) : null;
   const offline: { label: string; detail: string; tone: string }[] = [];
@@ -198,12 +192,11 @@ export function Dashboard({ active }: { active: boolean }) {
     <section className={`view hud${active ? " active" : ""}`} id="view-dashboard" aria-label="Plancia">
       <div className="hud-grid">
         <section className="hud-hero" aria-label="Stato di JARVIS">
-          <div className="hero-core">
-            <Avatar id="avatar-core" size="large" />
-            <div className="hero-state" role="status">{AVATAR_LABELS[avatarState]}</div>
-          </div>
           <div className="hero-side">
-            <Clock />
+            <div className="hero-heading">
+              <h1>Plancia</h1>
+              <Clock />
+            </div>
             <div className="hero-readouts">
               <div><span>AI</span><b className={backend?.name === "offline" ? "warn" : backend ? "ok" : "bad"}>{backend ? `${backend.name} · ${backend.model}` : "—"}</b></div>
               <div><span>Voce</span><b className={vs?.available ? "ok" : "warn"}>{vs ? (vs.available ? `${vs.stt.name} · ${vs.tts ? vs.tts.name : "senza sintesi"}` : "non disponibile") : "—"}</b></div>
@@ -212,8 +205,12 @@ export function Dashboard({ active }: { active: boolean }) {
             </div>
             <form className="hud-command" id="dashboard-command" onSubmit={runCommand}>
               <input aria-label="Comando a JARVIS" placeholder="Dai un comando a JARVIS…" value={command} onChange={(e) => setCommand(e.target.value)} maxLength={8000} />
-              <button className="primary" type="submit">Esegui</button>
+              <button className="primary" type="submit" disabled={app.thinking}>Esegui</button>
             </form>
+          </div>
+          <div className="hero-core">
+            <Avatar id="avatar-core" size="large" />
+            <div className="hero-state" role="status">{AVATAR_LABELS[avatarState]}</div>
           </div>
         </section>
 
@@ -225,7 +222,7 @@ export function Dashboard({ active }: { active: boolean }) {
           <Kpi icon="node" label="nodi in linea" value={`${nodesOnline}/${(snap?.nodes || []).length}`} />
         </section>
 
-        <Panel title="In attesa di conferma" icon="shield" code="CNF" className={snap?.confirmations.length ? "alert" : ""}>
+        <Panel title="In attesa di conferma" icon="shield" className={snap?.confirmations.length ? "alert" : ""}>
           <div id="dash-confirmations" className="hud-list">
             {snap && !snap.confirmations.length ? <p className="empty">Nessuna operazione in attesa.</p> : null}
             {(snap?.confirmations || []).map((c) => (
@@ -244,7 +241,7 @@ export function Dashboard({ active }: { active: boolean }) {
           </div>
         </Panel>
 
-        <Panel title="Attività ed esecutori" icon="tasks" code="TSK" className="wide">
+        <Panel title="Attività ed esecutori" icon="tasks" className="wide">
           <div id="dash-tasks" className="hud-list">
             {snap && !snap.tasks.length ? <p className="empty">Nessuna attività: prova un comando qui sopra.</p> : null}
             {(snap?.tasks || []).slice(0, 7).map((t) => (
@@ -261,10 +258,10 @@ export function Dashboard({ active }: { active: boolean }) {
           <button className="ghost small link" onClick={() => show("tasks")}>Tutte le attività →</button>
         </Panel>
 
-        <Panel title="Condizioni e nodi" icon="node" code="NET">
+        <Panel title="Condizioni e nodi" icon="node">
           <div className="hud-list" id="dash-conditions">
             <div className="hud-item">
-              <span className="led succeeded" aria-hidden="true"></span>
+              <span className={`led ${reachable ? "succeeded" : "failed"}`} aria-hidden="true"></span>
               <div className="grow"><div className="t">Core locale</div><div className="m">{reachable ? "in linea" : "non raggiungibile"}</div></div>
             </div>
             {(snap?.nodes || []).map((n) => (
@@ -279,7 +276,7 @@ export function Dashboard({ active }: { active: boolean }) {
           </div>
         </Panel>
 
-        <Panel title="Prestazioni" icon="gauge" code="PRF">
+        <Panel title="Prestazioni" icon="gauge">
           <div className="gauges">
             <Gauge value={chatP95} max={Math.max(1000, chatP95)} label="p95 chat" unit="ms" tone={chatP95 > 2000 ? "warn" : "accent"} />
             <Gauge value={reqs} max={Math.max(reqs, 100)} label="richieste" />
@@ -292,7 +289,7 @@ export function Dashboard({ active }: { active: boolean }) {
           </div>
         </Panel>
 
-        <Panel title="Errori e avvisi" icon="alert" code="ERR" className={failed.length || alerts.length ? "warnline" : ""}>
+        <Panel title="Errori e avvisi" icon="alert" className={failed.length || alerts.length ? "warnline" : ""}>
           <div className="hud-list" id="dash-errors">
             {snap && !failed.length && !alerts.length ? <p className="empty">Nessun errore recente.</p> : null}
             {failed.slice(0, 3).map((t) => (
@@ -304,7 +301,7 @@ export function Dashboard({ active }: { active: boolean }) {
           </div>
         </Panel>
 
-        <Panel title="Memoria" icon="memory" code="MEM" className="wide">
+        <Panel title="Memoria" icon="memory" className="wide">
           <div className="mem-stats">
             <div><b>{kinds.semantic}</b><span>fatti</span></div>
             <div><b>{kinds.procedural}</b><span>preferenze</span></div>
@@ -315,7 +312,7 @@ export function Dashboard({ active }: { active: boolean }) {
           <button className="ghost small link" onClick={() => show("memory")}>Apri la memoria →</button>
         </Panel>
 
-        <Panel title="Automazioni" icon="automations" code="AUT">
+        <Panel title="Automazioni" icon="automations">
           <div className="hud-list">
             {snap && !nextRuns.length ? <p className="empty">Nessuna automazione attiva.</p> : null}
             {nextRuns.map((w) => (
@@ -328,7 +325,7 @@ export function Dashboard({ active }: { active: boolean }) {
           <button className="ghost small link" onClick={() => show("automations")}>Gestisci →</button>
         </Panel>
 
-        <Panel title="Dispositivi" icon="devices" code="DEV">
+        <Panel title="Dispositivi" icon="devices">
           <div className="mem-stats">
             <div><b>{devicesActive}</b><span>associati</span></div>
             <div><b>{nodesOnline}/{(snap?.nodes || []).length}</b><span>nodi in linea</span></div>

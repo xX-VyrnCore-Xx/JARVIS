@@ -19,14 +19,14 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "ai"))
 
 from jarvis_ai.contracts import validation_errors  # noqa: E402
-from jarvis_ai.gateway import Gateway, load_catalog  # noqa: E402
+from jarvis_ai.gateway import Gateway, load_catalog, select_tools  # noqa: E402
 
 FIXTURES = ROOT / "tests" / "contracts" / "fixtures" / "valid"
 
 
 def delegation(message: str, **inputs) -> dict:
     d = json.loads((FIXTURES / "delegation.research.json").read_text(encoding="utf-8"))
-    d["tools"] = [{"name": n, "version": "1.0.0"} for n in load_catalog()]
+    d["tools"] = [{"name": name, "version": desc["version"]} for name, desc in load_catalog().items()]
     d["inputs"] = {"messages": [{"role": "user", "content": message}], "memory": [], **inputs}
     assert validation_errors("delegation", d) == ([], [])
     return d
@@ -64,6 +64,12 @@ class FakeOllama(BaseHTTPRequestHandler):
         elif "tools" in body and FakeOllama.mode == "tool":
             self._json({"message": {"role": "assistant", "content": "", "tool_calls": [
                 {"function": {"name": "fs__read", "arguments": {"path": "note.txt"}}}]}})
+        elif FakeOllama.mode == "malformed_calls":
+            self._json({"message": {"role": "assistant", "tool_calls": [
+                {"function": {"name": "time__now", "arguments": "{"}},
+                {"function": {"name": "time__now", "arguments": []}},
+                {"function": {"name": "time__now", "arguments": "{}"}},
+            ]}})
         else:
             self._json({"message": {"role": "assistant", "content": "Risposta sintetica del modello."}, "prompt_eval_count": 321, "eval_count": 12})
 
@@ -113,6 +119,40 @@ class OllamaAdapter(unittest.TestCase):
         with mock.patch.dict(os.environ, {"JARVIS_TOOL_SELECTION": "all"}):
             self.gateway().respond(delegation("che ore sono?"))
         self.assertIn("fs__write", {t["function"]["name"] for t in FakeOllama.requests[-1]["tools"]})
+
+    def test_ignores_calls_for_tools_omitted_from_prompt(self):
+        result = self.gateway().respond(delegation("che ore sono"))
+        self.assertEqual(result["kind"], "reply")
+        self.assertIn("strumento disponibile", result["text"])
+
+    def test_malformed_calls_do_not_degrade_ollama(self):
+        FakeOllama.mode = "malformed_calls"
+        gateway = self.gateway()
+        result = gateway.respond(delegation("che ore sono"))
+        self.assertEqual(result["tool_call"]["tool"], "time.now")
+        self.assertEqual(result["tool_call"]["arguments"], {})
+        self.assertEqual(gateway.status()["backend"]["name"], "ollama")
+
+    def test_cited_operation_has_priority_in_large_catalog(self):
+        names = [f"connector.servizio.azione_{index}" for index in range(20)]
+        self.assertEqual(select_tools("connettore servizio azione_19", names)[0], names[-1])
+
+    def test_structured_connector_uses_delegation_without_ollama(self):
+        name = "connector.meteo.previsioni"
+        descriptor = {"name": name, "version": "2.0.0", "summary": "Meteo",
+                      "input_schema": {"type": "object"}}
+        d = delegation('connettore meteo previsioni {"citta":"San Donà","giorni":[1,3]}',
+                       tool_descriptors=[descriptor])
+        d["tools"].append({"name": name, "version": "2.0.0"})
+
+        gateway = self.gateway()
+        result = gateway.respond(d)
+        self.assertEqual(result["tool_call"]["arguments"], {"citta": "San Donà", "giorni": [1, 3]})
+        self.assertEqual(result["tool_call"]["version"], "2.0.0")
+        self.assertEqual(validation_errors("agent-result", result), ([], []))
+        d["tools"].pop()
+        self.assertIn("non disponibile", gateway.respond(d)["text"])
+        self.assertFalse(FakeOllama.requests)
 
     def test_tool_result_round_returns_reply_without_tools(self):
         result = self.gateway().respond(delegation("leggi le note", tool_result={"tool": "fs.read", "status": "succeeded", "output": {"content": "x"}}))
