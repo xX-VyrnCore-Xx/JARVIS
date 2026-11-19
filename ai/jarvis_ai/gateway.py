@@ -69,7 +69,20 @@ def system_prompt(inputs: dict, now: datetime | None = None, role: str | None = 
     if role:
         # Specializzazione scelta dal Core (ADR-0038): ambito e strumenti concessi per questa richiesta.
         text = text.replace("\n\nStile\n", f"\nSpecializzazione per questa richiesta — {role}\n\nStile\n", 1)
+    skills = [s for s in inputs.get("skills", []) if s.get("instructions")]
+    if skills:
+        # Competenze del proprietario attivate dalla richiesta (ADR-0048): procedure da seguire, non permessi.
+        block = "\n\n".join(f"Competenza «{s.get('name', s.get('id', ''))}»\n{s['instructions']}" for s in skills)
+        text = text.replace("\n\nSicurezza\n", f"\n\nCompetenze attive (procedure del proprietario da seguire)\n{block}\n\nSicurezza\n", 1)
     return text
+
+
+def skill_tools(inputs: dict) -> list[str]:
+    """Strumenti suggeriti dalle competenze attive, in ordine e senza ripetizioni."""
+    out: list[str] = []
+    for s in inputs.get("skills", []):
+        out += [t for t in s.get("tools", []) if t not in out]
+    return out
 
 
 MAX_STEPS = 4
@@ -827,6 +840,11 @@ class OllamaBackend:
             messages.append({"role": "user", "content": "Rispondi ora alla mia richiesta usando i risultati degli strumenti, senza chiamarne altri."})
         else:
             names = select_tools(_last_user_message(delegation), [n for n in catalog if n in allowed])
+            # Gli strumenti delle competenze attive vengono offerti per primi (ADR-0048).
+            preferred = [n for n in skill_tools(inputs) if n in catalog and n in allowed]
+            names = preferred + [n for n in names if n not in preferred]
+            if os.environ.get("JARVIS_TOOL_SELECTION") != "all":
+                names = names[:max(MAX_TOOLS, len(preferred))]
             used = [s["tool"] for s in history if s["tool"] in catalog and s["tool"] in allowed and s["tool"] not in names]
             names = names + used
             body["tools"] = [

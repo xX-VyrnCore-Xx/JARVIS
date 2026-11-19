@@ -1078,6 +1078,22 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** unitario `every_template_is_a_valid_manifest` (tutti validi contro il contratto, ID client obbligatorio per OAuth); `rfc822_builds_a_utf8_message_and_refuses_header_injection`; `mail_is_sent_as_rfc822_only_after_confirmation` in `tests/connectors.rs`; E2E: Gmail senza ID client disabilitato, Google Calendar e GitHub aggiunti dal catalogo (79/79).
 - **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ACCEPTANCE.md, ROADMAP.md, contratto `connector`.
 
+### ADR-0048 — Competenze (Skills): procedure riutilizzabili del proprietario
+
+- **Data:** 2026-11-19 · **Stato:** accettato · **Fonte:** richiesta del proprietario («aggiungi Skills e Competenze»).
+- **Contesto:** le preferenze in memoria guidano lo stile, ma non descrivono procedure in più passi (briefing, revisione di testi, ricerca con fonti, registro delle spese). Il modello locale va guidato con istruzioni brevi e mirate, non con un prompt sempre più lungo.
+- **Decisione:**
+  - una competenza ha nome, descrizione, parole di attivazione, istruzioni (al massimo 4000 caratteri), strumenti suggeriti del catalogo e stato attivo/disattivo; è salvata nella tabella `skills` (schema 6);
+  - cinque competenze incluse al primo avvio, modificabili e disattivabili ma non eliminabili: «Briefing del mattino», «Scrittura e revisione», «Ricerca con fonti», «Organizzazione», «Spese»;
+  - una competenza si attiva quando la richiesta contiene una parola di attivazione o la richiama per nome («usa Spese: …», «competenza Spese»); al massimo 2 per richiesta;
+  - il Core aggiunge le competenze attive agli input della delega (`inputs.skills`, aggiunta compatibile al contratto); il worker inserisce le istruzioni nel prompt di sistema, prima delle regole di sicurezza, e offre per primi i loro strumenti;
+  - gli strumenti suggeriti devono esistere nel catalogo; possono allargare l'ambito dello specialista scelto per la richiesta (es. `todo.list` durante una ricerca con il briefing), ma non i permessi: policy, conferme e audit restano quelli di ogni strumento; gli agenti temporanei non ricevono competenze;
+  - API solo del proprietario: `GET/POST /api/skills`, `PUT/DELETE /api/skills/{id}`; ogni modifica è registrata nell'audit (`skill.save`, `skill.delete`); nella chat il passo «competenza · <nome>» mostra quale procedura è stata applicata; nuova vista «Competenze» nella dashboard.
+- **Alternative scartate:** competenze come plugin con codice (escluse dalla decisione 81 sui plugin isolati); attivazione decisa dal modello (meno prevedibile e più costosa in token con modelli piccoli).
+- **Conseguenze:** il proprietario insegna a JARVIS nuove procedure senza modificare il codice. Le parole di attivazione sono confronti di testo semplici: parole troppo generiche attivano la competenza più spesso del voluto.
+- **Evidenza:** `tests/skills.rs` (incluse, validazione, attivazione per parola e per nome, disattivazione, eliminazione, audit); `active_skills_enter_the_prompt_and_widen_only_the_offered_tools` in `tests/agent_loop.rs`; test Python del prompt e dell'ordine degli strumenti; E2E: competenza creata dalla dashboard e attivata in chat (84/84).
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ACCEPTANCE.md, ROADMAP.md, contratto `delegation`.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

@@ -499,3 +499,11 @@ kbd { font-family: var(--mono); font-size: .7rem; padding: .05rem .4rem; border-
 .card.template details summary { cursor: pointer; color: var(--accent); font-size: .85rem; margin-top: .3rem; }
 .card.template input[name="client_id"] { flex: 1; min-width: 0; }
 .card.template .desc { margin: .4rem 0 0; color: var(--muted); font-size: .9rem; line-height: 1.45; }
+.card.skill .desc { margin: .3rem 0; color: var(--muted); font-size: .9rem; line-height: 1.45; }
+.card.skill.off { opacity: .62; }
+.skill-form { display: grid; gap: .7rem; margin-bottom: 1rem; flex-direction: column; align-items: stretch; }
+.skill-form label { display: grid; gap: .3rem; font-size: .85rem; color: var(--muted); }
+.skill-form label.check { display: flex; align-items: center; gap: .5rem; color: var(--text); }
+.skill-form textarea { resize: vertical; font: inherit; }
+.skill-form .row { display: flex; gap: .5rem; }
+.skill-form .error { color: var(--danger, #ff6b6b); margin: 0; }

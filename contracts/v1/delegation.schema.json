@@ -300,6 +300,42 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 4
+        },
+        "skills": {
+          "description": "Competenze del proprietario attive per questa richiesta (ADR-0048): istruzioni da seguire e strumenti suggeriti. Non ampliano i permessi.",
+          "type": "array",
+          "maxItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "name",
+              "instructions"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "maxLength": 64
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 80
+              },
+              "instructions": {
+                "type": "string",
+                "maxLength": 4000
+              },
+              "tools": {
+                "type": "array",
+                "maxItems": 12,
+                "items": {
+                  "type": "string",
+                  "maxLength": 80
+                }
+              }
+            }
+          }
         }
       }
     },

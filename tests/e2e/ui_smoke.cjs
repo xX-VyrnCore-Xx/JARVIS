@@ -193,6 +193,30 @@ function check(cond, msg) {
   check((await page.locator("#memory-graph").innerHTML()).includes("Anna"), "grafo delle conoscenze con le relazioni");
   if (shots) await page.screenshot({ path: `${shots}/jarvis-memoria.png`, fullPage: true });
 
+  // Competenze (ADR-0048): incluse visibili, nuova competenza creata e attivata da una parola chiave in chat.
+  await page.click('[data-view="skills"]');
+  await page.waitForSelector('#skills [data-skill="briefing"]');
+  check((await page.locator("#skills .card").count()) >= 5, "competenze incluse elencate");
+  await page.click("#skill-new");
+  await page.fill('#skill-form input[name="name"]', "Viaggi E2E");
+  await page.fill('#skill-form input[name="triggers"]', "itinerario");
+  await page.fill('#skill-form textarea[name="instructions"]', "Proponi un itinerario giorno per giorno.");
+  await page.fill('#skill-form input[name="tools"]', "weather.forecast");
+  await page.click('#skill-form button[type="submit"]');
+  await page.waitForFunction(() => [...document.querySelectorAll("#skills .card .title")].some((t) => t.textContent === "Viaggi E2E"));
+  check(true, "competenza creata dalla dashboard");
+  await page.click('[data-view="chat"]');
+  await send("prepara un itinerario per Lisbona");
+  await page.waitForFunction(() => [...document.querySelectorAll(".step")].some((s) => s.textContent.includes("competenza · Viaggi E2E")));
+  check(true, "competenza attivata dalla parola chiave e mostrata nei passi");
+  await page.click('[data-view="skills"]');
+  const custom = page.locator("#skills .card", { hasText: "Viaggi E2E" });
+  await custom.locator('[data-action="toggle"]').click();
+  await page.waitForFunction(() => [...document.querySelectorAll("#skills .card.off .title")].some((t) => t.textContent === "Viaggi E2E"));
+  check(true, "competenza disattivata");
+  check((await page.locator('#skills [data-skill="briefing"] [data-action="delete"]').count()) === 0, "le competenze incluse non si eliminano");
+  if (shots) await page.screenshot({ path: `${shots}/jarvis-competenze.png`, fullPage: true });
+
   await page.click('[data-view="tasks"]');
   await page.waitForSelector("#tasks .card");
   check((await page.locator("#tasks .badge").first().innerText()) === "succeeded", "attività con stato verificato");

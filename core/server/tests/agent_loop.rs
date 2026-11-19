@@ -296,3 +296,34 @@ async fn invalid_arguments_are_explained_and_the_model_can_retry() {
         "{text}"
     );
 }
+
+#[tokio::test]
+async fn active_skills_enter_the_prompt_and_widen_only_the_offered_tools() {
+    // «buongiorno» attiva la competenza inclusa «Briefing del mattino» anche per una richiesta di ricerca:
+    // le sue istruzioni entrano nel prompt e i suoi strumenti vengono offerti per primi (ADR-0048).
+    let (url, seen) = fake_ollama(vec![], false);
+    let out = chat(url, 18780, "buongiorno, cerca sul web le notizie di oggi").await;
+    let first = seen.lock().unwrap()[0].clone();
+    let system = first["messages"][0]["content"].as_str().unwrap();
+    assert!(
+        system.contains("Competenza «Briefing del mattino»") && system.contains("cinque punti"),
+        "{system}"
+    );
+    let offered: Vec<String> = first["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["function"]["name"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        offered[..3],
+        ["time__now", "weather__forecast", "todo__list"],
+        "{offered:?}"
+    );
+    assert!(!offered.iter().any(|t| t == "shell__run"), "{offered:?}");
+    assert!(out["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["kind"] == "skill" && s["skill"] == "briefing"));
+}

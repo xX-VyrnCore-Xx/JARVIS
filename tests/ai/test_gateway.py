@@ -172,6 +172,21 @@ class OllamaAdapter(unittest.TestCase):
         system = FakeOllama.requests[-1]["messages"][0]["content"]
         self.assertIn("Specializzazione per questa richiesta — Ricerca: cita sempre gli URL.", system)
 
+    def test_active_skills_enter_the_prompt_and_their_tools_come_first(self):
+        from jarvis_ai.gateway import skill_tools, system_prompt
+        skills = [{"id": "spese", "name": "Spese", "instructions": "Registra ogni spesa come nota.", "tools": ["notes.add", "math.calc"]},
+                  {"id": "x", "name": "X", "instructions": "Altro.", "tools": ["math.calc", "time.now"]}]
+        text = system_prompt({"memory": [], "skills": skills})
+        self.assertIn("Competenze attive", text)
+        self.assertIn("Competenza «Spese»\nRegistra ogni spesa come nota.", text)
+        self.assertLess(text.index("Competenze attive"), text.index("Sicurezza"))
+        self.assertEqual(skill_tools({"skills": skills}), ["notes.add", "math.calc", "time.now"])
+        d = delegation("ho speso 12 euro")
+        d["inputs"]["skills"] = skills[:1]
+        self.gateway().respond(d)
+        offered = [t["function"]["name"] for t in FakeOllama.requests[-1]["tools"]]
+        self.assertEqual(offered[:2], ["notes__add", "math__calc"])
+
     def test_arguments_are_coerced_to_the_schema(self):
         from jarvis_ai.gateway import coerce_arguments
         schema = {"type": "object", "additionalProperties": False, "properties": {

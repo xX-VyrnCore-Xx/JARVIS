@@ -498,8 +498,17 @@ impl Jarvis {
         if let Some((_, tools)) = self.temporary.get(&task.id()) {
             return tools.iter().any(|t| t == tool);
         }
-        crate::agents::route(task.doc["objective"].as_str().unwrap_or_default())
-            .is_none_or(|a| crate::agents::allows(a, tool))
+        let objective = task.doc["objective"].as_str().unwrap_or_default();
+        // Una competenza attiva rende disponibili i suoi strumenti anche fuori dall'ambito dello specialista
+        // (ADR-0048); policy, conferme e audit restano quelli di ogni strumento.
+        crate::agents::route(objective).is_none_or(|a| crate::agents::allows(a, tool))
+            || crate::skills::active(&self.store, objective)
+                .iter()
+                .any(|s| {
+                    s["tools"]
+                        .as_array()
+                        .is_some_and(|ts| ts.iter().any(|t| t == tool))
+                })
     }
 
     /// Aggiunge agli input i descrittori dei connettori autorizzati, che il catalogo statico dell'agente non conosce.
@@ -610,7 +619,15 @@ impl Jarvis {
             .unwrap_or_default()
             .to_string();
         let memory = budget_memory(self.memory_context(&query)?, MEMORY_CHARS);
-        Ok(json!({"messages": messages, "memory": memory}))
+        // Competenze attivate dalla richiesta (ADR-0048).
+        let skills: Vec<Value> = crate::skills::active(&self.store, &query)
+            .into_iter()
+            .map(|s| json!({"id": s["id"], "name": s["name"], "instructions": s["instructions"], "tools": s["tools"]}))
+            .collect();
+        if skills.is_empty() {
+            return Ok(json!({"messages": messages, "memory": memory}));
+        }
+        Ok(json!({"messages": messages, "memory": memory, "skills": skills}))
     }
 
     fn save(&self, task: &Task) -> Result<(), CoreError> {
@@ -721,6 +738,10 @@ impl Jarvis {
             .map_or(crate::agents::GENERAL, |a| a.name);
         out.steps
             .push(json!({"kind": "delegation", "agent": agent, "backend": result["backend"]}));
+        for s in inputs["skills"].as_array().into_iter().flatten() {
+            out.steps
+                .push(json!({"kind": "skill", "skill": s["id"], "name": s["name"]}));
+        }
         self.drive(task, inputs, result, out, Vec::new())
     }
 
@@ -3405,6 +3426,52 @@ impl Jarvis {
             .find(|(m, _, _)| m["id"] == id)
             .map(|(m, _, a)| (m, a))
             .ok_or_else(|| CoreError::NotFound(format!("nessun connettore {id}")))
+    }
+
+    /// Competenze del proprietario (ADR-0048).
+    pub fn skills(&self) -> Result<Value, CoreError> {
+        Ok(
+            json!({"items": crate::skills::list(&self.store).map_err(internal)?, "max_active": crate::skills::MAX_ACTIVE}),
+        )
+    }
+
+    /// Crea (`id` assente) o aggiorna una competenza; gli strumenti devono esistere nel catalogo.
+    pub fn skill_save(&mut self, id: Option<&str>, input: &Value) -> Result<Value, CoreError> {
+        if let Some(id) = id {
+            let exists = crate::skills::list(&self.store)
+                .map_err(internal)?
+                .iter()
+                .any(|s| s["id"] == id);
+            if !exists {
+                return Err(CoreError::NotFound("competenza inesistente".into()));
+            }
+        }
+        let skill = crate::skills::validate(input, |t| self.catalog.get(t).is_some())
+            .map_err(CoreError::BadRequest)?;
+        let id = crate::skills::save(&self.store, id, &skill).map_err(internal)?;
+        self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "owner", "id": "owner"},
+                          "node": "core-local", "action": "skill.save", "resource": format!("jarvis://skill/{id}"),
+                          "outcome": "succeeded", "effect": "applied"}))?;
+        Ok(merge(&skill, json!({"id": id})))
+    }
+
+    pub fn skill_delete(&mut self, id: &str) -> Result<Value, CoreError> {
+        let builtin = crate::skills::list(&self.store)
+            .map_err(internal)?
+            .iter()
+            .any(|s| s["id"] == id && s["builtin"] == true);
+        if builtin {
+            return Err(CoreError::BadRequest(
+                "le competenze incluse non si eliminano: disattivala".into(),
+            ));
+        }
+        if !crate::skills::delete(&self.store, id).map_err(internal)? {
+            return Err(CoreError::NotFound("competenza inesistente".into()));
+        }
+        self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "owner", "id": "owner"},
+                          "node": "core-local", "action": "skill.delete", "resource": format!("jarvis://skill/{id}"),
+                          "outcome": "succeeded", "effect": "applied"}))?;
+        Ok(json!({"deleted": id}))
     }
 
     fn connector_audit(&mut self, action: &str, id: &str, outcome: &str) -> Result<(), CoreError> {

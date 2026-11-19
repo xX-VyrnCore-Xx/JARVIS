@@ -423,6 +423,11 @@ pub fn router(state: Shared) -> Router {
             get(|| async { ([(header::CONTENT_TYPE, "image/svg+xml")], ICON) }),
         )
         .route("/api/connectors", get(connectors).post(install_connector))
+        .route("/api/skills", get(skills_list).post(skill_create))
+        .route(
+            "/api/skills/{id}",
+            axum::routing::put(skill_update).delete(skill_delete),
+        )
         .route("/api/connectors/templates", get(connector_templates))
         .route("/api/connectors/templates/{id}", post(install_template))
         .route("/api/connectors/{id}", delete(uninstall_connector))
@@ -909,6 +914,26 @@ async fn passkey_delete(
 }
 
 /// Catalogo dei connettori pronti (ADR-0047).
+async fn skills_list(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.skills()).await)
+}
+
+async fn skill_create(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply(with_core(&state, move |j| j.skill_save(None, &body)).await)
+}
+
+async fn skill_update(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    reply(with_core(&state, move |j| j.skill_save(Some(&id), &body)).await)
+}
+
+async fn skill_delete(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    reply(with_core(&state, move |j| j.skill_delete(&id)).await)
+}
+
 async fn connector_templates() -> Json<Value> {
     Json(crate::connector_catalog::index())
 }

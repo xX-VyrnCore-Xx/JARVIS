@@ -14,7 +14,7 @@ pub struct Store {
 pub type StoreResult<T> = Result<T, rusqlite::Error>;
 
 /// Versione dello schema (ADR-0037): 1 = schema fino a 1.3.x con migrazioni additive; 3 = tracce dei task (ADR-0039); 4 = passkey (ADR-0042); 5 = note e cose da fare (ADR-0046).
-pub const SCHEMA_VERSION: i64 = 5;
+pub const SCHEMA_VERSION: i64 = 6;
 
 impl Store {
     pub fn open(path: &Path) -> StoreResult<Self> {
@@ -72,6 +72,7 @@ impl Store {
             embedder: None,
         };
         store.memory_migrate()?;
+        crate::skills::migrate(&store)?;
         store
             .conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)?;

@@ -26,6 +26,7 @@ pub mod policy;
 pub mod rollback;
 pub mod secrets;
 pub mod setup;
+pub mod skills;
 
 /// Su Windows i processi figli (worker Python, pip) non devono aprire una finestra di console quando il
 /// Core è avviato dall'app desktop. Altrove non fa nulla.

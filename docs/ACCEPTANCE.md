@@ -8,7 +8,7 @@ Questo documento raccoglie ciò che serve per l'accettazione finale descritta in
 |---|---|---|---|---|
 | RF-01 Conversazione | `core/server/tests/api.rs`, E2E | P1, P2 | Verde | Qualità con modelli reali da valutare |
 | RF-02 Orchestrazione | `api.rs`, `agent_loop.rs`, contratti task | — | Verde | Ciclo fino a 4 strumenti per richiesta (ADR-0037) |
-| RF-03 Agenti | contratti delega, `agents.rs`, `agent_loop.rs`, `subagents.rs`, `tests/ai` | — | Verde | 5 specializzazioni con ambito di strumenti (ADR-0038); agenti temporanei di sola lettura, un livello (ADR-0040) |
+| RF-03 Agenti | contratti delega, `agents.rs`, `agent_loop.rs`, `subagents.rs`, `skills.rs`, `tests/ai` | P17 | Verde | 5 specializzazioni con ambito di strumenti (ADR-0038); agenti temporanei di sola lettura, un livello (ADR-0040); competenze del proprietario (ADR-0048) |
 | RF-04 AI Gateway | `tests/ai/test_gateway.py`, guasti in `resilience.rs` | P2 | Verde | Solo backend locali |
 | RF-05 Computer Use | strumenti file, sistema, processi e terminale; `api.rs`, `terminal.rs` | P3, P14 | Verde | Terminale con conferma a ogni comando (ADR-0038); niente controllo di desktop e mouse |
 | RF-06 Web | `web.rs` (SSRF, iniezioni), `browser.rs` (`tests/browser.rs`), E2E | P4, P15 | Verde | Navigazione con il browser del sistema (ADR-0043); niente sessioni con le credenziali del proprietario |
@@ -66,12 +66,13 @@ Da eseguire sul proprio computer con una release o con i sorgenti. Annotare esit
 | P14 | Processi e terminale | «quali processi usano più memoria?», poi «terminale: ls» e approva; prova «terminale: sudo ls» | Elenco dei processi senza conferma; il comando chiede conferma e mostra l'output; `sudo` viene negato |
 | P15 | Navigazione Web | Con Chrome o Edge installato: «naviga https://it.wikipedia.org e clicca Storia», poi «compila modulo <pagina con un modulo di prova>: campo=valore» e approva | Testo della pagina seguita con fonte; il modulo chiede conferma, mostra i campi e viene inviato solo dopo l'approvazione |
 | P16 | Gmail e Calendar | Crea un ID client OAuth «App desktop» in Google Cloud (Gmail API e Calendar API abilitate), poi in Connettori → Catalogo aggiungi Gmail e Google Calendar e premi «Accedi»; in chat: «connettore gmail cerca q=is:unread», «connettore google_calendar eventi timeMin=<oggi>» | Elenco reale delle email e degli eventi; invio di una bozza o di un evento solo dopo la conferma |
+| P17 | Competenze | In Competenze crea «Viaggi» con attivazione «itinerario», istruzioni «proponi un itinerario giorno per giorno» e strumento `weather.forecast`; in chat: «prepara un itinerario per Lisbona» | Passo «competenza · Viaggi», risposta che segue le istruzioni con il modello locale; disattivata, non si attiva più |
 
 ## Criteri di rilascio
 
 Una release `v1.0.0` si pubblica quando:
 1. tutti i job delle due CI sono verdi sul commit da rilasciare;
-2. le prove P1–P16, incluse P8a e P8b per i client nativi, sono superate o i difetti aperti sono registrati come non bloccanti;
+2. le prove P1–P17, incluse P8a e P8b per i client nativi, sono superate o i difetti aperti sono registrati come non bloccanti;
 3. il proprietario accetta esplicitamente.
 
 Restano decisioni del proprietario, perché richiedono suoi account, certificati o scelte:
