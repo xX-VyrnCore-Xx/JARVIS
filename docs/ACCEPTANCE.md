@@ -16,7 +16,7 @@ Questo documento raccoglie ciò che serve per l'accettazione finale descritta in
 | RF-08 Memoria | `api.rs`, `memory.rs`, E2E | P1 | Verde | Sinonimi con gli embedding di Ollama (ADR-0028); nessun PostgreSQL |
 | RF-09 Voce | `voice.rs`, `tests/ai/test_voice.py`, E2E con motori finti | P6 | Verde (finti) | Motori reali solo sul tuo computer |
 | RF-10 Client | E2E Web e telefono simulato, CI desktop su 3 sistemi | P7, P8 | Verde | iOS e Android nativi compilati in CI; prove su dispositivo (P8a, P8b) e sincronizzazione fonetica in sospeso |
-| RF-11 Dispositivi e nodi | `devices.rs`, `nodes.rs`, E2E | P8, P13 | Verde | Scelta automatica disponibile (ADR-0031). mTLS e VPN mesh in sospeso |
+| RF-11 Dispositivi e nodi | `devices.rs`, `nodes.rs`, `node_tls.rs`, E2E | P8, P13 | Verde | Scelta automatica (ADR-0031); mTLS con certificati fissati (ADR-0041); VPN mesh affidata a Tailscale |
 | RF-12 Dati | backup, rollback | P9 | Verde | Nessuna sincronizzazione fra nodi |
 | RF-13 Notifiche | `notifications.rs`, `channels.rs`, E2E | P5 | Verde | Canali esterni ntfy e Telegram (ADR-0026) |
 | RF-14 Connettori | `connectors.rs`, `oauth.rs`, E2E | P10 | Verde | OAuth 2.0 con PKCE (ADR-0027); niente plugin con codice |
@@ -24,7 +24,7 @@ Questo documento raccoglie ciò che serve per l'accettazione finale descritta in
 | RNF-01 Contratti | `tests/contracts`, `jarvis-contracts` | — | Verde | — |
 | RNF-02 Guasti | `resilience.rs` (blocco, crash, output non valido) | — | Verde | Perdita di rete fra nodi non provata |
 | RNF-03 Risorse | `tests/perf` (p95 in CI) | P11 | Verde | Misure con modelli reali da fare |
-| RNF-04 Sicurezza | token, host, CSP, policy, conferme, audit, revoca | P8, P12 | Verde | Passkey e mTLS assenti; portachiavi su macOS, Windows e Linux con sessione grafica |
+| RNF-04 Sicurezza | token, host, CSP, policy, conferme, audit, revoca | P8, P12 | Verde | Passkey assenti; mTLS dei nodi con `JARVIS_NODE_TLS_ADDR` (ADR-0041); portachiavi su macOS, Windows e Linux con sessione grafica |
 | RNF-05 Local-first | nessun backend cloud | — | Verde | — |
 | RNF-06 Offline | backend offline in tutta la CI | P2 | Verde | — |
 | RNF-07 Osservabilità | metriche, log, esportazione, tracce dei task (`api.rs`) | — | Verde | Tracce W3C locali per task (ADR-0039); nessun esportatore OTLP |

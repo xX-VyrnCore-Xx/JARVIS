@@ -1,6 +1,6 @@
 [package]
 name = "jarvis-core"
-version = "1.7.0"
+version = "1.8.0"
 description = "Core JARVIS: API locale, orchestrazione, policy, strumenti, memoria e audit (prototipo v0.1)"
 edition.workspace = true
 rust-version.workspace = true
@@ -29,6 +29,10 @@ futures-util = { version = "0.3", default-features = false }
 ed25519-dalek = "2"
 hmac = "0.12"
 ureq = "2"
+# mTLS fra Core e nodi (ADR-0041): stessa versione di rustls usata da ureq, provider ring.
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring", "pem"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "logging", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "logging", "tls12"] }
 url = "2"
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "sync", "time"] }

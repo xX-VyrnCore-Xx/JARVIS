@@ -72,6 +72,11 @@
           "fs.write"
         ]
       }
+    },
+    "cert_sha256": {
+      "description": "Impronta SHA-256 del certificato TLS del nodo (ADR-0041): con l'mTLS attivo il nodo deve presentarlo. Aggiunta compatibile (facoltativa) della v1.",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
     }
   }
 }

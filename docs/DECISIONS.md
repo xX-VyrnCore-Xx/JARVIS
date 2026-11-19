@@ -974,6 +974,21 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `tests/subagents.rs` (figlio con ruolo, stessa correlazione e traccia; nessuna scrittura né conferma); `temporary_agents_only_get_tools_without_confirmation` in `tests/agent_loop.rs`; E2E 75/75.
 - **Documenti interessati:** ACCEPTANCE.md, AI_SYSTEM.md, AUTONOMY_AND_TOOLS.md, ROADMAP.md.
 
+### ADR-0041 — mTLS fra Core e nodi con certificati fissati per impronta
+
+- **Data:** 2026-11-19 · **Stato:** accettato · **Fonte:** scelta del proprietario («mTLS Core–nodi»); lacuna RF-11 e RNF-04 «mTLS assente» in ACCEPTANCE.md.
+- **Contesto:** i nodi si autenticavano solo con il token del dispositivo, sopra l'HTTPS fornito da Tailscale. Un token copiato bastava per prendere il posto del nodo.
+- **Opzioni:** autorità di certificazione locale con richieste di firma; certificati autofirmati fissati per impronta. Scelta la seconda: nessuna CA da custodire, revoca immediata dal registro dei dispositivi, nessun problema di nomi host.
+- **Decisione:**
+  - modulo `tls.rs` (rustls con provider ring, rcgen): Core e nodo generano ciascuno chiave ECDSA P-256 e certificato autofirmato; l'identità del Core sta in `<dati>/tls` (chiave 0600);
+  - all'associazione il nodo invia solo il certificato (`cert_pem`); il Core ne registra l'impronta SHA-256 nel dispositivo (`cert_sha256`, aggiunta compatibile al contratto) e risponde con porta TLS e impronta del proprio certificato;
+  - la porta TLS dei nodi è attiva solo con `JARVIS_NODE_TLS_ADDR` (es. `0.0.0.0:8766`) ed espone solo `/api/nodes/next` e `/api/nodes/result/{id}`; il certificato client è obbligatorio e ammesso solo se registrato; il nodo accetta solo il Core con l'impronta fissata, qualunque sia il nome host;
+  - un nodo legato a un certificato deve presentare token **e** certificato: il token da solo viene rifiutato anche in chiaro; dopo la revoca il nodo completa l'handshake, riceve 401 e si ferma;
+  - senza `JARVIS_NODE_TLS_ADDR` e per i nodi associati prima, il comportamento resta quello dell'ADR-0017.
+- **Conseguenze:** furto del token inutile senza la chiave privata del nodo; nessuna dipendenza da Tailscale per la cifratura. La porta va resa raggiungibile dai nodi (rete privata o firewall). Versione 1.8.0.
+- **Evidenza:** `tests/node_tls.rs` (associazione con certificato, chiave privata mai inviata, esecuzione via TLS, token senza certificato rifiutato, certificato estraneo rifiutato all'handshake, Core con impronta diversa rifiutato dal nodo, revoca che ferma il nodo); unitari di `tls.rs`.
+- **Documenti interessati:** ACCEPTANCE.md, SECURITY_AND_PRIVACY.md, INTERFACE_AND_DEVICES.md, ROADMAP.md, contratto `device`.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

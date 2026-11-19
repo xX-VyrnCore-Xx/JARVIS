@@ -870,9 +870,10 @@ async fn pair_device(State(state): State<Shared>, Json(body): Json<Value>) -> Re
         .flatten()
         .filter_map(|c| c.as_str().map(str::to_string))
         .collect();
+    let cert = body["cert_pem"].as_str().map(str::to_string);
     reply(
         with_core(&state, move |j| {
-            j.pair_device(&code, &name, &platform, &capabilities)
+            j.pair_device(&code, &name, &platform, &capabilities, cert.as_deref())
         })
         .await,
     )
@@ -910,20 +911,55 @@ async fn list_nodes(State(state): State<Shared>, headers: axum::http::HeaderMap)
     reply(with_core(&state, |j| j.nodes().map(|items| json!({"items": items}))).await)
 }
 
-fn node_id(state: &Shared, headers: &axum::http::HeaderMap) -> Option<String> {
+fn node_id(
+    state: &Shared,
+    headers: &axum::http::HeaderMap,
+    peer: Option<&crate::tls::PeerCert>,
+) -> Option<String> {
     let token = headers
         .get("x-jarvis-device")
         .and_then(|t| t.to_str().ok())?;
-    state.nodes.authenticate(token)
+    state
+        .nodes
+        .authenticate_peer(token, peer.and_then(|p| p.0.as_deref()))
+}
+
+/// Router della porta TLS dei nodi (ADR-0041): solo le rotte dell'hub, autenticate da certificato e token.
+pub fn node_tls_router(state: Shared) -> Router {
+    Router::new()
+        .route("/api/nodes/next", get(node_next))
+        .route("/api/nodes/result/{id}", post(node_result))
+        .with_state(state)
+}
+
+/// Serve la porta TLS dei nodi finché il processo è attivo.
+pub async fn serve_node_tls(
+    state: Shared,
+    listener: tokio::net::TcpListener,
+    identity: crate::tls::Identity,
+) -> Result<(), String> {
+    let hub = state.nodes.clone();
+    let config = crate::tls::server_config(&identity, Arc::new(move |fp| hub.cert_allowed(fp)))?;
+    let tls = crate::tls::TlsListener {
+        tcp: listener,
+        acceptor: tokio_rustls::TlsAcceptor::from(Arc::new(config)),
+    };
+    axum::serve(
+        tls,
+        node_tls_router(state).into_make_service_with_connect_info::<crate::tls::PeerCert>(),
+    )
+    .await
+    .map_err(|e| e.to_string())
 }
 
 /// Attesa lunga del nodo (al massimo 25 s): 200 con l'assegnazione oppure 204.
 async fn node_next(
     State(state): State<Shared>,
+    peer: Option<axum::Extension<axum::extract::ConnectInfo<crate::tls::PeerCert>>>,
     headers: axum::http::HeaderMap,
     Query(q): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    let Some(id) = node_id(&state, &headers) else {
+    let Some(id) = node_id(&state, &headers, peer.as_ref().map(|p| &p.0 .0)) else {
         return error(
             StatusCode::UNAUTHORIZED,
             "unauthorized",
@@ -965,11 +1001,12 @@ async fn node_next(
 
 async fn node_result(
     State(state): State<Shared>,
+    peer: Option<axum::Extension<axum::extract::ConnectInfo<crate::tls::PeerCert>>>,
     Path(assignment): Path<String>,
     headers: axum::http::HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    let Some(id) = node_id(&state, &headers) else {
+    let Some(id) = node_id(&state, &headers, peer.as_ref().map(|p| &p.0 .0)) else {
         return error(
             StatusCode::UNAUTHORIZED,
             "unauthorized",

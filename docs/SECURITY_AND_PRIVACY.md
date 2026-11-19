@@ -57,3 +57,6 @@ Da completare:
 
 
 **Terminale (ADR-0038).** Ogni comando di `shell.run` richiede la conferma del proprietario con il testo esatto del comando; nessuna variabile `JARVIS_*` passa al processo; comandi con `sudo` o distruttivi noti sono negati dalla policy; il terminale non è ammesso in automazioni e nodi e si disattiva con `JARVIS_SHELL=off`.
+
+
+**mTLS dei nodi (ADR-0041).** Con `JARVIS_NODE_TLS_ADDR` il Core apre una porta TLS solo per i nodi: certificato client obbligatorio e registrato all'associazione, Core fissato per impronta dal nodo, token e certificato richiesti insieme. La chiave privata del nodo non lascia mai il nodo; la revoca vale subito.

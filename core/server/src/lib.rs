@@ -37,6 +37,7 @@ pub fn hide_console(cmd: &mut std::process::Command) {
     let _ = cmd;
 }
 pub mod store;
+pub mod tls;
 pub mod tools;
 pub mod updates;
 pub mod web;

@@ -92,3 +92,6 @@ La CI compila l'app per simulatore ed esegue i test Swift del protocollo. Le pro
 - **Mani libere** (opzionale): mostra «● Microfono attivo» per tutto il tempo in cui il microfono è aperto. Si attiva con «Ehi Jarvis» e si interrompe parlando sopra la risposta.
 
 Le conferme restano un clic.
+
+
+**Nodi con mTLS (ADR-0041).** Avvia il Core con `JARVIS_NODE_TLS_ADDR=0.0.0.0:8766` (o l'indirizzo della rete privata), poi associa il nodo come sempre: riceve la porta e l'impronta del Core e da lì usa solo la connessione TLS reciproca. `JARVIS_NODE_TLS_URL` sul nodo sostituisce l'indirizzo se il Core è raggiungibile con un altro nome.

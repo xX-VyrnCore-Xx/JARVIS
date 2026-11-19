@@ -132,9 +132,11 @@ fn ensure_paired(cfg: &AgentConfig) -> Result<Value, AgentError> {
     } else {
         cfg.capabilities.iter().map(String::as_str).collect()
     };
+    // Identità TLS del nodo (ADR-0041): la chiave privata resta qui; al Core va solo il certificato.
+    let identity = crate::tls::Identity::generate("jarvis-node").map_err(AgentError::Io)?;
     let res = post_json(
         agent().post(&format!("{}/api/devices/pair", cfg.core_url)),
-        &json!({"code": code, "name": cfg.name, "platform": "desktop", "capabilities": caps}),
+        &json!({"code": code, "name": cfg.name, "platform": "desktop", "capabilities": caps, "cert_pem": identity.cert_pem}),
     );
     let body: Value = match res {
         Ok(r) => read_json(r),
@@ -157,12 +159,63 @@ fn ensure_paired(cfg: &AgentConfig) -> Result<Value, AgentError> {
             "il codice non è per un nodo esecutore".into(),
         ));
     }
-    let state = json!({
+    let mut state = json!({
         "core_url": cfg.core_url, "token": body["token"], "device_id": body["device"]["device_id"],
         "slug": body["device"]["slug"], "capabilities": body["device"]["capabilities"],
     });
+    if let (Some(port), Some(fp)) = (
+        body["mtls"]["port"].as_u64(),
+        body["mtls"]["core_cert_sha256"].as_str(),
+    ) {
+        state["mtls"] = json!({
+            "url": tls_url(&cfg.core_url, port as u16), "core_cert_sha256": fp,
+            "cert_pem": identity.cert_pem, "key_pem": identity.key_pem,
+        });
+    }
     save_state(&cfg.dir, &state)?;
     Ok(state)
+}
+
+/// Indirizzo della porta TLS dei nodi: stesso host del Core, porta dichiarata all'associazione;
+/// `JARVIS_NODE_TLS_URL` lo sostituisce (es. un nome della rete privata diverso).
+fn tls_url(core_url: &str, port: u16) -> String {
+    if let Ok(u) = std::env::var("JARVIS_NODE_TLS_URL") {
+        return u.trim_end_matches('/').to_string();
+    }
+    let host = url::Url::parse(core_url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_string))
+        .unwrap_or_else(|| "127.0.0.1".into());
+    let host = if host.contains(':') {
+        format!("[{host}]")
+    } else {
+        host
+    };
+    format!("https://{host}:{port}")
+}
+
+/// Client HTTP e indirizzo base: con l'mTLS la porta TLS del Core con certificato del nodo e Core fissato.
+fn transport(cfg: &AgentConfig, state: &Value) -> Result<(ureq::Agent, String), AgentError> {
+    let mtls = &state["mtls"];
+    if mtls.is_null() {
+        return Ok((agent(), cfg.core_url.clone()));
+    }
+    let identity = crate::tls::Identity {
+        cert_pem: mtls["cert_pem"].as_str().unwrap_or_default().to_string(),
+        key_pem: mtls["key_pem"].as_str().unwrap_or_default().to_string(),
+    };
+    let config = crate::tls::client_config(
+        &identity,
+        mtls["core_cert_sha256"].as_str().unwrap_or_default(),
+    )
+    .map_err(AgentError::Io)?;
+    let http = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(10))
+        .timeout_read(Duration::from_secs(35))
+        .user_agent(concat!("JARVIS-node/", env!("CARGO_PKG_VERSION")))
+        .tls_config(Arc::new(config))
+        .build();
+    Ok((http, mtls["url"].as_str().unwrap_or_default().to_string()))
 }
 
 /// Ciclo del nodo: termina quando `stop` diventa vero (Ok) o quando il nodo viene revocato.
@@ -183,19 +236,24 @@ pub fn run(cfg: &AgentConfig, stop: Arc<AtomicBool>) -> Result<(), AgentError> {
         enabled: false,
         ..crate::web::WebConfig::default()
     };
-    let http = agent();
+    let (http, base) = transport(cfg, &state)?;
     let mut backoff = Duration::from_millis(500);
     println!(
-        "Nodo «{}» associato a {} (strumenti: {})",
+        "Nodo «{}» associato a {} (strumenti: {}{})",
         state["slug"].as_str().unwrap_or("?"),
-        cfg.core_url,
-        allowed.join(", ")
+        base,
+        allowed.join(", "),
+        if state["mtls"].is_null() {
+            ""
+        } else {
+            "; mTLS con il Core fissato"
+        }
     );
     while !stop.load(Ordering::Relaxed) {
         let res = http
             .get(&format!(
                 "{}/api/nodes/next?wait={}{}",
-                cfg.core_url,
+                base,
                 cfg.poll_wait_s.min(25),
                 resources_query()
             ))
@@ -233,7 +291,7 @@ pub fn run(cfg: &AgentConfig, stop: Arc<AtomicBool>) -> Result<(), AgentError> {
         };
         send_result(
             &http,
-            &format!("{}/api/nodes/result/{id}", cfg.core_url),
+            &format!("{}/api/nodes/result/{id}", base),
             &token,
             &reply,
             &stop,
