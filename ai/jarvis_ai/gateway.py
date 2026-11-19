@@ -57,13 +57,17 @@ Memoria autorizzata del proprietario (le preferenze sono istruzioni da seguire):
 {memory}"""
 
 
-def system_prompt(inputs: dict, now: datetime | None = None) -> str:
+def system_prompt(inputs: dict, now: datetime | None = None, role: str | None = None) -> str:
     """Prompt di sistema (ADR-0037): identità, data e ora locali, regole d'uso degli strumenti e memoria."""
     moment = (now or datetime.now().astimezone())
     days = ("lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica")
     when = f"{days[moment.weekday()]} {moment.strftime('%d/%m/%Y %H:%M')} ({moment.tzname() or 'ora locale'})"
     memory = "\n".join(f"- {m}" for m in inputs.get("memory", [])) or "(vuota)"
-    return SYSTEM_PROMPT.format(now=when, memory=memory, max_steps=MAX_STEPS)
+    text = SYSTEM_PROMPT.format(now=when, memory=memory, max_steps=MAX_STEPS)
+    if role:
+        # Specializzazione scelta dal Core (ADR-0038): ambito e strumenti concessi per questa richiesta.
+        text = text.replace("\n\nStile\n", f"\nSpecializzazione per questa richiesta — {role}\n\nStile\n", 1)
+    return text
 
 
 MAX_STEPS = 4
@@ -110,6 +114,20 @@ def _describe_tool_result(result: dict) -> str:
         return f"{tool} non è riuscito: {_reason(output)}."
     if tool == "time.now":
         return f"Sono le {output.get('local', '?')} (UTC {output.get('utc', '?')})."
+    if tool == "process.list":
+        procs = output.get("processes", [])
+        if not procs:
+            return "Nessun processo rilevato."
+        def line(p: dict) -> str:
+            cpu = f"CPU {p['cpu_percent']}% · " if "cpu_percent" in p else ""
+            return f"• {p.get('name')} (pid {p.get('pid')}): {cpu}{p.get('memory_mb')} MB"
+        head = "memoria" if output.get("sorted_by") == "memory" else "CPU"
+        return f"Processi con più uso di {head} ({len(procs)} di {output.get('total')}):\n" + "\n".join(line(p) for p in procs)
+    if tool == "shell.run":
+        code = output.get("exit_code")
+        body = (output.get("stdout") or "").strip() or (output.get("stderr") or "").strip() or "(nessun output)"
+        cut = "\n(output troncato)" if output.get("truncated") else ""
+        return f"Comando «{output.get('command')}» terminato con codice {code} in {output.get('duration_ms')} ms:\n{body[:3000]}{cut}"
     if tool == "system.info":
         parts = [f"{k}: {v}" for k, v in output.items()]
         return "Informazioni sul sistema:\n" + "\n".join(f"• {p}" for p in parts)
@@ -239,6 +257,11 @@ def _reason(output: Any) -> str:
 
 
 _RULES: list[tuple[re.Pattern[str], str, Any]] = [
+    # Terminale (ADR-0038): solo con il prefisso esplicito; il Core chiede sempre la conferma.
+    (re.compile(r"^\s*(?:terminale|esegui(?: il)? comando|shell|\$)\s*:?\s+(.+)$", re.I | re.S), "shell.run",
+     lambda m: {"command": m.group(1).strip()[:2000]}),
+    (re.compile(r"\b(processi|programmi (?:in esecuzione|aperti|attivi)|task manager|cosa (?:sta )?(?:girando|usa(?:ndo)? la cpu))\b", re.I), "process.list",
+     lambda m: {"sort": "memory" if re.search(r"memoria|ram", m.string, re.I) else "cpu"}),
     (re.compile(r"^\s*(?:apri|visita|leggi(?: la pagina)?|riassumi|fetch|open)\s+(https?://\S+)\s*$", re.I), "web.fetch", lambda m: {"url": m.group(1)}),
     (re.compile(r"^\s*(?:cerca nella (?:mia )?memoria|cerca tra i ricordi|search memory(?: for)?)\s*:?\s+(.+)$|^\s*cosa sai (?:di|su|sul|sulla|del|della)\s+(?!me\b)(.+?)\s*\??$", re.I | re.S),
      "memory.search", lambda m: {"query": (m.group(1) or m.group(2)).strip()[:500]}),
@@ -376,6 +399,7 @@ Prova con:
 • "che ore sono"
 • "info sistema"
 • "elenca file"
+• "processi" · "processi per memoria" · "terminale: ls -la" (ogni comando chiede conferma)
 • "scrivi note.txt: testo da salvare" (chiede conferma)
 • "leggi note.txt"
 • "ricorda che …", "preferisco …", "cosa sai di …", "cerca nella memoria …"
@@ -473,6 +497,8 @@ TOOL_HINTS: list[tuple[tuple[str, ...], tuple[str, ...]]] = [
     (("ricord", "memoria", "dimentic", "sai di", "preferisc"), ("memory.",)),
     (("connettor", "servizio", "api"), ("connector.",)),
     (("nodo", "computer", "pc ", "portatile"), ("node.",)),
+    (("processi", "processo", "programmi", "cpu", "ram", "task manager", "rallent"), ("process.",)),
+    (("terminale", "comando", "shell", "script", "esegui", "installa", "git ", "npm ", "python"), ("shell.",)),
 ]
 MAX_TOOLS = 10
 _SCHEMA_DROP = {"additionalProperties", "maxLength", "minLength", "maxItems", "minItems", "$schema", "examples"}
@@ -583,7 +609,8 @@ class OllamaBackend:
 
     def respond(self, delegation: dict, catalog: dict[str, dict], emit: Callable[[str], None] | None = None) -> dict:
         inputs = delegation.get("inputs", {})
-        messages = [{"role": "system", "content": system_prompt(inputs)}]
+        role = (delegation.get("delegate") or {}).get("role")
+        messages = [{"role": "system", "content": system_prompt(inputs, role=role)}]
         messages += [{"role": m["role"], "content": m["content"]} for m in inputs.get("messages", [])]
         allowed = {t["name"] for t in delegation.get("tools", [])}
         options: dict[str, Any] = {"temperature": 0.2, "num_ctx": self.num_ctx}

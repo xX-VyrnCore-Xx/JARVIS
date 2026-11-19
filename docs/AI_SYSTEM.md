@@ -63,3 +63,6 @@ Il Core imposta `stream: true` nella delega. Il worker chiede a Ollama lo stream
 ## Voce
 
 Il worker espone `voice.transcribe` e `voice.synthesize` sul bridge, con faster-whisper, Piper e openWakeWord in locale (ADR-0010). La trascrizione entra nella chat come testo, quindi l'agente e la policy non distinguono fra comando scritto e parlato. Lo stato dei motori fa parte della salute del worker.
+
+
+**Specializzazioni (ADR-0038).** Il Core sceglie lo specialista dalla richiesta (`research`, `system`, `automation`, `memory`, `coding`) o il generalista se gli ambiti sono zero o più di uno; lo specialista riceve il proprio ruolo nel prompt e solo gli strumenti del proprio ambito più `time.now` e `memory.search`.

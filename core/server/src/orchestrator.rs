@@ -385,9 +385,12 @@ impl Jarvis {
             "delegation_id": uuid::Uuid::new_v4().to_string(),
             "task_id": task.id(),
             "objective": task.doc["objective"],
-            "delegate": {"agent": "general_assistant", "temporary": false},
+            "delegate": match crate::agents::route(task.doc["objective"].as_str().unwrap_or_default()) {
+                Some(a) => json!({"agent": a.name, "temporary": false, "role": a.role}),
+                None => json!({"agent": crate::agents::GENERAL, "temporary": false}),
+            },
             "context": {"refs": [format!("jarvis://task/{}", task.id())]},
-            "tools": self.delegated_tools().map(|t| json!({"name": t.name(), "version": t.version()})).collect::<Vec<_>>(),
+            "tools": self.delegated_tools().filter(|t| self.task_allows(task, t.name())).map(|t| json!({"name": t.name(), "version": t.version()})).collect::<Vec<_>>(),
             "limits": {"max_steps": 4, "max_subdelegations": 0, "allow_cloud": false},
             "timeout_ms": self.cfg.delegation_timeout_ms,
             "completion_conditions": ["Esito jarvis.agent-result/1 valido"],
@@ -409,6 +412,13 @@ impl Jarvis {
             .filter(|t| !dynamic(t))
             .chain(self.catalog.iter().filter(dynamic).take(16))
             .take(32)
+    }
+
+    /// Strumento concesso all'agente del task: la specializzazione scelta dalla richiesta (ADR-0038) limita
+    /// gli strumenti al proprio ambito; il generalista li riceve tutti.
+    fn task_allows(&self, task: &Task, tool: &str) -> bool {
+        crate::agents::route(task.doc["objective"].as_str().unwrap_or_default())
+            .is_none_or(|a| crate::agents::allows(a, tool))
     }
 
     /// Aggiunge agli input i descrittori dei connettori autorizzati, che il catalogo statico dell'agente non conosce.
@@ -610,7 +620,10 @@ impl Jarvis {
             }
         };
         out.backend = Some(result["backend"].clone());
-        out.steps.push(json!({"kind": "delegation", "agent": "general_assistant", "backend": result["backend"]}));
+        let agent = crate::agents::route(task.doc["objective"].as_str().unwrap_or_default())
+            .map_or(crate::agents::GENERAL, |a| a.name);
+        out.steps
+            .push(json!({"kind": "delegation", "agent": agent, "backend": result["backend"]}));
         self.drive(task, inputs, result, out, Vec::new())
     }
 
@@ -650,6 +663,16 @@ impl Jarvis {
                 continue;
             }
             out.steps.push(json!({"kind": "tool_call", "tool": tool, "arguments": arguments, "rationale": call["rationale"]}));
+            // Ambito della specializzazione (ADR-0038): uno strumento non concesso non arriva alla policy.
+            if !self.task_allows(&task, &tool) {
+                out.steps
+                    .push(json!({"kind": "scope", "tool": tool, "allowed": false}));
+                self.obs.count("agent.out_of_scope");
+                let output = json!({"code": "policy.not_delegated", "message": policy::explain("policy.not_delegated")});
+                history.push(step_record(&tool, &arguments, &digest, "denied", output));
+                result = self.next_step(&task, &inputs, &history, true, &mut out);
+                continue;
+            }
             let (tid, corr) = (task.id(), task.correlation());
             let decision = policy::decide(
                 &self.catalog,
@@ -1322,6 +1345,19 @@ impl Jarvis {
                     .map_err(|e| tool_error("workflow.unavailable", e.to_string()))?;
                 Ok(json!({"id": short(&doc), "name": doc["name"]}))
             }
+            "shell.run" => {
+                if !confirmed {
+                    return Err(tool_error(
+                        "shell.not_confirmed",
+                        "ogni comando del terminale richiede la conferma del proprietario",
+                    ));
+                }
+                let workspace = self.cfg.workspace();
+                tools::shell_run(
+                    &workspace,
+                    arguments["command"].as_str().unwrap_or_default(),
+                )
+            }
             t if t.starts_with("connector.") => self.call_connector(t, arguments, confirmed),
             t if t.starts_with("node.") => self.call_node(t, arguments, confirmed),
             _ => {
@@ -1371,6 +1407,13 @@ impl Jarvis {
             if name.starts_with("workflow.") {
                 return Err(invalid(format!(
                     "passo {}: un'automazione non può gestire altre automazioni",
+                    i + 1
+                )));
+            }
+            // Il terminale chiede la conferma a ogni comando: non può girare senza il proprietario.
+            if name == "shell.run" {
+                return Err(invalid(format!(
+                    "passo {}: i comandi del terminale non sono ammessi nelle automazioni",
                     i + 1
                 )));
             }

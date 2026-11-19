@@ -15,9 +15,16 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use sha2::Digest;
 
-/// Strumenti che un nodo può offrire nel prototipo: lettura e scrittura nella propria workspace,
-/// informazioni di sistema e ora. Niente memoria, Web o automazioni, che restano al Core.
-pub const NODE_TOOLS: [&str; 5] = ["system.info", "time.now", "fs.list", "fs.read", "fs.write"];
+/// Strumenti che un nodo può offrire: lettura e scrittura nella propria workspace, informazioni di sistema,
+/// processi e ora. Niente memoria, Web, automazioni o terminale, che restano al Core (ADR-0038).
+pub const NODE_TOOLS: [&str; 6] = [
+    "system.info",
+    "time.now",
+    "fs.list",
+    "fs.read",
+    "fs.write",
+    "process.list",
+];
 
 pub fn token_hash(token: &str) -> String {
     hex::encode(sha2::Sha256::digest(token.as_bytes()))

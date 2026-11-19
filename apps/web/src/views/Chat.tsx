@@ -7,6 +7,7 @@ import { useApp, useVoice } from "../state";
 
 interface Step {
   kind: string;
+  agent?: string;
   backend?: { name: string };
   tool?: string;
   decision?: string;
@@ -41,11 +42,20 @@ const SUGGESTIONS = [
   "cerca intelligenza artificiale",
 ];
 
+/** Specializzazioni degli agenti (ADR-0038). */
+const AGENTS: Record<string, string> = {
+  research: "ricerca", system: "sistema", automation: "automazioni", memory: "memoria", coding: "codice",
+};
+
 function StepChips({ steps }: { steps?: Step[] }) {
   if (!steps || !steps.length) return null;
   const chips: React.ReactElement[] = [];
   steps.forEach((s, i) => {
     if (s.kind === "delegation" && s.backend) chips.push(<span key={i} className="step">agente · {s.backend.name}</span>);
+    if (s.kind === "delegation" && s.agent && AGENTS[s.agent])
+      chips.push(<span key={`${i}-a`} className="step specialist">specialista · {AGENTS[s.agent]}</span>);
+    if (s.kind === "loop_guard") chips.push(<span key={i} className="step deny">ripetizione bloccata · {s.tool}</span>);
+    if (s.kind === "scope") chips.push(<span key={i} className="step deny">fuori ambito · {s.tool}</span>);
     if (s.kind === "tool_call") chips.push(<span key={i} className="step">strumento · {s.tool}</span>);
     if (s.kind === "policy") chips.push(<span key={i} className={`step ${s.decision}`}>policy · {s.decision} · rischio {s.risk}</span>);
     if (s.kind === "confirmation")

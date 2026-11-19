@@ -7,10 +7,10 @@ Questo documento raccoglie ciò che serve per l'accettazione finale descritta in
 | ID | Verifica automatica (CI) | Prova del proprietario | Esito automatico | Limite noto |
 |---|---|---|---|---|
 | RF-01 Conversazione | `core/server/tests/api.rs`, E2E | P1, P2 | Verde | Qualità con modelli reali da valutare |
-| RF-02 Orchestrazione | `api.rs`, contratti task | — | Verde | Un solo agente |
-| RF-03 Agenti | contratti delega, `tests/ai` | — | Verde | Agente generalista unico |
+| RF-02 Orchestrazione | `api.rs`, `agent_loop.rs`, contratti task | — | Verde | Ciclo fino a 4 strumenti per richiesta (ADR-0037) |
+| RF-03 Agenti | contratti delega, `agents.rs`, `agent_loop.rs`, `tests/ai` | — | Verde | 5 specializzazioni con ambito di strumenti (ADR-0038); niente agenti temporanei né sottodeleghe |
 | RF-04 AI Gateway | `tests/ai/test_gateway.py`, guasti in `resilience.rs` | P2 | Verde | Solo backend locali |
-| RF-05 Computer Use | strumenti file e sistema, `api.rs` | P3 | Verde | File e informazioni di sistema; niente desktop o terminale |
+| RF-05 Computer Use | strumenti file, sistema, processi e terminale; `api.rs`, `terminal.rs` | P3, P14 | Verde | Terminale con conferma a ogni comando (ADR-0038); niente controllo di desktop e mouse |
 | RF-06 Web | `web.rs` (SSRF, iniezioni), E2E | P4 | Verde | Navigazione interattiva assente |
 | RF-07 Automazioni | `automation.rs`, E2E | P5 | Verde | — |
 | RF-08 Memoria | `api.rs`, `memory.rs`, E2E | P1 | Verde | Sinonimi con gli embedding di Ollama (ADR-0028); nessun PostgreSQL |
@@ -18,7 +18,7 @@ Questo documento raccoglie ciò che serve per l'accettazione finale descritta in
 | RF-10 Client | E2E Web e telefono simulato, CI desktop su 3 sistemi | P7, P8 | Verde | iOS e Android nativi compilati in CI; prove su dispositivo (P8a, P8b) e sincronizzazione fonetica in sospeso |
 | RF-11 Dispositivi e nodi | `devices.rs`, `nodes.rs`, E2E | P8, P13 | Verde | Scelta automatica disponibile (ADR-0031). mTLS e VPN mesh in sospeso |
 | RF-12 Dati | backup, rollback | P9 | Verde | Nessuna sincronizzazione fra nodi |
-| RF-13 Notifiche | `notifications.rs`, E2E | P5 | Verde | Nessun canale esterno |
+| RF-13 Notifiche | `notifications.rs`, `channels.rs`, E2E | P5 | Verde | Canali esterni ntfy e Telegram (ADR-0026) |
 | RF-14 Connettori | `connectors.rs`, `oauth.rs`, E2E | P10 | Verde | OAuth 2.0 con PKCE (ADR-0027); niente plugin con codice |
 | RF-15 Miglioramenti | — | — | Non iniziato | Fuori dalla prima release |
 | RNF-01 Contratti | `tests/contracts`, `jarvis-contracts` | — | Verde | — |
@@ -63,12 +63,13 @@ Da eseguire sul proprio computer con una release o con i sorgenti. Annotare esit
 | P11 | Prestazioni | `python tests/perf/latency.py http://127.0.0.1:8765 30` con Ollama attivo | p95 entro `tests/perf/slo.json` per le serie senza modello; registrare quelle con il modello |
 | P12 | Sicurezza | Dal telefono prova sezioni del proprietario; apri l'indirizzo da un host non ammesso | Accesso negato; host rifiutato |
 | P13 | Nodo esecutore | Su un secondo computer con Tailscale: codice «Nodo esecutore» dalla sezione Dispositivi, `./jarvis.sh node https://<core>.ts.net <codice>`, poi in chat «nodo <nome> system.info» e «nodo <nome> fs.write path=prova.txt content=ciao»; infine revoca | Informazioni del secondo computer; scrittura solo dopo conferma e nella workspace del nodo; dopo la revoca il nodo si ferma e i suoi strumenti spariscono |
+| P14 | Processi e terminale | «quali processi usano più memoria?», poi «terminale: ls» e approva; prova «terminale: sudo ls» | Elenco dei processi senza conferma; il comando chiede conferma e mostra l'output; `sudo` viene negato |
 
 ## Criteri di rilascio
 
 Una release `v1.0.0` si pubblica quando:
 1. tutti i job delle due CI sono verdi sul commit da rilasciare;
-2. le prove P1–P13, incluse P8a e P8b per i client nativi, sono superate o i difetti aperti sono registrati come non bloccanti;
+2. le prove P1–P14, incluse P8a e P8b per i client nativi, sono superate o i difetti aperti sono registrati come non bloccanti;
 3. il proprietario accetta esplicitamente.
 
 Restano decisioni del proprietario, perché richiedono suoi account, certificati o scelte:

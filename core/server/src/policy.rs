@@ -17,6 +17,11 @@ pub const POLICY_VERSION: &str = "0.1.0";
 pub const CONFIRMATION_TTL_SECS: i64 = 300;
 
 /// Spiegazione leggibile di un motivo di policy.
+/// Terminale disattivato dal proprietario (`JARVIS_SHELL=off`); attivo per impostazione, sempre con conferma.
+fn shell_disabled() -> bool {
+    std::env::var("JARVIS_SHELL").is_ok_and(|v| matches!(v.as_str(), "off" | "0" | "false"))
+}
+
 pub fn explain(reason: &str) -> &'static str {
     match reason {
         "policy.unknown_tool" => "strumento non presente nel catalogo autorizzato",
@@ -30,6 +35,13 @@ pub fn explain(reason: &str) -> &'static str {
         "policy.url_scheme_not_allowed" => "sono ammessi solo indirizzi http e https",
         "policy.url_with_credentials" => "l'indirizzo contiene credenziali",
         "policy.invalid_url" => "l'indirizzo non è valido",
+        "policy.not_delegated" => {
+            "lo strumento non rientra nell'ambito concesso all'agente per questa richiesta"
+        }
+        "policy.shell_disabled" => "il terminale è disattivato (JARVIS_SHELL=off)",
+        "policy.command_blocked" => {
+            "comando distruttivo o con privilegi di amministratore: JARVIS non lo esegue"
+        }
         _ => "azione non autorizzata dalla policy",
     }
 }
@@ -74,6 +86,7 @@ fn resource_uri(tool: &str, args: &Value) -> String {
     }
     match args["path"].as_str() {
         Some(p) if tool.starts_with("fs.") => format!("jarvis://file/workspace/{}", clean(p)),
+        _ if tool == "shell.run" => "jarvis://terminal/workspace".to_string(),
         _ if tool == "web.fetch" => {
             let host = args["url"]
                 .as_str()
@@ -94,6 +107,10 @@ fn resource_uri(tool: &str, args: &Value) -> String {
 
 fn expected_effect(tool: &str, args: &Value) -> String {
     match tool {
+        "shell.run" => format!(
+            "Eseguire nel terminale, nella workspace di JARVIS, il comando: «{}». Può modificare file e avviare programmi con i tuoi permessi; si interrompe dopo 60 secondi.",
+            args["command"].as_str().unwrap_or("?")
+        ),
         "fs.write" => {
             let content = args["content"].as_str().unwrap_or_default();
             let preview: String = content.chars().take(200).collect();
@@ -196,6 +213,17 @@ pub fn decide(catalog: &Catalog, web: &WebConfig, req: &Request) -> Value {
                 vec!["policy.path_outside_workspace"],
                 t.risk().into(),
             )
+        }
+        Some(t) if t.name() == "shell.run" && shell_disabled() => {
+            ("deny", vec!["policy.shell_disabled"], t.risk().into())
+        }
+        Some(t)
+            if t.name() == "shell.run"
+                && crate::tools::command_blocked(
+                    req.arguments["command"].as_str().unwrap_or_default(),
+                ) =>
+        {
+            ("deny", vec!["policy.command_blocked"], t.risk().into())
         }
         Some(t) if t.name().starts_with("web.") && !web.enabled => {
             ("deny", vec!["policy.web_disabled"], t.risk().into())

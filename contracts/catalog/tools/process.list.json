@@ -1,0 +1,46 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "process.list",
+  "version": "1.0.0",
+  "summary": "Elenca i processi in esecuzione sul computer, ordinati per uso di CPU o memoria",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "sort": {
+        "enum": [
+          "cpu",
+          "memory"
+        ],
+        "description": "Ordinamento (predefinito: cpu)"
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 50,
+        "description": "Numero massimo di processi (predefinito: 15)"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "node",
+  "prerequisites": [
+    "Solo lettura: nessun processo viene modificato"
+  ],
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "node.process:read"
+  ],
+  "errors": [
+    "process.unavailable"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

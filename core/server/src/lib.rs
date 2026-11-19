@@ -4,6 +4,7 @@
 //! strumenti confinati nella workspace, memoria SQLite e audit a catena di hash.
 //! L'intelligenza è nel worker Python (`ai/jarvis_ai`) raggiunto via `jarvis-bridge`.
 
+pub mod agents;
 pub mod api;
 pub mod audit;
 pub mod automation;
