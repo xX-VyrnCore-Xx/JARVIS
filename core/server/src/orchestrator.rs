@@ -2865,6 +2865,91 @@ impl Jarvis {
 
     /// Associa un dispositivo con un codice valido. Il token è restituito una sola volta; il Core ne
     /// conserva solo l'impronta SHA-256. Dopo 5 codici errati tutti i codici in attesa vengono annullati.
+    /// Registra una passkey verificata per un dispositivo attivo (ADR-0042), con voce di audit.
+    pub fn passkey_register(
+        &mut self,
+        device_id: &str,
+        reg: &crate::passkeys::Registered,
+    ) -> Result<Value, CoreError> {
+        let id = crate::passkeys::b64url(&reg.credential_id);
+        self.store
+            .passkey_add(&id, device_id, &reg.public_key, reg.sign_count, &now())
+            .map_err(internal)?;
+        self.device_audit("passkey.register", device_id, "succeeded")?;
+        Ok(json!({"credential_id": id}))
+    }
+
+    /// Passkey di un dispositivo, senza chiavi: id, creazione e ultimo uso.
+    pub fn passkeys(&self, device_id: &str) -> Result<Vec<Value>, CoreError> {
+        Ok(self
+            .store
+            .passkeys_for(device_id)
+            .map_err(internal)?
+            .into_iter()
+            .map(|(id, _, _, created, used)| json!({"credential_id": id, "created_at": created, "last_used_at": used}))
+            .collect())
+    }
+
+    /// Verifica un'asserzione per una conferma: la passkey deve appartenere al dispositivo.
+    #[allow(clippy::too_many_arguments)]
+    pub fn passkey_check(
+        &mut self,
+        device_id: &str,
+        credential_id: &str,
+        client_data: &[u8],
+        authenticator_data: &[u8],
+        signature: &[u8],
+        challenge: &str,
+        origins: &[String],
+        rp_id: &str,
+    ) -> Result<(), CoreError> {
+        let keys = self.store.passkeys_for(device_id).map_err(internal)?;
+        let Some((_, public, count, _, _)) = keys.iter().find(|k| k.0 == credential_id) else {
+            self.passkey_refused(device_id)?;
+            return Err(CoreError::Unauthorized(
+                "passkey non registrata per questo dispositivo".into(),
+            ));
+        };
+        match crate::passkeys::verify_assertion(
+            client_data,
+            authenticator_data,
+            signature,
+            public,
+            *count,
+            challenge,
+            origins,
+            rp_id,
+        ) {
+            Ok(n) => {
+                self.store
+                    .passkey_used(credential_id, n, &now())
+                    .map_err(internal)?;
+                self.device_audit("passkey.assert", device_id, "succeeded")?;
+                Ok(())
+            }
+            Err(e) => {
+                self.passkey_refused(device_id)?;
+                Err(CoreError::Unauthorized(e))
+            }
+        }
+    }
+
+    /// Asserzione rifiutata: nessun effetto, voce di audit per chi controlla gli accessi.
+    fn passkey_refused(&mut self, device_id: &str) -> Result<(), CoreError> {
+        self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "client", "id": "device"},
+                          "node": "core-local", "action": "passkey.assert", "resource": format!("jarvis://device/{device_id}"),
+                          "outcome": "cancelled", "effect": "not_applied"}))?;
+        Ok(())
+    }
+
+    /// Elimina una passkey (solo dal computer del proprietario).
+    pub fn passkey_delete(&mut self, credential_id: &str) -> Result<(), CoreError> {
+        if !self.store.passkey_delete(credential_id).map_err(internal)? {
+            return Err(CoreError::NotFound("passkey inesistente".into()));
+        }
+        self.owner_audit("passkey.delete")
+    }
+
     /// Attiva l'mTLS dei nodi sulla porta indicata (ADR-0041): identità del Core in `<dati>/tls`, creata al
     /// primo avvio. I nodi associati da qui in poi si legano al proprio certificato.
     pub fn enable_node_tls(&mut self, port: u16) -> Result<crate::tls::Identity, String> {

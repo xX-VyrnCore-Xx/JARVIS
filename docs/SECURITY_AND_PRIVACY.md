@@ -60,3 +60,6 @@ Da completare:
 
 
 **mTLS dei nodi (ADR-0041).** Con `JARVIS_NODE_TLS_ADDR` il Core apre una porta TLS solo per i nodi: certificato client obbligatorio e registrato all'associazione, Core fissato per impronta dal nodo, token e certificato richiesti insieme. La chiave privata del nodo non lascia mai il nodo; la revoca vale subito.
+
+
+**Passkey (ADR-0042).** Un dispositivo associato può registrare una passkey (WebAuthn, ES256, verifica dell'utente obbligatoria). Da quel momento ogni approvazione da quel dispositivo richiede un'asserzione legata alla singola conferma; il Core conserva solo la chiave pubblica, rifiuta contatori non crescenti e registra tutto nell'audit. Rifiutare un'azione resta sempre possibile.

@@ -1298,7 +1298,7 @@ dependencies = [
 
 [[package]]
 name = "jarvis-core"
-version = "1.8.0"
+version = "1.9.0"
 dependencies = [
  "argon2",
  "axum",
@@ -1316,6 +1316,7 @@ dependencies = [
  "jsonschema",
  "keyring",
  "rcgen",
+ "ring",
  "rusqlite",
  "rustls",
  "serde_json",

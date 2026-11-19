@@ -3,10 +3,11 @@
 // rapido verso la chat.
 
 import { useEffect, useState } from "react";
-import { api, fmtClock, fmtTime, fmtUptime, post } from "../lib/api";
+import { api, fmtClock, fmtTime, fmtUptime } from "../lib/api";
 import { voice } from "../lib/voice";
 import { Avatar, AVATAR_LABELS, useAvatarState } from "../components/Avatar";
 import { useApp, useVoice } from "../state";
+import { decideConfirmation } from "../lib/passkey";
 import type { Notification } from "../state";
 import type { Confirmation } from "./Chat";
 import { MemoryGraph } from "./Memory";
@@ -148,7 +149,7 @@ export function Dashboard({ active }: { active: boolean }) {
   const decide = async (c: Confirmation, approve: boolean) => {
     dismissToast(`confirmation:${c.confirmation_id}`);
     try {
-      await post(`/api/confirmations/${encodeURIComponent(c.confirmation_id)}`, { approve });
+      await decideConfirmation(c.confirmation_id, approve);
     } catch (e) {
       alert((e as Error).message);
     }

@@ -13,8 +13,8 @@ pub struct Store {
 
 pub type StoreResult<T> = Result<T, rusqlite::Error>;
 
-/// Versione dello schema (ADR-0037): 1 = schema fino a 1.3.x con migrazioni additive; 3 = tracce dei task (ADR-0039).
-pub const SCHEMA_VERSION: i64 = 3;
+/// Versione dello schema (ADR-0037): 1 = schema fino a 1.3.x con migrazioni additive; 3 = tracce dei task (ADR-0039); 4 = passkey (ADR-0042).
+pub const SCHEMA_VERSION: i64 = 4;
 
 impl Store {
     pub fn open(path: &Path) -> StoreResult<Self> {
@@ -52,7 +52,10 @@ impl Store {
              CREATE INDEX IF NOT EXISTS workflows_due ON workflows (next_run_at);
              CREATE TABLE IF NOT EXISTS task_spans (seq INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL,
                  at TEXT NOT NULL, span TEXT NOT NULL);
-             CREATE INDEX IF NOT EXISTS task_spans_by_task ON task_spans (task_id, seq);",
+             CREATE INDEX IF NOT EXISTS task_spans_by_task ON task_spans (task_id, seq);
+             CREATE TABLE IF NOT EXISTS passkeys (credential_id TEXT PRIMARY KEY, device_id TEXT NOT NULL,
+                 public_key BLOB NOT NULL, sign_count INTEGER NOT NULL, created_at TEXT NOT NULL, last_used_at TEXT);
+             CREATE INDEX IF NOT EXISTS passkeys_by_device ON passkeys (device_id);",
         )?;
         // Migrazione additiva: database creati prima delle fonti Web (RF-06).
         let has_sources = conn.prepare("SELECT sources FROM messages LIMIT 0").is_ok();
@@ -70,6 +73,54 @@ impl Store {
         // Statistiche del pianificatore di query aggiornate solo dove servono (raccomandazione di SQLite).
         store.conn.execute_batch("PRAGMA optimize=0x10002;")?;
         Ok(store)
+    }
+
+    /// Registra una passkey (chiave pubblica non compressa) per un dispositivo (ADR-0042).
+    pub fn passkey_add(
+        &self,
+        credential_id: &str,
+        device_id: &str,
+        public_key: &[u8],
+        sign_count: u32,
+        at: &str,
+    ) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT INTO passkeys (credential_id, device_id, public_key, sign_count, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![credential_id, device_id, public_key, sign_count, at],
+        )?;
+        Ok(())
+    }
+
+    /// Passkey di un dispositivo: (id della credenziale, chiave pubblica, contatore, creata, ultimo uso).
+    #[allow(clippy::type_complexity)]
+    pub fn passkeys_for(
+        &self,
+        device_id: &str,
+    ) -> StoreResult<Vec<(String, Vec<u8>, u32, String, Option<String>)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT credential_id, public_key, sign_count, created_at, last_used_at FROM passkeys WHERE device_id = ?1 ORDER BY created_at",
+        )?;
+        let rows = stmt.query_map([device_id], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+        })?;
+        rows.collect()
+    }
+
+    /// Aggiorna contatore e ultimo uso dopo un'asserzione valida.
+    pub fn passkey_used(&self, credential_id: &str, sign_count: u32, at: &str) -> StoreResult<()> {
+        self.conn.execute(
+            "UPDATE passkeys SET sign_count = ?2, last_used_at = ?3 WHERE credential_id = ?1",
+            params![credential_id, sign_count, at],
+        )?;
+        Ok(())
+    }
+
+    /// Elimina una passkey; vero se esisteva.
+    pub fn passkey_delete(&self, credential_id: &str) -> StoreResult<bool> {
+        Ok(self.conn.execute(
+            "DELETE FROM passkeys WHERE credential_id = ?1",
+            [credential_id],
+        )? > 0)
     }
 
     /// Aggiunge un intervallo alla traccia di un task (ADR-0039). Le tracce più vecchie di `keep_since`

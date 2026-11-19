@@ -269,7 +269,8 @@ function check(cond, msg) {
   await page.click('[data-view="chat"]');
   check((await send("connettore stato leggi nome=posta")).includes("operativo"), "chiamata al connettore dalla chat");
 
-  // Dispositivi (RF-11): un secondo contesto fa da telefono su un host remoto ammesso (JARVIS_ALLOWED_HOSTS=jarvis.test).
+  // Dispositivi (RF-11): un secondo contesto fa da telefono su un host remoto ammesso (JARVIS_ALLOWED_HOSTS).
+  // Un sottodominio di .localhost è un contesto sicuro anche in HTTP: serve a WebAuthn per le passkey (ADR-0042).
   await page.click('[data-view="devices"]');
   // Nodo esecutore: il codice mostra il comando da eseguire sull'altro computer.
   await page.check('#pairing-form input[name="node"]');
@@ -277,6 +278,7 @@ function check(cond, msg) {
   await page.waitForSelector("#pairing-code .node-cmd");
   check((await page.locator("#pairing-code").innerText()).includes("jarvis.sh node"), "codice per un nodo esecutore con il comando da eseguire");
   await page.uncheck('#pairing-form input[name="node"]');
+  await page.check('#pairing-form input[name="confirm"]');
   await page.click('#pairing-form button[type="submit"]');
   await page.waitForFunction(() => !document.querySelector("#pairing-code .node-cmd"));
   const code = (await page.locator("#pairing-code strong").innerText()).trim();
@@ -284,7 +286,7 @@ function check(cond, msg) {
   const phone = await phoneCtx.newPage();
   phone.on("pageerror", (e) => errors.push("telefono: " + e.message));
   const port = new (require("url").URL)(URL).port || "8765";
-  await phone.goto(`http://jarvis.test:${port}/`);
+  await phone.goto(`http://jarvis.localhost:${port}/`);
   await phone.waitForURL(/\/pair$/);
   check(true, "dispositivo non associato rimandato all'associazione");
   await phone.fill('#pair-form input[name="code"]', code);
@@ -296,6 +298,21 @@ function check(cond, msg) {
   await phone.keyboard.press("Enter");
   await phone.waitForFunction(() => document.querySelectorAll(".msg.assistant").length > 0, null, { timeout: 30000 });
   check(true, "chat dal dispositivo associato");
+  // Passkey (ADR-0042): autenticatore virtuale di Chromium con verifica dell'utente (impronta simulata).
+  const cdp = await phoneCtx.newCDPSession(phone);
+  await cdp.send("WebAuthn.enable");
+  await cdp.send("WebAuthn.addVirtualAuthenticator", { options: { protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true } });
+  await phone.click("#passkey-setup");
+  await phone.waitForSelector("#passkey-status");
+  check(true, "passkey registrata dal telefono");
+  await phone.fill("#input", "scrivi passkey.txt: approvato con la passkey");
+  await phone.keyboard.press("Enter");
+  await phone.waitForSelector('.confirm[role="group"] button.primary');
+  const phoneBefore = await phone.locator(".msg.assistant").count();
+  await phone.click('.confirm[role="group"] button.primary');
+  await phone.waitForFunction((n) => document.querySelectorAll(".msg.assistant").length > n, phoneBefore, { timeout: 30000 });
+  const approved = (await phone.locator(".msg.assistant").last().innerText()).trim();
+  check(approved.startsWith("Ho scritto"), "approvazione dal telefono con la passkey (WebAuthn)");
   if (shots) await phone.screenshot({ path: `${shots}/jarvis-telefono.png` });
   await page.click('[data-refresh="devices"]');
   await page.waitForSelector("#devices .card button.danger");

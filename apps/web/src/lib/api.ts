@@ -19,7 +19,14 @@ declare global {
   }
 }
 
-export class ApiError extends Error {}
+export class ApiError extends Error {
+  /** Codice d'errore del Core (es. `passkey_required`). */
+  code: string;
+  constructor(message: string, code = "") {
+    super(message);
+    this.code = code;
+  }
+}
 
 /** Dispositivo revocato: una sola navigazione verso l'associazione, anche se più richieste falliscono insieme. */
 function leaveIfRevoked() {
@@ -39,8 +46,9 @@ export async function api<T = any>(path: string, options: RequestInit = {}): Pro
     headers: { "Content-Type": "application/json", ...AUTH, ...((options.headers as Record<string, string>) || {}) },
   });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401) leaveIfRevoked();
-  if (!res.ok) throw new ApiError(data.error ? data.error.message : `HTTP ${res.status}`);
+  // Solo un token rifiutato porta all'associazione: una passkey mancante o non valida non disconnette.
+  if (res.status === 401 && (!data.error || data.error.code === "unauthorized")) leaveIfRevoked();
+  if (!res.ok) throw new ApiError(data.error ? data.error.message : `HTTP ${res.status}`, data.error ? data.error.code : "");
   return data as T;
 }
 
