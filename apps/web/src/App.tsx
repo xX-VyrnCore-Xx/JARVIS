@@ -12,7 +12,8 @@ import { Chat } from "./views/Chat";
 import { Dashboard } from "./views/Dashboard";
 import { Memory } from "./views/Memory";
 import { Skills } from "./views/Skills";
-import { Audit, Connectors, Devices, Tasks, Workspace } from "./views/Simple";
+import { Connectors } from "./views/Connectors";
+import { Audit, Devices, Tasks, Workspace } from "./views/Simple";
 import { System } from "./views/System";
 
 interface NavEntry {
@@ -75,7 +76,7 @@ function Shell() {
             <div className="nav-group" key={g}>
               <div className="nav-group-title" aria-hidden="true">{g}</div>
               {entries.filter((n) => n.group === g).map((n) => (
-                <button key={n.view} className={`nav-item${view === n.view ? " active" : ""}`} data-view={n.view} title={n.label} onClick={() => show(n.view)}>
+                <button key={n.view} className={`nav-item${view === n.view ? " active" : ""}`} data-view={n.view} title={n.label} aria-current={view === n.view ? "page" : undefined} onClick={() => show(n.view)}>
                   <Icon name={n.icon} className="glyph" />
                   <span className="nav-label">{n.label}</span>
                   {n.view === "chat" && pending ? <span className="nav-badge" aria-label={`${pending} conferme in attesa`}>{pending}</span> : null}

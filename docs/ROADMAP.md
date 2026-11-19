@@ -18,6 +18,10 @@ La prima versione include Core, Orchestrator, agenti fondamentali, AI locale e c
 
 Il checkpoint è la sezione di ripresa versionata con Git. Ogni voce va aggiornata quando cambia lo stato verificato. Includere gli identificativi dei requisiti e percorsi alle prove.
 
+**Ripresa del 2026-11-19 da `2c499e5` (JARVIS 1.11.0).** La nuova veste desktop e la preparazione guidata delle chiamate ai connettori sono integrate con il catalogo di servizi e il ciclo dell’agente (RF-10, RF-14, ADR-0051). Gli strumenti dinamici citati in chat hanno precedenza tra quelli ammessi per il task. Per la resa nella finestra WebKit e la prova dell’installer resta il collaudo su macOS.
+
+Il checkpoint precedente è riportato qui sotto per riferimento.
+
 | Campo | Stato al 2026-11-18 (diciottesima ripresa) |
 |---|---|
 | Ultima revisione verificata | `e7e6ed3` su `main`: PR #23 (configurazione guidata dei modelli, rifinitura macOS e Windows, ADR-0019, versione 1.0.0) e #24 (tag creato via git nel job di pubblicazione, `contents: write`). **Release `v1.0.0` pubblicata** con installatori `.dmg`, `.msi`, `-setup.exe`, `.deb`, `.AppImage` e impronte SHA-256 |

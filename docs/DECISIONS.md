@@ -1113,6 +1113,15 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** esecuzione del workflow `release` per `v1.11.0`.
 - **Documenti interessati:** README.md, note di rilascio, ROADMAP.md.
 
+### ADR-0051 — Dashboard desktop e operazioni dei connettori
+
+- **Data** 2026-11-19 · **Stato** implementato nel checkout · **Fonte** richiesta del proprietario.
+- **Contesto** Tauri avvia il Core locale e ospita l’intera dashboard. La migrazione a SwiftUI richiede verifica di build e parità funzionale su macOS.
+- **Decisione** La dashboard desktop usa superfici, tipografia di sistema e transizioni dedicate nella finestra Tauri. Le transizioni rispettano la preferenza di movimento ridotto.
+- **Integrazioni** Il modulo mostra i parametri dallo schema pubblicato dal Core e invia un comando JSON in chat. L’agente lo riconosce senza una chiamata a Ollama. Il risultato strutturato è presentato localmente. Il Core valida, applica la policy e registra l’audit. Per OAuth il modulo presenta il collegamento al consenso e aggiorna lo stato al ritorno del proprietario.
+- **Evidenza** Test di selezione nel gateway, test dei connettori nel Core ed E2E della nuova preparazione dalla dashboard.
+- **Documenti interessati** README.md, AUTONOMY_AND_TOOLS.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

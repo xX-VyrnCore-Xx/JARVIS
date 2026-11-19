@@ -47,7 +47,7 @@ L'interfaccia Web è servita dal Core su `http://localhost:8765` e comprende:
 
 La campanella nell'intestazione mostra le notifiche non lette. Il pannello elenca categoria, ora e task correlato, e un clic porta alla vista collegata. Le nuove notifiche compaiono come toast e, se autorizzate, come notifiche del browser quando la pagina non è in primo piano.
 
-**App desktop (ADR-0009):** `./jarvis.sh desktop` apre JARVIS in una finestra Tauri per Windows, macOS e Linux. L'app avvia il Core in automatico, tiene i dati nella cartella dell'applicazione dell'utente, apre i link esterni nel browser di sistema e alla chiusura arresta Core e worker, anche in caso di crash.
+**App desktop (ADR-0009):** `./jarvis.sh desktop` apre JARVIS in una finestra Tauri per Windows, macOS e Linux. L'app avvia il Core in automatico, tiene i dati nella cartella dell'applicazione dell'utente, apre i link esterni nel browser di sistema e alla chiusura arresta Core e worker, anche in caso di crash. La Plancia desktop usa superfici dedicate nei temi chiaro e scuro, tipografia di sistema e animazioni compatibili con la preferenza di movimento ridotto (ADR-0051).
 
 La sezione **Sistema** mostra lo stato di Core, AI, voce, Web, audit e worker, e la tabella delle latenze (p50, p95, max, errori) per endpoint, strumento e delega.
 

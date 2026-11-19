@@ -17,7 +17,7 @@ interface Entry {
 }
 
 export function CommandPalette({ views }: { views: { view: View; label: string; icon: string }[] }) {
-  const { show, sendRef } = useApp();
+  const { show, sendRef, thinking } = useApp();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
@@ -52,14 +52,14 @@ export function CommandPalette({ views }: { views: { view: View; label: string; 
     const nav: Entry[] = views
       .filter((v) => !term || v.label.toLowerCase().includes(term))
       .map((v) => ({ id: `view-${v.view}`, label: v.label, hint: "Vai alla sezione", icon: v.icon, run: () => show(v.view) }));
-    const quick: Entry[] = ["che ore sono", "info sistema", "cosa ricordi", "elenca automazioni"]
+    const quick: Entry[] = thinking ? [] : ["che ore sono", "info sistema", "cosa ricordi", "elenca automazioni"]
       .filter((c) => !term || c.includes(term))
       .map((c) => ({ id: `cmd-${c}`, label: c, hint: "Comando rapido", icon: "bolt", run: () => { show("chat"); sendRef.current(c); } }));
-    const free: Entry[] = term
+    const free: Entry[] = term && !thinking
       ? [{ id: "ask", label: q.trim(), hint: "Chiedi a JARVIS", icon: "chat", run: () => { show("chat"); sendRef.current(q.trim()); } }]
       : [];
     return [...nav, ...quick, ...free];
-  }, [q, views, show, sendRef]);
+  }, [q, views, show, sendRef, thinking]);
 
   if (!open) return null;
   const choose = (e: Entry) => {
