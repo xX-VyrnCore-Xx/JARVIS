@@ -407,6 +407,12 @@ impl Jarvis {
         let ts = |t: chrono::DateTime<chrono::Utc>| {
             t.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
         };
+        let scope = self.task_scope(task);
+        let tools: Vec<Value> = self
+            .delegated_tools()
+            .filter(|t| scope(t.name()))
+            .map(|t| json!({"name": t.name(), "version": t.version()}))
+            .collect();
         json!({
             "contract": "jarvis.delegation/1",
             "delegation_id": uuid::Uuid::new_v4().to_string(),
@@ -418,7 +424,7 @@ impl Jarvis {
                 (None, None) => json!({"agent": crate::agents::GENERAL, "temporary": false}),
             },
             "context": {"refs": [format!("jarvis://task/{}", task.id())]},
-            "tools": self.delegated_tools().filter(|t| self.task_allows(task, t.name())).map(|t| json!({"name": t.name(), "version": t.version()})).collect::<Vec<_>>(),
+            "tools": tools,
             "limits": if self.temporary.contains_key(&task.id()) {
                 json!({"max_steps": SUBAGENT_STEPS, "max_subdelegations": 0, "allow_cloud": false})
             } else {
@@ -434,7 +440,7 @@ impl Jarvis {
     }
 
     /// Strumenti delegati all'agente: prima il catalogo statico, poi al massimo 16 strumenti dei connettori
-    /// (limite di 32 del contratto di delega).
+    /// (limite di 64 del contratto di delega, ADR-0046).
     fn delegated_tools(&self) -> impl Iterator<Item = &crate::catalog::Tool> {
         fn dynamic(t: &&crate::catalog::Tool) -> bool {
             t.name().starts_with("connector.") || t.name().starts_with("node.")
@@ -443,7 +449,7 @@ impl Jarvis {
             .iter()
             .filter(|t| !dynamic(t))
             .chain(self.catalog.iter().filter(dynamic).take(16))
-            .take(32)
+            .take(64)
     }
 
     /// Registra un intervallo nella traccia del task (ADR-0039): nome, tipo, inizio, durata, esito e attributi
@@ -495,11 +501,38 @@ impl Jarvis {
     /// Strumento concesso all'agente del task: la specializzazione scelta dalla richiesta (ADR-0038) limita
     /// gli strumenti al proprio ambito; il generalista li riceve tutti.
     fn task_allows(&self, task: &Task, tool: &str) -> bool {
-        if let Some((_, tools)) = self.temporary.get(&task.id()) {
-            return tools.iter().any(|t| t == tool);
+        self.task_scope(task)(tool)
+    }
+
+    /// Ambito degli strumenti del task, calcolato una volta (le competenze attive richiedono una query).
+    fn task_scope(&self, task: &Task) -> impl Fn(&str) -> bool + '_ {
+        let temporary = self
+            .temporary
+            .get(&task.id())
+            .map(|(_, tools)| tools.clone());
+        let objective = task.doc["objective"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        let specialist = crate::agents::route(&objective);
+        // Una competenza attiva rende disponibili i suoi strumenti anche fuori dall'ambito dello specialista
+        // (ADR-0048); policy, conferme e audit restano quelli di ogni strumento.
+        let skill_tools: Vec<String> = if temporary.is_some() || specialist.is_none() {
+            Vec::new()
+        } else {
+            crate::skills::active(&self.store, &objective)
+                .iter()
+                .flat_map(|s| s["tools"].as_array().cloned().unwrap_or_default())
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        };
+        move |tool: &str| match &temporary {
+            Some(tools) => tools.iter().any(|t| t == tool),
+            None => {
+                specialist.is_none_or(|a| crate::agents::allows(a, tool))
+                    || skill_tools.iter().any(|t| t == tool)
+            }
         }
-        crate::agents::route(task.doc["objective"].as_str().unwrap_or_default())
-            .is_none_or(|a| crate::agents::allows(a, tool))
     }
 
     /// Aggiunge agli input i descrittori dei connettori autorizzati, che il catalogo statico dell'agente non conosce.
@@ -610,7 +643,15 @@ impl Jarvis {
             .unwrap_or_default()
             .to_string();
         let memory = budget_memory(self.memory_context(&query)?, MEMORY_CHARS);
-        Ok(json!({"messages": messages, "memory": memory}))
+        // Competenze attivate dalla richiesta (ADR-0048).
+        let skills: Vec<Value> = crate::skills::active(&self.store, &query)
+            .into_iter()
+            .map(|s| json!({"id": s["id"], "name": s["name"], "instructions": s["instructions"], "tools": s["tools"]}))
+            .collect();
+        if skills.is_empty() {
+            return Ok(json!({"messages": messages, "memory": memory}));
+        }
+        Ok(json!({"messages": messages, "memory": memory, "skills": skills}))
     }
 
     fn save(&self, task: &Task) -> Result<(), CoreError> {
@@ -721,6 +762,10 @@ impl Jarvis {
             .map_or(crate::agents::GENERAL, |a| a.name);
         out.steps
             .push(json!({"kind": "delegation", "agent": agent, "backend": result["backend"]}));
+        for s in inputs["skills"].as_array().into_iter().flatten() {
+            out.steps
+                .push(json!({"kind": "skill", "skill": s["id"], "name": s["name"]}));
+        }
         self.drive(task, inputs, result, out, Vec::new())
     }
 
@@ -807,10 +852,29 @@ impl Jarvis {
             let (status, output) = match decision["decision"].as_str() {
                 Some("deny") => {
                     let code = decision["reasons"][0].as_str().unwrap_or("policy.denied");
-                    (
-                        "denied",
-                        json!({"code": code, "message": policy::explain(code)}),
-                    )
+                    let mut output = json!({"code": code, "message": policy::explain(code)});
+                    // Argomenti non validi (ADR-0045): l'agente riceve i difetti precisi e lo schema atteso
+                    // e può correggere la chiamata nel passo successivo invece di chiudere il turno.
+                    if code == "policy.invalid_arguments" {
+                        if let Some(t) = self.catalog.get(&tool) {
+                            let details: Vec<String> = t
+                                .input
+                                .iter_errors(&arguments)
+                                .take(4)
+                                .map(|e| {
+                                    let at = e.instance_path.to_string();
+                                    if at.is_empty() {
+                                        e.to_string()
+                                    } else {
+                                        format!("{at}: {e}")
+                                    }
+                                })
+                                .collect();
+                            output["details"] = json!(details);
+                            output["expected"] = t.descriptor["input_schema"].clone();
+                        }
+                    }
+                    ("denied", output)
                 }
                 Some("require_confirmation") => {
                     return self.await_confirmation(
@@ -820,8 +884,9 @@ impl Jarvis {
                 _ if tool == "agent.delegate" => self.run_subagent(&task, &arguments, &mut out)?,
                 _ => self.run_tool(&task, &tool, &arguments, false, &mut out)?,
             };
+            let retryable = output["code"] == "policy.invalid_arguments";
             history.push(step_record(&tool, &arguments, &digest, status, output));
-            let last = history.len() >= MAX_STEPS || status == "denied";
+            let last = history.len() >= MAX_STEPS || (status == "denied" && !retryable);
             result = self.next_step(&task, &inputs, &history, last, &mut out);
         }
     }
@@ -2053,6 +2118,17 @@ impl Jarvis {
     ) -> Result<Vec<Value>, CoreError> {
         let tolerance = chrono::Duration::seconds(self.cfg.scheduler_tick_s as i64 * 2 + 60);
         let mut runs = Vec::new();
+        // Cose da fare scadute (ADR-0046): una notifica per ciascuna, una sola volta.
+        let now_s = now_t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        for t in crate::toolbox::todos_due(&self.store, &now_s) {
+            self.notify(json!({
+                "severity": if t["priority"] == "alta" { "warning" } else { "info" }, "category": "reminder",
+                "title": format!("Da fare: {}", t["text"].as_str().unwrap_or_default().chars().take(80).collect::<String>()),
+                "body": "Scadenza raggiunta. Scrivi «fatto <id>» quando l'hai completata.",
+                "source": {"kind": "module", "id": "todo"}, "dedupe_key": format!("todo:{}", t["id"].as_str().unwrap_or_default()),
+                "link": {"view": "chat"},
+            }))?;
+        }
         for (doc, scheduled) in self
             .store
             .workflows_due(&automation::ts(now_t))
@@ -2798,6 +2874,9 @@ impl Jarvis {
             let keep = (chrono::Utc::now() - chrono::Duration::days(TRACE_KEEP_DAYS))
                 .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
             let _ = self.store.spans_prune(&keep);
+            let done = (chrono::Utc::now() - chrono::Duration::days(90))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            let _ = self.store.history_prune(RUNS_KEEP_PER_WORKFLOW, &done);
         }
         Ok(Some(doc))
     }
@@ -2812,6 +2891,9 @@ impl Jarvis {
 }
 
 // ---------------------------------------------------------------------- Dispositivi associati (RF-11)
+
+/// Esecuzioni conservate per ogni automazione.
+pub const RUNS_KEEP_PER_WORKFLOW: u32 = 200;
 
 const PAIRING_TTL: std::time::Duration = std::time::Duration::from_secs(600);
 const PAIRING_MAX_FAILURES: u32 = 5;
@@ -3374,6 +3456,52 @@ impl Jarvis {
             .find(|(m, _, _)| m["id"] == id)
             .map(|(m, _, a)| (m, a))
             .ok_or_else(|| CoreError::NotFound(format!("nessun connettore {id}")))
+    }
+
+    /// Competenze del proprietario (ADR-0048).
+    pub fn skills(&self) -> Result<Value, CoreError> {
+        Ok(
+            json!({"items": crate::skills::list(&self.store).map_err(internal)?, "max_active": crate::skills::MAX_ACTIVE}),
+        )
+    }
+
+    /// Crea (`id` assente) o aggiorna una competenza; gli strumenti devono esistere nel catalogo.
+    pub fn skill_save(&mut self, id: Option<&str>, input: &Value) -> Result<Value, CoreError> {
+        if let Some(id) = id {
+            let exists = crate::skills::list(&self.store)
+                .map_err(internal)?
+                .iter()
+                .any(|s| s["id"] == id);
+            if !exists {
+                return Err(CoreError::NotFound("competenza inesistente".into()));
+            }
+        }
+        let skill = crate::skills::validate(input, |t| self.catalog.get(t).is_some())
+            .map_err(CoreError::BadRequest)?;
+        let id = crate::skills::save(&self.store, id, &skill).map_err(internal)?;
+        self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "owner", "id": "owner"},
+                          "node": "core-local", "action": "skill.save", "resource": format!("jarvis://skill/{id}"),
+                          "outcome": "succeeded", "effect": "applied"}))?;
+        Ok(merge(&skill, json!({"id": id})))
+    }
+
+    pub fn skill_delete(&mut self, id: &str) -> Result<Value, CoreError> {
+        let builtin = crate::skills::list(&self.store)
+            .map_err(internal)?
+            .iter()
+            .any(|s| s["id"] == id && s["builtin"] == true);
+        if builtin {
+            return Err(CoreError::BadRequest(
+                "le competenze incluse non si eliminano: disattivala".into(),
+            ));
+        }
+        if !crate::skills::delete(&self.store, id).map_err(internal)? {
+            return Err(CoreError::NotFound("competenza inesistente".into()));
+        }
+        self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "owner", "id": "owner"},
+                          "node": "core-local", "action": "skill.delete", "resource": format!("jarvis://skill/{id}"),
+                          "outcome": "succeeded", "effect": "applied"}))?;
+        Ok(json!({"deleted": id}))
     }
 
     fn connector_audit(&mut self, action: &str, id: &str, outcome: &str) -> Result<(), CoreError> {

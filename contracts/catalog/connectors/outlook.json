@@ -1,0 +1,162 @@
+{
+  "contract": "jarvis.connector/1",
+  "id": "outlook",
+  "name": "Outlook (Microsoft 365)",
+  "version": "1.0.0",
+  "description": "Posta e calendario Microsoft (Outlook.com, Microsoft 365) tramite Microsoft Graph.",
+  "base_url": "https://graph.microsoft.com/v1.0",
+  "allowed_hosts": [
+    "graph.microsoft.com",
+    "login.microsoftonline.com"
+  ],
+  "auth": {
+    "type": "oauth2",
+    "authorize_url": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+    "token_url": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+    "client_id": "CONFIGURA_IL_CLIENT_ID",
+    "scopes": [
+      "offline_access",
+      "User.Read",
+      "Mail.Read",
+      "Mail.Send",
+      "Calendars.ReadWrite"
+    ]
+  },
+  "operations": [
+    {
+      "name": "posta",
+      "summary": "Email recenti della casella ($top, $search tra virgolette, es. \"fattura\")",
+      "method": "GET",
+      "path": "/me/messages",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "$top": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 25
+          },
+          "$search": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "$select": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      }
+    },
+    {
+      "name": "leggi",
+      "summary": "Legge un'email per id",
+      "method": "GET",
+      "path": "/me/messages/{id}",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 300
+          }
+        }
+      }
+    },
+    {
+      "name": "invia",
+      "summary": "Invia un'email: message con subject, body {contentType: Text, content} e toRecipients [{emailAddress: {address}}]",
+      "method": "POST",
+      "path": "/me/sendMail",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "type": "object"
+          },
+          "saveToSentItems": {
+            "type": "boolean"
+          }
+        }
+      },
+      "risk": "high"
+    },
+    {
+      "name": "eventi",
+      "summary": "Eventi in un intervallo (startDateTime ed endDateTime ISO 8601)",
+      "method": "GET",
+      "path": "/me/calendarView",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "startDateTime",
+          "endDateTime"
+        ],
+        "properties": {
+          "startDateTime": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "endDateTime": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "$top": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        }
+      }
+    },
+    {
+      "name": "crea_evento",
+      "summary": "Crea un evento: subject, start/end {dateTime, timeZone}, location {displayName}, body {contentType, content}",
+      "method": "POST",
+      "path": "/me/events",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "subject",
+          "start",
+          "end"
+        ],
+        "properties": {
+          "subject": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "start": {
+            "type": "object"
+          },
+          "end": {
+            "type": "object"
+          },
+          "location": {
+            "type": "object"
+          },
+          "body": {
+            "type": "object"
+          }
+        }
+      },
+      "risk": "high"
+    }
+  ]
+}

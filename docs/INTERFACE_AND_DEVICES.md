@@ -98,3 +98,6 @@ Le conferme restano un clic.
 
 
 **Passkey sul telefono (ADR-0042).** Dalla chat del dispositivo associato: «Proteggi le approvazioni con una passkey». Dopo, «Approva» chiede impronta, volto o PIN. Serve HTTPS (es. `tailscale serve`). Il proprietario elimina una passkey con `DELETE /api/passkeys/{id}` dal computer del Core.
+
+
+**App desktop nativa (ADR-0044).** Icona nella barra dei menu o nell'area di notifica, menu di macOS in italiano, ⌘⇧J / Ctrl+Maiusc+J per richiamare JARVIS, finestra che si nasconde alla chiusura, notifiche del sistema, posizione ricordata.

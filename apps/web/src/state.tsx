@@ -6,7 +6,7 @@ import { api, DEVICE_MODE } from "./lib/api";
 import { voice } from "./lib/voice";
 
 export type View =
-  | "dashboard" | "chat" | "tasks" | "automations" | "memory" | "workspace"
+  | "dashboard" | "chat" | "tasks" | "automations" | "memory" | "skills" | "workspace"
   | "connectors" | "devices" | "audit" | "system";
 
 export interface Notification {

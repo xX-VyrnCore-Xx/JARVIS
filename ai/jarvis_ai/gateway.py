@@ -48,6 +48,7 @@ Strumenti
 - Il Core verifica ogni strumento con la policy; le azioni che modificano file, servizi esterni o automazioni chiedono la conferma del proprietario: non chiederla tu a parole, proponi direttamente lo strumento.
 - Per un sotto-compito autonomo (es. analizzare dei file mentre tu prepari la risposta) puoi usare agent.delegate: l'agente temporaneo ha un ruolo, pochi strumenti di sola lettura e risponde solo a te.
 - Non inventare mai risultati: se uno strumento fallisce o viene negato, dillo e proponi un'alternativa.
+- Se il Core rifiuta gli argomenti (policy.invalid_arguments), leggi `details` e `expected` e ripeti la chiamata corretta una sola volta.
 - Per domande sul proprietario consulta prima la memoria qui sotto, poi memory.search. Quando il proprietario dichiara un fatto stabile o una preferenza, salvala con memory.remember in una frase breve e autonoma.
 
 Sicurezza
@@ -68,7 +69,20 @@ def system_prompt(inputs: dict, now: datetime | None = None, role: str | None = 
     if role:
         # Specializzazione scelta dal Core (ADR-0038): ambito e strumenti concessi per questa richiesta.
         text = text.replace("\n\nStile\n", f"\nSpecializzazione per questa richiesta — {role}\n\nStile\n", 1)
+    skills = [s for s in inputs.get("skills", []) if s.get("instructions")]
+    if skills:
+        # Competenze del proprietario attivate dalla richiesta (ADR-0048): procedure da seguire, non permessi.
+        block = "\n\n".join(f"Competenza «{s.get('name', s.get('id', ''))}»\n{s['instructions']}" for s in skills)
+        text = text.replace("\n\nSicurezza\n", f"\n\nCompetenze attive (procedure del proprietario da seguire)\n{block}\n\nSicurezza\n", 1)
     return text
+
+
+def skill_tools(inputs: dict) -> list[str]:
+    """Strumenti suggeriti dalle competenze attive, in ordine e senza ripetizioni."""
+    out: list[str] = []
+    for s in inputs.get("skills", []):
+        out += [t for t in s.get("tools", []) if t not in out]
+    return out
 
 
 MAX_STEPS = 4
@@ -115,6 +129,53 @@ def _describe_tool_result(result: dict) -> str:
         return f"{tool} non è riuscito: {_reason(output)}."
     if tool == "time.now":
         return f"Sono le {output.get('local', '?')} (UTC {output.get('utc', '?')})."
+    if tool == "math.calc":
+        return f"{output.get('expression')} = {output.get('result')}"
+    if tool == "units.convert":
+        return f"{output.get('value')} {output.get('from')} = {output.get('result')} {output.get('to')}"
+    if tool == "date.calc":
+        parts = [f"Il {output.get('date')} è {output.get('weekday')}."]
+        if "days_between" in output:
+            parts.append(f"Fino al {output.get('until')} mancano {output.get('days_between')} giorni.")
+        if "result" in output:
+            parts.append(f"Risultato: {output.get('result')} ({output.get('result_weekday')}).")
+        return " ".join(parts)
+    if tool == "weather.forecast":
+        c = output.get("current") or {}
+        days = "\n".join(f"• {d['date']}: {d['sky']}, {d['min_c']}–{d['max_c']} °C, pioggia {d.get('rain_probability')}%" for d in output.get("daily", []))
+        return (f"Meteo a {output.get('place')} ({output.get('region') or output.get('country')}): ora {c.get('temperature_c')} °C, {c.get('sky')}, "
+                f"vento {c.get('wind_kmh')} km/h.\n{days}\nFonte: Open-Meteo.")
+    if tool == "system.disks":
+        return "Dischi:\n" + "\n".join(f"• {d['mount']}: {d['free_gb']} GB liberi su {d['total_gb']} GB ({d['used_percent']}% usato)" for d in output.get("disks", []))
+    if tool == "fs.search":
+        res = output.get("results", [])
+        if not res:
+            return "Nessun file trovato."
+        return "File trovati:\n" + "\n".join(f"• {r['path']}" + (f" (riga {r['line']}: {r['snippet']})" if r.get("line") else "") for r in res)
+    if tool in ("fs.mkdir", "fs.move", "fs.delete"):
+        return {"fs.mkdir": f"Cartella creata: {output.get('path')}", "fs.move": f"Spostato «{output.get('from')}» in «{output.get('to')}».",
+                "fs.delete": f"Eliminato: {output.get('path')}"}[tool]
+    if tool == "notes.add":
+        return f"Nota salvata (id {output.get('id')})."
+    if tool in ("notes.list", "notes.search"):
+        notes = output.get("notes", [])
+        if not notes:
+            return "Nessuna nota."
+        return "Note:\n" + "\n".join(f"• [{n['id']}] {n['title'] or n['text'][:80]}" for n in notes)
+    if tool == "notes.delete":
+        return f"Nota {output.get('id')} eliminata."
+    if tool == "todo.add":
+        due = f", scadenza {output.get('due_at')}" if output.get("due_at") else ""
+        return f"Aggiunto alle cose da fare (id {output.get('id')}{due}): {output.get('text')}"
+    if tool == "todo.list":
+        todos = output.get("todos", [])
+        if not todos:
+            return "Nessuna cosa da fare."
+        return "Cose da fare:\n" + "\n".join(f"• [{t['id']}] {t['text']}" + (f" (entro {t['due_at']})" if t.get("due_at") else "") for t in todos)
+    if tool == "todo.done":
+        return f"Fatto! Attività {output.get('id')} completata."
+    if tool == "memory.update":
+        return f"Ricordo {output.get('id')} aggiornato: {output.get('text')}"
     if tool in ("web.browse", "web.form"):
         excerpt = (output.get("text") or "").strip()[:1200]
         head = "Modulo inviato. " if tool == "web.form" else ""
@@ -280,6 +341,29 @@ def _form_fields(text: str) -> dict:
 
 
 _RULES: list[tuple[re.Pattern[str], str, Any]] = [
+    # Strumenti quotidiani (ADR-0046).
+    (re.compile(r"^\s*(?:calcola|quanto fa|quanto vale|calc)\s*:?\s+(.+?)\s*\??$", re.I), "math.calc", lambda m: {"expression": m.group(1)}),
+    (re.compile(r"^\s*(?:converti|quanti|quante)\s+(-?\d+(?:[.,]\d+)?)\s*([a-z°/0-9]+)\s+(?:in|a)\s+([a-z°/0-9]+)\s*\??$", re.I), "units.convert",
+     lambda m: {"value": float(m.group(1).replace(",", ".")), "from": m.group(2), "to": m.group(3)}),
+    (re.compile(r"^\s*quanti giorni (?:mancano|ci sono) (?:al|fino al|dal)\s+(\d{4}-\d{2}-\d{2})\s*\??$", re.I), "date.calc",
+     lambda m: {"date": time.strftime("%Y-%m-%d"), "until": m.group(1)}),
+    (re.compile(r"^\s*(?:che tempo fa|meteo|previsioni(?: meteo)?)\s+(?:a|ad|in|per|di)?\s*(.+?)\s*\??$", re.I), "weather.forecast",
+     lambda m: {"place": m.group(1).strip()[:120], "days": 3}),
+    (re.compile(r"\b(spazio (?:su|del|sul) disco|spazio libero|dischi)\b", re.I), "system.disks", lambda m: {}),
+    (re.compile(r"^\s*(?:trova|cerca) (?:il |i )?file\s+(?:che contengono|con)\s+[«\"']?(.+?)[»\"']?\s*$", re.I), "fs.search", lambda m: {"text": m.group(1)[:200]}),
+    (re.compile(r"^\s*(?:trova|cerca) (?:il |i )?file\s+[«\"']?([^«»\"']+?)[»\"']?\s*$", re.I), "fs.search", lambda m: {"name": m.group(1)[:200]}),
+    (re.compile(r"^\s*(?:prendi nota|annota|nuova nota)\s*:?\s+(.+)$", re.I | re.S), "notes.add", lambda m: {"text": m.group(1).strip()[:10000]}),
+    (re.compile(r"^\s*(?:le mie note|mostra(?:mi)? le note|elenca le note|note)\s*$", re.I), "notes.list", lambda m: {}),
+    (re.compile(r"^\s*cerca nelle note\s*:?\s+(.+)$", re.I), "notes.search", lambda m: {"query": m.group(1)[:200]}),
+    (re.compile(r"^\s*(?:aggiungi (?:alle|tra le) cose da fare|da fare|ricordami di)\s*:?\s+(.+?)(?:\s+(?:entro|per il|il)\s+(\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2})?))?\s*$", re.I), "todo.add",
+     lambda m: {"text": m.group(1)[:500], **({"due": m.group(2)} if m.group(2) else {})}),
+    (re.compile(r"^\s*(?:cose da fare|lista delle cose da fare|cosa devo fare)\s*\??$", re.I), "todo.list", lambda m: {}),
+    (re.compile(r"^\s*fatto\s+([0-9a-f]{8})\s*$", re.I), "todo.done", lambda m: {"id": m.group(1)}),
+    (re.compile(r"^\s*(?:crea (?:la )?cartella|mkdir)\s+[«\"']?([^«»\"'\s]+)[»\"']?\s*$", re.I), "fs.mkdir", lambda m: {"path": m.group(1)}),
+    (re.compile(r"^\s*(?:sposta|rinomina)\s+[«\"']?([^«»\"'\s]+)[»\"']?\s+(?:in|a|come)\s+[«\"']?([^«»\"'\s]+)[»\"']?\s*$", re.I), "fs.move",
+     lambda m: {"from": m.group(1), "to": m.group(2)}),
+    (re.compile(r"^\s*(?:elimina|cancella) (?:il file |la cartella )?[«\"']?([^«»\"'\s]+\.[a-z0-9]+|[^«»\"'\s]+/)[»\"']?\s*$", re.I), "fs.delete",
+     lambda m: {"path": m.group(1).rstrip("/")}),
     # Navigazione con il browser (ADR-0043).
     (re.compile(r"^\s*naviga(?: su| in| a)?\s+(https?://\S+)(?:\s+e\s+(?:clicca|apri|segui)(?: su)?\s+[«\"']?(.+?)[»\"']?)?\s*$", re.I), "web.browse",
      lambda m: {"url": m.group(1), **({"follow": [m.group(2).strip()[:120]]} if m.group(2) else {})}),
@@ -296,7 +380,7 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
     (re.compile(r"^\s*(?:apri|visita|leggi(?: la pagina)?|riassumi|fetch|open)\s+(https?://\S+)\s*$", re.I), "web.fetch", lambda m: {"url": m.group(1)}),
     (re.compile(r"^\s*(?:cerca nella (?:mia )?memoria|cerca tra i ricordi|search memory(?: for)?)\s*:?\s+(.+)$|^\s*cosa sai (?:di|su|sul|sulla|del|della)\s+(?!me\b)(.+?)\s*\??$", re.I | re.S),
      "memory.search", lambda m: {"query": (m.group(1) or m.group(2)).strip()[:500]}),
-    (re.compile(r"^\s*(?:cerca(?: sul web| online| in rete)?|search(?: the web)?)\s*:?\s+(.+)$", re.I | re.S), "web.search", lambda m: {"query": m.group(1).strip()[:300]}),
+    (re.compile(r"^\s*(?:cerca(?!\s+(?:nelle note|(?:il |i )?file)\b)(?: sul web| online| in rete)?|search(?: the web)?)\s*:?\s+(.+)$", re.I | re.S), "web.search", lambda m: {"query": m.group(1).strip()[:300]}),
     (re.compile(r"\b(che ore sono|che ora è|ora attuale|data di oggi|che giorno è|what time)\b", re.I), "time.now", lambda m: {}),
     (re.compile(r"\b(info(?:rmazioni)? (?:di |sul |del )?sistema|system info|che sistema)\b", re.I), "system.info", lambda m: {}),
     (re.compile(r"^\s*(?:leggi|apri|mostra(?:mi)? il file|read)\s+(?:il file\s+)?[\"']?([^\"'\s]+)[\"']?\s*$", re.I), "fs.read",
@@ -322,7 +406,7 @@ _WORKFLOW_RULES: list[tuple[re.Pattern[str], str, Any]] = [
     (re.compile(r"^\s*(?:apri|visita|leggi(?: la pagina)?|riassumi|fetch|open)\s+(https?://\S+)\s*$", re.I), "web.fetch", lambda m: {"url": m.group(1)}),
     (re.compile(r"^\s*(?:cerca nella (?:mia )?memoria|cerca tra i ricordi|search memory(?: for)?)\s*:?\s+(.+)$|^\s*cosa sai (?:di|su|sul|sulla|del|della)\s+(?!me\b)(.+?)\s*\??$", re.I | re.S),
      "memory.search", lambda m: {"query": (m.group(1) or m.group(2)).strip()[:500]}),
-    (re.compile(r"^\s*(?:cerca(?: sul web| online| in rete)?|search(?: the web)?)\s*:?\s+(.+)$", re.I | re.S), "web.search", lambda m: {"query": m.group(1).strip()[:300]}),
+    (re.compile(r"^\s*(?:cerca(?!\s+(?:nelle note|(?:il |i )?file)\b)(?: sul web| online| in rete)?|search(?: the web)?)\s*:?\s+(.+)$", re.I | re.S), "web.search", lambda m: {"query": m.group(1).strip()[:300]}),
     (re.compile(r"\b(elenca|mostra|quali|lista)( le)? automazioni\b|\bautomazioni\?*$", re.I), "workflow.list", lambda m: {}),
     (re.compile(r"^\s*(?:esegui|avvia|lancia)(?: ora)? (?:l')?automazione\s+([0-9a-f-]{4,})\s*$", re.I), "workflow.run", lambda m: {"id": m.group(1)}),
     (re.compile(r"^\s*(?:elimina|cancella|rimuovi) (?:l')?automazione\s+([0-9a-f-]{4,})\s*$", re.I), "workflow.delete", lambda m: {"id": m.group(1)}),
@@ -431,6 +515,9 @@ Prova con:
 • "info sistema"
 • "elenca file"
 • "delega a un agente analista: che ore sono" (agente temporaneo con strumenti di sola lettura)
+• "calcola 15% di 230" · "converti 10 km in mi" · "quanti giorni mancano al 2026-12-25" · "meteo a Roma" · "spazio su disco"
+• "prendi nota: …" · "le mie note" · "ricordami di pagare la bolletta entro 2026-11-30 18:00" · "cose da fare" · "fatto <id>"
+• "trova file con «bolletta»" · "crea cartella archivio" · "sposta a.txt in archivio/a.txt" · "elimina vecchio.txt" (conferma)
 • "processi" · "processi per memoria" · "terminale: ls -la" (ogni comando chiede conferma)
 • "scrivi note.txt: testo da salvare" (chiede conferma)
 • "leggi note.txt"
@@ -528,13 +615,29 @@ TOOL_HINTS: list[tuple[tuple[str, ...], tuple[str, ...]]] = [
     (("cerca", "web", "internet", "online", "notizi", "http", "sito", "pagina", "wikipedia", "apri", "naviga", "modulo", "compila", "clicca"), ("web.",)),
     (("ogni ", "tra ", "automazion", "pianific", "ricorda di", "alle ", "ogni giorno", "ogni ora", "workflow", "esegui"), ("workflow.",)),
     (("ricord", "memoria", "dimentic", "sai di", "preferisc"), ("memory.",)),
-    (("connettor", "servizio", "api"), ("connector.",)),
+    (("connettor", "servizio", "api", "email", "e-mail", "mail", "posta", "calendario", "evento", "riunione", "appuntament",
+      "github", "issue", "todoist", "slack", "outlook", "gmail"), ("connector.",)),
     (("nodo", "computer", "pc ", "portatile"), ("node.",)),
     (("agente temporaneo", "sotto-agente", "sottoagente", "delega a", "sotto-compit", "in parallelo"), ("agent.",)),
+    (("calcola", "quanto fa", "percent", "radice", "converti", "quanti", "giorni", "data", "settimana"), ("math.", "units.", "date.")),
+    (("meteo", "tempo fa", "pioggia", "temperatura", "previsioni"), ("weather.",)),
+    (("nota", "note", "annota", "appunt"), ("notes.",)),
+    (("da fare", "todo", "ricordami", "scadenza", "promemoria", "fatto "), ("todo.",)),
+    (("disco", "dischi", "spazio"), ("system.",)),
+    (("trova", "sposta", "rinomina", "elimina", "cartella"), ("fs.",)),
     (("processi", "processo", "programmi", "cpu", "ram", "task manager", "rallent"), ("process.",)),
     (("terminale", "comando", "shell", "script", "esegui", "installa", "git ", "npm ", "python"), ("shell.",)),
 ]
-MAX_TOOLS = 10
+MAX_TOOLS = 12
+# Parole che rendono uno strumento più pertinente dentro il suo gruppo (ADR-0046): i più pertinenti per primi.
+TOOL_WORDS: dict[str, tuple[str, ...]] = {
+    "fs.write": ("scriv", "salva", "crea il file", "crea un file"), "fs.read": ("leggi", "apri", "mostra"),
+    "fs.list": ("elenca", "lista", "cosa c'e"), "fs.search": ("trova", "cerca"), "fs.move": ("sposta", "rinomina"),
+    "fs.delete": ("elimina", "cancella"), "fs.mkdir": ("cartella",), "web.search": ("cerca",), "web.fetch": ("apri", "leggi"),
+    "web.browse": ("naviga", "clicca"), "web.form": ("modulo", "compila"), "notes.add": ("prendi nota", "annota"),
+    "notes.search": ("cerca",), "todo.add": ("ricordami", "aggiungi"), "todo.done": ("fatto", "completat"),
+    "memory.forget": ("dimentica",), "memory.update": ("correggi", "aggiorna", "non e piu"),
+}
 _SCHEMA_DROP = {"additionalProperties", "maxLength", "minLength", "maxItems", "minItems", "$schema", "examples"}
 
 
@@ -559,6 +662,10 @@ def select_tools(message: str, names: list[str]) -> list[str]:
         dynamic = n.split(".")[1] if n.startswith(("connector.", "node.")) and n.count(".") >= 1 else None
         if any(n.startswith(p) for p in prefixes) or (dynamic and dynamic in text):
             chosen.append(n)
+    core = [n for n in chosen if n in CORE_TOOLS]
+    rest = [n for n in chosen if n not in CORE_TOOLS]
+    rest.sort(key=lambda n: -sum(w in text for w in TOOL_WORDS.get(n, ())))
+    chosen = core + rest
     return chosen[:MAX_TOOLS] if len(chosen) > MAX_TOOLS else chosen
 
 
@@ -584,6 +691,78 @@ def _usage(data: dict, tools_sent: int) -> dict:
 
 def _fn_name(tool: str) -> str:
     return tool.replace(".", "__")
+
+
+def coerce_arguments(args: Any, schema: dict) -> dict:
+    """Corregge gli errori di tipo più comuni dei modelli locali (ADR-0045): numeri e booleani scritti come testo,
+    oggetti passati come stringa JSON, campi inventati quando lo schema non li ammette. Il Core valida comunque."""
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except ValueError:
+            return {}
+    if not isinstance(args, dict):
+        return {}
+    props = schema.get("properties", {}) if isinstance(schema, dict) else {}
+    out: dict[str, Any] = {}
+    for key, value in args.items():
+        spec = props.get(key)
+        if spec is None:
+            if schema.get("additionalProperties", True) is False:
+                continue
+            out[key] = value
+            continue
+        kind = spec.get("type")
+        kinds = kind if isinstance(kind, list) else [kind]
+        if isinstance(value, str) and "string" not in kinds:
+            text = value.strip()
+            if "integer" in kinds and re.fullmatch(r"-?\d+", text):
+                value = int(text)
+            elif "number" in kinds and re.fullmatch(r"-?\d+(?:[.,]\d+)?", text):
+                value = float(text.replace(",", "."))
+            elif "boolean" in kinds and text.lower() in ("true", "false", "vero", "falso", "si", "sì", "no"):
+                value = text.lower() in ("true", "vero", "si", "sì")
+            elif ("array" in kinds or "object" in kinds) and text[:1] in "[{":
+                try:
+                    value = json.loads(text)
+                except ValueError:
+                    pass
+            elif "array" in kinds:
+                value = [value]
+        elif isinstance(value, (int, float)) and not isinstance(value, bool) and kinds == ["string"]:
+            value = str(value)
+        out[key] = value
+    return out
+
+
+_TOOL_TAG = re.compile(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", re.S)
+_FENCE = re.compile(r"^```(?:json)?\s*(\{.*\})\s*```$", re.S)
+
+
+def text_tool_call(content: str, by_fn: dict[str, str]) -> tuple[str, Any] | None:
+    """Chiamata di strumento scritta nel testo invece che nel campo dedicato (Qwen, Llama, Mistral):
+    `<tool_call>{...}</tool_call>`, blocco ```json``` o un oggetto JSON con `name` e `arguments`/`parameters`."""
+    text = (content or "").strip()
+    candidates = [m.group(1) for m in _TOOL_TAG.finditer(text)]
+    fence = _FENCE.match(text)
+    if fence:
+        candidates.append(fence.group(1))
+    if text.startswith("{") and text.endswith("}"):
+        candidates.append(text)
+    for raw in candidates:
+        try:
+            obj = json.loads(raw)
+        except ValueError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        if isinstance(obj.get("function"), dict):
+            obj = obj["function"]
+        name = str(obj.get("name") or obj.get("tool") or "")
+        tool = by_fn.get(name) or by_fn.get(_fn_name(name))
+        if tool:
+            return tool, obj.get("arguments", obj.get("parameters", {}))
+    return None
 
 
 def _tool_payload(step: dict) -> str:
@@ -661,6 +840,11 @@ class OllamaBackend:
             messages.append({"role": "user", "content": "Rispondi ora alla mia richiesta usando i risultati degli strumenti, senza chiamarne altri."})
         else:
             names = select_tools(_last_user_message(delegation), [n for n in catalog if n in allowed])
+            # Gli strumenti delle competenze attive vengono offerti per primi (ADR-0048).
+            preferred = [n for n in skill_tools(inputs) if n in catalog and n in allowed]
+            names = preferred + [n for n in names if n not in preferred]
+            if os.environ.get("JARVIS_TOOL_SELECTION") != "all":
+                names = names[:max(MAX_TOOLS, len(preferred))]
             used = [s["tool"] for s in history if s["tool"] in catalog and s["tool"] in allowed and s["tool"] not in names]
             names = names + used
             body["tools"] = [
@@ -671,14 +855,16 @@ class OllamaBackend:
         timeout = min(self.timeout_s, delegation.get("timeout_ms", 120000) / 1000)
         data = self._stream(body, timeout, emit) if emit else self._post("/api/chat", body, timeout)
         msg = data.get("message", {})
-        by_fn = {_fn_name(n): n for n in catalog}
-        for call in msg.get("tool_calls") or []:
-            fn = call.get("function", {})
-            tool = by_fn.get(fn.get("name", ""))
-            if tool and tool in allowed:
-                args = fn.get("arguments") or {}
-                if isinstance(args, str):
-                    args = json.loads(args)
+        by_fn = {_fn_name(n): n for n in catalog if n in allowed}
+        calls = [(by_fn.get(c.get("function", {}).get("name", "")), c.get("function", {}).get("arguments") or {})
+                 for c in msg.get("tool_calls") or []]
+        if not calls and steps_left > 0:
+            found = text_tool_call(msg.get("content") or "", by_fn)
+            if found:
+                calls = [found]
+        for tool, args in calls:
+            if tool:
+                args = coerce_arguments(args, catalog[tool].get("input_schema", {}))
                 out = _result("tool_call", self.info, tool=tool, arguments=args, catalog=catalog, rationale="Proposto dal modello")
                 out["usage"] = _usage(data, sent)
                 return out

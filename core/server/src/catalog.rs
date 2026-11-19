@@ -17,7 +17,24 @@ macro_rules! tool_file {
     };
 }
 
-const SOURCES: [&str; 21] = [
+const SOURCES: [&str; 38] = [
+    tool_file!("date.calc"),
+    tool_file!("fs.delete"),
+    tool_file!("fs.mkdir"),
+    tool_file!("fs.move"),
+    tool_file!("fs.search"),
+    tool_file!("math.calc"),
+    tool_file!("memory.update"),
+    tool_file!("notes.add"),
+    tool_file!("notes.delete"),
+    tool_file!("notes.list"),
+    tool_file!("notes.search"),
+    tool_file!("system.disks"),
+    tool_file!("todo.add"),
+    tool_file!("todo.done"),
+    tool_file!("todo.list"),
+    tool_file!("units.convert"),
+    tool_file!("weather.forecast"),
     tool_file!("agent.delegate"),
     tool_file!("fs.list"),
     tool_file!("fs.read"),

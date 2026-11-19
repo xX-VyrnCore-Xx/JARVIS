@@ -1,0 +1,94 @@
+{
+  "contract": "jarvis.connector/1",
+  "id": "todoist",
+  "name": "Todoist",
+  "version": "1.0.0",
+  "description": "Attività Todoist con il token API delle impostazioni di Todoist.",
+  "base_url": "https://api.todoist.com/api/v1",
+  "allowed_hosts": [
+    "api.todoist.com"
+  ],
+  "auth": {
+    "type": "bearer"
+  },
+  "operations": [
+    {
+      "name": "attivita",
+      "summary": "Attività attive",
+      "method": "GET",
+      "path": "/tasks",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "project_id": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200
+          }
+        }
+      }
+    },
+    {
+      "name": "crea_attivita",
+      "summary": "Crea un'attività (due_string in linguaggio naturale, es. «domani alle 18»)",
+      "method": "POST",
+      "path": "/tasks",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "content"
+        ],
+        "properties": {
+          "content": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000
+          },
+          "due_string": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4
+          }
+        }
+      },
+      "risk": "medium"
+    },
+    {
+      "name": "completa",
+      "summary": "Completa un'attività per id",
+      "method": "POST",
+      "path": "/tasks/{id}/close",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64
+          }
+        }
+      },
+      "risk": "medium"
+    }
+  ]
+}

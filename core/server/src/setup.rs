@@ -21,7 +21,47 @@ pub const TTS_VOICES: [&str; 3] = [
     "it_IT-riccardo-x_low",
     "en_US-lessac-medium",
 ];
-pub const OLLAMA_MODELS: [&str; 4] = ["qwen2.5:3b", "llama3.2:3b", "qwen2.5:7b", "gemma3:4b"];
+/// Modelli Ollama proposti (ADR-0045): i più recenti con buon supporto agli strumenti in testa.
+pub const OLLAMA_MODELS: [&str; 7] = [
+    "qwen3:4b",
+    "qwen3:8b",
+    "llama3.1:8b",
+    "qwen2.5:3b",
+    "llama3.2:3b",
+    "qwen2.5:7b",
+    "gemma3:4b",
+];
+
+/// Memoria fisica in GB, se il sistema la espone senza permessi speciali.
+pub fn total_memory_gb() -> Option<u64> {
+    if let Ok(t) = std::fs::read_to_string("/proc/meminfo") {
+        let kb: u64 = t
+            .lines()
+            .find(|l| l.starts_with("MemTotal:"))?
+            .split_whitespace()
+            .nth(1)?
+            .parse()
+            .ok()?;
+        return Some(kb / 1024 / 1024);
+    }
+    if cfg!(target_os = "macos") {
+        let out = std::process::Command::new("/usr/sbin/sysctl")
+            .args(["-n", "hw.memsize"])
+            .output()
+            .ok()?;
+        let bytes: u64 = String::from_utf8_lossy(&out.stdout).trim().parse().ok()?;
+        return Some(bytes / 1024 / 1024 / 1024);
+    }
+    None
+}
+
+/// Modello consigliato: con almeno 16 GB un modello da 8 miliardi di parametri, altrimenti uno da 4.
+pub fn recommended_model(memory_gb: Option<u64>) -> &'static str {
+    match memory_gb {
+        Some(gb) if gb >= 16 => "qwen3:8b",
+        _ => "qwen3:4b",
+    }
+}
 /// Modelli di embedding per la ricerca nella memoria con i sinonimi (ADR-0028).
 pub const EMBED_MODELS: [&str; 2] = ["nomic-embed-text", "mxbai-embed-large"];
 
@@ -233,7 +273,8 @@ impl Setup {
                 "voice_packages": self.packages_dir().join("faster_whisper").is_dir(),
             },
             "choices": {"stt_models": STT_MODELS, "tts_voices": TTS_VOICES, "ollama_models": OLLAMA_MODELS, "embed_models": EMBED_MODELS},
-            "sizes_mb": {"voice_packages": 350, "stt": {"tiny": 75, "base": 145, "small": 470, "medium": 1500}, "tts": 65, "ollama": {"qwen2.5:3b": 1900, "llama3.2:3b": 2000, "qwen2.5:7b": 4700, "gemma3:4b": 3300}, "embed": {"nomic-embed-text": 280, "mxbai-embed-large": 670}},
+            "recommended": {"ollama_model": recommended_model(total_memory_gb()), "memory_gb": total_memory_gb()},
+            "sizes_mb": {"voice_packages": 350, "stt": {"tiny": 75, "base": 145, "small": 470, "medium": 1500}, "tts": 65, "ollama": {"qwen3:4b": 2600, "qwen3:8b": 5200, "llama3.1:8b": 4900, "qwen2.5:3b": 1900, "llama3.2:3b": 2000, "qwen2.5:7b": 4700, "gemma3:4b": 3300}, "embed": {"nomic-embed-text": 280, "mxbai-embed-large": 670}},
         })
     }
 
@@ -518,5 +559,20 @@ mod tests {
                 .as_deref(),
             Some("qwen2.5:3b")
         );
+    }
+}
+
+#[cfg(test)]
+mod model_tests {
+    use super::*;
+
+    #[test]
+    fn recommendation_follows_memory_and_is_in_the_list() {
+        assert_eq!(recommended_model(Some(32)), "qwen3:8b");
+        assert_eq!(recommended_model(Some(8)), "qwen3:4b");
+        assert_eq!(recommended_model(None), "qwen3:4b");
+        for gb in [None, Some(8), Some(16)] {
+            assert!(OLLAMA_MODELS.contains(&recommended_model(gb)));
+        }
     }
 }

@@ -264,3 +264,66 @@ async fn temporary_agents_only_get_tools_without_confirmation() {
         reqs[1]
     );
 }
+
+#[tokio::test]
+async fn invalid_arguments_are_explained_and_the_model_can_retry() {
+    // Primo tentativo con un campo sbagliato; il modello riceve i difetti e riprova correttamente (ADR-0045).
+    let (url, seen) = fake_ollama(
+        vec![
+            ("memory__search", json!({"domanda": "caffè"})),
+            ("memory__search", json!({"query": "caffè"})),
+        ],
+        false,
+    );
+    let out = chat(url, 18779, "cerca nella memoria il caffè").await;
+    let calls = tools_called(&out);
+    assert_eq!(calls, ["memory.search", "memory.search"], "{out}");
+    let results: Vec<&Value> = out["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|s| s["kind"] == "tool_result")
+        .collect();
+    assert_eq!(
+        results.len(),
+        1,
+        "solo il secondo tentativo viene eseguito: {out}"
+    );
+    let second = seen.lock().unwrap()[1].clone();
+    let text = second["messages"].to_string();
+    assert!(
+        text.contains("policy.invalid_arguments") && text.contains("expected"),
+        "{text}"
+    );
+}
+
+#[tokio::test]
+async fn active_skills_enter_the_prompt_and_widen_only_the_offered_tools() {
+    // «buongiorno» attiva la competenza inclusa «Briefing del mattino» anche per una richiesta di ricerca:
+    // le sue istruzioni entrano nel prompt e i suoi strumenti vengono offerti per primi (ADR-0048).
+    let (url, seen) = fake_ollama(vec![], false);
+    let out = chat(url, 18780, "buongiorno, cerca sul web le notizie di oggi").await;
+    let first = seen.lock().unwrap()[0].clone();
+    let system = first["messages"][0]["content"].as_str().unwrap();
+    assert!(
+        system.contains("Competenza «Briefing del mattino»") && system.contains("cinque punti"),
+        "{system}"
+    );
+    let offered: Vec<String> = first["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["function"]["name"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        offered[..3],
+        ["time__now", "weather__forecast", "todo__list"],
+        "{offered:?}"
+    );
+    assert!(!offered.iter().any(|t| t == "shell__run"), "{offered:?}");
+    assert!(out["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["kind"] == "skill" && s["skill"] == "briefing"));
+}

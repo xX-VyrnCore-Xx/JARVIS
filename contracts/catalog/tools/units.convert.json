@@ -1,0 +1,49 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "units.convert",
+  "version": "1.0.0",
+  "summary": "Converte un valore tra unità di misura (lunghezza, massa, temperatura, volume, velocità, area, dati, tempo)",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "value",
+      "from",
+      "to"
+    ],
+    "properties": {
+      "value": {
+        "type": "number"
+      },
+      "from": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 20
+      },
+      "to": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 20
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "none",
+  "risk": "low",
+  "permissions": [
+    "core.compute:execute"
+  ],
+  "errors": [
+    "units.unknown",
+    "units.incompatible"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

@@ -14,6 +14,7 @@ interface SetupStatus {
   running: boolean;
   steps: { label: string; status: string; progress?: number | null; detail?: string }[];
   choices: { stt_models: string[]; tts_voices: string[]; ollama_models: string[]; embed_models?: string[] };
+  recommended?: { ollama_model?: string; memory_gb?: number | null };
   detected: { ollama: boolean; ollama_models: string[] };
   saved?: { plan?: { stt_model?: string; tts_voice?: string; ollama_model?: string; embed_model?: string } };
   sizes_mb: { voice_packages: number; tts: number; stt: Record<string, number>; ollama: Record<string, number>; embed?: Record<string, number> };
@@ -31,7 +32,7 @@ export const SetupDialog = forwardRef<SetupHandle>(function SetupDialog(_, ref) 
   const [stt, setStt] = useState("small");
   const [tts, setTts] = useState("it_IT-paola-medium");
   const [ollama, setOllama] = useState(false);
-  const [model, setModel] = useState("qwen2.5:3b");
+  const [model, setModel] = useState("qwen3:4b");
   const [embed, setEmbed] = useState(false);
   const [embedModel, setEmbedModel] = useState("nomic-embed-text");
   const [steps, setSteps] = useState<SetupStatus["steps"] | null>(null);
@@ -61,7 +62,7 @@ export const SetupDialog = forwardRef<SetupHandle>(function SetupDialog(_, ref) 
     setStatus(s);
     setStt(saved.stt_model || "small");
     setTts(saved.tts_voice || "it_IT-paola-medium");
-    setModel(saved.ollama_model || "qwen2.5:3b");
+    setModel(saved.ollama_model || s.recommended?.ollama_model || "qwen3:4b");
     setOllama(s.detected.ollama);
     setEmbed(s.detected.ollama);
     setEmbedModel(saved.embed_model || "nomic-embed-text");

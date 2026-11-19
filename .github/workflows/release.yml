@@ -1,6 +1,7 @@
 name: release
 
-# Programmi di installazione per Linux (.deb, .AppImage), macOS (.dmg) e Windows (.msi, setup .exe), con Core,
+# Programmi di installazione per Linux (.deb, .AppImage; .deb anche ARM64), macOS (.dmg Apple Silicon e Intel) e
+# Windows (.msi, setup .exe), con Core,
 # runtime AI e Python autonomo inclusi (ADR-0016). Ogni installer viene installato davvero sul runner (Linux e
 # Windows; su macOS l'app copiata dal .dmg montato) e il Core installato supera la prova di avvio.
 # Con un tag vX.Y.Z pubblica la release con installer e impronte (decisione del proprietario del 2026-11-17); i tag con suffisso, es. v1.0.0-rc.1, restano prerelease.
@@ -34,7 +35,13 @@ jobs:
           - { os: ubuntu-22.04, target: linux-x86_64, bundles: "deb,appimage" }
           - { os: macos-latest, target: macos-aarch64, bundles: "dmg" }
           - { os: windows-latest, target: windows-x86_64, bundles: "msi,nsis" }
+          # Piattaforme aggiuntive (ADR-0050): Mac con processore Intel e Linux ARM64 (Raspberry Pi 5, server
+          # ARM). Facoltative: se il runner non è disponibile la release esce con le piattaforme principali.
+          - { os: macos-15-intel, target: macos-x86_64, bundles: "dmg", optional: true }
+          - { os: ubuntu-22.04-arm, target: linux-aarch64, bundles: "deb", optional: true }
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.optional == true }}
+    timeout-minutes: 90
     env:
       JARVIS_AI_BACKEND: offline
       PYTHONDONTWRITEBYTECODE: "1"

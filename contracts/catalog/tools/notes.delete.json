@@ -1,0 +1,38 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "notes.delete",
+  "version": "1.0.0",
+  "summary": "Elimina una nota per id",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "id"
+    ],
+    "properties": {
+      "id": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 40
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "write_local",
+  "risk": "medium",
+  "permissions": [
+    "core.notes:write"
+  ],
+  "errors": [
+    "notes.not_found"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "none"
+}

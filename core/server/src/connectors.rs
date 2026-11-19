@@ -224,7 +224,21 @@ pub fn call(
         }
         None
     } else {
-        Some(serde_json::to_vec(&Value::Object(rest)).unwrap_or_default())
+        match op["body_encoding"].as_str() {
+            Some(enc @ ("gmail_raw" | "gmail_draft")) => {
+                let raw = rfc822(&rest)?;
+                Some(
+                    if enc == "gmail_raw" {
+                        json!({"raw": raw})
+                    } else {
+                        json!({"message": {"raw": raw}})
+                    }
+                    .to_string()
+                    .into_bytes(),
+                )
+            }
+            _ => Some(serde_json::to_vec(&Value::Object(rest)).unwrap_or_default()),
+        }
     };
     let mut headers = vec![(
         "Accept".to_string(),
@@ -300,6 +314,43 @@ pub fn call(
         "connector": manifest["id"], "operation": op_name, "status": status, "data": content,
         "retrieved_at": crate::now(), "untrusted": true,
     }))
+}
+
+/// Messaggio di posta RFC 822 in UTF-8, codificato base64url come richiesto da Gmail (ADR-0047).
+/// Le intestazioni rifiutano gli a capo (niente iniezione di intestazioni); l'oggetto usa la codifica MIME.
+pub fn rfc822(args: &serde_json::Map<String, Value>) -> Result<String, ToolError> {
+    use base64::Engine;
+    let field = |k: &str| {
+        args.get(k)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    let (to, subject, body, cc) = (field("to"), field("subject"), field("body"), field("cc"));
+    if to.trim().is_empty() {
+        return Err(err("connector.invalid", "manca il destinatario (to)"));
+    }
+    if [&to, &subject, &cc]
+        .iter()
+        .any(|v| v.contains('\r') || v.contains('\n'))
+    {
+        return Err(err(
+            "connector.invalid",
+            "a capo non ammessi nelle intestazioni",
+        ));
+    }
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let mut msg = format!("To: {to}\r\n");
+    if !cc.is_empty() {
+        msg.push_str(&format!("Cc: {cc}\r\n"));
+    }
+    msg.push_str(&format!(
+        "Subject: =?UTF-8?B?{}?=\r\n",
+        b64.encode(subject.as_bytes())
+    ));
+    msg.push_str("MIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n");
+    msg.push_str(&b64.encode(body.as_bytes()));
+    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(msg.as_bytes()))
 }
 
 /// Errori transitori: una lettura può essere ripetuta, una scrittura no (potrebbe essere già avvenuta).
@@ -392,5 +443,33 @@ mod tests {
         assert!(!verify_signature("segreto", b"{\"a\":2}", Some(&sig)));
         assert!(!verify_signature("altro", b"{\"a\":1}", Some(&sig)));
         assert!(!verify_signature("segreto", b"{\"a\":1}", None));
+    }
+}
+
+#[cfg(test)]
+mod mail_tests {
+    use super::*;
+
+    #[test]
+    fn rfc822_builds_a_utf8_message_and_refuses_header_injection() {
+        use base64::Engine;
+        let args = json!({"to": "ada@example.org", "subject": "Città", "body": "Ciao è tutto ok"});
+        let raw = rfc822(args.as_object().unwrap()).unwrap();
+        let msg = String::from_utf8(
+            base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(raw)
+                .unwrap(),
+        )
+        .unwrap();
+        assert!(msg.starts_with("To: ada@example.org\r\n"));
+        assert!(msg.contains("Subject: =?UTF-8?B?"));
+        let body = msg.split("\r\n\r\n").nth(1).unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(body)
+            .unwrap();
+        assert_eq!(String::from_utf8(decoded).unwrap(), "Ciao è tutto ok");
+        let bad = json!({"to": "a@b.c\r\nBcc: spia@x.y", "subject": "x", "body": "y"});
+        assert!(rfc822(bad.as_object().unwrap()).is_err());
+        assert!(rfc822(json!({"subject": "x"}).as_object().unwrap()).is_err());
     }
 }

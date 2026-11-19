@@ -1,0 +1,112 @@
+{
+  "contract": "jarvis.connector-catalog/1",
+  "templates": [
+    {
+      "id": "gmail",
+      "name": "Gmail",
+      "provider": "Google",
+      "category": "posta",
+      "auth": "oauth2",
+      "description": "Posta Gmail: cerca e leggi le email, crea bozze, invia messaggi (invio e bozze con conferma).",
+      "setup": "Google Cloud Console → API e servizi → abilita Gmail API; Credenziali → ID client OAuth di tipo «App desktop»; copia ID client e client secret.",
+      "setup_url": "https://console.cloud.google.com/apis/credentials",
+      "needs_client_id": true,
+      "needs_client_secret": true,
+      "operations": [
+        "cerca",
+        "leggi",
+        "bozza",
+        "invia",
+        "etichette"
+      ]
+    },
+    {
+      "id": "google_calendar",
+      "name": "Google Calendar",
+      "provider": "Google",
+      "category": "calendario",
+      "auth": "oauth2",
+      "description": "Calendario Google: prossimi eventi, ricerca, nuovi eventi (con conferma).",
+      "setup": "Google Cloud Console → abilita Google Calendar API; usa un ID client OAuth «App desktop» (anche lo stesso di Gmail).",
+      "setup_url": "https://console.cloud.google.com/apis/credentials",
+      "needs_client_id": true,
+      "needs_client_secret": true,
+      "operations": [
+        "eventi",
+        "crea_evento",
+        "calendari"
+      ]
+    },
+    {
+      "id": "outlook",
+      "name": "Outlook (Microsoft 365)",
+      "provider": "Microsoft",
+      "category": "posta e calendario",
+      "auth": "oauth2",
+      "description": "Posta e calendario Microsoft (Outlook.com, Microsoft 365) tramite Microsoft Graph.",
+      "setup": "Portale Azure → Registrazioni app → nuova app (account personali e aziendali) → piattaforma «App per dispositivi mobili e desktop» con URI di reindirizzamento http://localhost; copia l'ID applicazione (client).",
+      "setup_url": "https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade",
+      "needs_client_id": true,
+      "needs_client_secret": false,
+      "operations": [
+        "posta",
+        "leggi",
+        "invia",
+        "eventi",
+        "crea_evento"
+      ]
+    },
+    {
+      "id": "github",
+      "name": "GitHub",
+      "provider": "GitHub",
+      "category": "sviluppo",
+      "auth": "bearer",
+      "description": "Repository, issue e notifiche GitHub con un token personale (fine-grained consigliato).",
+      "setup": "GitHub → Settings → Developer settings → Personal access tokens (fine-grained) con accesso in lettura a repository, issue e notifiche (e scrittura issue se vuoi crearle).",
+      "setup_url": "https://github.com/settings/personal-access-tokens",
+      "needs_client_id": false,
+      "needs_client_secret": false,
+      "operations": [
+        "repository",
+        "issue",
+        "notifiche",
+        "crea_issue"
+      ]
+    },
+    {
+      "id": "todoist",
+      "name": "Todoist",
+      "provider": "Todoist",
+      "category": "produttività",
+      "auth": "bearer",
+      "description": "Attività Todoist con il token API delle impostazioni di Todoist.",
+      "setup": "Todoist → Impostazioni → Integrazioni → Sviluppatore → copia il token API.",
+      "setup_url": "https://app.todoist.com/app/settings/integrations/developer",
+      "needs_client_id": false,
+      "needs_client_secret": false,
+      "operations": [
+        "attivita",
+        "crea_attivita",
+        "completa"
+      ]
+    },
+    {
+      "id": "slack",
+      "name": "Slack",
+      "provider": "Slack",
+      "category": "comunicazione",
+      "auth": "bearer",
+      "description": "Canali e messaggi Slack con il token di un'app (xoxb-…) installata nel tuo workspace.",
+      "setup": "api.slack.com/apps → crea un'app → OAuth & Permissions con channels:read, channels:history, chat:write → installa nel workspace e copia il Bot User OAuth Token (xoxb-…).",
+      "setup_url": "https://api.slack.com/apps",
+      "needs_client_id": false,
+      "needs_client_secret": false,
+      "operations": [
+        "canali",
+        "messaggi",
+        "invia"
+      ]
+    }
+  ]
+}

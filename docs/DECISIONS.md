@@ -1020,6 +1020,99 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `tests/browser.rs` con il browser reale contro un sito sintetico (JavaScript eseguito, collegamento seguito, modulo inviato, immagine verso host negato bloccata e mai ricevuta, campo inesistente, indirizzo privato rifiutato prima dell'avvio; dalla chat: lettura senza conferma con fonte, invio solo dopo la conferma con password mascherata); in CI il browser è obbligatorio (`google-chrome` dei runner Ubuntu).
 - **Documenti interessati:** ACCEPTANCE.md, AUTONOMY_AND_TOOLS.md, SECURITY_AND_PRIVACY.md, ROADMAP.md.
 
+### ADR-0044 — App desktop nativa: barra dei menu, scorciatoia globale e notifiche di sistema
+
+- **Data:** 2026-11-19 · **Stato:** accettato · **Fonte:** richiesta del proprietario («migliora la grafica dell'app Windows e soprattutto dell'app macOS»).
+- **Decisione:**
+  - icona nella barra dei menu (macOS) o nell'area di notifica (Windows, Linux) con «Apri JARVIS», «Nascondi», «Esci da JARVIS»; clic sinistro per mostrare o nascondere;
+  - su macOS menu dell'applicazione in italiano (Informazioni, Nascondi, Modifica con copia e incolla, Finestra, Schermo intero) e riapertura dal Dock;
+  - chiudere la finestra la nasconde: voce, automazioni e notifiche restano attive; solo «Esci da JARVIS» ferma Core e worker;
+  - scorciatoia globale ⌘⇧J (macOS) o Ctrl+Maiusc+J (Windows, Linux) per mostrare o nascondere JARVIS da qualunque app; istanza singola; posizione e dimensioni della finestra ricordate;
+  - notifiche native del sistema: l'app legge le notifiche non lette del Core ogni 10 secondi e mostra le nuove quando la finestra non è in primo piano (la WebView di macOS non offre le notifiche Web); il launcher genera il token di sessione (128 bit) e lo passa al Core con `JARVIS_TOKEN`;
+  - dashboard nell'app: su macOS barra laterale e intestazione traslucide, raggi morbidi; su Windows superfici piene in stile Fluent con indicatore della voce attiva; interfaccia non selezionabile come testo.
+- **Conseguenze:** JARVIS si comporta come un assistente residente. La scorciatoia può essere già occupata da un'altra app: in quel caso resta l'icona. La prova P7 è aggiornata.
+- **Evidenza:** `cargo clippy -D warnings` e build bloccata dell'app su Linux; build dell'app su macOS e Windows nella CI; `launches_core_on_free_port_and_stops_it` verifica che il token del launcher apra le notifiche del Core.
+- **Documenti interessati:** ACCEPTANCE.md, INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
+### ADR-0045 — Tool calling più robusto e modelli consigliati
+
+- **Data:** 2026-11-19 · **Stato:** accettato · **Fonte:** richiesta del proprietario («migliora il modello di JARVIS e la tool calling»).
+- **Decisione:**
+  - argomenti non validi: il Core restituisce all'agente i difetti (percorso del campo e motivo, al massimo 4) e lo schema atteso; il turno non si chiude e l'agente può ripetere la chiamata corretta (il blocco delle ripetizioni resta per le chiamate identiche);
+  - correzione dei tipi prima dell'invio al Core: numeri e booleani scritti come testo (anche «0,5», «sì»), oggetti o liste in forma di stringa JSON, valore singolo per un campo lista, campi non previsti scartati quando lo schema non li ammette; il Core valida comunque;
+  - chiamate scritte nel testo invece che nel campo dedicato: `<tool_call>{…}</tool_call>`, blocco ```json``` o oggetto con `name` e `arguments`/`parameters`, accettate solo per strumenti delegati;
+  - modelli proposti nella configurazione guidata: `qwen3:4b`, `qwen3:8b`, `llama3.1:8b` in testa ai precedenti; raccomandazione automatica in base alla memoria (≥ 16 GB → `qwen3:8b`, altrimenti `qwen3:4b`).
+- **Conseguenze:** meno turni persi per errori di formato dei modelli locali piccoli.
+- **Evidenza:** `invalid_arguments_are_explained_and_the_model_can_retry` in `tests/agent_loop.rs`; `test_arguments_are_coerced_to_the_schema`, `test_tool_calls_written_in_text_are_recognised` in `tests/ai`; unitario della raccomandazione in `setup.rs`.
+- **Documenti interessati:** AI_SYSTEM.md, ROADMAP.md.
+
+### ADR-0046 — Strumenti quotidiani: calcolo, unità, date, note, cose da fare, file, dischi, meteo
+
+- **Data:** 2026-11-19 · **Stato:** accettato · **Fonte:** richiesta del proprietario («migliora la sua memoria e i suoi tools e aggiungine di nuovi tanti»).
+- **Decisione:** 17 nuovi strumenti nel catalogo (38 in totale), tutti con policy, audit e tracce:
+  - `math.calc` (parser a discesa ricorsiva, niente eval: operatori, potenza, percentuale, funzioni, costanti), `units.convert` (lunghezza, massa, volume, velocità, area, dati, tempo, temperatura), `date.calc` (giorni fra date, somma di giorni e mesi, giorno della settimana);
+  - `notes.add/list/search/delete` e `todo.add/list/done` in SQLite (schema v5); le cose da fare con scadenza generano una notifica una sola volta (nuova categoria `reminder`, aggiunta compatibile al contratto);
+  - `fs.search` (nome e testo, senza seguire collegamenti simbolici, al massimo 5.000 voci), `fs.mkdir`, `fs.move` e `fs.delete` con conferma (cartelle solo se vuote, mai la workspace stessa, percorsi fuori negati dalla policy);
+  - `system.disks`; `weather.forecast` con Open-Meteo (senza chiavi, solo i suoi host, negato con il Web spento);
+  - `memory.update` per correggere un ricordo per id;
+  - selezione degli strumenti per pertinenza (parole chiave per strumento, fino a 12 descrizioni), limite del contratto di delega portato a 64 strumenti (aggiunta compatibile); nuovi strumenti assegnati agli specialisti; comandi offline in italiano per tutti.
+- **Conseguenze:** JARVIS copre le richieste quotidiane senza modelli remoti né servizi a pagamento.
+- **Evidenza:** unitari di `toolbox.rs` (calcolatore, unità, date, file, dischi); `tests/everyday.rs` (dalla chat: calcolo, conversione, note, cose da fare con notifica unica, file con conferma, percorsi fuori negati, dischi; meteo contro un Open-Meteo sintetico e negato con il Web spento); `tests/ai`; E2E 77/77.
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, MEMORY_DATA_SYNC.md, ROADMAP.md, contratti `delegation` e `notification`.
+
+### ADR-0047 — Catalogo dei connettori: Gmail, Google Calendar, Outlook, GitHub, Todoist, Slack
+
+- **Data:** 2026-11-19 · **Stato:** accettato · **Fonte:** richiesta del proprietario («fai sì che si possa collegare Gmail e Calendar e tutto il resto»); decisione 81 (opzione D: framework completo con catalogo iniziale prioritario), il cui catalogo concreto viene così definito dal proprietario.
+- **Decisione:**
+  - modelli di manifest in `contracts/catalog/connectors/` incorporati nel Core, con indice (fornitore, categoria, tipo di accesso, istruzioni di configurazione e collegamento alla console):
+    - **Gmail** (OAuth Google): cerca, leggi, etichette, bozza e invio con conferma;
+    - **Google Calendar** (OAuth Google): eventi, calendari, nuovo evento con conferma;
+    - **Outlook** (OAuth Microsoft, Graph): posta, invio, eventi, nuovo evento;
+    - **GitHub** (token personale): repository, issue, notifiche, nuova issue;
+    - **Todoist** (token, API v1): attività, nuova attività, completamento;
+    - **Slack** (token del bot): canali, messaggi, invio;
+  - l'OAuth usa il motore dell'ADR-0027 (PKCE, token cifrati, rinnovo e revoca); l'ID client è quello creato dal proprietario nella console del servizio (JARVIS non distribuisce credenziali proprie), il client secret di Google si inserisce all'accesso;
+  - nuovo campo facoltativo `body_encoding` delle operazioni (aggiunta compatibile al contratto): con `gmail_raw` e `gmail_draft` il Core costruisce un messaggio RFC 822 UTF-8 da `to`, `subject`, `body`, `cc` (oggetto in codifica MIME, a capo nelle intestazioni rifiutati) e lo codifica in base64url, invece di chiederlo al modello;
+  - `GET /api/connectors/templates`, `POST /api/connectors/templates/{id}` (solo il proprietario); nella pagina Connettori la sezione «Catalogo» con istruzioni e pulsante «Aggiungi»; parole come «email», «calendario», «evento» rendono pertinenti gli strumenti dei connettori.
+- **Conseguenze:** collegare un servizio richiede solo la registrazione di un'app nella sua console (pochi minuti) e il consenso. Le API dei servizi possono cambiare: in particolare l'API v1 di Todoist va verificata con un account reale.
+- **Evidenza:** unitario `every_template_is_a_valid_manifest` (tutti validi contro il contratto, ID client obbligatorio per OAuth); `rfc822_builds_a_utf8_message_and_refuses_header_injection`; `mail_is_sent_as_rfc822_only_after_confirmation` in `tests/connectors.rs`; E2E: Gmail senza ID client disabilitato, Google Calendar e GitHub aggiunti dal catalogo (79/79).
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ACCEPTANCE.md, ROADMAP.md, contratto `connector`.
+
+### ADR-0048 — Competenze (Skills): procedure riutilizzabili del proprietario
+
+- **Data:** 2026-11-19 · **Stato:** accettato · **Fonte:** richiesta del proprietario («aggiungi Skills e Competenze»).
+- **Contesto:** le preferenze in memoria guidano lo stile, ma non descrivono procedure in più passi (briefing, revisione di testi, ricerca con fonti, registro delle spese). Il modello locale va guidato con istruzioni brevi e mirate, non con un prompt sempre più lungo.
+- **Decisione:**
+  - una competenza ha nome, descrizione, parole di attivazione, istruzioni (al massimo 4000 caratteri), strumenti suggeriti del catalogo e stato attivo/disattivo; è salvata nella tabella `skills` (schema 6);
+  - cinque competenze incluse al primo avvio, modificabili e disattivabili ma non eliminabili: «Briefing del mattino», «Scrittura e revisione», «Ricerca con fonti», «Organizzazione», «Spese»;
+  - una competenza si attiva quando la richiesta contiene una parola di attivazione o la richiama per nome («usa Spese: …», «competenza Spese»); al massimo 2 per richiesta;
+  - il Core aggiunge le competenze attive agli input della delega (`inputs.skills`, aggiunta compatibile al contratto); il worker inserisce le istruzioni nel prompt di sistema, prima delle regole di sicurezza, e offre per primi i loro strumenti;
+  - gli strumenti suggeriti devono esistere nel catalogo; possono allargare l'ambito dello specialista scelto per la richiesta (es. `todo.list` durante una ricerca con il briefing), ma non i permessi: policy, conferme e audit restano quelli di ogni strumento; gli agenti temporanei non ricevono competenze;
+  - API solo del proprietario: `GET/POST /api/skills`, `PUT/DELETE /api/skills/{id}`; ogni modifica è registrata nell'audit (`skill.save`, `skill.delete`); nella chat il passo «competenza · <nome>» mostra quale procedura è stata applicata; nuova vista «Competenze» nella dashboard.
+- **Alternative scartate:** competenze come plugin con codice (escluse dalla decisione 81 sui plugin isolati); attivazione decisa dal modello (meno prevedibile e più costosa in token con modelli piccoli).
+- **Conseguenze:** il proprietario insegna a JARVIS nuove procedure senza modificare il codice. Le parole di attivazione sono confronti di testo semplici: parole troppo generiche attivano la competenza più spesso del voluto.
+- **Evidenza:** `tests/skills.rs` (incluse, validazione, attivazione per parola e per nome, disattivazione, eliminazione, audit); `active_skills_enter_the_prompt_and_widen_only_the_offered_tools` in `tests/agent_loop.rs`; test Python del prompt e dell'ordine degli strumenti; E2E: competenza creata dalla dashboard e attivata in chat (84/84).
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ACCEPTANCE.md, ROADMAP.md, contratto `delegation`.
+
+### ADR-0049 — Backend: bundle compresso, ambito degli strumenti calcolato una volta, conservazione dello storico
+
+- **Data:** 2026-11-19 · **Stato:** accettato · **Fonte:** richiesta del proprietario («migliora il backend»).
+- **Decisione:**
+  - `app.js` e `app.css` vengono serviti con ETag (hash SHA-256 del contenuto), `Cache-Control: no-cache` e revalida con 304; con `Accept-Encoding: gzip` la versione compressa, calcolata una sola volta all'avvio (bundle da circa 320 KB a circa 100 KB, utile per telefoni e tablet in rete locale);
+  - l'ambito degli strumenti di una delega (specialista, agente temporaneo, competenze attive) viene calcolato una volta per delega invece che per ciascuno dei 64 strumenti;
+  - nella manutenzione periodica del database: per ogni automazione si conservano le ultime 200 esecuzioni; le cose da fare completate da più di 90 giorni vengono eliminate. Conversazione, attività, memoria e audit non cambiano conservazione.
+- **Conseguenze:** meno traffico e avvio più rapido della dashboard dai dispositivi; il database non cresce senza limite con automazioni frequenti.
+- **Evidenza:** `bundle_is_gzipped_and_revalidated_with_etag` in `tests/api.rs`; `history_keeps_the_latest_runs_and_recent_todos` in `store.rs`; suite Core completa (183 test).
+- **Documenti interessati:** ROADMAP.md.
+
+### ADR-0050 — Installer per Mac Intel e Linux ARM64
+
+- **Data:** 2026-11-19 · **Stato:** accettato · **Fonte:** richiesta del proprietario («migliora le build e crea le release nuove»).
+- **Decisione:** il workflow `release` aggiunge alla matrice `.dmg` per Mac con processore Intel (runner `macos-15-intel`) e `.deb` per Linux ARM64 (runner `ubuntu-22.04-arm`, es. Raspberry Pi 5), con le stesse prove degli altri installer (installazione reale e avvio del Core installato). Le due piattaforme sono facoltative (`continue-on-error`): se il runner non è disponibile per il repository, la release esce con le piattaforme principali; un limite di 90 minuti per job evita esecuzioni bloccate. Ogni file pubblicato riceve impronta, attestazione di provenienza e firma Sigstore come gli altri.
+- **Conseguenze:** gli installer coprono Apple Silicon, Intel, Windows x64, Linux x64 e Linux ARM64. L'AppImage resta solo x64.
+- **Evidenza:** esecuzione del workflow `release` per `v1.11.0`.
+- **Documenti interessati:** README.md, note di rilascio, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

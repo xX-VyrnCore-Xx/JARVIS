@@ -84,7 +84,11 @@ impl Config {
                 .and_then(|v| v.parse().ok())
                 .filter(|v| *v >= 1)
                 .unwrap_or(20),
-            token: uuid::Uuid::new_v4().simple().to_string(),
+            // Token di sessione: dal processo che avvia il Core (l'app desktop, per le notifiche native,
+            // ADR-0044) se robusto, altrimenti casuale a ogni avvio.
+            token: var("JARVIS_TOKEN")
+                .filter(|t| t.len() >= 32 && t.chars().all(|c| c.is_ascii_alphanumeric()))
+                .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string()),
             web: crate::web::WebConfig::from_env(),
         })
     }

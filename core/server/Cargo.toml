@@ -1,6 +1,6 @@
 [package]
 name = "jarvis-core"
-version = "1.10.0"
+version = "1.11.0"
 description = "Core JARVIS: API locale, orchestrazione, policy, strumenti, memoria e audit (prototipo v0.1)"
 edition.workspace = true
 rust-version.workspace = true
@@ -32,6 +32,7 @@ ureq = "2"
 # mTLS fra Core e nodi (ADR-0041): stessa versione di rustls usata da ureq, provider ring.
 # Verifica delle firme ES256 delle passkey (ADR-0042), già usata da rustls.
 ring = "0.17"
+flate2 = "1"
 # Navigazione Web interattiva (ADR-0043): DevTools Protocol del browser locale su ws://127.0.0.1, senza TLS.
 tungstenite = { version = "0.30", default-features = false, features = ["handshake"] }
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring", "pem"] }

@@ -11,6 +11,7 @@ import { Automations } from "./views/Automations";
 import { Chat } from "./views/Chat";
 import { Dashboard } from "./views/Dashboard";
 import { Memory } from "./views/Memory";
+import { Skills } from "./views/Skills";
 import { Audit, Connectors, Devices, Tasks, Workspace } from "./views/Simple";
 import { System } from "./views/System";
 
@@ -28,6 +29,7 @@ const NAV: NavEntry[] = [
   { view: "tasks", label: "Attività", icon: "tasks", group: "Operazioni" },
   { view: "automations", label: "Automazioni", owner: true, icon: "automations", group: "Operazioni" },
   { view: "memory", label: "Memoria", owner: true, icon: "memory", group: "Dati" },
+  { view: "skills", label: "Competenze", owner: true, icon: "skills", group: "Dati" },
   { view: "workspace", label: "Workspace", owner: true, icon: "workspace", group: "Dati" },
   { view: "connectors", label: "Connettori", owner: true, icon: "connectors", group: "Integrazioni" },
   { view: "devices", label: "Dispositivi", owner: true, icon: "devices", group: "Integrazioni" },
@@ -104,6 +106,7 @@ function Shell() {
             <>
               <Automations active={view === "automations"} />
               <Memory active={view === "memory"} />
+              <Skills active={view === "skills"} />
               <Workspace active={view === "workspace"} />
               <Connectors active={view === "connectors"} />
               <Devices active={view === "devices"} />

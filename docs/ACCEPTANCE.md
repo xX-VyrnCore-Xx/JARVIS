@@ -8,7 +8,7 @@ Questo documento raccoglie ciò che serve per l'accettazione finale descritta in
 |---|---|---|---|---|
 | RF-01 Conversazione | `core/server/tests/api.rs`, E2E | P1, P2 | Verde | Qualità con modelli reali da valutare |
 | RF-02 Orchestrazione | `api.rs`, `agent_loop.rs`, contratti task | — | Verde | Ciclo fino a 4 strumenti per richiesta (ADR-0037) |
-| RF-03 Agenti | contratti delega, `agents.rs`, `agent_loop.rs`, `subagents.rs`, `tests/ai` | — | Verde | 5 specializzazioni con ambito di strumenti (ADR-0038); agenti temporanei di sola lettura, un livello (ADR-0040) |
+| RF-03 Agenti | contratti delega, `agents.rs`, `agent_loop.rs`, `subagents.rs`, `skills.rs`, `tests/ai` | P17 | Verde | 5 specializzazioni con ambito di strumenti (ADR-0038); agenti temporanei di sola lettura, un livello (ADR-0040); competenze del proprietario (ADR-0048) |
 | RF-04 AI Gateway | `tests/ai/test_gateway.py`, guasti in `resilience.rs` | P2 | Verde | Solo backend locali |
 | RF-05 Computer Use | strumenti file, sistema, processi e terminale; `api.rs`, `terminal.rs` | P3, P14 | Verde | Terminale con conferma a ogni comando (ADR-0038); niente controllo di desktop e mouse |
 | RF-06 Web | `web.rs` (SSRF, iniezioni), `browser.rs` (`tests/browser.rs`), E2E | P4, P15 | Verde | Navigazione con il browser del sistema (ADR-0043); niente sessioni con le credenziali del proprietario |
@@ -19,7 +19,7 @@ Questo documento raccoglie ciò che serve per l'accettazione finale descritta in
 | RF-11 Dispositivi e nodi | `devices.rs`, `nodes.rs`, `node_tls.rs`, E2E | P8, P13 | Verde | Scelta automatica (ADR-0031); mTLS con certificati fissati (ADR-0041); VPN mesh affidata a Tailscale |
 | RF-12 Dati | backup, rollback | P9 | Verde | Nessuna sincronizzazione fra nodi |
 | RF-13 Notifiche | `notifications.rs`, `channels.rs`, E2E | P5 | Verde | Canali esterni ntfy e Telegram (ADR-0026) |
-| RF-14 Connettori | `connectors.rs`, `oauth.rs`, E2E | P10 | Verde | OAuth 2.0 con PKCE (ADR-0027); niente plugin con codice |
+| RF-14 Connettori | `connectors.rs`, `oauth.rs`, `connector_catalog.rs`, E2E | P10, P16 | Verde | OAuth 2.0 con PKCE (ADR-0027); catalogo Gmail, Calendar, Outlook, GitHub, Todoist, Slack (ADR-0047); niente plugin con codice |
 | RF-15 Miglioramenti | — | — | Non iniziato | Fuori dalla prima release |
 | RNF-01 Contratti | `tests/contracts`, `jarvis-contracts` | — | Verde | — |
 | RNF-02 Guasti | `resilience.rs` (blocco, crash, output non valido) | — | Verde | Perdita di rete fra nodi non provata |
@@ -54,7 +54,7 @@ Da eseguire sul proprio computer con una release o con i sorgenti. Annotare esit
 | P4 | Web reale | «cerca Rust linguaggio», poi «apri <link>» | Fonti con link, ora e SHA-256 |
 | P5 | Automazioni e notifiche | «tra 2 minuti che ore sono» | Esecuzione all'ora prevista e notifica nella campanella |
 | P6 | Voce | Dall'app installata: al primo avvio «Configura JARVIS» → Installa (dai sorgenti anche `./jarvis.sh voice-setup`), poi 🎤 e «Mani libere» | Trascrizione corretta in italiano; «Ehi Jarvis» attiva; interruzione con la voce |
-| P7 | App desktop | Installa dalla release (`.msi`/`.exe`, `.dmg`, `.deb`/`.AppImage`) e apri JARVIS dal menu; dai sorgenti: `./jarvis.sh desktop` | Si apre senza installare Python o Rust; chiudendola si fermano Core e worker; la disinstallazione rimuove l'app ma non i dati |
+| P7 | App desktop | Installa dalla release (`.msi`/`.exe`, `.dmg`, `.deb`/`.AppImage`) e apri JARVIS dal menu; dai sorgenti: `./jarvis.sh desktop` | Si apre senza installare Python o Rust; chiudendo la finestra JARVIS resta nella barra dei menu o nell'area di notifica (⌘⇧J / Ctrl+Maiusc+J la riapre), «Esci da JARVIS» ferma Core e worker; le notifiche arrivano come notifiche del sistema; la disinstallazione rimuove l'app ma non i dati |
 | P8 | Telefono | `tailscale serve 8765`, `JARVIS_ALLOWED_HOSTS=<host>`, codice dalla sezione Dispositivi | Associazione, chat dal telefono; dopo la revoca l'accesso cade subito |
 | P8a | App nativa iOS | Avvia il target JARVIS da Xcode, associa al Core, invia un messaggio, verifica conferme con e senza permesso, riapri l’app e revoca dal Core | Cronologia e chat funzionano, l’associazione persiste e la prima richiesta successiva alla revoca torna all’associazione |
 | P8b | App nativa Android | Installa l'APK `jarvis-android-debug` della CI (o compila `apps/android`), inserisci l'indirizzo HTTPS del Core e il codice, invia un messaggio, verifica le conferme con e senza permesso, riapri l'app e revoca dal Core | Chat e cronologia funzionano, l'associazione resta dopo il riavvio dell'app, dopo la revoca l'app torna all'associazione |
@@ -65,12 +65,14 @@ Da eseguire sul proprio computer con una release o con i sorgenti. Annotare esit
 | P13 | Nodo esecutore | Su un secondo computer con Tailscale: codice «Nodo esecutore» dalla sezione Dispositivi, `./jarvis.sh node https://<core>.ts.net <codice>`, poi in chat «nodo <nome> system.info» e «nodo <nome> fs.write path=prova.txt content=ciao»; infine revoca | Informazioni del secondo computer; scrittura solo dopo conferma e nella workspace del nodo; dopo la revoca il nodo si ferma e i suoi strumenti spariscono |
 | P14 | Processi e terminale | «quali processi usano più memoria?», poi «terminale: ls» e approva; prova «terminale: sudo ls» | Elenco dei processi senza conferma; il comando chiede conferma e mostra l'output; `sudo` viene negato |
 | P15 | Navigazione Web | Con Chrome o Edge installato: «naviga https://it.wikipedia.org e clicca Storia», poi «compila modulo <pagina con un modulo di prova>: campo=valore» e approva | Testo della pagina seguita con fonte; il modulo chiede conferma, mostra i campi e viene inviato solo dopo l'approvazione |
+| P16 | Gmail e Calendar | Crea un ID client OAuth «App desktop» in Google Cloud (Gmail API e Calendar API abilitate), poi in Connettori → Catalogo aggiungi Gmail e Google Calendar e premi «Accedi»; in chat: «connettore gmail cerca q=is:unread», «connettore google_calendar eventi timeMin=<oggi>» | Elenco reale delle email e degli eventi; invio di una bozza o di un evento solo dopo la conferma |
+| P17 | Competenze | In Competenze crea «Viaggi» con attivazione «itinerario», istruzioni «proponi un itinerario giorno per giorno» e strumento `weather.forecast`; in chat: «prepara un itinerario per Lisbona» | Passo «competenza · Viaggi», risposta che segue le istruzioni con il modello locale; disattivata, non si attiva più |
 
 ## Criteri di rilascio
 
 Una release `v1.0.0` si pubblica quando:
 1. tutti i job delle due CI sono verdi sul commit da rilasciare;
-2. le prove P1–P15, incluse P8a e P8b per i client nativi, sono superate o i difetti aperti sono registrati come non bloccanti;
+2. le prove P1–P17, incluse P8a e P8b per i client nativi, sono superate o i difetti aperti sono registrati come non bloccanti;
 3. il proprietario accetta esplicitamente.
 
 Restano decisioni del proprietario, perché richiedono suoi account, certificati o scelte:

@@ -17,7 +17,9 @@ Gli strumenti dichiarano input, output, ambito, prerequisiti, effetti, errori, t
 
 La decisione 81 prevede il framework di integrazione completo fin dall'inizio e un catalogo iniziale prioritario. Le categorie coprono servizi cloud e Web, produttività, sviluppo, database e infrastrutture, comunicazione, dispositivi, API, webhook e plugin. Le integrazioni concrete crescono per milestone. Il catalogo e l'ordine dei singoli connettori richiedono ancora conferma. I plugin operano con isolamento e permessi revocabili.
 
-Nel prototipo il framework è l'Integration Engine dichiarativo (ADR-0013): un manifest `jarvis.connector/1` diventa un insieme di strumenti `connector.<id>.<operazione>` del catalogo, presenti solo mentre il connettore è autorizzato. Valgono gli stessi controlli degli strumenti statici (policy, SSRF, conferma delle scritture esterne, audit). Il catalogo concreto dei connettori resta da confermare (decisione 81).
+Nel prototipo il framework è l'Integration Engine dichiarativo (ADR-0013): un manifest `jarvis.connector/1` diventa un insieme di strumenti `connector.<id>.<operazione>` del catalogo, presenti solo mentre il connettore è autorizzato. Valgono gli stessi controlli degli strumenti statici (policy, SSRF, conferma delle scritture esterne, audit). Il catalogo iniziale (decisione 81) è definito dal proprietario: Gmail, Google Calendar, Outlook, GitHub, Todoist e Slack (ADR-0047).
+
+Le competenze (ADR-0048) sono procedure del proprietario: istruzioni, parole di attivazione e strumenti suggeriti. Quando una richiesta le attiva, al massimo due, entrano nel prompt dell'agente e i loro strumenti vengono offerti per primi. Non concedono permessi: ogni strumento passa comunque da policy, conferma e audit.
 
 Le proposte di auto-evoluzione passano attraverso modifiche versionate, test isolati e i controlli di rilascio. La configurazione di sicurezza resta sotto controllo del proprietario.
 
@@ -66,3 +68,6 @@ Dettagli in ADR-0005.
 
 
 **Navigazione con il browser (ADR-0043).** `web.browse` apre una pagina con il browser del sistema (JavaScript incluso) e segue fino a 3 collegamenti; `web.form` compila e invia un modulo solo dopo la conferma del proprietario. Ogni richiesta di rete del browser passa dalla policy Web; il profilo è temporaneo.
+
+
+**Strumenti quotidiani (ADR-0046).** Calcolo, conversioni di unità, date, note, cose da fare con promemoria, ricerca e gestione dei file nella workspace (spostare ed eliminare con conferma), dischi, meteo da Open-Meteo, correzione di un ricordo.

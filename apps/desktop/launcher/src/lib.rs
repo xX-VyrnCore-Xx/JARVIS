@@ -118,6 +118,8 @@ pub struct RunningCore {
     pub port: u16,
     pub url: String,
     pub log: PathBuf,
+    /// Token di sessione del Core, generato qui: serve all'app per leggere le notifiche (ADR-0044).
+    pub token: String,
 }
 
 impl RunningCore {
@@ -157,6 +159,29 @@ fn healthy(port: u16) -> bool {
 }
 
 /// Avvia il Core e attende che sia pronto.
+/// Token casuale di 32 caratteri esadecimali (128 bit) dal generatore del sistema.
+fn session_token() -> String {
+    let mut raw = [0u8; 16];
+    let ok = std::fs::File::open("/dev/urandom")
+        .and_then(|mut f| std::io::Read::read_exact(&mut f, &mut raw))
+        .is_ok();
+    if !ok {
+        // Windows: niente /dev/urandom; RandomState usa chiavi casuali del sistema per ogni istanza.
+        use std::hash::{BuildHasher, Hasher};
+        for chunk in raw.chunks_mut(8) {
+            let mut h = std::collections::hash_map::RandomState::new().build_hasher();
+            h.write_u128(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0),
+            );
+            chunk.copy_from_slice(&h.finish().to_le_bytes()[..chunk.len()]);
+        }
+    }
+    raw.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 pub fn launch(cfg: &LaunchConfig) -> Result<RunningCore, LaunchError> {
     std::fs::create_dir_all(&cfg.data_dir).map_err(|e| LaunchError::Io(e.to_string()))?;
     let log = cfg.data_dir.join("core.log");
@@ -169,6 +194,7 @@ pub fn launch(cfg: &LaunchConfig) -> Result<RunningCore, LaunchError> {
         .try_clone()
         .map_err(|e| LaunchError::Io(e.to_string()))?;
     let port = free_port().map_err(|e| LaunchError::Io(e.to_string()))?;
+    let token = session_token();
     let mut cmd = Command::new(&cfg.core_bin);
     // L'app desktop è un programma grafico: su Windows il Core (programma da console) non deve aprire
     // una finestra di console.
@@ -185,6 +211,7 @@ pub fn launch(cfg: &LaunchConfig) -> Result<RunningCore, LaunchError> {
         .env("JARVIS_PYTHON", &cfg.python)
         .current_dir(&cfg.home)
         .env("JARVIS_EXIT_WITH_PARENT", "stdin")
+        .env("JARVIS_TOKEN", &token)
         .stdin(Stdio::piped())
         .stdout(Stdio::from(out))
         .stderr(Stdio::from(err));
@@ -198,6 +225,7 @@ pub fn launch(cfg: &LaunchConfig) -> Result<RunningCore, LaunchError> {
     let mut core = RunningCore {
         child,
         parent_pipe,
+        token,
         port,
         url: format!("http://localhost:{port}/"),
         log: log.clone(),

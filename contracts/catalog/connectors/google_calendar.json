@@ -1,0 +1,164 @@
+{
+  "contract": "jarvis.connector/1",
+  "id": "google_calendar",
+  "name": "Google Calendar",
+  "version": "1.0.0",
+  "description": "Calendario Google: prossimi eventi, ricerca, nuovi eventi (con conferma).",
+  "base_url": "https://www.googleapis.com/calendar/v3",
+  "allowed_hosts": [
+    "www.googleapis.com",
+    "oauth2.googleapis.com"
+  ],
+  "auth": {
+    "type": "oauth2",
+    "authorize_url": "https://accounts.google.com/o/oauth2/v2/auth",
+    "token_url": "https://oauth2.googleapis.com/token",
+    "revoke_url": "https://oauth2.googleapis.com/revoke",
+    "client_id": "CONFIGURA_IL_CLIENT_ID",
+    "scopes": [
+      "https://www.googleapis.com/auth/calendar.events",
+      "https://www.googleapis.com/auth/calendar.readonly"
+    ]
+  },
+  "operations": [
+    {
+      "name": "eventi",
+      "summary": "Eventi del calendario principale da una data (timeMin in RFC 3339, es. 2026-11-20T00:00:00Z), in ordine",
+      "method": "GET",
+      "path": "/calendars/primary/events",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "timeMin": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "timeMax": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "q": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "maxResults": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "singleEvents": {
+            "type": "boolean"
+          },
+          "orderBy": {
+            "enum": [
+              "startTime",
+              "updated"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "crea_evento",
+      "summary": "Crea un evento nel calendario principale (start/end con dateTime RFC 3339 e timeZone, es. Europe/Rome)",
+      "method": "POST",
+      "path": "/calendars/primary/events",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "summary",
+          "start",
+          "end"
+        ],
+        "properties": {
+          "summary": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "location": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "start": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [],
+            "properties": {
+              "dateTime": {
+                "type": "string",
+                "maxLength": 40
+              },
+              "date": {
+                "type": "string",
+                "maxLength": 10
+              },
+              "timeZone": {
+                "type": "string",
+                "maxLength": 64
+              }
+            }
+          },
+          "end": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [],
+            "properties": {
+              "dateTime": {
+                "type": "string",
+                "maxLength": 40
+              },
+              "date": {
+                "type": "string",
+                "maxLength": 10
+              },
+              "timeZone": {
+                "type": "string",
+                "maxLength": 64
+              }
+            }
+          },
+          "attendees": {
+            "type": "array",
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "email"
+              ],
+              "properties": {
+                "email": {
+                  "type": "string",
+                  "maxLength": 200
+                }
+              }
+            }
+          }
+        }
+      },
+      "risk": "high"
+    },
+    {
+      "name": "calendari",
+      "summary": "Elenca i calendari dell'account",
+      "method": "GET",
+      "path": "/users/me/calendarList",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {}
+      }
+    }
+  ]
+}

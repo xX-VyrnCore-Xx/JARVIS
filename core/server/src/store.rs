@@ -13,8 +13,8 @@ pub struct Store {
 
 pub type StoreResult<T> = Result<T, rusqlite::Error>;
 
-/// Versione dello schema (ADR-0037): 1 = schema fino a 1.3.x con migrazioni additive; 3 = tracce dei task (ADR-0039); 4 = passkey (ADR-0042).
-pub const SCHEMA_VERSION: i64 = 4;
+/// Versione dello schema (ADR-0037): 1 = schema fino a 1.3.x con migrazioni additive; 3 = tracce dei task (ADR-0039); 4 = passkey (ADR-0042); 5 = note e cose da fare (ADR-0046).
+pub const SCHEMA_VERSION: i64 = 6;
 
 impl Store {
     pub fn open(path: &Path) -> StoreResult<Self> {
@@ -55,7 +55,12 @@ impl Store {
              CREATE INDEX IF NOT EXISTS task_spans_by_task ON task_spans (task_id, seq);
              CREATE TABLE IF NOT EXISTS passkeys (credential_id TEXT PRIMARY KEY, device_id TEXT NOT NULL,
                  public_key BLOB NOT NULL, sign_count INTEGER NOT NULL, created_at TEXT NOT NULL, last_used_at TEXT);
-             CREATE INDEX IF NOT EXISTS passkeys_by_device ON passkeys (device_id);",
+             CREATE INDEX IF NOT EXISTS passkeys_by_device ON passkeys (device_id);
+             CREATE TABLE IF NOT EXISTS notes (id TEXT PRIMARY KEY, title TEXT NOT NULL, text TEXT NOT NULL,
+                 tags TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS todos (id TEXT PRIMARY KEY, text TEXT NOT NULL, due_at TEXT, priority TEXT NOT NULL,
+                 created_at TEXT NOT NULL, done_at TEXT, notified_at TEXT);
+             CREATE INDEX IF NOT EXISTS todos_open ON todos (done_at, due_at);",
         )?;
         // Migrazione additiva: database creati prima delle fonti Web (RF-06).
         let has_sources = conn.prepare("SELECT sources FROM messages LIMIT 0").is_ok();
@@ -67,6 +72,7 @@ impl Store {
             embedder: None,
         };
         store.memory_migrate()?;
+        crate::skills::migrate(&store)?;
         store
             .conn
             .pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -149,6 +155,21 @@ impl Store {
             .execute("DELETE FROM task_spans WHERE at < ?1", [before])
     }
 
+    /// Conserva le ultime `keep` esecuzioni di ogni automazione (un workflow ogni minuto ne produrrebbe
+    /// oltre 500 000 l'anno) e le cose da fare completate da più di 90 giorni vengono eliminate.
+    pub fn history_prune(&self, keep: u32, done_before: &str) -> StoreResult<usize> {
+        let runs = self.conn.execute(
+            "DELETE FROM workflow_runs WHERE run_id IN (SELECT run_id FROM (SELECT run_id, ROW_NUMBER() OVER
+                 (PARTITION BY workflow_id ORDER BY started_at DESC) AS n FROM workflow_runs) WHERE n > ?1)",
+            [keep],
+        )?;
+        let todos = self.conn.execute(
+            "DELETE FROM todos WHERE done_at IS NOT NULL AND done_at < ?1",
+            [done_before],
+        )?;
+        Ok(runs + todos)
+    }
+
     /// Versione dello schema registrata nel file (`PRAGMA user_version`).
     pub fn schema_version(&self) -> StoreResult<i64> {
         self.conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -174,7 +195,7 @@ impl Store {
         Ok(json!({
             "ok": check == "ok", "check": check, "schema_version": self.schema_version()?,
             "size_bytes": pages * page_size,
-            "rows": {"memory": count("memory")?, "messages": count("messages")?, "tasks": count("tasks")?, "spans": count("task_spans")?,
+            "rows": {"notes": count("notes")?, "todos": count("todos")?, "memory": count("memory")?, "messages": count("messages")?, "tasks": count("tasks")?, "spans": count("task_spans")?,
                      "workflows": count("workflows")?, "notifications": count("notifications")?},
         }))
     }
@@ -583,5 +604,60 @@ impl Store {
         self.conn
             .execute("VACUUM INTO ?1", [path.to_string_lossy()])?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn history_keeps_the_latest_runs_and_recent_todos() {
+        let dir =
+            std::env::temp_dir().join(format!("jarvis-store-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let s = Store::open(&dir.join("jarvis.db")).unwrap();
+        for wf in ["a", "b"] {
+            for i in 0..5 {
+                s.conn
+                    .execute(
+                        "INSERT INTO workflow_runs (run_id, workflow_id, started_at, doc) VALUES (?1, ?2, ?3, '{}')",
+                        params![format!("{wf}{i}"), wf, format!("2026-01-0{}T00:00:00.000Z", i + 1)],
+                    )
+                    .unwrap();
+            }
+        }
+        for (id, done) in [
+            ("old", Some("2020-01-01T00:00:00.000Z")),
+            ("new", Some("2026-11-01T00:00:00.000Z")),
+            ("open", None),
+        ] {
+            s.conn
+                .execute(
+                    "INSERT INTO todos (id, text, priority, created_at, done_at) VALUES (?1, 'x', 'normale', '2020-01-01T00:00:00.000Z', ?2)",
+                    params![id, done],
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            s.history_prune(2, "2026-08-01T00:00:00.000Z").unwrap(),
+            6 + 1
+        );
+        let mut runs: Vec<String> = s
+            .conn
+            .prepare("SELECT run_id FROM workflow_runs ORDER BY run_id")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        runs.sort();
+        assert_eq!(runs, ["a3", "a4", "b3", "b4"]);
+        let todos: i64 = s
+            .conn
+            .query_row("SELECT COUNT(*) FROM todos", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(todos, 2);
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

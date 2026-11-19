@@ -6,6 +6,7 @@ const PATHS: Record<string, string> = {
   tasks: "M9 6h11M9 12h11M9 18h11M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2",
   automations: "M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4M12 8v4l3 2",
   memory: "M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5",
+  skills: "M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.4 6.8 19.1l1-5.8-4.3-4.1 5.9-.9z",
   workspace: "M3 7h6l2 2h10v10H3zM3 7V5h6l2 2",
   connectors: "M7 7h4M13 17h4M9 7a4 4 0 0 1 0 8H7M15 9h2a4 4 0 0 1 0 8M7 12h10",
   devices: "M4 5h12v9H4zM2 18h16M18 9h4v10h-4z",

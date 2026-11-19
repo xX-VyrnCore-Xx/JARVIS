@@ -1,0 +1,38 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "math.calc",
+  "version": "1.0.0",
+  "summary": "Calcola un'espressione matematica (+ - * / ^ %, parentesi, sqrt, sin, cos, tan, log, ln, abs, round, pi, e) in modo esatto e sicuro",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "expression"
+    ],
+    "properties": {
+      "expression": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "none",
+  "risk": "low",
+  "permissions": [
+    "core.compute:execute"
+  ],
+  "errors": [
+    "math.invalid"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

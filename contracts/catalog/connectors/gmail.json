@@ -1,0 +1,159 @@
+{
+  "contract": "jarvis.connector/1",
+  "id": "gmail",
+  "name": "Gmail",
+  "version": "1.0.0",
+  "description": "Posta Gmail: cerca e leggi le email, crea bozze, invia messaggi (invio e bozze con conferma).",
+  "base_url": "https://gmail.googleapis.com/gmail/v1/users/me",
+  "allowed_hosts": [
+    "gmail.googleapis.com",
+    "oauth2.googleapis.com"
+  ],
+  "auth": {
+    "type": "oauth2",
+    "authorize_url": "https://accounts.google.com/o/oauth2/v2/auth",
+    "token_url": "https://oauth2.googleapis.com/token",
+    "revoke_url": "https://oauth2.googleapis.com/revoke",
+    "client_id": "CONFIGURA_IL_CLIENT_ID",
+    "scopes": [
+      "https://www.googleapis.com/auth/gmail.readonly",
+      "https://www.googleapis.com/auth/gmail.compose"
+    ]
+  },
+  "operations": [
+    {
+      "name": "cerca",
+      "summary": "Cerca email con la sintassi di Gmail (es. «from:anna is:unread newer_than:7d»); restituisce gli id",
+      "method": "GET",
+      "path": "/messages",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "q": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "maxResults": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20
+          }
+        }
+      }
+    },
+    {
+      "name": "leggi",
+      "summary": "Legge un'email per id: intestazioni (mittente, oggetto, data) e anteprima; format=full per il corpo",
+      "method": "GET",
+      "path": "/messages/{id}",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "format": {
+            "enum": [
+              "metadata",
+              "full"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "bozza",
+      "summary": "Crea una bozza (to, subject, body, cc facoltativo)",
+      "method": "POST",
+      "path": "/drafts",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "to",
+          "subject",
+          "body"
+        ],
+        "properties": {
+          "to": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "subject": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "cc": {
+            "type": "string",
+            "maxLength": 500
+          }
+        }
+      },
+      "risk": "medium",
+      "body_encoding": "gmail_draft"
+    },
+    {
+      "name": "invia",
+      "summary": "Invia un'email (to, subject, body, cc facoltativo)",
+      "method": "POST",
+      "path": "/messages/send",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "to",
+          "subject",
+          "body"
+        ],
+        "properties": {
+          "to": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "subject": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "cc": {
+            "type": "string",
+            "maxLength": 500
+          }
+        }
+      },
+      "risk": "high",
+      "body_encoding": "gmail_raw"
+    },
+    {
+      "name": "etichette",
+      "summary": "Elenca le etichette della casella",
+      "method": "GET",
+      "path": "/labels",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {}
+      }
+    }
+  ]
+}

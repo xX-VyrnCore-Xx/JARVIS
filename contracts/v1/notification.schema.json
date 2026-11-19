@@ -39,7 +39,8 @@
         "confirmation",
         "system",
         "security",
-        "integration"
+        "integration",
+        "reminder"
       ]
     },
     "title": {

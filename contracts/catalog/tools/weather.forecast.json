@@ -1,0 +1,45 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "weather.forecast",
+  "version": "1.0.0",
+  "summary": "Meteo attuale e previsioni fino a 7 giorni per una località (Open-Meteo, senza chiavi; il nome della località esce dal computer)",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "place"
+    ],
+    "properties": {
+      "place": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 120
+      },
+      "days": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 7
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "web",
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "web.weather:read"
+  ],
+  "errors": [
+    "weather.not_found",
+    "web.unreachable",
+    "policy.web_disabled"
+  ],
+  "timeout_ms": 15000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

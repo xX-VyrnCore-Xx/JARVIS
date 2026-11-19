@@ -13,6 +13,7 @@ pub mod browser;
 pub mod catalog;
 pub mod channels;
 pub mod config;
+pub mod connector_catalog;
 pub mod connectors;
 pub mod memory;
 pub mod node_agent;
@@ -25,6 +26,7 @@ pub mod policy;
 pub mod rollback;
 pub mod secrets;
 pub mod setup;
+pub mod skills;
 
 /// Su Windows i processi figli (worker Python, pip) non devono aprire una finestra di console quando il
 /// Core è avviato dall'app desktop. Altrove non fa nulla.
@@ -40,6 +42,7 @@ pub fn hide_console(cmd: &mut std::process::Command) {
 }
 pub mod store;
 pub mod tls;
+pub mod toolbox;
 pub mod tools;
 pub mod updates;
 pub mod web;

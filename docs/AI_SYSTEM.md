@@ -69,3 +69,6 @@ Il worker espone `voice.transcribe` e `voice.synthesize` sul bridge, con faster-
 
 
 **Agenti temporanei (ADR-0040).** Con `agent.delegate` l'agente principale crea un agente temporaneo con un ruolo e pochi strumenti senza conferma (predefiniti di sola lettura): task figlio con la stessa traccia, al massimo 3 strumenti, nessuna sottodelega, al massimo 2 per richiesta.
+
+
+**Tool calling robusto (ADR-0045).** Argomenti corretti per tipo prima dell'invio, chiamate scritte nel testo riconosciute, difetti di validazione restituiti all'agente per un nuovo tentativo. Modelli consigliati: `qwen3:4b` (meno di 16 GB di RAM) o `qwen3:8b`.

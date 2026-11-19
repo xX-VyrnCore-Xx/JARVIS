@@ -5,11 +5,15 @@
 //! - La navigazione è limitata alla pagina locale e al Core; gli altri indirizzi http(s) (per esempio le
 //!   fonti Web) si aprono nel browser di sistema.
 //! - Nessuna capability Tauri è concessa: l'interfaccia remota non ha accesso alle API native.
-//! - Alla chiusura dell'app il Core viene terminato (il worker Python si chiude con il suo stdin).
+//! - Chiudere la finestra la nasconde: JARVIS resta attivo nella barra dei menu o nell'area di notifica e
+//!   torna con ⌘⇧J / Ctrl+Maiusc+J (ADR-0044). Uscendo dall'app («Esci da JARVIS») il Core viene terminato
+//!   (il worker Python si chiude con il suo stdin).
 //! - Installata con il programma di setup (ADR-0016), l'app usa il Core incluso accanto all'eseguibile
 //!   (`jarvis-core`), il runtime AI e i contratti tra le risorse e un Python autonomo incluso: non serve
 //!   installare altro.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod native;
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -85,6 +89,13 @@ fn clear_quarantine() {
 
 fn main() {
     let app = tauri::Builder::default()
+        // Una seconda apertura porta in primo piano la finestra esistente invece di avviare un altro Core.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            native::show(app)
+        }))
+        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(native::shortcut_plugin())
+        .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .manage(CoreState(Mutex::new(None)))
         .setup(|app| {
@@ -133,6 +144,18 @@ fn main() {
             let window = window.build()?;
             #[cfg(target_os = "macos")]
             clear_quarantine();
+            #[cfg(target_os = "macos")]
+            app.set_menu(native::app_menu(app.handle())?)?;
+            native::tray(app.handle())?;
+            native::register_shortcut(app.handle());
+            // Chiudere la finestra la nasconde: l'assistente resta attivo (voce, automazioni, notifiche).
+            let hider = window.clone();
+            window.on_window_event(move |event| {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = hider.hide();
+                }
+            });
 
             let handle = app.handle().clone();
             let bundled = app
@@ -155,6 +178,7 @@ fn main() {
                         // La dashboard applica le rifiniture dell'app desktop (ADR-0035).
                         url.query_pairs_mut().append_pair("app", "desktop");
                         *core_port.lock().unwrap_or_else(|e| e.into_inner()) = Some(core.port);
+                        native::watch_notifications(handle.clone(), core.port, core.token.clone());
                         *handle
                             .state::<CoreState>()
                             .0
@@ -175,6 +199,11 @@ fn main() {
         .expect("avvio dell'applicazione JARVIS");
 
     app.run(|handle, event| {
+        // macOS: clic sull'icona nel Dock con la finestra nascosta.
+        #[cfg(target_os = "macos")]
+        if let RunEvent::Reopen { .. } = event {
+            native::show(handle);
+        }
         if let RunEvent::Exit = event {
             if let Some(mut core) = handle
                 .state::<CoreState>()

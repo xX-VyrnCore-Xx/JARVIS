@@ -193,6 +193,30 @@ function check(cond, msg) {
   check((await page.locator("#memory-graph").innerHTML()).includes("Anna"), "grafo delle conoscenze con le relazioni");
   if (shots) await page.screenshot({ path: `${shots}/jarvis-memoria.png`, fullPage: true });
 
+  // Competenze (ADR-0048): incluse visibili, nuova competenza creata e attivata da una parola chiave in chat.
+  await page.click('[data-view="skills"]');
+  await page.waitForSelector('#skills [data-skill="briefing"]');
+  check((await page.locator("#skills .card").count()) >= 5, "competenze incluse elencate");
+  await page.click("#skill-new");
+  await page.fill('#skill-form input[name="name"]', "Viaggi E2E");
+  await page.fill('#skill-form input[name="triggers"]', "itinerario");
+  await page.fill('#skill-form textarea[name="instructions"]', "Proponi un itinerario giorno per giorno.");
+  await page.fill('#skill-form input[name="tools"]', "weather.forecast");
+  await page.click('#skill-form button[type="submit"]');
+  await page.waitForFunction(() => [...document.querySelectorAll("#skills .card .title")].some((t) => t.textContent === "Viaggi E2E"));
+  check(true, "competenza creata dalla dashboard");
+  await page.click('[data-view="chat"]');
+  await send("prepara un itinerario per Lisbona");
+  await page.waitForFunction(() => [...document.querySelectorAll(".step")].some((s) => s.textContent.includes("competenza · Viaggi E2E")));
+  check(true, "competenza attivata dalla parola chiave e mostrata nei passi");
+  await page.click('[data-view="skills"]');
+  const custom = page.locator("#skills .card", { hasText: "Viaggi E2E" });
+  await custom.locator('[data-action="toggle"]').click();
+  await page.waitForFunction(() => [...document.querySelectorAll("#skills .card.off .title")].some((t) => t.textContent === "Viaggi E2E"));
+  check(true, "competenza disattivata");
+  check((await page.locator('#skills [data-skill="briefing"] [data-action="delete"]').count()) === 0, "le competenze incluse non si eliminano");
+  if (shots) await page.screenshot({ path: `${shots}/jarvis-competenze.png`, fullPage: true });
+
   await page.click('[data-view="tasks"]');
   await page.waitForSelector("#tasks .card");
   check((await page.locator("#tasks .badge").first().innerText()) === "succeeded", "attività con stato verificato");
@@ -253,6 +277,15 @@ function check(cond, msg) {
 
   // Connettori (RF-14): installazione dal manifest, autorizzazione con credenziale cifrata, chiamata dalla chat.
   await page.click('[data-view="connectors"]');
+  // Catalogo (ADR-0047): Gmail chiede l'ID client OAuth; GitHub si aggiunge subito e attende il token.
+  await page.waitForSelector('#connector-catalog [data-template="gmail"]');
+  check(await page.locator('#connector-catalog [data-template="gmail"] button.primary').isDisabled(), "Gmail dal catalogo richiede l'ID client OAuth");
+  await page.fill('#connector-catalog [data-template="google_calendar"] input[name="client_id"]', "123-abc.apps.googleusercontent.com");
+  await page.click('#connector-catalog [data-template="google_calendar"] button.primary');
+  await page.click('#connector-catalog [data-template="github"] button.primary');
+  await page.waitForFunction(() => document.querySelector("#connectors").innerText.includes("GitHub") && document.querySelector("#connectors").innerText.includes("Google Calendar"));
+  check((await page.locator("#connectors").innerText()).includes("connector.google_calendar.crea_evento"), "Google Calendar e GitHub aggiunti dal catalogo con le loro operazioni");
+  if (shots) await page.screenshot({ path: `${shots}/jarvis-catalogo.png` });
   await page.fill('#connector-form textarea[name="manifest"]', JSON.stringify({
     contract: "jarvis.connector/1", id: "stato", name: "Stato servizi", version: "1.0.0", description: "Servizio sintetico",
     base_url: `http://127.0.0.1:${WEB_PORT}/svc`, allowed_hosts: ["127.0.0.1"], auth: { type: "bearer" },
@@ -260,10 +293,10 @@ function check(cond, msg) {
       input_schema: { type: "object", additionalProperties: false, required: ["nome"], properties: { nome: { type: "string" } } } }],
   }));
   await page.click('#connector-form button[type="submit"]');
-  await page.waitForSelector("#connectors .card");
-  await page.fill('#connectors input[type="password"]', "token-e2e-sintetico");
-  await page.click('#connectors button.primary');
-  await page.waitForFunction(() => document.querySelector("#connectors .badge").textContent === "autorizzato");
+  await page.waitForSelector('#connectors [data-connector="stato"]');
+  await page.fill('#connectors [data-connector="stato"] input[type="password"]', "token-e2e-sintetico");
+  await page.click('#connectors [data-connector="stato"] button.primary');
+  await page.waitForFunction(() => document.querySelector('#connectors [data-connector="stato"] .badge').textContent === "autorizzato");
   check(!(await page.locator("#connectors").innerText()).includes("token-e2e-sintetico"), "connettore autorizzato, credenziale non mostrata");
   if (shots) await page.screenshot({ path: `${shots}/jarvis-connettori.png` });
   await page.click('[data-view="chat"]');

@@ -345,7 +345,7 @@ function ConnectorCard({ c, reload }: { c: any; reload: () => void }) {
     });
   const id = encodeURIComponent(c.id);
   return (
-    <div className="card">
+    <div className="card" data-connector={c.id}>
       <div className="body">
         <div className="title">{c.name} <span className="sub">{c.id} · v{c.version}</span></div>
         <div className="sub">{c.base_url} · autenticazione {c.auth}{c.webhook ? ` · webhook ${c.webhook_path}` : ""}</div>
@@ -363,7 +363,7 @@ function ConnectorCard({ c, reload }: { c: any; reload: () => void }) {
           {c.auth === "oauth2" ? (
             <button className="primary" onClick={guard(async () => {
               // OAuth (ADR-0027): la pagina di consenso si apre nel browser; il servizio torna a JARVIS da solo.
-              const secret = prompt("Segreto del client, solo se il servizio lo richiede (altrimenti lascia vuoto):", "");
+              const secret = prompt("Client secret, se il servizio lo richiede (Google sì, Microsoft no; altrimenti lascia vuoto):", "");
               if (secret === null) return;
               const { authorize_url } = await post(`/api/connectors/${id}/oauth/start`, { client_secret: secret || undefined });
               window.open(authorize_url, "_blank", "noopener");
@@ -385,6 +385,62 @@ function ConnectorCard({ c, reload }: { c: any; reload: () => void }) {
         </div>
       </div>
       <span className={`badge ${c.authorized ? "succeeded" : "pending"}`}>{c.authorized ? "autorizzato" : "da autorizzare"}</span>
+    </div>
+  );
+}
+
+interface Template {
+  id: string; name: string; provider: string; category: string; auth: string; description: string;
+  setup: string; setup_url: string; needs_client_id: boolean; needs_client_secret: boolean; operations: string[];
+}
+
+/** Catalogo dei connettori pronti (ADR-0047): Gmail, Calendar, Outlook, GitHub, Todoist, Slack. */
+function TemplateCatalog({ installed, reload }: { installed: string[]; reload: () => void }) {
+  const { data } = useViewData(true, () => api<{ templates: Template[] }>("/api/connectors/templates"));
+  const [clientIds, setClientIds] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+  if (!data) return null;
+  return (
+    <div className="grid catalog" id="connector-catalog">
+      {data.templates.map((t) => {
+        const done = installed.includes(t.id);
+        return (
+          <div className="card template" key={t.id} data-template={t.id}>
+            <div className="body">
+              <div className="title">{t.name} <span className="sub">{t.provider} · {t.category}</span></div>
+              <p className="desc">{t.description}</p>
+              <details>
+                <summary>Come configurarlo</summary>
+                <p className="hint">{t.setup} <a href={t.setup_url} target="_blank" rel="noopener noreferrer">Apri la console</a></p>
+                <p className="hint">Operazioni: {t.operations.join(", ")}. Invii e creazioni chiedono sempre conferma.</p>
+              </details>
+              {done ? null : (
+                <div className="row">
+                  {t.needs_client_id ? (
+                    <input name="client_id" placeholder="ID client OAuth" aria-label={`ID client per ${t.name}`} value={clientIds[t.id] || ""}
+                      onChange={(e) => setClientIds({ ...clientIds, [t.id]: e.target.value })} />
+                  ) : null}
+                  <button type="button" className="primary" disabled={busy === t.id || (t.needs_client_id && !clientIds[t.id])}
+                    onClick={async () => {
+                      setBusy(t.id);
+                      try {
+                        await post(`/api/connectors/templates/${encodeURIComponent(t.id)}`, { client_id: clientIds[t.id] || undefined });
+                        reload();
+                      } catch (e) {
+                        alert((e as Error).message);
+                      } finally {
+                        setBusy(null);
+                      }
+                    }}>
+                    Aggiungi
+                  </button>
+                </div>
+              )}
+            </div>
+            <span className={`badge ${done ? "succeeded" : "pending"}`}>{done ? "aggiunto" : t.auth === "oauth2" ? "OAuth" : "token"}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -419,6 +475,9 @@ export function Connectors({ active }: { active: boolean }) {
         Servizi esterni descritti da un manifest <code>jarvis.connector/1</code>. Le credenziali restano cifrate nel Core e non vengono mai
         mostrate; le scritture verso l'esterno chiedono sempre conferma. In chat: «connettore &lt;id&gt; &lt;operazione&gt; chiave=valore».
       </p>
+      <h3 className="sub-head">Catalogo</h3>
+      {active ? <TemplateCatalog installed={items.map((c) => c.id)} reload={reload} /> : null}
+      <h3 className="sub-head">Installati</h3>
       <div id="connectors" className="list">
         {data && !items.length ? <Empty>Nessun connettore installato.</Empty> : null}
         {items.map((c) => <ConnectorCard key={c.id} c={c} reload={reload} />)}
