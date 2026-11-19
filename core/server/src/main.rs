@@ -275,6 +275,38 @@ async fn main() {
     );
     println!("  Arresto     : Ctrl+C");
     api::spawn_scheduler(state.clone(), std::time::Duration::from_secs(tick));
+    // mTLS dei nodi (ADR-0041): porta dedicata, solo su richiesta esplicita del proprietario.
+    if let Ok(tls_addr) = std::env::var("JARVIS_NODE_TLS_ADDR") {
+        match tls_addr.parse::<std::net::SocketAddr>() {
+            Ok(addr) => {
+                let identity = state
+                    .core
+                    .lock()
+                    .map_err(|e| e.to_string())
+                    .and_then(|mut j| j.enable_node_tls(addr.port()));
+                match (identity, tokio::net::TcpListener::bind(addr).await) {
+                    (Ok(identity), Ok(listener)) => {
+                        let fp = identity.fingerprint().unwrap_or_default();
+                        println!(
+                            "  Nodi (mTLS) : {addr} · impronta del Core {}…",
+                            &fp[..16.min(fp.len())]
+                        );
+                        let s = state.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = api::serve_node_tls(s, listener, identity).await {
+                                eprintln!("Porta TLS dei nodi terminata: {e}");
+                            }
+                        });
+                    }
+                    (Err(e), _) => eprintln!("mTLS dei nodi non attivato: {e}"),
+                    (_, Err(e)) => eprintln!("Porta TLS dei nodi {addr} non disponibile: {e}"),
+                }
+            }
+            Err(_) => {
+                eprintln!("JARVIS_NODE_TLS_ADDR non valido: «{tls_addr}» (esempio: 0.0.0.0:8766)")
+            }
+        }
+    }
     let core = state.core.clone();
     let app = api::router(state);
     if let Err(e) = axum::serve(listener, app)

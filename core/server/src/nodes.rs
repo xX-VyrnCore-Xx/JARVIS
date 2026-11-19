@@ -63,6 +63,8 @@ struct State {
     revoked: HashSet<String>,
     /// Risorse dichiarate dal nodo all'ultima richiesta di lavoro (ADR-0031).
     resources: HashMap<String, Resources>,
+    /// Impronta del certificato TLS del nodo (ADR-0041): con l'mTLS il token da solo non basta.
+    certs: HashMap<String, String>,
 }
 
 /// Risorse dichiarate da un nodo: CPU disponibili, carico medio dell'ultimo minuto e memoria libera.
@@ -88,6 +90,29 @@ impl NodeHub {
         let mut s = self.lock();
         s.tokens.insert(hash.to_string(), node_id.to_string());
         s.revoked.remove(node_id);
+    }
+
+    /// Lega il nodo al certificato TLS con questa impronta (ADR-0041).
+    pub fn bind_cert(&self, node_id: &str, fingerprint: &str) {
+        self.lock()
+            .certs
+            .insert(node_id.to_string(), fingerprint.to_string());
+    }
+
+    /// Vero se l'impronta appartiene a un nodo associato in questa sessione (verifica dell'handshake TLS).
+    /// Un nodo revocato completa l'handshake e riceve 401, così si ferma invece di riprovare all'infinito.
+    pub fn cert_allowed(&self, fingerprint: &str) -> bool {
+        self.lock().certs.values().any(|fp| fp == fingerprint)
+    }
+
+    /// Autenticazione completa: token valido e, se il nodo è legato a un certificato, connessione TLS con
+    /// quel certificato. Un token rubato non basta senza la chiave privata del nodo.
+    pub fn authenticate_peer(&self, token: &str, peer: Option<&str>) -> Option<String> {
+        let id = self.authenticate(token)?;
+        match self.lock().certs.get(&id) {
+            Some(fp) if peer != Some(fp.as_str()) => None,
+            _ => Some(id),
+        }
     }
 
     /// Revoca: il token smette di valere, la coda viene svuotata e le assegnazioni in attesa falliscono.

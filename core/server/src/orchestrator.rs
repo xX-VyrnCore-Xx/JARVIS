@@ -182,6 +182,8 @@ pub struct Jarvis {
     catalog: Catalog,
     worker: Option<Worker>,
     pending: HashMap<String, Pending>,
+    /// Porta TLS dei nodi e impronta del certificato del Core, se l'mTLS è attivo (ADR-0041).
+    node_tls: Option<(u16, String)>,
     /// Agenti temporanei in esecuzione (ADR-0040): task figlio → ruolo e strumenti concessi.
     temporary: HashMap<String, (String, Vec<String>)>,
     obs: std::sync::Arc<Observability>,
@@ -256,6 +258,7 @@ impl Jarvis {
             worker: None,
             pending: HashMap::new(),
             temporary: HashMap::new(),
+            node_tls: None,
             obs: std::sync::Arc::new(Observability::new(Some(&cfg_logs))),
             secrets,
             metrics_saved: None,
@@ -2862,12 +2865,22 @@ impl Jarvis {
 
     /// Associa un dispositivo con un codice valido. Il token è restituito una sola volta; il Core ne
     /// conserva solo l'impronta SHA-256. Dopo 5 codici errati tutti i codici in attesa vengono annullati.
+    /// Attiva l'mTLS dei nodi sulla porta indicata (ADR-0041): identità del Core in `<dati>/tls`, creata al
+    /// primo avvio. I nodi associati da qui in poi si legano al proprio certificato.
+    pub fn enable_node_tls(&mut self, port: u16) -> Result<crate::tls::Identity, String> {
+        let id =
+            crate::tls::Identity::load_or_create(&self.cfg.data_dir.join("tls"), "jarvis-core")?;
+        self.node_tls = Some((port, id.fingerprint()?));
+        Ok(id)
+    }
+
     pub fn pair_device(
         &mut self,
         code: &str,
         name: &str,
         platform: &str,
         capabilities: &[String],
+        cert_pem: Option<&str>,
     ) -> Result<Value, CoreError> {
         let code = code.trim().to_ascii_uppercase().replace(['-', ' '], "");
         let now_i = std::time::Instant::now();
@@ -2932,6 +2945,11 @@ impl Jarvis {
             }
             doc["slug"] = slug.into();
             doc["capabilities"] = json!(caps);
+            // mTLS (ADR-0041): con la porta dei nodi attiva il nodo si lega al certificato inviato.
+            if let (Some(_), Some(pem)) = (&self.node_tls, cert_pem) {
+                let cert = crate::tls::cert_from_pem(pem).map_err(CoreError::BadRequest)?;
+                doc["cert_sha256"] = crate::tls::fingerprint(cert.as_ref()).into();
+            }
         }
         let report = validate(Contract::Device, &doc);
         if !report.is_valid() {
@@ -2951,7 +2969,11 @@ impl Jarvis {
         self.notify(json!({"severity": "info", "category": "security", "title": format!("Nuovo dispositivo associato: {}", doc["name"].as_str().unwrap_or("")),
             "body": format!("Permessi: {}. Puoi revocarlo dalla sezione Dispositivi.", scopes.join(", ")),
             "source": {"kind": "module", "id": "devices"}}))?;
-        Ok(json!({"device": doc, "token": token}))
+        let mtls = match (&self.node_tls, doc.get("cert_sha256")) {
+            (Some((port, fp)), Some(_)) => json!({"port": port, "core_cert_sha256": fp}),
+            _ => Value::Null,
+        };
+        Ok(json!({"device": doc, "token": token, "mtls": mtls}))
     }
 
     /// Dispositivo attivo per un token (None se sconosciuto o revocato); aggiorna `last_seen_at` al massimo ogni minuto.
@@ -3018,6 +3040,9 @@ impl Jarvis {
         let slug = doc["slug"].as_str().unwrap_or_default();
         let name = doc["name"].as_str().unwrap_or(slug);
         self.nodes.register(id, hash);
+        if let Some(fp) = doc["cert_sha256"].as_str() {
+            self.nodes.bind_cert(id, fp);
+        }
         self.catalog.remove_prefix(&format!("node.{slug}."));
         for cap in doc["capabilities"]
             .as_array()
