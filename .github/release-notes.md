@@ -1,8 +1,6 @@
-## Novità in JARVIS 1.13.0
+## Novità in JARVIS 1.13.1
 
-- Supporto opzionale a XTTS v2 locale con campione WAV fornito dal proprietario. Faster Whisper usa filtri e parole chiave mirate, con correzioni italiane conservative. La dettatura si può rivedere prima dell’invio al cloud.
-- Verifica statica ed esecuzione Python con conferma in Docker isolato. Gli agenti temporanei usano strumenti di lettura limitati. Il terminale host richiede un consenso esplicito.
-- Budget del contesto cloud e controllo di credenziali riconoscibili prima dell’invio. Il workflow pubblica dal commit di `main` dopo una CI verde.
+La distribuzione desktop include un `.dmg` per Mac Apple Silicon e un setup `.exe` per Windows x64. Entrambi gli installer vengono installati e provati dalla CI.
 
 ## Installazione
 
