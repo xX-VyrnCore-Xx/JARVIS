@@ -46,6 +46,11 @@ fn populated(data: &Path) -> (Value, String) {
     j.confirm(&id, true).unwrap();
     j.create_workflow(&json!({"name": "Ora", "trigger": {"kind": "interval", "every_seconds": 3600}, "steps": [{"tool": "time.now", "arguments": {}}]}))
         .unwrap();
+    std::fs::write(
+        data.join("updates.json"),
+        r#"{"enabled":true,"channel":"beta"}"#,
+    )
+    .unwrap();
     let summary = j.create_backup(PASS).unwrap();
     let file = config(data)
         .backups_dir()
@@ -78,6 +83,9 @@ fn backup_restores_everything_on_a_clean_environment() {
         (Some("ok"), Some(true))
     );
     assert!(report["previous_data"].is_null());
+    assert!(std::fs::read_to_string(clean.join("updates.json"))
+        .unwrap()
+        .contains("beta"));
 
     let mut j = Jarvis::new(config(&clean)).unwrap();
     assert_eq!(
@@ -251,6 +259,28 @@ async fn backup_api_is_protected_audited_and_listed() {
     let list: Value =
         serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
     assert_eq!(list["items"][0]["file"], summary["file"]);
+    for (file, passphrase, expected) in [
+        (summary["file"].as_str().unwrap(), PASS, StatusCode::OK),
+        (
+            summary["file"].as_str().unwrap(),
+            "passphrase errata",
+            StatusCode::BAD_REQUEST,
+        ),
+        ("../altro.jbak", PASS, StatusCode::BAD_REQUEST),
+    ] {
+        let res = app
+            .clone()
+            .oneshot(call(
+                "POST",
+                "/api/backups/verify",
+                Some(json!({"file": file, "passphrase": passphrase})),
+                true,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), expected, "{file}");
+    }
+
     let res = app
         .clone()
         .oneshot(call("GET", "/api/audit", None, true))

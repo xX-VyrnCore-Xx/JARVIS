@@ -83,6 +83,7 @@ impl Updates {
         let mut s: Value = std::fs::read(&self.path)
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
+            .filter(Value::is_object)
             .unwrap_or_else(|| json!({}));
         if !s["enabled"].is_boolean() {
             s["enabled"] = false.into();
@@ -99,7 +100,7 @@ impl Updates {
         if let Some(o) = s.as_object_mut() {
             o.remove("current");
         }
-        std::fs::write(&self.path, s.to_string()).map_err(|e| e.to_string())
+        crate::backup::atomic_write(&self.path, s.to_string().as_bytes()).map_err(|e| e.to_string())
     }
 
     pub fn configure(&self, enabled: bool, channel: &str) -> Result<Value, String> {
@@ -108,7 +109,14 @@ impl Updates {
         }
         let mut s = self.state();
         s["enabled"] = enabled.into();
-        s["channel"] = channel.into();
+        if s["channel"] != channel {
+            s["channel"] = channel.into();
+            for key in ["latest", "error", "checked_at", "update_available"] {
+                s.as_object_mut()
+                    .expect("stato degli aggiornamenti")
+                    .remove(key);
+            }
+        }
         self.save(&s)?;
         Ok(self.state())
     }

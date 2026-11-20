@@ -49,6 +49,11 @@ fn version_change_snapshots_data_and_rollback_restores_it() {
 
     // Simula dati lasciati da una versione precedente.
     std::fs::write(data.join("VERSION"), "0.0.9").unwrap();
+    std::fs::write(
+        data.join("updates.json"),
+        r#"{"enabled":true,"channel":"beta"}"#,
+    )
+    .unwrap();
     {
         let mut j = Jarvis::new(config(&data)).unwrap();
         let notes = j.notifications(10, true, None).unwrap().to_string();
@@ -64,7 +69,14 @@ fn version_change_snapshots_data_and_rollback_restores_it() {
         .to_string_lossy()
         .starts_with("0.0.9-"));
 
+    let broken = root.join("broken");
+    std::fs::create_dir(&broken).unwrap();
+    std::fs::write(broken.join("jarvis.sqlite3"), "non è SQLite").unwrap();
+    assert!(rollback::restore(&data, Some(&broken)).is_err());
     let out = rollback::restore(&data, None).unwrap();
+    assert!(std::fs::read_to_string(data.join("updates.json"))
+        .unwrap()
+        .contains("beta"));
     assert_eq!(out["version"], "0.0.9");
     assert!(
         Path::new(out["previous_data"].as_str().unwrap())

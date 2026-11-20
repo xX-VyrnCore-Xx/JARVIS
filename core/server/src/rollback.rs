@@ -13,7 +13,6 @@ use serde_json::{json, Value};
 
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 const KEEP: usize = 3;
-const MAX_WORKSPACE_BYTES: u64 = 1024 * 1024 * 1024;
 
 pub fn rollback_dir(data_dir: &Path) -> PathBuf {
     let name = data_dir
@@ -37,20 +36,6 @@ fn copy_tree(from: &Path, to: &Path) -> std::io::Result<u64> {
         }
     }
     Ok(total)
-}
-
-fn dir_size(path: &Path) -> u64 {
-    fs::read_dir(path)
-        .map(|it| {
-            it.flatten()
-                .map(|e| match e.file_type() {
-                    Ok(k) if k.is_dir() => dir_size(&e.path()),
-                    Ok(k) if k.is_file() => e.metadata().map(|m| m.len()).unwrap_or(0),
-                    _ => 0,
-                })
-                .sum()
-        })
-        .unwrap_or(0)
 }
 
 /// Da chiamare con il blocco della cartella dati acquisito e prima di aprire il database.
@@ -80,27 +65,39 @@ pub fn prepare(data_dir: &Path) -> Result<Option<Value>, String> {
         .collect();
     let root = rollback_dir(data_dir);
     let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+    let id = uuid::Uuid::new_v4().simple();
     let target = root.join(format!("{safe}-{stamp}"));
+    let target = if target.exists() {
+        root.join(format!("{safe}-{id}-{stamp}"))
+    } else {
+        target
+    };
     let staging = root.join(format!(".in-corso-{}", uuid::Uuid::new_v4().simple()));
     let result = (|| -> std::io::Result<()> {
-        fs::create_dir_all(&staging)?;
+        fs::create_dir_all(&root)?;
+        crate::backup::private_dir(&staging)?;
         for name in [
             "jarvis.sqlite3",
             "jarvis.sqlite3-wal",
             "jarvis.sqlite3-shm",
             ".secrets.key",
             "VERSION",
-        ] {
+        ]
+        .into_iter()
+        .chain(crate::backup::DATA_SETTINGS.iter().copied())
+        {
             let src = data_dir.join(name);
             if src.is_file() {
-                fs::copy(&src, staging.join(name))?;
+                let dest = staging.join(name);
+                fs::create_dir_all(dest.parent().expect("cartella della copia"))?;
+                fs::copy(&src, dest)?;
             }
         }
         if data_dir.join("audit").is_dir() {
             copy_tree(&data_dir.join("audit"), &staging.join("audit"))?;
         }
         let workspace = data_dir.join("workspace");
-        if workspace.is_dir() && dir_size(&workspace) <= MAX_WORKSPACE_BYTES {
+        if workspace.is_dir() {
             copy_tree(&workspace, &staging.join("workspace"))?;
         }
         fs::rename(&staging, &target)
@@ -117,7 +114,8 @@ pub fn prepare(data_dir: &Path) -> Result<Option<Value>, String> {
 
 /// Registra la versione corrente: da chiamare dopo un'apertura riuscita.
 pub fn mark(data_dir: &Path) -> Result<(), String> {
-    fs::write(data_dir.join("VERSION"), CURRENT).map_err(|e| format!("VERSION: {e}"))
+    crate::backup::atomic_write(&data_dir.join("VERSION"), CURRENT.as_bytes())
+        .map_err(|e| format!("VERSION: {e}"))
 }
 
 pub fn list(data_dir: &Path) -> Vec<PathBuf> {
@@ -176,22 +174,68 @@ pub fn restore(data_dir: &Path, which: Option<&Path>) -> Result<Value, String> {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "data".into());
-    let aside = data_dir.with_file_name(format!("{name}.before-rollback-{stamp}"));
-    let staging = data_dir.with_file_name(format!(
-        ".{name}-rollback-{}",
-        uuid::Uuid::new_v4().simple()
-    ));
-    copy_tree(&source, &staging).map_err(|e| format!("copia non riuscita: {e}"))?;
-    fs::create_dir_all(staging.join("workspace")).map_err(|e| e.to_string())?;
-    if data_dir.exists() {
-        fs::rename(data_dir, &aside).map_err(|e| {
-            let _ = fs::remove_dir_all(&staging);
-            format!("impossibile spostare i dati attuali: {e}")
-        })?;
+    let id = uuid::Uuid::new_v4().simple();
+    let aside = data_dir.with_file_name(format!("{name}.before-rollback-{stamp}-{id}"));
+    let staging = data_dir.with_file_name(format!(".{name}-rollback-{id}"));
+    crate::backup::private_dir(&staging).map_err(|e| format!("cartella temporanea: {e}"))?;
+    let result = (|| {
+        copy_tree(&source, &staging).map_err(|e| format!("copia non riuscita: {e}"))?;
+        fs::create_dir_all(staging.join("workspace")).map_err(|e| e.to_string())?;
+        crate::backup::validate_database(&staging.join("jarvis.sqlite3"))?;
+        let version = fs::read_to_string(staging.join("VERSION")).unwrap_or_else(|_| "?".into());
+        let previous = replace_data(data_dir, &staging, &aside)?;
+        Ok(json!({
+            "restored_from": source.to_string_lossy(), "version": version.trim(),
+            "previous_data": previous.then(|| aside.to_string_lossy()),
+        }))
+    })();
+    if result.is_err() {
+        let _ = fs::remove_dir_all(staging);
     }
-    fs::rename(&staging, data_dir).map_err(|e| format!("ripristino non completato: {e}"))?;
-    let version = fs::read_to_string(data_dir.join("VERSION")).unwrap_or_else(|_| "?".into());
-    Ok(
-        json!({"restored_from": source.to_string_lossy(), "version": version.trim(), "previous_data": aside.to_string_lossy()}),
-    )
+    result
+}
+
+/// Installa i dati già verificati. Se lo spostamento finale fallisce, rimette la cartella precedente.
+pub(crate) fn replace_data(data: &Path, staging: &Path, aside: &Path) -> Result<bool, String> {
+    let has_previous = match fs::symlink_metadata(data) {
+        Ok(info) if info.is_dir() => {
+            fs::rename(data, aside).map_err(|e| format!("spostamento dei dati attuali: {e}"))?;
+            true
+        }
+        Ok(_) => return Err("la destinazione deve essere una cartella dati reale".into()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => return Err(format!("lettura della cartella dati: {e}")),
+    };
+    if let Err(e) = fs::rename(staging, data) {
+        if has_previous {
+            fs::rename(aside, data).map_err(|rollback| format!(
+                "installazione non riuscita ({e}) e recupero automatico non riuscito ({rollback}). I dati precedenti sono in {}",
+                aside.display()
+            ))?;
+        }
+        return Err(format!("installazione dei dati non riuscita: {e}"));
+    }
+    Ok(has_previous)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_install_puts_original_data_back() {
+        let root =
+            std::env::temp_dir().join(format!("jarvis-swap-{}", uuid::Uuid::new_v4().simple()));
+        let data = root.join("data");
+        fs::create_dir_all(&data).unwrap();
+        fs::write(data.join("sentinel"), "originale").unwrap();
+        let aside = root.join("precedenti");
+        assert!(replace_data(&data, &root.join("staging-assente"), &aside).is_err());
+        assert_eq!(
+            fs::read_to_string(data.join("sentinel")).unwrap(),
+            "originale"
+        );
+        assert!(!aside.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
 }

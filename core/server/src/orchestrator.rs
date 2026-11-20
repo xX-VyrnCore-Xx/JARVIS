@@ -202,6 +202,7 @@ pub struct Jarvis {
     pair_failures: u32,
     /// Blocco esclusivo sulla cartella dati: un solo Core per volta (rilasciato alla chiusura).
     _lock: std::fs::File,
+    _legacy_lock: std::fs::File,
 }
 
 fn obj(v: Value) -> Map<String, Value> {
@@ -213,25 +214,17 @@ fn obj(v: Value) -> Map<String, Value> {
 
 impl Jarvis {
     pub fn new(cfg: Config) -> Result<Self, String> {
+        let wait = std::time::Duration::from_secs(3);
+        let lock = crate::config::data_lock(&cfg.data_dir, wait)?;
         std::fs::create_dir_all(cfg.workspace()).map_err(|e| format!("workspace: {e}"))?;
-        let lock = std::fs::OpenOptions::new()
+        // Compatibilità con le release che usano ancora il blocco interno.
+        let legacy_lock = std::fs::OpenOptions::new()
             .create(true)
             .truncate(false)
             .write(true)
             .open(cfg.data_dir.join(".lock"))
             .map_err(|e| format!("blocco della cartella dati: {e}"))?;
-        // Il blocco (flock) appartiene al file aperto: un Core appena chiuso, o un processo figlio nato da
-        // un altro thread nell'istante fra fork ed exec, può trattenerlo per poco. Si riprova fino a 3 s.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-        while lock.try_lock().is_err() {
-            if std::time::Instant::now() >= deadline {
-                return Err(format!(
-                    "un altro Core JARVIS sta già usando la cartella dati {}",
-                    cfg.data_dir.display()
-                ));
-            }
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        }
+        crate::config::wait_lock(&legacy_lock, &cfg.data_dir, wait)?;
         // Rollback di release: copia dei dati prima che una versione diversa apra (e migri) il database.
         let upgraded = crate::rollback::prepare(&cfg.data_dir)?;
         std::fs::create_dir_all(cfg.data_dir.join("audit")).map_err(|e| format!("audit: {e}"))?;
@@ -278,6 +271,7 @@ impl Jarvis {
             ),
             pair_failures: 0,
             _lock: lock,
+            _legacy_lock: legacy_lock,
         };
         jarvis.register_authorized_connectors()?;
         jarvis.refresh_embedder();
@@ -808,8 +802,19 @@ impl Jarvis {
                 } else {
                     "Strumenti eseguiti e risposta composta"
                 };
-                task.transition("succeeded", reason);
                 let text = result["text"].as_str().unwrap_or_default().to_string();
+                if history
+                    .last()
+                    .is_some_and(|h| h["output"]["effect"] == "unknown")
+                {
+                    task.fail(
+                        json!({"code": "tool.uncertain_effect", "category": "unavailable",
+                               "message": "Effetto della scrittura non verificabile", "retryable": false, "effect": "unknown"}),
+                        "Esito dello strumento incerto",
+                    );
+                } else {
+                    task.transition("succeeded", reason);
+                }
                 return self.finish(task, out, text);
             }
             let call = &result["tool_call"];
@@ -878,6 +883,16 @@ impl Jarvis {
                     // e può correggere la chiamata nel passo successivo invece di chiudere il turno.
                     if code == "policy.invalid_arguments" {
                         if let Some(t) = self.catalog.get(&tool) {
+                            let missing = missing_tool_parameters(t, &arguments);
+                            if !missing.is_empty() {
+                                let text = format!(
+                                    "Per usare {tool}, mi servono questi parametri: {}. Puoi indicarli?",
+                                    missing.join(", ")
+                                );
+                                out.steps.push(json!({"kind": "clarification", "tool": tool, "missing": missing}));
+                                task.transition("succeeded", "Richiesti parametri al proprietario");
+                                return self.finish(task, out, text);
+                            }
                             let details: Vec<String> = t
                                 .input
                                 .iter_errors(&arguments)
@@ -1155,6 +1170,15 @@ impl Jarvis {
         last: bool,
         out: &mut Outcome,
     ) -> Value {
+        if let Some(uncertain) = history
+            .last()
+            .filter(|h| h["output"]["effect"] == "unknown")
+        {
+            let tool = uncertain["tool"].as_str().unwrap_or("lo strumento");
+            return json!({"kind": "reply", "text": format!(
+                "Esito incerto per {tool}. La scrittura potrebbe essere arrivata a destinazione. Verifica lo stato prima di ripetere l’operazione."
+            )});
+        }
         let mut inputs = inputs.clone();
         // I passi precedenti all'ultimo viaggiano ridotti: bastano all'agente per orientarsi e tengono la
         // delega entro il budget di token (ADR-0024).
@@ -1396,7 +1420,10 @@ impl Jarvis {
                 ))?;
                 out.steps.push(json!({"kind": "tool_result", "tool": tool, "status": "failed", "error": e.code, "effect": effect}));
                 self.notify_connector_failure(task, tool, &e, effect)?;
-                Ok(("failed", json!({"code": e.code, "message": e.message})))
+                Ok((
+                    "failed",
+                    json!({"code": e.code, "message": e.message, "effect": effect}),
+                ))
             }
         }
     }
@@ -3940,7 +3967,11 @@ impl Jarvis {
             && self.catalog.get(tool).is_some_and(|t| {
                 t.descriptor["effects"] != "read" && t.descriptor["effects"] != "none"
             });
-        if (write_external && matches!(code, "web.timeout" | "web.unreachable"))
+        if (write_external
+            && matches!(
+                code,
+                "web.timeout" | "web.unreachable" | "connector.server_error"
+            ))
             || (node_write && matches!(code, "node.timeout" | "node.revoked"))
         {
             "unknown"
@@ -4056,8 +4087,13 @@ impl Jarvis {
         Ok(view)
     }
 
+    pub fn backup_directory(&self) -> std::path::PathBuf {
+        self.cfg.backups_dir()
+    }
+
     pub fn backups(&self) -> Value {
-        json!({"dir": self.cfg.backups_dir().to_string_lossy(), "items": crate::backup::list(&self.cfg.backups_dir())})
+        json!({"dir": self.cfg.backups_dir().to_string_lossy(), "items": crate::backup::list(&self.cfg.backups_dir()),
+               "rollback": crate::rollback::list(&self.cfg.data_dir).iter().rev().filter_map(|p| p.file_name().map(|name| name.to_string_lossy())).collect::<Vec<_>>()})
     }
 }
 
@@ -4082,6 +4118,25 @@ fn clip(text: &str, max: usize) -> String {
     }
     let head: String = text.chars().take(max.saturating_sub(1)).collect();
     format!("{head}…")
+}
+
+fn missing_tool_parameters(tool: &crate::catalog::Tool, arguments: &Value) -> Vec<String> {
+    tool.input
+        .iter_errors(arguments)
+        .filter_map(|error| {
+            let jsonschema::error::ValidationErrorKind::Required { property } = error.kind else {
+                return None;
+            };
+            let name = property.as_str()?;
+            let path = error.instance_path.to_string();
+            Some(if path.is_empty() {
+                name.to_owned()
+            } else {
+                format!("{path}/{name}")
+            })
+        })
+        .take(8)
+        .collect()
 }
 
 fn explicit_connector_tool(objective: &str) -> Option<String> {

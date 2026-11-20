@@ -96,21 +96,13 @@ fn maintenance(cfg: &Config, args: &[String]) -> Option<i32> {
                 eprintln!("Uso: jarvis restore <file.jbak>");
                 return Some(2);
             };
-            // Il ripristino richiede il Core fermo: il blocco esclusivo sulla cartella dati lo garantisce.
-            if cfg.data_dir.join(".lock").exists() {
-                if let Ok(f) = std::fs::OpenOptions::new()
-                    .write(true)
-                    .open(cfg.data_dir.join(".lock"))
-                {
-                    if f.try_lock().is_err() {
-                        eprintln!(
-                            "✗ JARVIS è in esecuzione su {}: chiudilo prima del ripristino.",
-                            cfg.data_dir.display()
-                        );
-                        return Some(1);
-                    }
+            let _lock = match maintenance_lock(cfg) {
+                Ok(lock) => lock,
+                Err(e) => {
+                    eprintln!("✗ {e}. Esci da JARVIS prima del ripristino.");
+                    return Some(1);
                 }
-            }
+            };
             Some(
                 match jarvis_core::backup::restore(
                     std::path::Path::new(file),
@@ -129,20 +121,20 @@ fn maintenance(cfg: &Config, args: &[String]) -> Option<i32> {
                         0
                     }
                     Err(e) => {
-                        eprintln!("✗ Ripristino non riuscito: {e}. I dati attuali non sono stati modificati.");
+                        eprintln!("✗ Ripristino non riuscito: {e}");
                         1
                     }
                 },
             )
         }
         Some("rollback") => {
-            if core_running(cfg) {
-                eprintln!(
-                    "✗ JARVIS è in esecuzione su {}: chiudilo prima del rollback.",
-                    cfg.data_dir.display()
-                );
-                return Some(1);
-            }
+            let _lock = match maintenance_lock(cfg) {
+                Ok(lock) => lock,
+                Err(e) => {
+                    eprintln!("✗ {e}. Esci da JARVIS prima del rollback.");
+                    return Some(1);
+                }
+            };
             let snapshots = jarvis_core::rollback::list(&cfg.data_dir);
             if args.get(1).map(String::as_str) == Some("--list") || snapshots.is_empty() {
                 if snapshots.is_empty() {
@@ -183,12 +175,20 @@ fn maintenance(cfg: &Config, args: &[String]) -> Option<i32> {
     }
 }
 
-/// Vero se un Core detiene il blocco della cartella dati.
-fn core_running(cfg: &Config) -> bool {
-    std::fs::OpenOptions::new()
+fn maintenance_lock(cfg: &Config) -> Result<std::fs::File, String> {
+    let lock = jarvis_core::config::data_lock(&cfg.data_dir, std::time::Duration::ZERO)?;
+    // Le release precedenti conoscono solo il blocco interno. Su Windows va chiuso prima di spostare la cartella.
+    match std::fs::OpenOptions::new()
         .write(true)
         .open(cfg.data_dir.join(".lock"))
-        .is_ok_and(|f| f.try_lock().is_err())
+    {
+        Ok(file) => file
+            .try_lock()
+            .map_err(|e| format!("blocco della release precedente: {e}"))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+        Err(e) => return Err(format!("blocco della release precedente: {e}")),
+    }
+    Ok(lock)
 }
 
 #[tokio::main]

@@ -21,7 +21,12 @@ const webServer = http.createServer((req, res) => {
   if (req.url.startsWith("/svc/stato/")) {
     const ok = req.headers.authorization === "Bearer token-e2e-sintetico";
     res.writeHead(ok ? 200 : 401, { "Content-Type": "application/json" });
-    return res.end(JSON.stringify(ok ? { servizio: decodeURIComponent(req.url.slice(11)), stato: "operativo" } : { errore: "no" }));
+    const url = new (require("url").URL)(req.url, "http://127.0.0.1");
+    return res.end(JSON.stringify(ok ? {
+      servizio: decodeURIComponent(url.pathname.slice(11)),
+      stato: "operativo",
+      dettaglio: url.searchParams.get("dettaglio"),
+    } : { errore: "no" }));
   }
   if (req.method === "POST" && req.url === "/") {
     // ntfy sintetico (ADR-0026): registra le notifiche inviate al telefono.
@@ -290,7 +295,13 @@ function check(cond, msg) {
     contract: "jarvis.connector/1", id: "stato", name: "Stato servizi", version: "1.0.0", description: "Servizio sintetico",
     base_url: `http://127.0.0.1:${WEB_PORT}/svc`, allowed_hosts: ["127.0.0.1"], auth: { type: "bearer" },
     operations: [{ name: "leggi", summary: "Stato di un servizio", method: "GET", path: "/stato/{nome}", effects: "read",
-      input_schema: { type: "object", additionalProperties: false, required: ["nome"], properties: { nome: { type: "string" } } } }],
+      input_schema: { type: "object", additionalProperties: false, required: ["nome"], properties: {
+        nome: { type: "string" },
+        dettaglio: { type: "object", required: ["attivo", "etichette"], properties: {
+          attivo: { type: "boolean" },
+          etichette: { type: "array", minItems: 1, items: { type: "string" } },
+        } },
+      } } }],
   }));
   await page.click('#connector-form button[type="submit"]');
   await page.waitForSelector('#connectors [data-connector="stato"]');
@@ -307,11 +318,16 @@ function check(cond, msg) {
   const operation = page.getByRole("dialog", { name: "Stato di un servizio" });
   await operation.getByRole("button", { name: "Invia alla chat" }).click();
   check((await operation.getByRole("alert").innerText()).includes("nome"), "parametro obbligatorio indicato prima dell’invio");
-  await operation.getByLabel("Parametri JSON").fill(JSON.stringify({ nome: "posta di Roma" }));
+  await operation.getByLabel("nome (obbligatorio)").fill("posta di Roma");
+  await operation.getByRole("button", { name: "Aggiungi dettaglio" }).click();
+  await operation.getByLabel("attivo (obbligatorio)").selectOption({ label: "Sì" });
+  await operation.getByRole("button", { name: "Aggiungi voce" }).click();
+  await operation.getByLabel("etichette 1 (obbligatorio)").fill("consegna");
   await operation.getByRole("button", { name: "Invia alla chat" }).click();
   await page.waitForSelector("#view-chat.active");
   await page.locator(".msg.assistant").filter({ hasText: /posta di Roma.*operativo/s }).waitFor();
   check(!(await operation.isVisible()), "chiamata strutturata dal modulo del connettore, con risultato in chat");
+  check(/attivo.*true.*consegna/s.test(await page.locator(".msg.assistant").last().innerText()), "gruppi, liste e booleani arrivano al connettore con il loro tipo");
 
   // Dispositivi (RF-11): un secondo contesto fa da telefono su un host remoto ammesso (JARVIS_ALLOWED_HOSTS).
   // Un sottodominio di .localhost è un contesto sicuro anche in HTTP: serve a WebAuthn per le passkey (ADR-0042).
@@ -411,6 +427,11 @@ function check(cond, msg) {
   await page.click('#backup-form button[type="submit"]');
   await page.waitForFunction(() => /\.jbak/.test(document.querySelector("#backup-list").innerText), null, { timeout: 30000 });
   check(true, "backup cifrato creato dall'interfaccia");
+  await page.locator("#backup-list").getByRole("button", { name: "Verifica backup" }).first().click();
+  await page.locator("#verify-backup").getByLabel("Passphrase del backup").fill("passphrase del test e2e");
+  await page.locator("#verify-backup").getByRole("button", { name: "Verifica ora" }).click();
+  await page.locator("#verify-backup").getByRole("status").waitFor();
+  check((await page.locator("#verify-backup").innerText()).includes("Archivio e database verificati"), "backup verificato senza ripristinarlo");
   if (shots) await page.screenshot({ path: `${shots}/jarvis-sistema.png` });
 
   await page.setViewportSize({ width: 390, height: 800 });

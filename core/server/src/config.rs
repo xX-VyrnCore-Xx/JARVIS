@@ -1,7 +1,7 @@
 //! Configurazione da variabili d'ambiente. Il Core ascolta solo su loopback.
 
 use std::net::{IpAddr, Ipv4Addr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -105,5 +105,47 @@ impl Config {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "data".into());
         self.data_dir.with_file_name(format!("{name}-backups"))
+    }
+}
+
+/// Blocco stabile accanto ai dati, mantenuto anche quando la cartella viene sostituita.
+pub fn data_lock(data_dir: &Path, wait: std::time::Duration) -> Result<std::fs::File, String> {
+    let name = data_dir.file_name().ok_or("cartella dati non valida")?;
+    let mut lock_name = std::ffi::OsString::from(".");
+    lock_name.push(name);
+    lock_name.push(".jarvis-lock");
+    let path = data_dir.with_file_name(lock_name);
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent).map_err(|e| format!("cartella del blocco: {e}"))?;
+    }
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(path)
+        .map_err(|e| format!("blocco della cartella dati: {e}"))?;
+    wait_lock(&lock, data_dir, wait)?;
+    Ok(lock)
+}
+
+pub(crate) fn wait_lock(
+    file: &std::fs::File,
+    data_dir: &Path,
+    wait: std::time::Duration,
+) -> Result<(), String> {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(()),
+            Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(e) => {
+                return Err(format!(
+                    "un altro Core JARVIS sta già usando la cartella dati {} o il blocco non è disponibile ({e})",
+                    data_dir.display()
+                ))
+            }
+        }
     }
 }

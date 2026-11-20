@@ -20,6 +20,8 @@ Il checkpoint è la sezione di ripresa versionata con Git. Ogni voce va aggiorna
 
 **Ripresa del 2026-11-19 da `2c499e5` (JARVIS 1.11.0).** La nuova veste desktop e la preparazione guidata delle chiamate ai connettori sono integrate con il catalogo di servizi e il ciclo dell’agente (RF-10, RF-14, ADR-0051). Gli strumenti dinamici citati in chat hanno precedenza tra quelli ammessi per il task. Per la resa nella finestra WebKit e la prova dell’installer resta il collaudo su macOS.
 
+**Ripresa del 2026-11-20 da `7397d8a`.** RF-14 e RNF-08, ADR-0052. Moduli delle operazioni senza editor JSON, chiarimenti sui parametri obbligatori, stop dopo scritture dall’esito incerto, verifica dei backup dalla sezione Sistema e rollback con verifica di SQLite e blocco stabile.
+
 Il checkpoint precedente è riportato qui sotto per riferimento.
 
 | Campo | Stato al 2026-11-18 (diciottesima ripresa) |

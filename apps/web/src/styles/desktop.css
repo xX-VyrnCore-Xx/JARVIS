@@ -20,9 +20,9 @@
 .connector-dialog form { display: grid; gap: .7rem; }
 dialog.connector-dialog h2 { margin: 0; font-size: 1.25rem; letter-spacing: -.02em; text-transform: none; }
 .connector-dialog .hint { margin: 0; overflow-wrap: anywhere; }
-.operation-parameters { margin: 0; max-height: 24vh; overflow: auto; }
-.operation-parameters div { display: flex; gap: .65rem; padding: .35rem 0; border-bottom: 1px solid var(--border); overflow-wrap: anywhere; }
-.operation-parameters dd { margin: 0; color: var(--muted); font-size: .85rem; }
+.operation-fields, .operation-group, .operation-array-item { display: grid; gap: .55rem; min-width: 0; }
+.operation-group { border: 1px solid var(--border); border-radius: 10px; }
+.operation-group button { justify-self: start; }
 .operation-input { display: grid; gap: .35rem; }
 .operation-input textarea { resize: vertical; font: .9rem/1.55 var(--mono); }
 .operation-actions { justify-content: flex-end; }

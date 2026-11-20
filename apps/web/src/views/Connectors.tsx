@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { initialParameters, missingParameters, OperationFields } from "../components/OperationFields";
+import type { ParameterSchema, Parameters } from "../components/OperationFields";
 import { Icon } from "../components/Icon";
 import { api, post } from "../lib/api";
 import { useApp, useViewData } from "../state";
@@ -10,10 +12,7 @@ interface Operation {
   method: string;
   effects: string;
   risk: string;
-  input_schema: {
-    required?: string[];
-    properties?: Record<string, { type?: unknown; description?: string }>;
-  };
+  input_schema: ParameterSchema;
 }
 
 interface Connector {
@@ -32,10 +31,8 @@ interface Connector {
 function OperationDialog({ operation, onClose }: { operation: Operation; onClose: () => void }) {
   const { show, sendRef, thinking } = useApp();
   const dialog = useRef<HTMLDialogElement>(null);
-  const [parameters, setParameters] = useState("{}");
+  const [parameters, setParameters] = useState<Parameters>(() => initialParameters(operation.input_schema));
   const [error, setError] = useState("");
-  const required = operation.input_schema.required || [];
-  const fields = Object.entries(operation.input_schema.properties || {});
   const confirmation = operation.effects === "write_external" || ["high", "critical"].includes(operation.risk);
 
   useEffect(() => { dialog.current?.showModal(); }, []);
@@ -43,24 +40,13 @@ function OperationDialog({ operation, onClose }: { operation: Operation; onClose
   function submit(event: React.FormEvent) {
     event.preventDefault();
     if (thinking) return;
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(parameters);
-    } catch {
-      setError("Inserisci un oggetto JSON valido.");
-      return;
-    }
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      setError("I parametri devono essere un oggetto JSON.");
-      return;
-    }
-    const missing = required.filter((name) => !Object.prototype.hasOwnProperty.call(parsed, name));
+    const missing = missingParameters(operation.input_schema, parameters);
     if (missing.length) {
       setError(`Parametri obbligatori mancanti: ${missing.join(", ")}.`);
       return;
     }
     const [, id, name] = operation.tool.split(".");
-    const command = `connettore ${id} ${name} ${JSON.stringify(parsed)}`;
+    const command = `connettore ${id} ${name} ${JSON.stringify(parameters)}`;
     if (Array.from(command).length > 8000) {
       setError("Riduci la lunghezza dei parametri a meno di 8.000 caratteri complessivi.");
       return;
@@ -75,19 +61,7 @@ function OperationDialog({ operation, onClose }: { operation: Operation; onClose
       <form onSubmit={submit}>
         <h2 id="operation-title">{operation.summary}</h2>
         <p className="hint"><code>{operation.tool}</code> · {operation.method}{confirmation ? " · Richiede conferma in chat" : ""}</p>
-        {fields.length ? (
-          <dl className="operation-parameters">
-            {fields.map(([name, field]) => (
-              <div key={name}>
-                <dt><code>{name}</code></dt>
-                <dd>{[typeof field?.type === "string" ? field.type : "", required.includes(name) ? "obbligatorio" : "facoltativo", field?.description].filter(Boolean).join(" · ")}</dd>
-              </div>
-            ))}
-          </dl>
-        ) : null}
-        <label className="operation-input">Parametri JSON
-          <textarea rows={5} value={parameters} spellCheck={false} onChange={(e) => { setParameters(e.target.value); setError(""); }} />
-        </label>
+        <OperationFields schema={operation.input_schema} values={parameters} onChange={(values) => { setParameters(values); setError(""); }} />
         {error ? <p className="form-error" role="alert">{error}</p> : null}
         <div className="row operation-actions">
           <button type="button" className="ghost" onClick={() => dialog.current?.close()}>Annulla</button>

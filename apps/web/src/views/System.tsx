@@ -19,10 +19,13 @@ function UpdatesPanel({ active }: { active: boolean }) {
   const [busy, setBusy] = useState(false);
   if (!data) return null;
   const save = async (enabled: boolean, channel: string) => {
+    setBusy(true);
     try {
       setData(await post("/api/updates", { enabled, channel }));
     } catch (e) {
       alert((e as Error).message);
+    } finally {
+      setBusy(false);
     }
   };
   const check = async () => {
@@ -44,11 +47,11 @@ function UpdatesPanel({ active }: { active: boolean }) {
       </p>
       <div className="row">
         <label className="check">
-          <input type="checkbox" name="updates-enabled" checked={data.enabled} onChange={(e) => save(e.target.checked, data.channel)} /> Controlla gli
+          <input type="checkbox" name="updates-enabled" disabled={busy} checked={data.enabled} onChange={(e) => save(e.target.checked, data.channel)} /> Controlla gli
           aggiornamenti ogni giorno
         </label>
         <label>Canale
-          <select name="updates-channel" value={data.channel} onChange={(e) => save(data.enabled, e.target.value)}>
+          <select name="updates-channel" disabled={busy} value={data.channel} onChange={(e) => save(data.enabled, e.target.value)}>
             <option value="stable">Stable</option>
             <option value="beta">Beta (anche le versioni di prova)</option>
           </select>
@@ -95,6 +98,30 @@ export function System({ active, onSetup }: { active: boolean; onSetup: () => vo
   const [pass, setPass] = useState("");
   const [again, setAgain] = useState("");
   const [busy, setBusy] = useState(false);
+  const [verifyFile, setVerifyFile] = useState("");
+  const [verifyPass, setVerifyPass] = useState("");
+  const [verifyBusy, setVerifyBusy] = useState(false);
+  const [verification, setVerification] = useState<{ text: string; failed: boolean } | null>(null);
+
+  async function verifyBackup(e: React.FormEvent) {
+    e.preventDefault();
+    setVerifyBusy(true);
+    setVerification(null);
+    try {
+      const result = await post<{ files: number; created_at: string; audit_chain_valid: boolean }>("/api/backups/verify", {
+        file: verifyFile, passphrase: verifyPass,
+      });
+      setVerification({
+        text: `Archivio e database verificati · ${result.files} file · ${fmtTime(result.created_at)} · audit ${result.audit_chain_valid ? "integro" : "da controllare"}`,
+        failed: false,
+      });
+    } catch (e) {
+      setVerification({ text: (e as Error).message, failed: true });
+    } finally {
+      setVerifyPass("");
+      setVerifyBusy(false);
+    }
+  }
 
   const backup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -158,12 +185,36 @@ export function System({ active, onSetup }: { active: boolean; onSetup: () => vo
           <label>Ripeti <input type="password" name="again" minLength={12} required autoComplete="new-password" value={again} onChange={(e) => setAgain(e.target.value)} /></label>
           <button type="submit" className="primary" disabled={busy}>{busy ? "Cifratura…" : "Crea backup"}</button>
         </div>
-        <div id="backup-list" className="list">
-          {data ? (data.bk.items.length ? data.bk.items.slice(0, 5).map((x: any) => (
-            <div className="sub" key={x.file}>{x.file} · {(x.bytes / 1024).toFixed(1)} KiB</div>
-          )) : <div className="sub">Nessun backup in {data.bk.dir}</div>) : null}
-        </div>
       </form>
+      <div id="backup-list" className="list">
+        {data ? (data.bk.items.length ? data.bk.items.slice(0, 5).map((x: { file: string; bytes: number }) => (
+          <div className="row" key={x.file}>
+            <span className="sub">{x.file} · {(x.bytes / 1024).toFixed(1)} KiB</span>
+            <button type="button" className="ghost small" disabled={verifyBusy} onClick={() => {
+              setVerifyFile(x.file);
+              setVerifyPass("");
+              setVerification(null);
+            }}>Verifica backup</button>
+          </div>
+        )) : <div className="sub">Nessun backup in {data.bk.dir}</div>) : null}
+      </div>
+      {verifyFile ? (
+        <form id="verify-backup" className="form backup-form" onSubmit={verifyBackup}>
+          <p className="hint">Controlla passphrase, archivio, database e audit di <code>{verifyFile}</code> senza ripristinarlo.</p>
+          <div className="row">
+            <label>Passphrase del backup <input type="password" required autoComplete="off" value={verifyPass} onChange={(e) => setVerifyPass(e.target.value)} /></label>
+            <button type="submit" className="primary" disabled={verifyBusy}>{verifyBusy ? "Verifica…" : "Verifica ora"}</button>
+          </div>
+          {verification ? <p role={verification.failed ? "alert" : "status"} className={verification.failed ? "form-error" : "hint"}>{verification.text}</p> : null}
+        </form>
+      ) : null}
+      {data?.bk.rollback?.length ? (
+        <div className="backup-form">
+          <h4>Copie prima degli aggiornamenti</h4>
+          <p className="hint">Per tornare alla versione precedente, esci da JARVIS ed esegui <code>./jarvis.sh rollback</code> (Windows <code>jarvis.cmd rollback</code>).</p>
+          <ul>{data.bk.rollback.map((name: string) => <li key={name}><code>{name}</code></li>)}</ul>
+        </div>
+      ) : null}
       <h3 className="sub-head">Latenze</h3>
       <div className="table-wrap">
         <table id="metrics-table" className="metrics">
