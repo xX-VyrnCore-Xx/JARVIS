@@ -136,6 +136,7 @@ class FakeTTS:
 
 class WhisperSTT:
     def __init__(self, env: dict[str, str]):
+        os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
         from faster_whisper import WhisperModel  # import pigro: dipendenza opzionale
 
         self.model_name = env.get("JARVIS_STT_MODEL", "small")
@@ -145,8 +146,17 @@ class WhisperSTT:
         self.info = {"name": "faster-whisper", "model": self.model_name, "location": "local"}
 
     def transcribe(self, data: bytes, language: str) -> str:
+        import numpy as np
+
+        samples, rate, _ = read_wav(data)
+        if not samples or rms(samples) < 45:
+            return ""
+        audio = np.asarray(samples, dtype=np.float32) / 32768.0
+        if rate != 16000:
+            positions = np.arange(len(samples) * 16000 // rate) * (rate / 16000.0)
+            audio = np.interp(positions, np.arange(len(samples)), audio).astype(np.float32)
         segments, _ = self.model.transcribe(
-            io.BytesIO(data), language=language, vad_filter=True, beam_size=3,
+            audio, language=language, vad_filter=True, beam_size=3,
             condition_on_previous_text=False, temperature=0,
             vad_parameters={"min_silence_duration_ms": 350, "speech_pad_ms": 180},
             hotwords="JARVIS, GitHub, Python, JavaScript, macOS, Ollama, NVIDIA NIM",
@@ -170,7 +180,10 @@ def correct_transcript(text: str, language: str) -> str:
 
 class PiperTTS:
     def __init__(self, env: dict[str, str]):
+        import onnxruntime
         from piper import PiperVoice  # import pigro: dipendenza opzionale
+
+        onnxruntime.disable_telemetry_events()
 
         path = env.get("JARVIS_TTS_VOICE", "")
         if not path or not Path(path).is_file():
@@ -221,7 +234,7 @@ class XttsTTS:
             if self.model is None:
                 config = XttsConfig()
                 config.load_json(str(self.directory / "config.json"))
-                model = Xtts.init_from_config(config)
+                model = Xtts(config)
                 model.load_checkpoint(config, checkpoint_dir=str(self.directory), eval=True)
                 if torch.cuda.is_available():
                     model.cuda()
