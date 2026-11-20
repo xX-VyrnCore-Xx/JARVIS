@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CloudSettings } from "../components/CloudSettings";
 import { api, AUTH, download, fmtTime, fmtUptime, post } from "../lib/api";
 import { useViewData } from "../state";
 import { ViewHead } from "./Simple";
@@ -170,6 +171,7 @@ export function System({ active, onSetup }: { active: boolean; onSetup: () => vo
         ) : null}
       </div>
       <div className="row"><button className="ghost" type="button" id="open-setup" onClick={onSetup}>Configura voce e modello AI</button></div>
+      <CloudSettings active={active} />
       <h3 className="sub-head">Database locale</h3>
       <DatabasePanel active={active} />
       <h3 className="sub-head">Aggiornamenti</h3>

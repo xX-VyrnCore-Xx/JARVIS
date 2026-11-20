@@ -176,6 +176,8 @@ pub struct Jarvis {
     stream_sink: Option<StreamSink>,
     updates: crate::updates::Updates,
     oauth: crate::oauth::Flows,
+    cloud_limiter: crate::cloud::Limiter,
+    n8n: std::sync::Arc<crate::n8n::Manager>,
     cfg: Config,
     store: Store,
     audit: AuditLog,
@@ -244,6 +246,8 @@ impl Jarvis {
             stream_sink: None,
             updates: crate::updates::Updates::new(&cfg.data_dir),
             oauth: crate::oauth::Flows::default(),
+            cloud_limiter: crate::cloud::Limiter::default(),
+            n8n: std::sync::Arc::new(crate::n8n::Manager::new(cfg.data_dir.clone())),
             cfg,
             store,
             audit,
@@ -402,7 +406,11 @@ impl Jarvis {
             t.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
         };
         let objective = task.doc["objective"].as_str().unwrap_or_default();
-        let tools = self.delegated_tools(objective, self.task_scope(task));
+        let tools = if inputs["response_only"] == true {
+            Vec::new()
+        } else {
+            self.delegated_tools(objective, self.task_scope(task))
+        };
         json!({
             "contract": "jarvis.delegation/1",
             "delegation_id": uuid::Uuid::new_v4().to_string(),
@@ -459,7 +467,11 @@ impl Jarvis {
         });
         self.catalog
             .iter()
-            .filter(|t| in_scope(t.name()) && !dynamic(t))
+            .filter(|t| {
+                in_scope(t.name())
+                    && !dynamic(t)
+                    && (t.name() != "n8n.create" || self.n8n.enabled())
+            })
             .chain(ranked.into_iter().take(16))
             .take(64)
             .collect()
@@ -703,6 +715,181 @@ impl Jarvis {
         let out = self.chat_inner(message);
         self.record_task("chat", &timer, &out);
         out
+    }
+
+    pub fn record_owner_action(&mut self, action: &str) -> Result<(), CoreError> {
+        self.audit(json!({
+            "correlation_id": uuid::Uuid::new_v4().to_string(),
+            "actor": {"kind": "owner", "id": "owner"}, "node": "core-local",
+            "action": action, "outcome": "succeeded", "effect": "applied",
+        }))?;
+        Ok(())
+    }
+
+    pub fn cloud_status(&self) -> Result<Value, CoreError> {
+        let settings = crate::cloud::settings(&self.cfg.data_dir);
+        let providers = crate::cloud::Provider::ALL
+            .into_iter()
+            .map(|provider| {
+                let configured = self
+                    .secrets
+                    .get(&provider.secret())
+                    .map_err(internal)?
+                    .is_some();
+                Ok(provider.view(&settings, configured, &self.cloud_limiter))
+            })
+            .collect::<Result<Vec<_>, CoreError>>()?;
+        Ok(json!({"providers": providers}))
+    }
+
+    pub fn configure_cloud(&mut self, body: &Value) -> Result<Value, CoreError> {
+        let provider = crate::cloud::Provider::parse(&body["provider"])
+            .ok_or_else(|| CoreError::BadRequest("provider sconosciuto".into()))?;
+        if body["remove_key"] == true {
+            self.secrets.delete(&provider.secret()).map_err(internal)?;
+        } else {
+            let model = body["model"]
+                .as_str()
+                .filter(|m| crate::cloud::valid_model(m))
+                .ok_or_else(|| {
+                    CoreError::BadRequest("identificativo del modello non valido".into())
+                })?;
+            if let Some(key) = body["key"].as_str().filter(|key| !key.is_empty()) {
+                if key.len() > 1024 || key.bytes().any(|b| !b.is_ascii_graphic()) {
+                    return Err(CoreError::BadRequest("chiave API non valida".into()));
+                }
+                self.secrets
+                    .put(&provider.secret(), key)
+                    .map_err(internal)?;
+            }
+            let mut settings = crate::cloud::settings(&self.cfg.data_dir);
+            settings[provider.id()] = json!(model);
+            crate::backup::atomic_write(
+                &self.cfg.data_dir.join("cloud.json"),
+                settings.to_string().as_bytes(),
+            )
+            .map_err(internal)?;
+        }
+        let action = if body["remove_key"] == true {
+            "cloud.remove_key"
+        } else {
+            "cloud.configure"
+        };
+        self.record_owner_action(action)?;
+        self.cloud_status()
+    }
+
+    pub fn cloud_chat(&mut self, body: &Value) -> Result<Outcome, CoreError> {
+        let provider = crate::cloud::Provider::parse(&body["provider"])
+            .ok_or_else(|| CoreError::BadRequest("provider sconosciuto".into()))?;
+        let message = body["message"]
+            .as_str()
+            .map(str::trim)
+            .filter(|message| !message.is_empty() && message.chars().count() <= MAX_MESSAGE)
+            .ok_or_else(|| CoreError::BadRequest("messaggio mancante o troppo lungo".into()))?;
+        let key = self
+            .secrets
+            .get(&provider.secret())
+            .map_err(internal)?
+            .ok_or_else(|| CoreError::BadRequest("configura la chiave API in Sistema".into()))?;
+        let settings = crate::cloud::settings(&self.cfg.data_dir);
+        let model = provider.model(&settings);
+        let timer = Timer::start();
+        let response = crate::cloud::chat(provider, model, &key, message, &mut self.cloud_limiter);
+        let text = match response {
+            Ok(text) => text,
+            Err(crate::cloud::Failure::InvalidKey) => {
+                return Err(CoreError::BadRequest(
+                    "chiave rifiutata dal provider o modello non autorizzato".into(),
+                ));
+            }
+            Err(error) => {
+                let reason = match error {
+                    crate::cloud::Failure::RateLimited(wait) => format!(
+                        "limite remoto, riprova tra {} s",
+                        wait.as_secs_f64().ceil() as u64
+                    ),
+                    _ => "provider non disponibile".into(),
+                };
+                let mut task = Task::new(message, json!({"kind": "owner", "id": "owner"}));
+                task.transition("planned", "Risposta alternativa dal modello locale");
+                task.transition("running", "Inferenza locale");
+                let local = self
+                    .call_agent(
+                        &task,
+                        &json!({
+                            "messages": [{"role": "user", "content": message}],
+                            "memory": [], "steps_left": 0, "response_only": true,
+                        }),
+                    )
+                    .ok()
+                    .filter(|r| {
+                        r["kind"] == "reply"
+                            && r["backend"]["location"] == "local"
+                            && r["backend"]["name"] == "ollama"
+                    });
+                if let Some(result) = local {
+                    task.transition("succeeded", "Risposta dal modello locale");
+                    self.store
+                        .message_add("user", message, &task.id(), &now(), None)
+                        .map_err(internal)?;
+                    let out = Outcome {
+                        backend: Some(result["backend"].clone()),
+                        steps: vec![
+                            json!({"kind": "cloud_fallback", "reason": reason, "backend": result["backend"]}),
+                        ],
+                        ..Outcome::default()
+                    };
+                    return self.finish(
+                        task,
+                        out,
+                        result["text"].as_str().unwrap_or_default().to_string(),
+                    );
+                }
+                return self.finish_cloud_turn(message, format!(
+                    "Il modello cloud non ha completato la richiesta ({reason}). La chat Locale resta disponibile."
+                ), provider, model, &timer, false);
+            }
+        };
+        self.finish_cloud_turn(message, text, provider, model, &timer, true)
+    }
+
+    fn finish_cloud_turn(
+        &mut self,
+        message: &str,
+        text: String,
+        provider: crate::cloud::Provider,
+        model: &str,
+        timer: &Timer,
+        ok: bool,
+    ) -> Result<Outcome, CoreError> {
+        let mut task = Task::new(message, json!({"kind": "owner", "id": "owner"}));
+        task.transition("planned", "Modello remoto scelto dal proprietario");
+        task.transition("running", "Inferenza remota");
+        if ok {
+            task.transition("succeeded", "Risposta del modello");
+        } else {
+            task.fail(json!({"code": "cloud.unavailable", "category": "unavailable",
+                             "message": "Modello cloud non disponibile", "retryable": false, "effect": "not_applied"}),
+                      "Inferenza remota non riuscita");
+        }
+        self.audit(json!({
+            "correlation_id": task.correlation(), "task_id": task.id(),
+            "actor": {"kind": "owner", "id": "owner"}, "node": "core-local",
+            "action": format!("cloud.{}", provider.id()), "outcome": if ok { "succeeded" } else { "failed" },
+        }))?;
+        self.store
+            .message_add("user", message, &task.id(), &now(), None)
+            .map_err(internal)?;
+        let backend = json!({"name": provider.id(), "location": "cloud", "model": model});
+        let out = Outcome {
+            steps: vec![json!({"kind": "delegation", "backend": backend})],
+            backend: Some(backend),
+            ..Outcome::default()
+        };
+        let result = self.finish(task, out, text);
+        self.record_task("cloud", timer, &result);
+        result
     }
 
     /// Metriche e log di fine richiesta: identificativi, stato e durata, mai il contenuto.
@@ -1719,6 +1906,51 @@ impl Jarvis {
         )
     }
 
+    pub fn n8n(&self) -> std::sync::Arc<crate::n8n::Manager> {
+        self.n8n.clone()
+    }
+
+    pub fn n8n_notices(&mut self, completed: &[Value]) -> Result<(), CoreError> {
+        for job in completed {
+            let (severity, body) = if job["kind"] == "audit" {
+                match self.security_status() {
+                    Ok(report)
+                        if report["audit_chain_valid"] == true
+                            && report["signatures"]["valid"] == true =>
+                    {
+                        ("success", "Audit integro e firme valide.")
+                    }
+                    _ => (
+                        "warning",
+                        "Verifica l’integrità del registro nel Centro sicurezza.",
+                    ),
+                }
+            } else {
+                ("info", "Promemoria pianificato da n8n.")
+            };
+            self.notify(json!({
+                "severity": severity, "category": "integration", "title": job["name"], "body": body,
+                "source": {"kind": "module", "id": "n8n"}, "link": {"view": "automations"},
+                "dedupe_key": format!("n8n:{}:{}", job["id"].as_str().unwrap_or_default(),
+                                      job["last_run"].as_u64().unwrap_or_default()),
+            }))?;
+        }
+        Ok(())
+    }
+
+    pub fn security_status(&self) -> Result<Value, CoreError> {
+        let audit = self.audit_log(0)?;
+        let devices = self.devices()?;
+        let active = devices.iter().filter(|d| d["revoked_at"].is_null()).count();
+        Ok(json!({
+            "audit_chain_valid": audit["chain_valid"], "audit_events": audit["total"],
+            "signatures": {"enabled": audit["signatures"]["enabled"], "valid": audit["signatures"]["valid"]},
+            "secrets_store": self.secrets.location(), "devices_active": active,
+            "pending_confirmations": self.pending.len(), "web_enabled": self.cfg.web.enabled,
+            "web_private_addresses": self.cfg.web.allow_private, "shell_enabled": !policy::shell_disabled(),
+        }))
+    }
+
     pub fn workspace_listing(&self) -> Result<Value, CoreError> {
         let workspace = self.cfg.workspace();
         tools::execute(
@@ -1768,6 +2000,20 @@ impl Jarvis {
         confirmed: bool,
     ) -> Result<Value, tools::ToolError> {
         match tool {
+            "n8n.create" if confirmed => self
+                .n8n
+                .add(arguments)
+                .map_err(|reason| tool_error("n8n.unavailable", reason)),
+            "n8n.create" => Err(tool_error(
+                "n8n.unavailable",
+                "la routine richiede conferma",
+            )),
+            "security.status" => self.security_status().map_err(|_| {
+                tool_error(
+                    "security.unavailable",
+                    "controllo della postura non riuscito",
+                )
+            }),
             "workflow.create" => {
                 if !confirmed {
                     return Err(tool_error(

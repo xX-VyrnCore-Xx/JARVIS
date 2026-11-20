@@ -349,6 +349,81 @@ async fn api_requires_token_and_local_host() {
 }
 
 #[tokio::test]
+async fn security_posture_and_cloud_configuration_are_local_and_hide_keys() {
+    let e = env();
+    let host = format!("127.0.0.1:{PORT}");
+    for path in ["/api/security", "/api/cloud", "/api/n8n"] {
+        assert_eq!(
+            e.call("GET", path, None, None, &host).await.0,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    let (code, report) = e.api("GET", "/api/security", None).await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(report["audit_chain_valid"], true);
+    let out = e.chat("controlla la postura di sicurezza").await;
+    assert!(out["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|step| step["tool"] == "security.status"));
+    let secret = "SyntheticNimKeyForJarvisTest";
+    let (code, report) = e
+        .api(
+            "POST",
+            "/api/cloud",
+            Some(json!({
+                "provider":"nvidia_nim", "model":"meta/llama-3.3-70b-instruct", "key":secret
+            })),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(report["providers"][1]["configured"], true);
+    assert_eq!(report["providers"][1]["effective_rpm"], 35);
+    assert!(!report.to_string().contains(secret));
+    assert!(!std::fs::read_to_string(e.data.join("cloud.json"))
+        .unwrap()
+        .contains(secret));
+    let (code, report) = e
+        .api(
+            "POST",
+            "/api/cloud",
+            Some(json!({
+                "provider":"nvidia_nim", "remove_key":true
+            })),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(report["providers"][1]["configured"], false);
+    assert_eq!(
+        e.api(
+            "POST",
+            "/api/cloud/chat",
+            Some(json!({
+                "message":"test locale", "provider":"nvidia_nim"
+            }))
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[tokio::test]
+async fn n8n_chat_routine_requires_owner_confirmation() {
+    let e = env();
+    let (status, out) = e
+        .api("POST", "/api/n8n", Some(json!({"enable": true})))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(out["enabled"], true);
+    let out = e.chat("n8n audit ogni 15 minuti: Verifica registro").await;
+    assert_eq!(out["confirmation"]["tool"], "n8n.create", "{out}");
+    assert_eq!(out["confirmation"]["arguments"]["kind"], "audit");
+    assert_eq!(out["confirmation"]["arguments"]["minutes"], 15);
+}
+
+#[tokio::test]
 async fn invalid_input_is_rejected() {
     let e = env();
     let (s, _) = e

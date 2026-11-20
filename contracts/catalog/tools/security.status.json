@@ -1,0 +1,31 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "security.status",
+  "version": "1.0.0",
+  "summary": "Controlla solo la postura locale: audit, protezione dei segreti, accessi associati e policy Web di JARVIS",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {}
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "prerequisites": [],
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.system:read"
+  ],
+  "errors": [
+    "security.unavailable"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

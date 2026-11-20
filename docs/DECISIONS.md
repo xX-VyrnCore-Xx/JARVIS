@@ -1130,6 +1130,12 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - Il pannello Sistema verifica passphrase, impronte, SQLite e audit dei backup cifrati e mostra le copie prima degli aggiornamenti. Il Core e i comandi di recupero condividono un blocco esterno alla cartella dati. Il rollback verifica SQLite prima di installare la copia e conserva i dati precedenti.
 - I nuovi backup e le copie prima degli aggiornamenti includono le preferenze e l’identità TLS locale. I pacchetti Python e i modelli scaricati restano installazioni locali.
 
+### ADR-0053 — Avatar, postura difensiva, n8n e modelli cloud
+
+- L’avatar offre controlli vocali e navigazione, con movimento ridotto rispettato. Il Centro sicurezza espone la postura locale, disponibile anche tramite lo strumento di sola lettura `security.status`.
+- n8n locale usa Docker con rete disabilitata e volume dedicato. Il Core genera solo routine da modelli interni, separa l’importazione dall’esecuzione per evitare due scrittori SQLite e converte i segnali delle routine in notifiche locali.
+- Ollama Cloud e NVIDIA NIM sono accessibili al proprietario per il singolo messaggio. Le chiavi usano l’archivio dei segreti. Il Core non invia memoria, cronologia o esiti di strumenti. NIM usa intervalli fra le richieste e un massimo di 35 RPM per Core, con attesa indicata dal provider dopo HTTP 429.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

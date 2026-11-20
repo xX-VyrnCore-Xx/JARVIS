@@ -167,6 +167,11 @@ class OllamaAdapter(unittest.TestCase):
         self.assertNotIn("tools", FakeOllama.requests[-1])
         self.assertEqual(FakeOllama.requests[-1]["messages"][-2]["role"], "tool")
 
+    def test_local_ollama_does_not_select_cloud_aliases(self):
+        FakeOllama.models = ["qwen3-coder:480b-cloud", "qwen2.5:3b"]
+        gateway = self.gateway()
+        self.assertEqual(gateway.status()["backend"]["model"], "qwen2.5:3b")
+
     def test_only_delegated_tools_are_offered(self):
         d = delegation("ciao")
         d["tools"] = [{"name": "time.now", "version": "1.0.0"}]

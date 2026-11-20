@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, chatStream, fmtTime, pref } from "../lib/api";
+import { api, chatStream, DEVICE_MODE, fmtTime, post, pref } from "../lib/api";
 import { voice } from "../lib/voice";
 import { Avatar, AVATAR_LABELS, useAvatarState } from "../components/Avatar";
+import { CLOUD_LABELS } from "../components/CloudSettings";
+import type { CloudProvider } from "../components/CloudSettings";
 import { Icon } from "../components/Icon";
-import { useApp, useVoice } from "../state";
+import { useApp, useViewData, useVoice } from "../state";
 import { PASSKEY_SUPPORTED, decideConfirmation, registerPasskey } from "../lib/passkey";
 
 interface Step {
@@ -19,6 +21,7 @@ interface Step {
   status?: string;
   error?: string;
   effect?: string;
+  reason?: string;
 }
 interface Source {
   url: string;
@@ -81,13 +84,14 @@ function PasskeySetup() {
 
 /** Specializzazioni degli agenti (ADR-0038). */
 const AGENTS: Record<string, string> = {
-  research: "ricerca", system: "sistema", automation: "automazioni", memory: "memoria", coding: "codice",
+  research: "ricerca", system: "sistema", automation: "automazioni", memory: "memoria", coding: "codice", monitoring: "sicurezza",
 };
 
 function StepChips({ steps }: { steps?: Step[] }) {
   if (!steps || !steps.length) return null;
   const chips: React.ReactElement[] = [];
   steps.forEach((s, i) => {
+    if (s.kind === "cloud_fallback") chips.push(<span key={i} className="step require_confirmation">risposta locale · {s.reason}</span>);
     if (s.kind === "delegation" && s.backend) chips.push(<span key={i} className="step">agente · {s.backend.name}</span>);
     if (s.kind === "delegation" && s.agent && AGENTS[s.agent])
       chips.push(<span key={`${i}-a`} className="step specialist">specialista · {AGENTS[s.agent]}</span>);
@@ -137,6 +141,9 @@ export function Chat({ active }: { active: boolean }) {
   const [pending, setPending] = useState(false);
   const sending = useRef(false);
   const [text, setText] = useState("");
+  const [provider, setProvider] = useState<CloudProvider["id"] | "">("");
+  const { data: cloud } = useViewData(active && !DEVICE_MODE, () => api<{ providers: CloudProvider[] }>("/api/cloud"));
+  const cloudChoices = cloud?.providers.filter((item) => item.configured) || [];
   const nextId = useRef(1);
   const box = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -157,7 +164,7 @@ export function Chat({ active }: { active: boolean }) {
   }, [items, pending]);
 
   const send = useCallback(
-    async (raw: string) => {
+    async (raw: string, remote?: CloudProvider["id"]) => {
       const message = raw.trim();
       if (!message || sending.current) return;
       sending.current = true;
@@ -180,7 +187,7 @@ export function Chat({ active }: { active: boolean }) {
         }
       };
       try {
-        const out = await chatStream(message, onDelta);
+        const out = remote ? await post("/api/cloud/chat", { message, provider: remote }) : await chatStream(message, onDelta);
         const final = { kind: "msg" as const, role: "assistant" as const, text: out.reply || "(nessuna risposta)", steps: out.steps, sources: out.sources,
           error: out.task && out.task.state === "failed" };
         if (streamId != null) {
@@ -268,7 +275,9 @@ export function Chat({ active }: { active: boolean }) {
     const t = text;
     setText("");
     if (input.current) input.current.style.height = "";
-    void send(t);
+    const remote = cloudChoices.find((item) => item.id === provider);
+    setProvider("");
+    void send(t, remote?.id);
   };
 
   const available = voice.available;
@@ -341,6 +350,19 @@ export function Chat({ active }: { active: boolean }) {
         <span className="mic-live" id="mic-live" hidden={!voice.micOpen} aria-live="polite">● Microfono attivo</span>
         <PasskeySetup />
       </div>
+      {cloudChoices.length ? (
+        <div className="voice-bar cloud-selector">
+          <label>Modello per il prossimo messaggio
+            <select value={provider} disabled={thinking} onChange={(event) => {
+              setProvider(cloudChoices.find((item) => item.id === event.target.value)?.id || "");
+            }}>
+              <option value="">Locale</option>
+              {cloudChoices.map((item) => <option key={item.id} value={item.id}>{CLOUD_LABELS[item.id]} · {item.model}</option>)}
+            </select>
+          </label>
+          {provider ? <small>Il testo di questo messaggio verrà inviato al provider scelto.</small> : null}
+        </div>
+      ) : null}
       <form className="composer" id="composer" onSubmit={submit}>
         <button
           type="button" className="mic" id="mic" aria-pressed={voice.state === "listening" && voice.pushing}

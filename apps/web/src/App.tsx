@@ -14,6 +14,7 @@ import { Memory } from "./views/Memory";
 import { Skills } from "./views/Skills";
 import { Connectors } from "./views/Connectors";
 import { Audit, Devices, Tasks, Workspace } from "./views/Simple";
+import { Security } from "./views/Security";
 import { System } from "./views/System";
 
 interface NavEntry {
@@ -34,6 +35,7 @@ const NAV: NavEntry[] = [
   { view: "workspace", label: "Workspace", owner: true, icon: "workspace", group: "Dati" },
   { view: "connectors", label: "Connettori", owner: true, icon: "connectors", group: "Integrazioni" },
   { view: "devices", label: "Dispositivi", owner: true, icon: "devices", group: "Integrazioni" },
+  { view: "security", label: "Sicurezza", owner: true, icon: "shield", group: "Sistema" },
   { view: "audit", label: "Audit", owner: true, icon: "audit", group: "Sistema" },
   { view: "system", label: "Sistema", owner: true, icon: "system", group: "Sistema" },
 ];
@@ -112,6 +114,7 @@ function Shell() {
               <Connectors active={view === "connectors"} />
               <Devices active={view === "devices"} />
               <Audit active={view === "audit"} />
+              <Security active={view === "security"} />
               <System active={view === "system"} onSetup={() => setup.current?.open()} />
             </>
           ) : null}

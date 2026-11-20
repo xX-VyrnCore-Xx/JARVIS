@@ -22,6 +22,8 @@ Il checkpoint è la sezione di ripresa versionata con Git. Ogni voce va aggiorna
 
 **Ripresa del 2026-11-20 da `7397d8a`.** RF-14 e RNF-08, ADR-0052. Moduli delle operazioni senza editor JSON, chiarimenti sui parametri obbligatori, stop dopo scritture dall’esito incerto, verifica dei backup dalla sezione Sistema e rollback con verifica di SQLite e blocco stabile.
 
+**Ripresa del 2026-11-20 da `9866380`.** Avatar con controlli vocali, Centro sicurezza e strumento difensivo di sola lettura, n8n isolato per promemoria e audit, Ollama Cloud e NVIDIA NIM per il singolo messaggio (ADR-0053). 95 controlli in Chromium superati, suite mirate Rust e Python verdi, test HTTP sintetico per `Retry-After` e promemoria ricevuto da n8n 2.48.7 in Docker reale. L’inferenza cloud va collaudata con chiavi e account dei rispettivi provider.
+
 Il checkpoint precedente è riportato qui sotto per riferimento.
 
 | Campo | Stato al 2026-11-18 (diciottesima ripresa) |
