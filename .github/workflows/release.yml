@@ -1,6 +1,6 @@
 name: release
 
-# Installer macOS (.dmg per Apple Silicon e Intel) e Windows (setup .exe), con Core,
+# Installer macOS (.dmg per Apple Silicon) e Windows (setup .exe), con Core,
 # runtime AI e Python autonomo inclusi. Ogni installer viene installato e il Core supera la prova di avvio.
 # Con un tag vX.Y.Z pubblica la release con installer e impronte (decisione del proprietario del 2026-11-17); i tag con suffisso, es. v1.0.0-rc.1, restano prerelease.
 on:
@@ -39,7 +39,6 @@ jobs:
       matrix:
         include:
           - { os: macos-latest, target: macos-aarch64, bundles: "dmg" }
-          - { os: macos-15-intel, target: macos-x86_64, bundles: "dmg" }
           - { os: windows-latest, target: windows-x86_64, bundles: "nsis" }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
@@ -178,7 +177,7 @@ jobs:
           TAG: ${{ steps.tag.outputs.name }}
         run: |
           version="${TAG#v}"
-          installers=("JARVIS_${version}_aarch64.dmg" "JARVIS_${version}_x64.dmg" "JARVIS_${version}_x64-setup.exe")
+          installers=("JARVIS_${version}_aarch64.dmg" "JARVIS_${version}_x64-setup.exe")
           test "$(find . -maxdepth 1 -type f | wc -l)" -eq "${#installers[@]}"
           for installer in "${installers[@]}"; do test -s "$installer"; done
           sha256sum -- "${installers[@]}" > SHA256SUMS

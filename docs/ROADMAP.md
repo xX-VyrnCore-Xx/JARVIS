@@ -32,6 +32,8 @@ Il checkpoint è la sezione di ripresa versionata con Git. Ogni voce va aggiorna
 
 **JARVIS 1.13.0 (2026-11-20).** ADR-0057. Voce XTTS v2 con riferimento locale, trascrizione più controllata, strumenti Python in sandbox, contesto filtrato e release automatica dopo CI. La sandbox è verificata in Docker e la pipeline Piper–faster-whisper con audio italiano sintetico. XTTS v2 è provato con pesi reali e un riferimento sintetico. Il timbro richiesto richiede un campione autorizzato.
 
+**Distribuzione desktop dopo `f14f378`.** ADR-0058. Il workflow di rilascio prepara e verifica due pacchetti, il `.dmg` Apple Silicon e il setup Windows x64.
+
 Il checkpoint precedente è riportato qui sotto per riferimento.
 
 | Campo | Stato al 2026-11-18 (diciottesima ripresa) |

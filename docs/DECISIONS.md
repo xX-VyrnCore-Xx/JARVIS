@@ -1163,7 +1163,12 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - XTTS v2 usa checkpoint e audio di riferimento locali. Il worker carica i pesi al primo utilizzo, conserva il condizionamento e ripiega su Piper se il modello non è utilizzabile. La trascrizione usa faster-whisper con VAD, parole chiave tecniche e correzioni conservative. La chat richiede revisione manuale della dettatura destinata ai provider.
 - Le istruzioni privilegiano verifiche di sviluppo riproducibili. Gli agenti temporanei di coding partono da strumenti di lettura e verifica della sintassi. L’esecuzione Python richiede conferma, Docker locale e un container effimero senza volumi o rete. Il terminale del PC è disabilitato per impostazione iniziale.
 - Il Core limita contesto e risultati degli strumenti. Esclude dalla richiesta cloud le credenziali riconosciute e interrompe l’inclusione di turni precedenti che le contengono.
-- Una CI `contracts` verde su `main` avvia il rilascio per una versione stabile senza tag. La build e il tag usano il commit verificato. Rimangono validi i tre pacchetti e le verifiche di ADR-0056.
+- Una CI `contracts` verde su `main` avvia il rilascio per una versione stabile senza tag. La build e il tag usano il commit verificato. I pacchetti seguono la matrice di distribuzione corrente e mantengono le verifiche di ADR-0056.
+
+### ADR-0058 — Distribuzione desktop per Apple Silicon e Windows
+
+- **Data** 2026-11-20 · **Fonte** richiesta del proprietario.
+- La matrice del workflow `release` pubblica il `.dmg` Apple Silicon e il setup Windows x64. Entrambi devono superare la prova di avvio e il controllo delle impronte. La decisione aggiorna l’elenco di pacchetti di ADR-0056.
 
 ### Decisione operativa — Merge automatico con CI verde
 

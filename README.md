@@ -8,7 +8,7 @@ L’inferenza usa Ollama Cloud o NVIDIA NIM quando il proprietario seleziona un 
 
 **Con il programma di installazione (consigliato):** dalla pagina Releases di GitHub scarica il file per il tuo sistema:
 - **Windows x64:** `JARVIS_<versione>_x64-setup.exe`.
-- **macOS:** `JARVIS_<versione>_aarch64.dmg` (chip Apple) oppure `JARVIS_<versione>_x64.dmg` (Intel).
+- **macOS Apple Silicon:** `JARVIS_<versione>_aarch64.dmg`.
 
 Installalo e apri **JARVIS** dal menu delle applicazioni. Core, runtime AI e Python sono inclusi: non serve installare altro.
 
