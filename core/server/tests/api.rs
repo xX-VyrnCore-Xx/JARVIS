@@ -22,11 +22,18 @@ struct Env {
 
 fn env() -> Env {
     let data = std::env::temp_dir().join(format!("jarvis-test-{}", uuid::Uuid::new_v4().simple()));
+    Env {
+        app: api::router(api::state(test_core(&data), TOKEN.into(), PORT)),
+        data,
+    }
+}
+
+fn test_core(data: &std::path::Path) -> Jarvis {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let cfg = Config {
         host: "127.0.0.1".parse().unwrap(),
         port: PORT,
-        data_dir: data.clone(),
+        data_dir: data.to_path_buf(),
         python: std::env::var("JARVIS_PYTHON").unwrap_or_else(|_| "python3".into()),
         ai_dir: root.join("ai"),
         ai_backend: Some("offline".into()),
@@ -37,11 +44,7 @@ fn env() -> Env {
         token: TOKEN.into(),
         web: jarvis_core::web::WebConfig::default(),
     };
-    let core = Jarvis::new(cfg).expect("core");
-    Env {
-        app: api::router(api::state(core, TOKEN.into(), PORT)),
-        data,
-    }
+    Jarvis::new(cfg).expect("core")
 }
 
 impl Env {
@@ -346,6 +349,146 @@ async fn api_requires_token_and_local_host() {
     let (s, health) = e.call("GET", "/api/health", None, None, &host).await;
     assert_eq!(s, StatusCode::OK);
     assert_eq!(health["ai"]["status"], "up");
+}
+
+#[tokio::test]
+async fn security_posture_and_cloud_configuration_are_local_and_hide_keys() {
+    let e = env();
+    let host = format!("127.0.0.1:{PORT}");
+    for path in ["/api/security", "/api/cloud", "/api/n8n"] {
+        assert_eq!(
+            e.call("GET", path, None, None, &host).await.0,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    let (code, report) = e.api("GET", "/api/security", None).await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(report["audit_chain_valid"], true);
+    let out = e.chat("controlla la postura di sicurezza").await;
+    assert!(out["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|step| step["tool"] == "security.status"));
+    let secret = "SyntheticNimKeyForJarvisTest";
+    let (code, report) = e
+        .api(
+            "POST",
+            "/api/cloud",
+            Some(json!({
+                "provider":"nvidia_nim", "model":"meta/llama-3.3-70b-instruct", "key":secret
+            })),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(report["providers"][1]["configured"], true);
+    assert_eq!(report["providers"][1]["effective_rpm"], 35);
+    assert!(!report.to_string().contains(secret));
+    assert!(!std::fs::read_to_string(e.data.join("cloud.json"))
+        .unwrap()
+        .contains(secret));
+    let (code, report) = e
+        .api(
+            "POST",
+            "/api/cloud",
+            Some(json!({
+                "provider":"nvidia_nim", "remove_key":true
+            })),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(report["providers"][1]["configured"], false);
+    assert_eq!(
+        e.api(
+            "POST",
+            "/api/cloud/chat",
+            Some(json!({
+                "message":"test locale", "provider":"nvidia_nim"
+            }))
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+}
+
+#[test]
+fn cloud_tool_calls_use_core_policy_before_workspace_changes() {
+    use jarvis_core::cloud::{Answer, Completed, Failure, Provider};
+    use jarvis_core::observability::Timer;
+
+    let dir = std::env::temp_dir().join(format!("jarvis-cloud-{}", uuid::Uuid::new_v4().simple()));
+    let mut core = test_core(&dir);
+    let turn = |core: &mut Jarvis, arguments: Value| {
+        core.finish_cloud_chat(
+            "Crea un appunto".into(),
+            Completed {
+                model: "synthetic".into(),
+                provider: Provider::Nim,
+                fallback: Some((Provider::Ollama, Failure::Unavailable)),
+                answer: Ok(Answer::Call(json!({
+                    "tool": "fs.write", "version": "1.0.0", "arguments": arguments,
+                }))),
+            },
+            Timer::start(),
+        )
+        .unwrap()
+        .to_json()
+    };
+    let missing = turn(&mut core, json!({"path":"nota.txt"}));
+    assert!(
+        kinds(&missing).contains(&"clarification".into()),
+        "{missing}"
+    );
+    let pending = turn(
+        &mut core,
+        json!({"path":"nota.txt", "content":"verificato"}),
+    );
+    assert_eq!(
+        pending["task"]["state"], "waiting_confirmation",
+        "{pending}"
+    );
+    assert!(kinds(&pending).contains(&"cloud_fallback".into()));
+    assert_eq!(pending["backend"]["name"], "nvidia_nim");
+    let path = dir.join("workspace/nota.txt");
+    assert!(!path.exists());
+    let id = pending["confirmation"]["confirmation_id"].as_str().unwrap();
+    let confirmed = core.confirm(id, true).unwrap().to_json();
+    assert_eq!(confirmed["task"]["state"], "succeeded", "{confirmed}");
+    assert_eq!(confirmed["backend"]["name"], "nvidia_nim");
+    assert_eq!(std::fs::read_to_string(path).unwrap(), "verificato");
+    assert!(core.confirm(id, true).is_err());
+    let limited = core
+        .finish_cloud_chat(
+            "Limite remoto".into(),
+            Completed {
+                provider: Provider::Nim,
+                model: "synthetic".into(),
+                fallback: None,
+                answer: Err(Failure::RateLimited(std::time::Duration::from_secs(10))),
+            },
+            Timer::start(),
+        )
+        .unwrap()
+        .to_json();
+    assert_eq!(limited["task"]["state"], "failed");
+    assert_eq!(limited["task"]["error"]["code"], "cloud.rate_limited");
+    drop(core);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn n8n_chat_routine_requires_owner_confirmation() {
+    let e = env();
+    let (status, out) = e
+        .api("POST", "/api/n8n", Some(json!({"enable": true})))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(out["enabled"], true);
+    let out = e.chat("n8n audit ogni 15 minuti: Verifica registro").await;
+    assert_eq!(out["confirmation"]["tool"], "n8n.create", "{out}");
+    assert_eq!(out["confirmation"]["arguments"]["kind"], "audit");
+    assert_eq!(out["confirmation"]["arguments"]["minutes"], 15);
 }
 
 #[tokio::test]

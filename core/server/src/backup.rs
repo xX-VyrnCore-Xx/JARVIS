@@ -84,8 +84,13 @@ pub(crate) fn private_dir(path: &Path) -> std::io::Result<()> {
 }
 
 /// Preferenze e identità da conservare anche attraverso gli aggiornamenti.
-pub(crate) const DATA_SETTINGS: &[&str] =
-    &["setup.json", "updates.json", "tls/core.crt", "tls/core.key"];
+pub(crate) const DATA_SETTINGS: &[&str] = &[
+    "setup.json",
+    "updates.json",
+    "cloud.json",
+    "tls/core.crt",
+    "tls/core.key",
+];
 
 /// File regolari della workspace (i link simbolici sono esclusi: potrebbero puntare fuori).
 fn workspace_files(root: &Path) -> Vec<PathBuf> {

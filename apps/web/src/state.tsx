@@ -7,7 +7,7 @@ import { voice } from "./lib/voice";
 
 export type View =
   | "dashboard" | "chat" | "tasks" | "automations" | "memory" | "skills" | "workspace"
-  | "connectors" | "devices" | "audit" | "system";
+  | "connectors" | "devices" | "audit" | "security" | "system";
 
 export interface Notification {
   notification_id: string;

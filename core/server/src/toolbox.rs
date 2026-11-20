@@ -331,15 +331,18 @@ pub fn fs_search(workspace: &Path, args: &Value) -> Result<Value, ToolError> {
         .map_err(|e| err("fs.unavailable", e.to_string()))?;
     let mut stack = vec![root.clone()];
     let (mut found, mut scanned) = (Vec::new(), 0usize);
-    while let Some(dir) = stack.pop() {
+    let mut read_budget = 32 * 1024 * 1024;
+    let mut truncated = false;
+    'scan: while let Some(dir) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
         };
         for e in entries.flatten() {
-            scanned += 1;
-            if scanned > MAX_SCAN || found.len() >= limit {
-                break;
+            if scanned == MAX_SCAN || found.len() >= limit {
+                truncated = true;
+                break 'scan;
             }
+            scanned += 1;
             let Ok(meta) = e.metadata() else { continue };
             // Niente collegamenti simbolici: la ricerca non esce dalla workspace.
             if meta.file_type().is_symlink() {
@@ -355,7 +358,7 @@ pub fn fs_search(workspace: &Path, args: &Value) -> Result<Value, ToolError> {
                 stack.push(path);
                 continue;
             }
-            if !name.is_empty() && !rel.to_lowercase().contains(&name) {
+            if !meta.is_file() || (!name.is_empty() && !rel.to_lowercase().contains(&name)) {
                 continue;
             }
             let mut hit = json!({"path": rel, "bytes": meta.len()});
@@ -363,27 +366,34 @@ pub fn fs_search(workspace: &Path, args: &Value) -> Result<Value, ToolError> {
                 if meta.len() > 1_000_000 {
                     continue;
                 }
-                let Ok(content) = std::fs::read_to_string(&path) else {
+                let allowance = meta.len().min(1_000_000);
+                if allowance > read_budget {
+                    truncated = true;
+                    break 'scan;
+                }
+                use std::io::Read;
+                let Ok(file) = std::fs::File::open(&path) else {
                     continue;
                 };
-                let Some(pos) = content.to_lowercase().find(&text) else {
+                let mut content = String::new();
+                read_budget -= allowance;
+                if file.take(allowance).read_to_string(&mut content).is_err() {
                     continue;
-                };
-                let line = content[..pos].matches('\n').count() + 1;
-                let snippet: String = content[pos..]
+                }
+                let Some((line, snippet)) = content
                     .lines()
-                    .next()
-                    .unwrap_or_default()
-                    .chars()
-                    .take(160)
-                    .collect();
-                hit["line"] = line.into();
-                hit["snippet"] = snippet.into();
+                    .enumerate()
+                    .find(|(_, line)| line.to_lowercase().contains(&text))
+                else {
+                    continue;
+                };
+                hit["line"] = (line + 1).into();
+                hit["snippet"] = snippet.trim().chars().take(160).collect::<String>().into();
             }
             found.push(hit);
         }
     }
-    Ok(json!({"results": found, "scanned": scanned.min(MAX_SCAN), "truncated": scanned > MAX_SCAN}))
+    Ok(json!({"results": found, "scanned": scanned, "truncated": truncated}))
 }
 
 pub fn fs_mkdir(workspace: &Path, rel: &str) -> Result<Value, ToolError> {
@@ -462,7 +472,7 @@ pub fn disks() -> Result<Value, ToolError> {
         for line in String::from_utf8_lossy(&o.stdout).lines().skip(1) {
             let f: Vec<&str> = line.split_whitespace().collect();
             if f.len() < 6
-                || !f[0].starts_with('/')
+                || (!f[0].starts_with('/') && f[5] != "/")
                 || f[5].starts_with("/snap")
                 || f[5].starts_with("/System/Volumes/") && f[5] != "/System/Volumes/Data"
             {
@@ -475,7 +485,7 @@ pub fn disks() -> Result<Value, ToolError> {
             if total <= 0.0 {
                 continue;
             }
-            out.push(json!({"mount": f[5], "total_gb": gb(total), "free_gb": gb(avail), "used_percent": f[4].trim_end_matches('%').parse::<f64>().unwrap_or(0.0)}));
+            out.push(json!({"mount": f[5..].join(" "), "total_gb": gb(total), "free_gb": gb(avail), "used_percent": f[4].trim_end_matches('%').parse::<f64>().unwrap_or(0.0)}));
         }
     }
     Ok(json!({"disks": out}))
@@ -819,6 +829,10 @@ mod tests {
         let r = fs_search(&ws, &json!({"text": "UOVA"})).unwrap();
         assert_eq!(r["results"][0]["path"], "note/spesa.txt");
         assert_eq!(r["results"][0]["line"], 2);
+        std::fs::write(ws.join("unicode.txt"), "İİİ test\n").unwrap();
+        let unicode = fs_search(&ws, &json!({"name": "unicode", "text": "test"})).unwrap();
+        assert_eq!(unicode["results"][0]["line"], 1);
+        assert_eq!(unicode["results"][0]["snippet"], "İİİ test");
         let r = fs_search(&ws, &json!({"name": "diario"})).unwrap();
         assert_eq!(r["results"].as_array().unwrap().len(), 1);
         fs_mkdir(&ws, "archivio").unwrap();

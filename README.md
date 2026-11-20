@@ -2,9 +2,9 @@
 
 JARVIS è un ecosistema AI privato, autonomo, modulare e multipiattaforma per un singolo proprietario. Un Core Linux coordina modelli, agenti, memoria e strumenti. I dispositivi autorizzati possono eseguire attività locali e riprendere la sincronizzazione al ritorno della connessione.
 
-L'inferenza e la persistenza privilegiano l'ambiente locale. Il cloud interviene quando serve una capacità superiore e la policy autorizza la trasmissione. L'autonomia comprende pianificazione, esecuzione e verifica, entro i permessi del proprietario.
+L’inferenza usa Ollama Cloud o NVIDIA NIM quando il proprietario seleziona un provider. I comandi a regole, la voce, la memoria e la persistenza restano locali. L'autonomia comprende pianificazione, esecuzione e verifica, entro i permessi del proprietario.
 
-## Prova il prototipo (v0.1)
+## Installa JARVIS
 
 **Con il programma di installazione (consigliato):** dalla pagina Releases di GitHub scarica il file per il tuo sistema:
 - **Windows:** `JARVIS_<versione>_x64_en-US.msi` oppure `JARVIS_<versione>_x64-setup.exe`;
@@ -13,11 +13,7 @@ L'inferenza e la persistenza privilegiano l'ambiente locale. Il cloud interviene
 
 Installalo e apri **JARVIS** dal menu delle applicazioni. Core, runtime AI e Python sono inclusi: non serve installare altro.
 
-Al primo avvio si apre **Configura JARVIS** con le scelte consigliate già selezionate:
-- voce locale con riconoscimento `small`, voce italiana Paola e «Ehi Jarvis»;
-- se [Ollama](https://ollama.com/download) è installato, il modello `qwen2.5:3b`.
-
-Un clic su **Installa** scarica tutto mostrando l'avanzamento (circa 2,7 GB). La configurazione si ripete da Sistema → «Configura voce e modello AI». Ogni release è firmata dal workflow di GitHub, senza chiavi da custodire (ADR-0020). Si verifica così:
+Al primo avvio puoi installare la voce locale con riconoscimento `small`, voce italiana Paola e «Ehi Jarvis» (circa 0,9 GB). Il download mostra l’avanzamento. Per ripetere la configurazione, apri **Sistema → Configura la voce**. Per la conversazione libera, salva una chiave in **Sistema → Modelli cloud**. Ogni release è firmata dal workflow di GitHub, senza chiavi da custodire (ADR-0020). Si verifica così:
 
 ```bash
 gh attestation verify JARVIS_1.0.0_aarch64.dmg --repo xX-VyrnCore-Xx/JARVIS
@@ -43,7 +39,7 @@ Le istruzioni qui sotto valgono per chi usa i sorgenti.
 
 Il prototipo funziona sul tuo computer, senza cloud. Comprende chat, strumenti con permessi, conferme, memoria, workspace e audit.
 
-**Requisiti:** Windows, macOS o Linux con [Python 3.10+](https://www.python.org/) (su Windows spunta «Add to PATH»), [Rust](https://rustup.rs/) e Git. Opzionale: [Ollama](https://ollama.com) per la conversazione libera con un modello locale.
+**Requisiti:** Windows, macOS o Linux con [Python 3.10+](https://www.python.org/) (su Windows spunta «Add to PATH»), [Rust](https://rustup.rs/) e Git.
 
 ```bash
 git clone https://github.com/xX-VyrnCore-Xx/JARVIS.git
@@ -63,8 +59,7 @@ Al primo avvio vengono compilati i componenti: richiede alcuni minuti e l'avanza
 sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev
 ```
 
-- **Senza Ollama** JARVIS parte in modalità *offline*: un modello a regole capisce comandi come «che ore sono», «info sistema», «elenca file», «scrivi note.txt: testo», «leggi note.txt», «ricorda che …», «preferisco …», «cosa sai di …», «cosa ricordi» e «dimentica <id>».
-- **Con Ollama** installa un modello con supporto agli strumenti (per esempio `ollama pull qwen2.5:3b`) e invia un messaggio. Se il gateway è già in modalità offline, attendi almeno 15 secondi dall'ultimo tentativo: la richiesta successiva verifica di nuovo Ollama.
+- **Comandi offline.** Il motore a regole capisce comandi come «che ore sono», «info sistema», «elenca file», «scrivi note.txt: testo», «leggi note.txt», «ricorda che …», «preferisco …», «cosa sai di …», «cosa ricordi» e «dimentica <id>».
 
 - **Automazioni**: scrivi in chat «ogni ora info sistema», «ogni giorno alle 08:00 scrivi buongiorno.txt: ciao» o «tra 5 minuti che ore sono», oppure usa la sezione Automazioni. Le automazioni sopravvivono al riavvio e conservano la cronologia di ogni esecuzione. Si possono modificare («modifica automazione <id> ogni 2 ore» o il pulsante Modifica): ogni modifica crea una nuova versione, approvata da te.
 
@@ -78,6 +73,11 @@ sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev
 - **Notifiche**: la campanella in alto segnala conferme in attesa, automazioni fallite e anomalie (agente AI non disponibile, audit alterato). Ogni notifica è collegata al task che l'ha generata.
 
 - **Backup**: dalla sezione Sistema o con `./jarvis.sh backup` crei una copia cifrata dei tuoi dati, protetta da una passphrase che scegli tu. **Verifica backup** controlla la passphrase, le impronte, il database e l’audit dalla sezione Sistema senza ripristinare i dati. Per ripristinarla, con JARVIS chiuso: `./jarvis.sh restore data-backups/<file>.jbak`. Dopo un aggiornamento, `./jarvis.sh rollback` riporta i dati alla copia fatta automaticamente prima del cambio di versione.
+- **Avatar interattivo.** Seleziona il nucleo nella Plancia o in Chat per parlare, interrompere una risposta o aprire la conversazione.
+- **Centro sicurezza.** Controlla integrità e firme dell’audit, protezione dei segreti, dispositivi, conferme e policy Web. In chat puoi chiedere «controlla la postura di sicurezza».
+- **n8n locale.** Con Docker in esecuzione, apri Automazioni → Container n8n → Abilita e Avvia. Puoi attivare un promemoria o una verifica dell’audit dal pannello o dalla chat, per esempio «n8n audit ogni 15 minuti: Verifica registro». Il container usa un volume Docker dedicato e senza rete. JARVIS mostra l’ultima esecuzione riuscita delle routine registrate quando il Core è attivo.
+- **Ollama Cloud e NVIDIA NIM.** In **Sistema → Modelli cloud** salva la chiave API e l’identificativo del modello per ciascun provider. In Chat puoi scegliere il provider o, con entrambe le chiavi configurate, **Cloud automatico**. Quest’ultima opzione tenta Ollama Cloud per primo e può reinviare lo stesso messaggio a NVIDIA NIM. Il provider riceve il testo del messaggio corrente e schemi pubblici di alcuni strumenti. Una sua proposta passa dalla policy del Core, incluse le conferme per le scritture. Cronologia, memoria e risultati degli strumenti restano locali. NIM distanzia le richieste con un tetto di 35 RPM per Core. Entrambi rispettano `Retry-After` dopo una risposta 429. Servono accesso a Internet e una chiave abilitata al modello scelto.
+
 - **Connettori**: nella sezione Connettori incolli il manifest JSON di un servizio esterno (esempio in `tests/contracts/fixtures/valid/connector.meteo.json`), lo autorizzi con il suo token e selezioni **Prepara** accanto a un’operazione, compili i campi e la invii alla chat. Puoi anche usare «connettore <id> <operazione> chiave=valore» in modalità offline. Il token resta cifrato nel Core e non viene mai mostrato. Le operazioni che scrivono verso l'esterno chiedono sempre conferma. «Revoca» cancella il token e blocca subito le chiamate.
 - **Dal telefono**: pubblica JARVIS nella tua rete privata con un proxy HTTPS (per esempio [Tailscale](https://tailscale.com): `tailscale serve 8765`), avvialo con `JARVIS_ALLOWED_HOSTS=<nome del computer nella rete Tailscale>`, apri l'indirizzo sul telefono e inserisci il codice generato nella sezione **Dispositivi**. Puoi installarlo come app dalla schermata Home. Ogni dispositivo si revoca con un clic, con effetto immediato.
 - **App iOS nativa:** apri `apps/ios/JARVIS.xcodeproj` in Xcode. Il client per iOS/iPadOS 17+ si associa allo stesso Core HTTPS della PWA e offre chat, cronologia e conferme secondo i permessi del dispositivo. Vedi [Interfacce e dispositivi](docs/INTERFACE_AND_DEVICES.md).
@@ -99,9 +99,6 @@ Cosa osservare:
 |---|---|---|
 | `JARVIS_PORT` | `8765` | Porta locale (il Core ascolta solo su 127.0.0.1) |
 | `JARVIS_DATA_DIR` | `./data` | Database, workspace e audit. Per ripartire da zero cancella questa cartella |
-| `JARVIS_AI_BACKEND` | `auto` | `auto`, `ollama` oppure `offline` |
-| `JARVIS_OLLAMA_URL` | `http://127.0.0.1:11434` | Indirizzo di Ollama |
-| `JARVIS_OLLAMA_MODEL` | primo modello installato | Modello da usare, per esempio `qwen2.5:3b` |
 | `JARVIS_SCHEDULER_TICK_S` | `20` | Ogni quanti secondi il Core controlla le automazioni scadute |
 | `JARVIS_WEB` | attivo | `off` disattiva ricerca e lettura di pagine |
 | `JARVIS_VOICE_ENGINE` | `auto` | `off` disattiva la voce; `fake` usa motori finti (test) |
@@ -112,10 +109,10 @@ Cosa osservare:
 | `JARVIS_ALLOWED_HOSTS` | — | Nomi host del proxy fidato da cui i dispositivi associati raggiungono JARVIS (separati da virgola) |
 | `JARVIS_WEB_ALLOW` / `JARVIS_WEB_DENY` | — | Domini consentiti o vietati, separati da virgola (`wikipedia.org,example.org`) |
 
-Limiti noti della v0.1:
-- un solo utente locale e una richiesta alla volta;
+Limiti noti
+- un solo proprietario del Core;
 - PWA su Android/iOS e client nativo iOS per chat e conferme; connettori HTTP dichiarativi con token, chiave o OAuth 2.0 (niente plugin con codice);
-- con Ollama la qualità degli strumenti dipende dal modello scelto.
+- per proporre strumenti, il modello cloud deve supportare le chiamate a funzioni.
 
 Accettazione e prove da fare sul tuo computer: [docs/ACCEPTANCE.md](docs/ACCEPTANCE.md). Dettagli in [docs/ROADMAP.md](docs/ROADMAP.md) e nell'ADR-0004 in [docs/DECISIONS.md](docs/DECISIONS.md).
 

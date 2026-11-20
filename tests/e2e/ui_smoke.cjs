@@ -74,18 +74,23 @@ function check(cond, msg) {
 
   // Primo avvio (ADR-0019): la configurazione guidata si apre da sola con le scelte consigliate.
   await page.waitForSelector("#setup-dialog[open]", { timeout: 15000 });
-  check(await page.locator('#setup-form select[name="stt_model"]').inputValue() === "small", "configurazione guidata al primo avvio con le scelte consigliate");
+  check(await page.locator('#setup-form select[name="stt_model"]').inputValue() === "small", "configurazione della voce al primo avvio con le scelte consigliate");
   check((await page.locator("#setup-size").innerText()).includes("GB"), "dimensione stimata del download");
   if (shots) await page.screenshot({ path: `${shots}/jarvis-configurazione.png` });
   await page.click("#setup-start");
   await page.waitForFunction(() => document.querySelector("#setup-size").textContent.includes("completata"), null, { timeout: 30000 });
-  check((await page.locator("#setup-steps .step.done").count()) >= 4, "passi della configurazione completati con avanzamento");
+  check((await page.locator("#setup-steps .step.done").count()) === 4, "configurazione della voce completata in quattro passi");
   await page.click("#setup-later");
   check(!(await page.locator("#setup-dialog").evaluate((d) => d.open)), "finestra di configurazione chiusa");
 
   check((await page.locator("#st-ai").innerText()).includes("offline"), "stato AI visibile nell'intestazione");
   // Plancia (dashboard HUD): vista iniziale con stato, esecutori, conferme e comando rapido.
   await page.waitForSelector("#view-dashboard.active #avatar-core");
+  const avatar = page.locator("#view-dashboard").getByRole("button", { name: "Controlli avatar di JARVIS" });
+  await avatar.click();
+  check(await page.locator("#view-dashboard").getByRole("button", { name: "Apri chat", exact: true }).isVisible(), "avatar interattivo con controlli accessibili");
+  await page.keyboard.press("Escape");
+  check((await avatar.getAttribute("aria-expanded")) === "false", "controlli avatar richiudibili da tastiera");
   check((await page.locator("#view-dashboard").innerText()).includes("IN ATTESA DI CONFERMA") || (await page.locator("#view-dashboard").innerText()).toLowerCase().includes("in attesa di conferma"), "plancia con il pannello delle conferme");
   check((await page.locator("#dash-conditions").innerText()).includes("modalità offline"), "plancia mostra le condizioni offline");
   if (shots) await page.screenshot({ path: `${shots}/jarvis-plancia.png` });
@@ -407,6 +412,10 @@ function check(cond, msg) {
   if (shots) await page.screenshot({ path: `${shots}/jarvis-audit.png` });
 
   // Sistema (Fase 4): stato dei componenti e latenze misurate.
+  await page.click('[data-view="security"]');
+  await page.getByRole("heading", { name: "Centro sicurezza" }).waitFor();
+  await page.locator("#view-security").getByText("Catena integra", { exact: true }).waitFor();
+  check(await page.locator("#view-security").getByRole("button", { name: "Gestisci accessi" }).isVisible(), "centro sicurezza con audit e accessi");
   await page.click('[data-view="system"]');
   await page.waitForSelector("#metrics-table tbody tr td");
   check((await page.locator("#system-cards").innerText()).includes("catena integra"), "pannello Sistema con stato dei componenti");

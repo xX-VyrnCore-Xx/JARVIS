@@ -13,7 +13,7 @@
 # Su Windows usa jarvis.cmd (doppio clic) oppure jarvis.ps1.
 # Se il file non è eseguibile (es. scaricato come ZIP): bash jarvis.sh
 #
-# Variabili utili: JARVIS_PORT, JARVIS_DATA_DIR, JARVIS_AI_BACKEND, JARVIS_OLLAMA_MODEL,
+# Variabili utili: JARVIS_PORT, JARVIS_DATA_DIR,
 # JARVIS_NO_BROWSER=1 (non aprire il browser) — vedi README.md.
 
 # Avviato con `sh jarvis.sh` (dash su Ubuntu non conosce pipefail): si riavvia con bash.
@@ -46,7 +46,6 @@ doctor() {
     if [ -x "$CORE_BIN" ]; then ok "Core già compilato"; else echo "· Core non ancora compilato (succede al primo avvio)"; fi
   fi
   if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then warn "La porta $PORT è occupata: imposta JARVIS_PORT=8766 o chiudi l'altro programma"; problems=$((problems + 1)); else ok "Porta $PORT libera"; fi
-  if curl -s -m 1 "${JARVIS_OLLAMA_URL:-http://127.0.0.1:11434}/api/tags" >/dev/null 2>&1; then ok "Ollama attivo"; else echo "· Ollama non attivo (facoltativo: https://ollama.com, poi 'ollama pull qwen2.5:3b')"; fi
   if [ "$problems" -eq 0 ]; then ok "Tutto pronto: ./jarvis.sh"; else echo "Problemi trovati: $problems"; return 1; fi
 }
 
@@ -115,12 +114,7 @@ if [ "$CMD" = "desktop" ]; then
   exec "$ROOT/apps/desktop/src-tauri/target/release/jarvis-desktop" "$@"
 fi
 
-if curl -s -m 1 "${JARVIS_OLLAMA_URL:-http://127.0.0.1:11434}/api/tags" >/dev/null 2>&1; then
-  echo "→ Ollama rilevato: JARVIS userà un modello locale se disponibile"
-else
-  echo "→ Ollama non rilevato: JARVIS parte in modalità offline (comandi semplici)."
-  echo "  Per la conversazione libera: installa Ollama (https://ollama.com) ed esegui 'ollama pull qwen2.5:3b'"
-fi
+echo "→ Per la conversazione libera, configura un modello in Sistema → Modelli cloud."
 
 # Apre il browser quando il Core risponde (disattivabile con JARVIS_NO_BROWSER=1).
 open_browser() {

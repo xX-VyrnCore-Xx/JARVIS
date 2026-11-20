@@ -176,6 +176,8 @@ pub struct Jarvis {
     stream_sink: Option<StreamSink>,
     updates: crate::updates::Updates,
     oauth: crate::oauth::Flows,
+    cloud_limiter: std::sync::Arc<std::sync::Mutex<crate::cloud::Limiter>>,
+    n8n: std::sync::Arc<crate::n8n::Manager>,
     cfg: Config,
     store: Store,
     audit: AuditLog,
@@ -244,6 +246,8 @@ impl Jarvis {
             stream_sink: None,
             updates: crate::updates::Updates::new(&cfg.data_dir),
             oauth: crate::oauth::Flows::default(),
+            cloud_limiter: Default::default(),
+            n8n: std::sync::Arc::new(crate::n8n::Manager::new(cfg.data_dir.clone())),
             cfg,
             store,
             audit,
@@ -274,7 +278,6 @@ impl Jarvis {
             _legacy_lock: legacy_lock,
         };
         jarvis.register_authorized_connectors()?;
-        jarvis.refresh_embedder();
         jarvis.enable_audit_signing()?;
         jarvis.register_nodes()?;
         crate::rollback::mark(&jarvis.cfg.data_dir)?;
@@ -306,10 +309,9 @@ impl Jarvis {
         if self.worker.as_mut().is_some_and(|w| w.has_exited()) {
             self.worker = None;
         }
-        // Dopo la configurazione dei modelli il worker riparte con i nuovi percorsi (voce, Ollama).
+        // Dopo la configurazione della voce il worker riparte con i nuovi percorsi.
         if self.setup.take_restart() {
             self.worker = None;
-            self.refresh_embedder();
             self.obs
                 .log("info", "worker.restart", json!({"reason": "setup"}));
         }
@@ -383,7 +385,7 @@ impl Jarvis {
             }));
         }
         json!({
-            "core": {"version": env!("CARGO_PKG_VERSION"), "status": "up", "secrets_store": self.secrets.location(), "memory_embeddings": self.embed_model(),
+            "core": {"version": env!("CARGO_PKG_VERSION"), "status": "up", "secrets_store": self.secrets.location(), "memory_embeddings": null,
                      "database": {"schema_version": self.store.schema_version().ok()}},
             "web": self.cfg.web.describe(),
             "ai": ai,
@@ -402,7 +404,11 @@ impl Jarvis {
             t.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
         };
         let objective = task.doc["objective"].as_str().unwrap_or_default();
-        let tools = self.delegated_tools(objective, self.task_scope(task));
+        let tools = if inputs["response_only"] == true {
+            Vec::new()
+        } else {
+            self.delegated_tools(objective, self.task_scope(task))
+        };
         json!({
             "contract": "jarvis.delegation/1",
             "delegation_id": uuid::Uuid::new_v4().to_string(),
@@ -459,7 +465,11 @@ impl Jarvis {
         });
         self.catalog
             .iter()
-            .filter(|t| in_scope(t.name()) && !dynamic(t))
+            .filter(|t| {
+                in_scope(t.name())
+                    && !dynamic(t)
+                    && (t.name() != "n8n.create" || self.n8n.enabled())
+            })
             .chain(ranked.into_iter().take(16))
             .take(64)
             .collect()
@@ -703,6 +713,202 @@ impl Jarvis {
         let out = self.chat_inner(message);
         self.record_task("chat", &timer, &out);
         out
+    }
+
+    pub fn record_owner_action(&mut self, action: &str) -> Result<(), CoreError> {
+        self.audit(json!({
+            "correlation_id": uuid::Uuid::new_v4().to_string(),
+            "actor": {"kind": "owner", "id": "owner"}, "node": "core-local",
+            "action": action, "outcome": "succeeded", "effect": "applied",
+        }))?;
+        Ok(())
+    }
+
+    pub fn cloud_status(&self) -> Result<Value, CoreError> {
+        let settings = crate::cloud::settings(&self.cfg.data_dir);
+        let limiter = self.cloud_limiter.lock().unwrap_or_else(|e| e.into_inner());
+        let providers = crate::cloud::Provider::ALL
+            .into_iter()
+            .map(|provider| {
+                let configured = self
+                    .secrets
+                    .get(&provider.secret())
+                    .map_err(internal)?
+                    .is_some();
+                Ok(provider.view(&settings, configured, &limiter))
+            })
+            .collect::<Result<Vec<_>, CoreError>>()?;
+        Ok(json!({"providers": providers}))
+    }
+
+    pub fn configure_cloud(&mut self, body: &Value) -> Result<Value, CoreError> {
+        let provider = crate::cloud::Provider::parse(&body["provider"])
+            .ok_or_else(|| CoreError::BadRequest("provider sconosciuto".into()))?;
+        if body["remove_key"] == true {
+            self.secrets.delete(&provider.secret()).map_err(internal)?;
+        } else {
+            let model = body["model"]
+                .as_str()
+                .filter(|m| crate::cloud::valid_model(m))
+                .ok_or_else(|| {
+                    CoreError::BadRequest("identificativo del modello non valido".into())
+                })?;
+            if let Some(key) = body["key"].as_str().filter(|key| !key.is_empty()) {
+                if key.len() > 1024 || key.bytes().any(|b| !b.is_ascii_graphic()) {
+                    return Err(CoreError::BadRequest("chiave API non valida".into()));
+                }
+                self.secrets
+                    .put(&provider.secret(), key)
+                    .map_err(internal)?;
+            }
+            let mut settings = crate::cloud::settings(&self.cfg.data_dir);
+            settings[provider.id()] = json!(model);
+            crate::backup::atomic_write(
+                &self.cfg.data_dir.join("cloud.json"),
+                settings.to_string().as_bytes(),
+            )
+            .map_err(internal)?;
+        }
+        let action = if body["remove_key"] == true {
+            "cloud.remove_key"
+        } else {
+            "cloud.configure"
+        };
+        self.record_owner_action(action)?;
+        self.cloud_status()
+    }
+
+    pub fn prepare_cloud_chat(&self, body: &Value) -> Result<crate::cloud::Request, CoreError> {
+        use crate::cloud::{Function, Provider, Request, Target};
+
+        let providers = if body["provider"] == "auto" {
+            Provider::ALL.to_vec()
+        } else {
+            vec![Provider::parse(&body["provider"])
+                .ok_or_else(|| CoreError::BadRequest("provider sconosciuto".into()))?]
+        };
+        let message = body["message"]
+            .as_str()
+            .map(str::trim)
+            .filter(|message| !message.is_empty() && message.chars().count() <= MAX_MESSAGE)
+            .ok_or_else(|| CoreError::BadRequest("messaggio mancante o troppo lungo".into()))?;
+        let settings = crate::cloud::settings(&self.cfg.data_dir);
+        let mut targets = Vec::new();
+        for provider in providers {
+            if let Some(key) = self.secrets.get(&provider.secret()).map_err(internal)? {
+                targets.push(Target {
+                    provider,
+                    key,
+                    model: provider.model(&settings).to_string(),
+                });
+            }
+        }
+        if targets.is_empty() {
+            return Err(CoreError::BadRequest(
+                "configura la chiave API in Sistema".into(),
+            ));
+        }
+        let task = Task::new(message, json!({"kind": "owner", "id": "owner"}));
+        let allows = self.task_scope(&task);
+        let tools = crate::cloud::TOOLS
+            .iter()
+            .filter(|tool| allows(tool))
+            .filter_map(|tool| self.catalog.get(tool))
+            .map(Function::from)
+            .collect();
+        Ok(Request {
+            message: message.to_string(),
+            tools,
+            targets,
+            limiter: self.cloud_limiter.clone(),
+        })
+    }
+
+    pub fn finish_cloud_chat(
+        &mut self,
+        message: String,
+        completed: crate::cloud::Completed,
+        timer: Timer,
+    ) -> Result<Outcome, CoreError> {
+        use crate::cloud::{Answer, Failure};
+
+        self.expire_pending()?;
+        let mut task = Task::new(&message, json!({"kind": "owner", "id": "owner"}));
+        task.transition("planned", "Modello remoto scelto dal proprietario");
+        task.transition("running", "Inferenza remota");
+        let crate::cloud::Completed {
+            provider,
+            model,
+            fallback,
+            answer: response,
+        } = completed;
+        let attempts = fallback
+            .as_ref()
+            .map(|(provider, error)| (*provider, Some(error)))
+            .into_iter()
+            .chain(std::iter::once((provider, response.as_ref().err())));
+        for (attempted, error) in attempts {
+            let mut event = json!({
+                "correlation_id": task.correlation(), "task_id": task.id(),
+                "actor": {"kind": "owner", "id": "owner"}, "node": "core-local",
+                "action": format!("cloud.{}", attempted.id()), "outcome": "succeeded",
+            });
+            if let Some(error) = error {
+                event["outcome"] = json!("failed");
+                event["error_code"] = json!(error.code());
+                event["effect"] = json!("not_applied");
+            }
+            self.audit(event)?;
+        }
+        self.store
+            .message_add("user", &message, &task.id(), &now(), None)
+            .map_err(internal)?;
+        let backend = json!({"name": provider.id(), "location": "cloud", "model": model});
+        let mut out = Outcome {
+            steps: vec![json!({"kind": "delegation", "backend": backend})],
+            backend: Some(backend),
+            ..Outcome::default()
+        };
+        if let Some((first, _)) = fallback {
+            out.steps.insert(0, json!({"kind": "cloud_fallback", "reason": format!("{} non ha completato la richiesta", first.id()), "backend": out.backend}));
+        }
+        let result = match response {
+            Ok(Answer::Text(text)) => {
+                task.transition("succeeded", "Risposta del modello");
+                self.finish(task, out, text)
+            }
+            Ok(Answer::Call(call)) => {
+                self.save(&task)?;
+                let inputs = json!({
+                    "messages": [{"role": "user", "content": message}],
+                    "memory": [], "cloud_backend": out.backend,
+                });
+                self.drive(
+                    task,
+                    inputs,
+                    json!({"kind": "tool_call", "tool_call": call}),
+                    out,
+                    Vec::new(),
+                )
+            }
+            Err(error) => {
+                let code = error.code();
+                let (text, retryable) = match error {
+                    Failure::InvalidKey => ("Il provider ha rifiutato la chiave o il modello. Controlla la configurazione in Sistema.".to_string(), false),
+                    Failure::InvalidTool => ("Il modello ha proposto una chiamata non valida. Riformula la richiesta o usa i comandi offline.".to_string(), false),
+                    Failure::RateLimited(wait) => (format!("Limite del provider raggiunto. Riprova tra {} s o scegli un altro provider.", wait.as_secs_f64().ceil() as u64), true),
+                    Failure::Unavailable => ("Il provider non ha completato la richiesta. Controlla la connessione e il modello in Sistema o scegli un altro provider.".to_string(), true),
+                };
+                task.fail(
+                    json!({"code": code, "category": "unavailable", "message": text,
+                    "retryable": retryable, "effect": "not_applied"}),
+                    "Inferenza remota non riuscita",
+                );
+                self.finish(task, out, text)
+            }
+        };
+        self.record_task("cloud", &timer, &result);
+        result
     }
 
     /// Metriche e log di fine richiesta: identificativi, stato e durata, mai il contenuto.
@@ -1170,6 +1376,7 @@ impl Jarvis {
         last: bool,
         out: &mut Outcome,
     ) -> Value {
+        let last = last || inputs["cloud_backend"].is_object();
         if let Some(uncertain) = history
             .last()
             .filter(|h| h["output"]["effect"] == "unknown")
@@ -1206,7 +1413,9 @@ impl Jarvis {
         });
         match self.call_agent(task, &inputs) {
             Ok(r) if r["kind"] == "reply" || (!last && r["kind"] == "tool_call") => {
-                out.backend = Some(r["backend"].clone());
+                if !inputs["cloud_backend"].is_object() {
+                    out.backend = Some(r["backend"].clone());
+                }
                 r
             }
             _ => {
@@ -1282,7 +1491,10 @@ impl Jarvis {
                 "conferma non corrispondente ai parametri".into(),
             ));
         }
-        let mut out = Outcome::default();
+        let mut out = Outcome {
+            backend: inputs.get("cloud_backend").cloned(),
+            ..Outcome::default()
+        };
         let waited = task.doc["history"]
             .as_array()
             .and_then(|h| h.iter().rev().find(|x| x["to"] == "waiting_confirmation"))
@@ -1487,31 +1699,6 @@ impl Jarvis {
             .map_err(|_| "chiave di firma dell'audit danneggiata".to_string())?;
         self.audit.set_signer(&seed);
         Ok(())
-    }
-
-    /// Attiva gli embedding della memoria se è scelto un modello (ADR-0028). Senza Ollama la memoria usa
-    /// l'indice locale; gli embedding mancanti vengono calcolati appena il servizio risponde.
-    fn refresh_embedder(&mut self) {
-        let embedder = self.setup.embed_model().map(|m| {
-            std::sync::Arc::new(crate::memory::OllamaEmbedder::new(
-                self.setup.ollama_url(),
-                &m,
-            )) as std::sync::Arc<dyn crate::memory::Embedder>
-        });
-        match self.store.set_embedder(embedder) {
-            Ok(n) if n > 0 => self.obs.log("info", "memory.embedded", json!({"items": n})),
-            Ok(_) => {}
-            Err(e) => self.obs.log(
-                "warn",
-                "memory.embed_failed",
-                json!({"error": e.to_string()}),
-            ),
-        }
-    }
-
-    /// Modello di embedding attivo, per lo stato del sistema.
-    pub fn embed_model(&self) -> Option<String> {
-        self.store.embedder.as_ref().map(|e| e.model().to_string())
     }
 
     /// Memoria data all'agente (ADR-0022): tutte le preferenze, poi i fatti e gli episodi pertinenti alla
@@ -1719,6 +1906,51 @@ impl Jarvis {
         )
     }
 
+    pub fn n8n(&self) -> std::sync::Arc<crate::n8n::Manager> {
+        self.n8n.clone()
+    }
+
+    pub fn n8n_notices(&mut self, completed: &[Value]) -> Result<(), CoreError> {
+        for job in completed {
+            let (severity, body) = if job["kind"] == "audit" {
+                match self.security_status() {
+                    Ok(report)
+                        if report["audit_chain_valid"] == true
+                            && report["signatures"]["valid"] == true =>
+                    {
+                        ("success", "Audit integro e firme valide.")
+                    }
+                    _ => (
+                        "warning",
+                        "Verifica l’integrità del registro nel Centro sicurezza.",
+                    ),
+                }
+            } else {
+                ("info", "Promemoria pianificato da n8n.")
+            };
+            self.notify(json!({
+                "severity": severity, "category": "integration", "title": job["name"], "body": body,
+                "source": {"kind": "module", "id": "n8n"}, "link": {"view": "automations"},
+                "dedupe_key": format!("n8n:{}:{}", job["id"].as_str().unwrap_or_default(),
+                                      job["last_run"].as_u64().unwrap_or_default()),
+            }))?;
+        }
+        Ok(())
+    }
+
+    pub fn security_status(&self) -> Result<Value, CoreError> {
+        let audit = self.audit_log(0)?;
+        let devices = self.devices()?;
+        let active = devices.iter().filter(|d| d["revoked_at"].is_null()).count();
+        Ok(json!({
+            "audit_chain_valid": audit["chain_valid"], "audit_events": audit["total"],
+            "signatures": {"enabled": audit["signatures"]["enabled"], "valid": audit["signatures"]["valid"]},
+            "secrets_store": self.secrets.location(), "devices_active": active,
+            "pending_confirmations": self.pending.len(), "web_enabled": self.cfg.web.enabled,
+            "web_private_addresses": self.cfg.web.allow_private, "shell_enabled": !policy::shell_disabled(),
+        }))
+    }
+
     pub fn workspace_listing(&self) -> Result<Value, CoreError> {
         let workspace = self.cfg.workspace();
         tools::execute(
@@ -1768,6 +2000,20 @@ impl Jarvis {
         confirmed: bool,
     ) -> Result<Value, tools::ToolError> {
         match tool {
+            "n8n.create" if confirmed => self
+                .n8n
+                .add(arguments)
+                .map_err(|reason| tool_error("n8n.unavailable", reason)),
+            "n8n.create" => Err(tool_error(
+                "n8n.unavailable",
+                "la routine richiede conferma",
+            )),
+            "security.status" => self.security_status().map_err(|_| {
+                tool_error(
+                    "security.unavailable",
+                    "controllo della postura non riuscito",
+                )
+            }),
             "workflow.create" => {
                 if !confirmed {
                     return Err(tool_error(

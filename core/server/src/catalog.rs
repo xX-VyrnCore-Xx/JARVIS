@@ -17,7 +17,7 @@ macro_rules! tool_file {
     };
 }
 
-const SOURCES: [&str; 38] = [
+const SOURCES: [&str; 40] = [
     tool_file!("date.calc"),
     tool_file!("fs.delete"),
     tool_file!("fs.mkdir"),
@@ -43,7 +43,9 @@ const SOURCES: [&str; 38] = [
     tool_file!("memory.list"),
     tool_file!("memory.remember"),
     tool_file!("memory.search"),
+    tool_file!("n8n.create"),
     tool_file!("process.list"),
+    tool_file!("security.status"),
     tool_file!("shell.run"),
     tool_file!("system.info"),
     tool_file!("time.now"),

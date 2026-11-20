@@ -131,3 +131,20 @@ dialog.connector-dialog h2 { margin: 0; font-size: 1.25rem; letter-spacing: -.02
   .app-desktop button:not(:disabled), .nav, .gauge .arc, .avatar-large .mouth { transition: none; }
   .app-desktop button:not(:disabled):active { transform: none; }
 }
+
+.security-actions { margin-top: 1rem; }
+.cloud-settings h4 { margin: 0; }
+.cloud-selector label { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.n8n-panel { margin-bottom: 1rem; }
+.n8n-panel > .row { margin: .7rem 0; }
+
+.avatar-control { position: relative; line-height: 0; flex: none; }
+.avatar-trigger, .avatar-trigger:hover { display: block; padding: 0; border: 0; background: none; box-shadow: none; border-radius: 50%; }
+.avatar-trigger .avatar { display: block; }
+.avatar-trigger .avatar-small { width: 30px; }
+.avatar-trigger .iris { translate: var(--avatar-x, 0) var(--avatar-y, 0); transition: translate .18s ease-out; }
+.avatar-tools { position: absolute; z-index: 4; top: calc(100% + .45rem); left: 0; line-height: 1.4; display: flex; gap: .35rem;
+  padding: .35rem; white-space: nowrap; background: var(--panel-solid); border: 1px solid var(--border-strong); border-radius: 10px; }
+.avatar-control-large .avatar-tools { left: 50%; translate: -50% 0; top: auto; bottom: .25rem; }
+.avatar-tools[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) { .avatar-trigger .iris { translate: none; transition: none; } }

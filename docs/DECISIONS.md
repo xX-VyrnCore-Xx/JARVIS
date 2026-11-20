@@ -1130,6 +1130,20 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - Il pannello Sistema verifica passphrase, impronte, SQLite e audit dei backup cifrati e mostra le copie prima degli aggiornamenti. Il Core e i comandi di recupero condividono un blocco esterno alla cartella dati. Il rollback verifica SQLite prima di installare la copia e conserva i dati precedenti.
 - I nuovi backup e le copie prima degli aggiornamenti includono le preferenze e l’identità TLS locale. I pacchetti Python e i modelli scaricati restano installazioni locali.
 
+### ADR-0053 — Avatar, postura difensiva, n8n e modelli cloud
+
+- L’avatar offre controlli vocali e navigazione, con movimento ridotto rispettato. Il Centro sicurezza espone la postura locale, disponibile anche tramite lo strumento di sola lettura `security.status`.
+- n8n locale usa Docker con rete disabilitata e volume dedicato. Il Core genera solo routine da modelli interni, separa l’importazione dall’esecuzione per evitare due scrittori SQLite e converte i segnali delle routine in notifiche locali.
+- Ollama Cloud e NVIDIA NIM sono accessibili al proprietario per il singolo messaggio. Le chiavi usano l’archivio dei segreti. Il Core non invia memoria, cronologia o esiti di strumenti. NIM usa intervalli fra le richieste e un massimo di 35 RPM per Core, con attesa indicata dal provider dopo HTTP 429.
+
+### ADR-0054 — Inferenza solo cloud e strumenti mediati dal Core
+
+- **Data** 2026-11-20 · **Stato** implementato · **Fonte** richiesta del proprietario.
+- Il Core usa il motore a regole per i comandi offline. Il setup installa la voce. Le precedenti scelte per Ollama locale e gli embedding vengono ignorate, mantenendo i ricordi e la loro ricerca locale. Questa decisione sostituisce le istruzioni relative ai modelli locali in ADR-0019, ADR-0028 e ADR-0045.
+- Il proprietario può abilitare il passaggio da Ollama Cloud a NVIDIA NIM con «Cloud automatico». Il Core libera il proprio mutex durante la richiesta remota, distanzia le chiamate NIM a 35 RPM e registra nell’audit i provider tentati.
+- Al provider arrivano il messaggio corrente e gli schemi degli strumenti selezionati dal catalogo. Il Core accetta una sola proposta e applica ambito, convalida, policy ed eventuale conferma. Il worker offline compone la risposta usando l’esito dello strumento locale. I connettori continuano a usare i moduli guidati e il motore a regole.
+- **Evidenza** Test dei due formati API, del raffreddamento su 429 e del percorso proposta–policy–conferma nel Core. README e ROADMAP riportano la configurazione corrente.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

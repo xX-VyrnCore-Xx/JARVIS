@@ -18,7 +18,7 @@ pub const CONFIRMATION_TTL_SECS: i64 = 300;
 
 /// Spiegazione leggibile di un motivo di policy.
 /// Terminale disattivato dal proprietario (`JARVIS_SHELL=off`); attivo per impostazione, sempre con conferma.
-fn shell_disabled() -> bool {
+pub(crate) fn shell_disabled() -> bool {
     std::env::var("JARVIS_SHELL").is_ok_and(|v| matches!(v.as_str(), "off" | "0" | "false"))
 }
 
@@ -184,6 +184,9 @@ fn expected_effect(tool: &str, args: &Value) -> String {
             };
             format!("Scrivere {} byte nel file '{}' della workspace (sovrascrive se esiste). Anteprima: «{preview}{more}»", content.len(), args["path"].as_str().unwrap_or("?"))
         }
+        "n8n.create" => format!("Attivare in n8n la routine «{}» ogni {} minuti.{}",
+            args["name"].as_str().unwrap_or_default(), args["minutes"],
+            if args["kind"] == "audit" { " JARVIS controllerà l’audit locale." } else { " JARVIS mostrerà un promemoria." }),
         "workflow.create" => {
             let steps: Vec<String> = args["steps"]
                 .as_array()

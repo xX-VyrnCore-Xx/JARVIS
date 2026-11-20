@@ -13,7 +13,13 @@ pub struct Agent {
 /// Strumenti concessi a ogni specializzazione oltre al proprio ambito: ora e ricerca nella memoria.
 const COMMON: [&str; 2] = ["time.now", "memory.search"];
 
-pub const SPECIALISTS: [Agent; 5] = [
+pub const SPECIALISTS: [Agent; 6] = [
+    Agent {
+        name: "monitoring",
+        role: "Sicurezza difensiva: controlla postura, audit e configurazioni locali. Spiega rischio, rilevamento, correzione e verifica, senza svolgere attacchi.",
+        keywords: &["cybersecurity", "postura di sicurezza", "centro sicurezza", "audit di sicurezza", "hardening", "controllo di sicurezza", "bonifica"],
+        tools: &["security.status", "system.info", "system.disks", "fs.read", "fs.list", "fs.search"],
+    },
     Agent {
         name: "research",
         role: "Ricerca: trova informazioni sul Web, confronta le fonti e cita sempre gli URL.",
@@ -22,15 +28,15 @@ pub const SPECIALISTS: [Agent; 5] = [
     },
     Agent {
         name: "system",
-        role: "Sistema: controlla processi, risorse e terminale del computer; spiega l'effetto di ogni comando prima di proporlo.",
+        role: "Sistemi IT: inizia da diagnosi in sola lettura; distingue osservazioni e ipotesi. Prima di una modifica indica impatto, verifica e ripristino.",
         keywords: &["processi", "processo", "terminale", "cpu", " ram", "task manager", "rallent", "che sistema", "info sistema", "informazioni di sistema", "informazioni sul sistema"],
         tools: &["system.info", "system.disks", "process.list", "shell.run", "fs.list", "fs.read", "fs.search"],
     },
     Agent {
         name: "automation",
         role: "Automazioni: crea, modifica ed esegue automazioni pianificate; descrivi chiaramente quando e cosa eseguiranno.",
-        keywords: &["automazion", "pianific", "ogni giorno", "ogni ora", "ogni settimana", "tra 1", "tra 2", "tra 3", "tra 5", "tra 10", "tra un", "tra mezz"],
-        tools: &["workflow.create", "workflow.list", "workflow.run", "workflow.update", "workflow.delete", "system.info", "fs.write", "todo.add", "todo.list", "todo.done"],
+        keywords: &["n8n", "automazion", "pianific", "ogni giorno", "ogni ora", "ogni settimana", "tra 1", "tra 2", "tra 3", "tra 5", "tra 10", "tra un", "tra mezz"],
+        tools: &["n8n.create", "workflow.create", "workflow.list", "workflow.run", "workflow.update", "workflow.delete", "system.info", "fs.write", "todo.add", "todo.list", "todo.done"],
     },
     Agent {
         name: "memory",
@@ -40,8 +46,8 @@ pub const SPECIALISTS: [Agent; 5] = [
     },
     Agent {
         name: "coding",
-        role: "Codice: scrivi, leggi ed esegui script e programmi nella workspace; proponi comandi verificabili.",
-        keywords: &["codice", "script", "programma in", "python", "javascript", "compila", "git ", "npm "],
+        role: "Coding: leggi il codice prima di modificarlo, riproduci il problema con un test, limita la patch, verifica le regressioni e riporta le verifiche svolte.",
+        keywords: &["codice", "script", "programma in", "python", "javascript", "compila", "git ", "npm ", "regressione", "code review", "refactoring", "test unitari"],
         tools: &["fs.list", "fs.read", "fs.write", "fs.search", "fs.mkdir", "fs.move", "fs.delete", "shell.run", "math.calc"],
     },
 ];
@@ -60,6 +66,13 @@ fn fold(text: &str) -> String {
 /// Specializzazione per la richiesta: esattamente un ambito riconosciuto, altrimenti `None` (generalista).
 pub fn route(message: &str) -> Option<&'static Agent> {
     let text = format!(" {} ", fold(message));
+    if text.trim_start().starts_with("n8n ") {
+        return SPECIALISTS.iter().find(|agent| agent.name == "automation");
+    }
+    let security = &SPECIALISTS[0];
+    if security.keywords.iter().any(|key| text.contains(key)) {
+        return Some(security);
+    }
     let mut hits = SPECIALISTS
         .iter()
         .filter(|a| a.keywords.iter().any(|k| text.contains(k)));

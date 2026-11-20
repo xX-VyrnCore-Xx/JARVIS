@@ -108,6 +108,7 @@ pub struct AppState {
     device_db: std::path::PathBuf,
     /// Configurazione guidata dei modelli: stato letto senza il blocco del Core.
     pub setup: Arc<crate::setup::Setup>,
+    n8n: Arc<crate::n8n::Manager>,
     /// Sfide WebAuthn in corso (ADR-0042): sfida -> dispositivo, scopo e scadenza.
     challenges: Mutex<std::collections::HashMap<String, Challenge>>,
 }
@@ -388,6 +389,12 @@ pub fn router(state: Shared) -> Router {
         )
         .route("/api/health", get(health))
         .route("/api/chat", post(chat))
+        .route("/api/security", get(security_status))
+        .route("/api/n8n", get(n8n_status).post(n8n_runtime))
+        .route("/api/n8n/jobs", post(n8n_create))
+        .route("/api/n8n/jobs/{id}", delete(n8n_remove))
+        .route("/api/cloud", get(cloud_status).post(configure_cloud))
+        .route("/api/cloud/chat", post(cloud_chat))
         .route("/api/chat/stream", post(chat_stream))
         .route("/api/updates", get(updates_get).post(updates_set))
         .route("/api/updates/check", post(updates_check))
@@ -548,6 +555,95 @@ async fn health(State(state): State<Shared>) -> Json<Value> {
             h["busy"] = true.into();
             Json(h)
         }
+    }
+}
+
+async fn n8n_action(
+    state: &Shared,
+    audit: Option<&'static str>,
+    action: impl FnOnce(&crate::n8n::Manager) -> Result<Value, String> + Send + 'static,
+) -> Response {
+    let manager = state.n8n.clone();
+    let result = tokio::task::spawn_blocking(move || action(&manager)).await;
+    match result {
+        Ok(Ok(view)) => {
+            if let Some(action) = audit {
+                if let Err(error) = with_core(state, move |j| j.record_owner_action(action)).await {
+                    return error.into_response();
+                }
+            }
+            Json(view).into_response()
+        }
+        Ok(Err(error)) => CoreError::BadRequest(error).into_response(),
+        Err(_) => CoreError::Internal("operazione n8n interrotta".into()).into_response(),
+    }
+}
+
+async fn n8n_status(State(state): State<Shared>) -> Response {
+    n8n_action(&state, None, |manager| Ok(manager.status())).await
+}
+
+async fn n8n_runtime(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    if body["enable"] == true {
+        return n8n_action(&state, Some("n8n.enable"), |manager| manager.enable()).await;
+    }
+    let Some(running) = body["running"].as_bool() else {
+        return CoreError::BadRequest("stato del container mancante".into()).into_response();
+    };
+    let action = if running { "n8n.start" } else { "n8n.stop" };
+    n8n_action(&state, Some(action), move |manager| {
+        manager.set_running(running)
+    })
+    .await
+}
+
+async fn n8n_create(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    n8n_action(&state, Some("n8n.create"), move |manager| {
+        manager.add(&body)
+    })
+    .await
+}
+
+async fn n8n_remove(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    n8n_action(&state, Some("n8n.remove"), move |manager| {
+        manager.remove(&id)
+    })
+    .await
+}
+
+async fn security_status(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.security_status()).await)
+}
+
+async fn cloud_status(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.cloud_status()).await)
+}
+
+async fn configure_cloud(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply(with_core(&state, move |j| j.configure_cloud(&body)).await)
+}
+
+async fn cloud_chat(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let request = match with_core(&state, move |j| j.prepare_cloud_chat(&body)).await {
+        Ok(request) => request,
+        Err(error) => return error.into_response(),
+    };
+    let timer = crate::observability::Timer::start();
+    let completed = tokio::task::spawn_blocking(move || {
+        let completed = request.execute();
+        (request.message, completed)
+    })
+    .await;
+    let Ok((message, completed)) = completed else {
+        return CoreError::Internal("richiesta cloud interrotta".into()).into_response();
+    };
+    match with_core(&state, move |j| {
+        j.finish_cloud_chat(message, completed, timer)
+    })
+    .await
+    {
+        Ok(out) => Json(out.to_json()).into_response(),
+        Err(error) => error.into_response(),
     }
 }
 
@@ -1645,6 +1741,26 @@ pub fn spawn_scheduler(state: Shared, tick: std::time::Duration) -> tokio::task:
                 runs
             })
             .await;
+            if state.n8n.enabled() {
+                let manager = state.n8n.clone();
+                if let Ok(completed) =
+                    tokio::task::spawn_blocking(move || manager.completed()).await
+                {
+                    if !completed.is_empty() {
+                        let notices = completed.clone();
+                        if with_core(&state, move |j| j.n8n_notices(&notices))
+                            .await
+                            .is_ok()
+                        {
+                            let manager = state.n8n.clone();
+                            let _ = tokio::task::spawn_blocking(move || {
+                                manager.acknowledge(&completed)
+                            })
+                            .await;
+                        }
+                    }
+                }
+            }
             // Aggiornamenti (ADR-0034): una volta al giorno, solo se attivato, con la rete fuori dal blocco.
             if with_core(&state, |j| j.updates_due()).await {
                 let fetched = fetch_releases(&state).await;
@@ -1682,6 +1798,7 @@ pub fn state_with_remote(
     let obs = core.observability();
     let nodes = core.node_hub();
     let setup = core.setup();
+    let n8n = core.n8n();
     let device_db = core.data_dir().join("jarvis.sqlite3");
     Arc::new(AppState {
         core: Arc::new(Mutex::new(core)),
@@ -1693,6 +1810,7 @@ pub fn state_with_remote(
         nodes,
         device_db,
         setup,
+        n8n,
         challenges: Mutex::new(std::collections::HashMap::new()),
     })
 }

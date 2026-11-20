@@ -1,3 +1,4 @@
+import { N8nPanel } from "../components/N8nPanel";
 import { useEffect, useRef, useState } from "react";
 import { api, fmtTime, post } from "../lib/api";
 import { useApp, useViewData } from "../state";
@@ -191,6 +192,7 @@ export function Automations({ active }: { active: boolean }) {
         Attività pianificate che sopravvivono al riavvio. A ogni esecuzione la policy viene ricontrollata; i passi a rischio alto partono
         solo perché li hai approvati alla creazione.
       </p>
+      <N8nPanel active={active} />
       <details className="panel" id="wf-new" ref={details} open={open} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
         <summary>{editing ? `Modifica «${editing.name}» (versione ${editing.version} → ${editing.version + 1})` : "Nuova automazione"}</summary>
         <form id="wf-form" className="form" onSubmit={submit}>
