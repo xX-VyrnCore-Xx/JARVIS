@@ -46,9 +46,9 @@ pub const SPECIALISTS: [Agent; 6] = [
     },
     Agent {
         name: "coding",
-        role: "Coding: leggi il codice prima di modificarlo, riproduci il problema con un test, limita la patch, verifica le regressioni e riporta le verifiche svolte.",
+        role: "Coding: leggi il codice prima di modificarlo, riproduci il problema con un test, limita la patch, verifica le regressioni, segnala i controlli mancanti e riporta un prossimo passo pertinente.",
         keywords: &["codice", "script", "programma in", "python", "javascript", "compila", "git ", "npm ", "regressione", "code review", "refactoring", "test unitari"],
-        tools: &["fs.list", "fs.read", "fs.write", "fs.search", "fs.mkdir", "fs.move", "fs.delete", "shell.run", "math.calc"],
+        tools: &["fs.list", "fs.read", "fs.write", "fs.search", "fs.mkdir", "fs.move", "fs.delete", "shell.run", "math.calc", "code.check_python", "code.run_python", "agent.delegate"],
     },
 ];
 

@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "ai"))
 
 from jarvis_ai.contracts import validation_errors  # noqa: E402
-from jarvis_ai.voice import VoiceError, VoiceService, read_wav, write_wav  # noqa: E402
+from jarvis_ai.voice import VoiceError, VoiceService, correct_transcript, read_wav, write_wav  # noqa: E402
 from jarvis_ai.worker import handle_line, assistant_handler  # noqa: E402
 
 FIXTURES = ROOT / "tests" / "contracts" / "fixtures" / "valid"
@@ -29,6 +29,14 @@ def tone(seconds=1.0, amp=4000, rate=16000):
 
 def b64(data: bytes) -> str:
     return base64.b64encode(data).decode()
+
+
+class TranscriptCorrectionTest(unittest.TestCase):
+    def test_italian_corrections_preserve_code_and_paths(self):
+        self.assertEqual(correct_transcript("Qual'è il prossimo passo e perchè", "it"), "Qual è il prossimo passo e perché")
+        for text in ("Scrivi note.txt: qual'è", "un pò in src/main.py", "password=un pò"):
+            self.assertEqual(correct_transcript(text, "it"), text)
+        self.assertEqual(correct_transcript("qual é", "es"), "qual é")
 
 
 class FakeEngines(unittest.TestCase):

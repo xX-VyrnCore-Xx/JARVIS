@@ -1,12 +1,8 @@
-## Novità in JARVIS 1.12.1
+## Novità in JARVIS 1.13.0
 
-La release desktop contiene un solo setup Windows x64 e due immagini macOS, una per Apple Silicon e una per Intel.
-
-## Novità in JARVIS 1.12.0
-
-- **Conversazioni con contesto.** In Chat, «Continua la conversazione» riusa fino a tre scambi testuali con lo stesso provider. «Qual è la fonte?» ripropone i collegamenti verificati del turno precedente. Per i riferimenti ambigui, JARVIS chiede chiarimenti.
-- **Modelli cloud.** Ollama Cloud e NVIDIA NIM gestiscono la conversazione libera. Configura le chiavi in **Sistema → Modelli cloud**. NIM ha un limite di 35 richieste al minuto per Core. Voce e comandi a regole sono disponibili offline.
-- **Strumenti e automazioni.** Il Core verifica le proposte dei modelli e richiede una conferma per le scritture. L’avatar interattivo offre controlli vocali, il Centro sicurezza mostra lo stato del Core e n8n gestisce routine locali per promemoria e audit.
+- Supporto opzionale a XTTS v2 locale con campione WAV fornito dal proprietario. Faster Whisper usa filtri e parole chiave mirate, con correzioni italiane conservative. La dettatura si può rivedere prima dell’invio al cloud.
+- Verifica statica ed esecuzione Python con conferma in Docker isolato. Gli agenti temporanei usano strumenti di lettura limitati. Il terminale host richiede un consenso esplicito.
+- Budget del contesto cloud e controllo di credenziali riconoscibili prima dell’invio. Il workflow pubblica dal commit di `main` dopo una CI verde.
 
 ## Installazione
 

@@ -1,0 +1,43 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "code.check_python",
+  "version": "1.0.0",
+  "summary": "Verifica la sintassi di un file Python della workspace in sandbox",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "path"
+    ],
+    "properties": {
+      "path": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 512
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "prerequisites": [
+    "Docker locale con immagine python:3.13-alpine già presente"
+  ],
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.sandbox:execute"
+  ],
+  "errors": [
+    "code.unavailable",
+    "code.timeout",
+    "code.invalid_source"
+  ],
+  "timeout_ms": 20000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "none"
+}

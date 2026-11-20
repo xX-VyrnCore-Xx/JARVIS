@@ -17,7 +17,9 @@ macro_rules! tool_file {
     };
 }
 
-const SOURCES: [&str; 40] = [
+const SOURCES: &[&str] = &[
+    tool_file!("code.check_python"),
+    tool_file!("code.run_python"),
     tool_file!("date.calc"),
     tool_file!("fs.delete"),
     tool_file!("fs.mkdir"),

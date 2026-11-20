@@ -30,6 +30,8 @@ Il checkpoint è la sezione di ripresa versionata con Git. Ogni voce va aggiorna
 
 **JARVIS 1.12.1 (2026-11-20).** ADR-0056. La release pubblica comprende solo il setup Windows x64 e le immagini macOS Apple Silicon e Intel. Il workflow verifica nomi dei pacchetti, firma e prove di avvio prima della pubblicazione.
 
+**JARVIS 1.13.0 (2026-11-20).** ADR-0057. Voce XTTS v2 con riferimento locale, trascrizione più controllata, strumenti Python in sandbox, contesto filtrato e release automatica dopo CI. Il collaudo del timbro richiede un campione autorizzato e i pesi XTTS v2.
+
 Il checkpoint precedente è riportato qui sotto per riferimento.
 
 | Campo | Stato al 2026-11-18 (diciottesima ripresa) |

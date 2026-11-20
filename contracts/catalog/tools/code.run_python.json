@@ -1,0 +1,43 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "code.run_python",
+  "version": "1.0.0",
+  "summary": "Esegue un frammento Python in un container locale isolato",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "source"
+    ],
+    "properties": {
+      "source": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 16000
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "prerequisites": [
+    "Docker locale con immagine python:3.13-alpine già presente"
+  ],
+  "effects": "write_local",
+  "risk": "high",
+  "permissions": [
+    "core.sandbox:execute"
+  ],
+  "errors": [
+    "code.unavailable",
+    "code.timeout",
+    "code.invalid_source"
+  ],
+  "timeout_ms": 20000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "required"
+}

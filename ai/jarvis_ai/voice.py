@@ -19,6 +19,7 @@ import base64
 import io
 import math
 import os
+import logging
 import re
 import struct
 import wave
@@ -144,9 +145,27 @@ class WhisperSTT:
         self.info = {"name": "faster-whisper", "model": self.model_name, "location": "local"}
 
     def transcribe(self, data: bytes, language: str) -> str:
-        read_wav(data)  # stessi limiti e controlli del formato
-        segments, _ = self.model.transcribe(io.BytesIO(data), language=language, vad_filter=True, beam_size=1)
-        return " ".join(s.text.strip() for s in segments).strip()
+        segments, _ = self.model.transcribe(
+            io.BytesIO(data), language=language, vad_filter=True, beam_size=3,
+            condition_on_previous_text=False, temperature=0,
+            vad_parameters={"min_silence_duration_ms": 350, "speech_pad_ms": 180},
+            hotwords="JARVIS, GitHub, Python, JavaScript, macOS, Ollama, NVIDIA NIM",
+        )
+        return " ".join(s.text.strip() for s in segments if s.no_speech_prob < 0.8).strip()
+
+
+def correct_transcript(text: str, language: str) -> str:
+    """Corregge solo locuzioni italiane note; lascia comandi, codice e punteggiatura tecnica intatti."""
+    if language != "it" or re.search(r"[`/:\\_@=]|\.\w{1,8}\b", text):
+        return text
+    for pattern, replacement in (
+        (r"\bqual['’]è\b", "qual è"),
+        (r"\bqual é\b", "qual è"),
+        (r"\bun pò\b", "un po’"),
+        (r"\bperchè\b", "perché"),
+    ):
+        text = re.sub(pattern, lambda m: replacement.capitalize() if m[0][0].isupper() else replacement, text, flags=re.I)
+    return text
 
 
 class PiperTTS:
@@ -166,6 +185,53 @@ class PiperTTS:
         with wave.open(buf, "wb") as wav:
             self.piper.synthesize_wav(text, wav)
         return buf.getvalue()
+
+
+class XttsTTS:
+    """XTTS v2 locale, pesi e riferimento scelti dal proprietario, senza download impliciti."""
+
+    info = {"name": "xtts", "model": "xtts-v2", "location": "local"}
+    voice = "xtts-reference"
+    rate = 24000
+
+    def __init__(self, env: dict[str, str]):
+        self.directory = Path(env.get("JARVIS_XTTS_DIR", ""))
+        self.reference = Path(env.get("JARVIS_XTTS_REFERENCE", ""))
+        self.language = env.get("JARVIS_VOICE_LANG", "it")
+        speed = float(env.get("JARVIS_XTTS_SPEED", "1.08"))
+        self.speed = min(1.3, max(0.8, speed))
+        if not self.reference.is_file() or not all(
+            (self.directory / name).is_file()
+            for name in ("config.json", "model.pth", "vocab.json")
+        ):
+            raise VoiceError("voice.model_missing", "XTTS v2 richiede pesi locali e un campione WAV")
+        with self.reference.open("rb") as audio:
+            samples, rate, _ = read_wav(audio.read(MAX_BYTES + 1))
+        if not 3 <= len(samples) / rate <= 30 or rms(samples) < 100:
+            raise VoiceError("voice.invalid_audio", "Il campione XTTS deve contenere da 3 a 30 secondi di voce")
+        self.model = None
+        self.conditioning = None
+
+    def synthesize(self, text: str) -> bytes:
+        import torch
+        from TTS.tts.configs.xtts_config import XttsConfig
+        from TTS.tts.models.xtts import Xtts
+
+        with torch.inference_mode():
+            if self.model is None:
+                config = XttsConfig()
+                config.load_json(str(self.directory / "config.json"))
+                model = Xtts.init_from_config(config)
+                model.load_checkpoint(config, checkpoint_dir=str(self.directory), eval=True)
+                if torch.cuda.is_available():
+                    model.cuda()
+                conditioning = model.get_conditioning_latents(audio_path=[str(self.reference)])
+                self.model, self.conditioning = model, conditioning
+            result = self.model.inference(
+                text, self.language, *self.conditioning, speed=self.speed, enable_text_splitting=True,
+            )
+        samples = [int(max(-1.0, min(1.0, float(sample))) * 32767) for sample in result["wav"]]
+        return write_wav(samples, self.rate)
 
 
 class OpenWakeWord:
@@ -216,6 +282,7 @@ class VoiceService:
         self.stt: Any = None
         self.tts: Any = None
         self.wake: Any = None
+        self.fallback_tts: Any = None
         self.reasons: list[str] = []
         if mode == "off":
             self.reasons.append("voce disattivata (JARVIS_VOICE_ENGINE=off)")
@@ -231,6 +298,12 @@ class VoiceService:
                     self.reasons.append(str(exc))
                 except Exception as exc:  # noqa: BLE001 — modello assente o corrotto: la voce resta disattivata, il resto funziona
                     self.reasons.append(f"{label} non disponibile: {exc.__class__.__name__}: {str(exc)[:200]}")
+            if self.env.get("JARVIS_XTTS_DIR") and self.env.get("JARVIS_XTTS_REFERENCE"):
+                try:
+                    self.fallback_tts = self.tts
+                    self.tts = XttsTTS(self.env)
+                except (OSError, ValueError, VoiceError):
+                    self.reasons.append("Configurazione XTTS v2 non valida; usa una cartella modello e un riferimento WAV validi")
             try:
                 self.wake = OpenWakeWord(self.env)
             except Exception:  # noqa: BLE001 — opzionale: si usa il riconoscimento della parola nella trascrizione
@@ -255,6 +328,7 @@ class VoiceService:
             raise VoiceError("voice.invalid_audio", "audio non in base64") from exc
         samples, rate, _ = read_wav(data)
         text = self.stt.transcribe(data, self.language).strip()[:8000]
+        text = correct_transcript(text, self.language)
         wake: dict[str, Any] = {"mode": mode, "detected": False}
         if mode == "wake_word":
             match = WAKE_RE.match(text)
@@ -282,7 +356,17 @@ class VoiceService:
             raise VoiceError("voice.invalid_text", "testo vuoto")
         if len(text) > MAX_TTS_CHARS:
             raise VoiceError("voice.too_long", f"testo oltre {MAX_TTS_CHARS} caratteri")
-        audio = self.tts.synthesize(text)
+        try:
+            audio = self.tts.synthesize(text)
+        except Exception as exc:
+            if not isinstance(self.tts, XttsTTS):
+                raise
+            logging.getLogger(__name__).debug("XTTS non disponibile: %s", type(exc).__name__)
+            self.reasons.append("XTTS v2 non disponibile; controlla che le dipendenze e il modello siano installati")
+            self.tts = self.fallback_tts
+            if self.tts is None:
+                raise VoiceError("voice.unavailable", self.reasons[-1]) from None
+            audio = self.tts.synthesize(text)
         samples, rate, _ = read_wav(audio) if len(audio) <= MAX_BYTES else ([], self.tts.rate, {})
         return {
             "contract": "jarvis.voice-synthesis/1",

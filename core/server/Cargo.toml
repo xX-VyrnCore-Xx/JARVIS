@@ -1,6 +1,6 @@
 [package]
 name = "jarvis-core"
-version = "1.12.1"
+version = "1.13.0"
 description = "Core JARVIS: API locale, orchestrazione, policy, strumenti, memoria e audit (prototipo v0.1)"
 edition.workspace = true
 rust-version.workspace = true

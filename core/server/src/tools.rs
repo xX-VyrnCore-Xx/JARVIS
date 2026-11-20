@@ -101,6 +101,7 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
             }))
         }
         "process.list" => process_list(args),
+        "code.check_python" => crate::sandbox::check_python(ctx.workspace, s("path")),
         "math.calc" => crate::toolbox::calc(s("expression")),
         "units.convert" => {
             crate::toolbox::convert(args["value"].as_f64().unwrap_or(0.0), s("from"), s("to"))
@@ -385,9 +386,18 @@ pub fn shell_run(workspace: &Path, command: &str) -> Result<Value, ToolError> {
         c.args(["-c", command]);
         c
     };
-    for (k, _) in std::env::vars_os() {
-        if k.to_string_lossy().starts_with("JARVIS_") {
-            cmd.env_remove(k);
+    cmd.env_clear();
+    for key in [
+        "PATH",
+        "SystemRoot",
+        "ComSpec",
+        "TEMP",
+        "TMP",
+        "TMPDIR",
+        "LANG",
+    ] {
+        if let Some(value) = std::env::var_os(key) {
+            cmd.env(key, value);
         }
     }
     let started = std::time::Instant::now();

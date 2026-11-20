@@ -252,40 +252,67 @@ export class VoiceEngine {
     if (!clean) return;
     const request = new AbortController();
     this.speechRequest = request;
-    try {
-      const res = await fetch("/api/voice/speak", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...AUTH },
-        body: JSON.stringify({ text: clean, with_visemes: true }),
-        signal: request.signal,
-      });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error?.message || `HTTP ${res.status}`);
-      // Labiale (ADR-0029): audio e visemi arrivano insieme.
-      const data = await res.json();
-      const bytes = Uint8Array.from(atob(data.audio_b64 || ""), (c) => c.charCodeAt(0));
-      const blob = new Blob([bytes], { type: "audio/wav" });
-      const timeline: Viseme[] = Array.isArray(data.visemes) ? data.visemes : [];
-      if (request.signal.aborted) return;
-      const audio = new Audio(URL.createObjectURL(blob));
-      this.player = audio;
-      audio.onplaying = () => {
-        if (this.player === audio) this.setState("speaking");
-      };
-      audio.onended = () => {
-        if (this.player === audio) this.stopSpeaking();
-      };
-      audio.onerror = () => {
-        if (this.player !== audio) return;
-        this.stopSpeaking();
-        this.handlers.onError("Riproduzione della risposta vocale interrotta da un errore.");
-      };
-      void this.animateSpeech(audio, blob, timeline);
-      await audio.play();
-    } catch (e) {
-      if (request.signal.aborted) return;
-      this.stopSpeaking();
-      this.handlers.onError(`Risposta vocale non disponibile: ${(e as Error).message}`);
+    const segments = clean.split(/(?<=[.!?])\s+/);
+    const chunks: string[] = [];
+    for (const segment of segments) {
+      const words = segment.trim().split(/\s+/);
+      let chunk = "";
+      for (const word of words) {
+        if (chunk && chunk.length + word.length + 1 > 260) {
+          chunks.push(chunk);
+          chunk = "";
+        }
+        chunk = chunk ? `${chunk} ${word}` : word;
+      }
+      if (chunk) chunks.push(chunk);
     }
+
+    const play = async (index: number) => {
+      if (request.signal.aborted) return;
+      try {
+        const res = await fetch("/api/voice/speak", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...AUTH },
+          body: JSON.stringify({ text: chunks[index], with_visemes: true }),
+          signal: request.signal,
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error?.message || `HTTP ${res.status}`);
+        const data = await res.json();
+        if (request.signal.aborted) return;
+        const bytes = Uint8Array.from(atob(data.audio_b64 || ""), (c) => c.charCodeAt(0));
+        const blob = new Blob([bytes], { type: "audio/wav" });
+        const timeline: Viseme[] = Array.isArray(data.visemes) ? data.visemes : [];
+        const audio = new Audio(URL.createObjectURL(blob));
+        this.player = audio;
+        audio.onplaying = () => {
+          if (this.player === audio) this.setState("speaking");
+        };
+        audio.onended = () => {
+          if (this.player !== audio) return;
+          if (index + 1 === chunks.length) {
+            this.stopSpeaking();
+            return;
+          }
+          URL.revokeObjectURL(audio.src);
+          this.player = null;
+          cancelAnimationFrame(this.speechFrame);
+          setMouth(null);
+          void play(index + 1);
+        };
+        audio.onerror = () => {
+          if (this.player !== audio) return;
+          this.stopSpeaking();
+          this.handlers.onError("Riproduzione della risposta vocale interrotta da un errore.");
+        };
+        void this.animateSpeech(audio, blob, timeline);
+        await audio.play();
+      } catch (e) {
+        if (request.signal.aborted) return;
+        this.stopSpeaking();
+        this.handlers.onError(`Risposta vocale non disponibile: ${(e as Error).message}`);
+      }
+    };
+    if (chunks.length) await play(0);
   }
 
   /**

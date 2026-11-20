@@ -14,11 +14,19 @@ on:
         description: "Tag da creare e pubblicare (es. v0.1.0): deve corrispondere alla versione del Core. Vuoto = solo archivi"
         required: false
         default: ""
+      commit:
+        description: "Commit verificato da usare per una pubblicazione automatica"
+        required: false
+        default: ""
       sostituisci:
         description: "Se la release del tag esiste già, la elimina con il suo tag e la ricrea sul commit costruito"
         type: boolean
         required: false
         default: false
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -41,6 +49,8 @@ jobs:
       GITHUB_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit || github.sha }}
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -147,6 +157,8 @@ jobs:
       attestations: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit || github.sha }}
       - name: Tag coerente con la versione del Core
         id: tag
         env:
@@ -205,7 +217,7 @@ jobs:
           # Con l'avvio manuale il tag non esiste ancora: lo crea qui sul commit costruito (via git, così un
           # rifiuto riporta la regola che lo blocca), poi la release usa il tag esistente.
           if ! git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null; then
-            git tag "$TAG" "$GITHUB_SHA"
+            git tag "$TAG" "$(git rev-parse HEAD)"
             git push origin "refs/tags/$TAG" || {
               echo "::error::push del tag $TAG rifiutato; regole attive:"
               gh api "repos/$GITHUB_REPOSITORY/rulesets" || true

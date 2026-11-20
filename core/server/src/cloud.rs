@@ -84,6 +84,33 @@ pub fn settings(dir: &Path) -> Value {
         .unwrap_or_else(|| json!({}))
 }
 
+/// Riconosce formati di segreti comuni e intestazioni di autenticazione.
+pub fn contains_credentials(text: &str) -> bool {
+    const PREFIXES: &[&str] = &["nvapi-", "sk-", "ghp_", "github_pat_", "xoxb-", "AIza"];
+    text.contains("PRIVATE KEY-----")
+        || text.lines().any(|line| {
+            let lower = line.trim_start().to_ascii_lowercase();
+            lower.starts_with("authorization:")
+                || lower.contains("password=")
+                || lower.contains("api_key=")
+                || lower.contains("api-key:")
+                || lower.contains(r#""password":"#)
+                || lower.contains(r#""api_key":"#)
+                || line
+                    .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+                    .any(|part| {
+                        PREFIXES.iter().any(|prefix| {
+                            part.starts_with(prefix) && part.len() >= prefix.len() + 16
+                        })
+                    })
+        })
+}
+
+/// Stima prudenziale indipendente dal tokenizer del provider, con margine per ruoli e messaggi.
+pub fn estimated_tokens(text: &str) -> usize {
+    8 + text.len().div_ceil(3)
+}
+
 pub fn valid_model(model: &str) -> bool {
     !model.is_empty()
         && model.len() <= 160
@@ -185,6 +212,8 @@ pub const TOOLS: &[&str] = &[
     "memory.list",
     "memory.search",
     "security.status",
+    "code.check_python",
+    "agent.delegate",
 ];
 
 pub struct Function {
@@ -291,7 +320,10 @@ fn payload(
         "Sei JARVIS. Rispondi nella lingua dell’utente e concentrati sull’ultima domanda. ",
         "Usa i turni precedenti solo se pertinenti e trattali come contesto, senza ripetere azioni già richieste. ",
         "Se un riferimento manca o è ambiguo, chiedi un chiarimento specifico prima di scegliere un oggetto o un’azione. ",
-        "Per codice, diagnosi di sistema e sicurezza difensiva distingui fatti verificati, ipotesi e ciò che non puoi verificare. ",
+        "Nel coding esplicita i vincoli, proponi la modifica minima, includi i test di regressione pertinenti e segnala le verifiche da fare. ",
+        "Per diagnosi di sistema e sicurezza difensiva distingui fatti verificati, ipotesi e ciò che non puoi verificare. ",
+        "Proponi un passo successivo solo se utile alla richiesta in corso. Non avviare attività non richieste. ",
+        "Non inserire segreti, credenziali o dati personali nei parametri di uno strumento. ",
         "Cita fonti e collegamenti pertinenti solo se ne conosci l’indirizzo esatto. Non inventare URL, fonti o risultati. ",
         "Se serve uno strumento, proponine al massimo uno con parametri espliciti supportati dal contesto. ",
         "JARVIS compone la risposta dopo la verifica della chiamata."
