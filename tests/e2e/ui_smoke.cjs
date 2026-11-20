@@ -279,6 +279,10 @@ function check(cond, msg) {
   await page.click('[data-view="chat"]');
   check((await send("cerca rust")).includes("[1] Rust (linguaggio)"), "ricerca Web con risultati numerati");
   check(await page.locator(".msg.assistant").last().locator(".sources a").count() === 1, "fonte della ricerca mostrata sotto la risposta");
+  const previousSource = await page.locator(".msg.assistant").last().locator(".sources a").first().getAttribute("href");
+  const sourcesReply = await send("Qual è la fonte?");
+  check(sourcesReply.includes("associate alla risposta precedente"), "il seguito recupera le fonti del turno precedente");
+  check(await page.locator(".msg.assistant").last().locator(".sources a").first().getAttribute("href") === previousSource, "il collegamento della fonte corrisponde al turno a cui si riferisce");
   const fetched = await send(`apri http://127.0.0.1:${WEB_PORT}/pagina`);
   check(fetched.includes("Contenuto verificabile."), "pagina Web letta ed estratta");
   check(/sha256 [0-9a-f]{12}/.test(await page.locator(".msg.assistant").last().locator(".sources").innerText()), "provenienza con SHA-256 del contenuto");

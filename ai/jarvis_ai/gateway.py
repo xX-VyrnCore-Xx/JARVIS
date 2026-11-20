@@ -617,8 +617,16 @@ class OfflineBackend:
         lowered = message.lower().strip(" !?.")
         if lowered in {"ciao", "salve", "buongiorno", "buonasera", "hello", "hi", "hey"}:
             return _result("reply", self.backend, text="Ciao! " + HELP)
-        memory = inputs.get("memory", [])
-        hits = [m for m in memory if any(w in m.lower() for w in re.findall(r"\w{4,}", lowered))]
+        if re.search(r"\b(?:di prima|di sopra|precedente|quest'ultim[oa])\b", lowered) or re.fullmatch(
+            r"(?:e\s+)?(?:quell[oaie]|quest[oaie]|l'altr[oa]|prima|dopo|perché|come mai)(?:\s+lì)?", lowered
+        ):
+            return _result("reply", self.backend, text="A quale elemento ti riferisci? Indicami il nome o ripeti la richiesta completa.")
+        # Cerca termini interi e ignora le parole generiche che accomunano richieste e ricordi diversi.
+        generic = {"quale", "quali", "quello", "quella", "quelli", "quelle", "questo", "questa",
+                   "questi", "queste", "come", "dove", "quando", "prima", "dopo", "anche", "della",
+                   "dello", "delle", "degli", "dall", "sulla", "sullo", "ancora", "altro", "altra"}
+        words = set(re.findall(r"\w{4,}", lowered)) - generic
+        hits = [m for m in inputs.get("memory", []) if words.intersection(re.findall(r"\w+", m.lower()))]
         if hits:
             return _result("reply", self.backend, text="Dalla memoria:\n" + "\n".join(f"• {h}" for h in hits[:5]))
         return _result("reply", self.backend, text="Non ho capito la richiesta in modalità offline.\n\n" + HELP)

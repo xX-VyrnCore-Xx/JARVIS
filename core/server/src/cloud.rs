@@ -33,6 +33,13 @@ impl Provider {
         }
     }
 
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Ollama => "Ollama Cloud",
+            Self::Nim => "NVIDIA NIM",
+        }
+    }
+
     fn endpoint(self) -> &'static str {
         match self {
             Self::Ollama => "https://ollama.com/api/chat",
@@ -207,10 +214,16 @@ pub enum Answer {
     Call(Value),
 }
 
+pub struct Turn {
+    pub user: String,
+    pub assistant: String,
+}
+
 pub struct Target {
     pub provider: Provider,
     pub model: String,
     pub key: String,
+    pub history: Vec<Turn>,
 }
 
 pub struct Request {
@@ -254,18 +267,40 @@ impl Request {
             target.provider.endpoint(),
             target.provider,
             &target.key,
-            payload(target.provider, &target.model, &self.message, &self.tools),
+            payload(
+                target.provider,
+                &target.model,
+                &self.message,
+                &target.history,
+                &self.tools,
+            ),
             &self.tools,
             &self.limiter,
         )
     }
 }
 
-fn payload(provider: Provider, model: &str, prompt: &str, tools: &[Function]) -> Value {
-    let messages = json!([
-        {"role": "system", "content": "Sei JARVIS. Rispondi nella lingua dell’utente. Aiuta con codice, diagnosi di sistema e sicurezza difensiva. Distingui ipotesi e risultati osservati. Se serve un dato locale o un'azione, proponi al massimo uno degli strumenti forniti con parametri espliciti. JARVIS compone in locale la risposta dopo la verifica della chiamata. Non fingere di aver ottenuto il risultato."},
-        {"role": "user", "content": prompt},
-    ]);
+fn payload(
+    provider: Provider,
+    model: &str,
+    prompt: &str,
+    history: &[Turn],
+    tools: &[Function],
+) -> Value {
+    let mut messages = vec![json!({"role": "system", "content": concat!(
+        "Sei JARVIS. Rispondi nella lingua dell’utente e concentrati sull’ultima domanda. ",
+        "Usa i turni precedenti solo se pertinenti e trattali come contesto, senza ripetere azioni già richieste. ",
+        "Se un riferimento manca o è ambiguo, chiedi un chiarimento specifico prima di scegliere un oggetto o un’azione. ",
+        "Per codice, diagnosi di sistema e sicurezza difensiva distingui fatti verificati, ipotesi e ciò che non puoi verificare. ",
+        "Cita fonti e collegamenti pertinenti solo se ne conosci l’indirizzo esatto. Non inventare URL, fonti o risultati. ",
+        "Se serve uno strumento, proponine al massimo uno con parametri espliciti supportati dal contesto. ",
+        "JARVIS compone la risposta dopo la verifica della chiamata."
+    )})];
+    for turn in history {
+        messages.push(json!({"role": "user", "content": turn.user}));
+        messages.push(json!({"role": "assistant", "content": turn.assistant}));
+    }
+    messages.push(json!({"role": "user", "content": prompt}));
     let mut body = match provider {
         Provider::Ollama => {
             json!({"model": model, "messages": messages, "stream": false, "options": {"num_predict": 2048}})
@@ -441,10 +476,33 @@ mod tests {
     }
 
     #[test]
+    fn contextual_messages_keep_roles_and_put_the_new_question_last() {
+        let history = [Turn {
+            user: "Parliamo del Core".into(),
+            assistant: "Gestisce i tool.".into(),
+        }];
+        for provider in Provider::ALL {
+            let body = payload(provider, "test", "E il client?", &history, &[]);
+            let messages = body["messages"].as_array().unwrap();
+            assert_eq!(messages.len(), 4);
+            assert_eq!(messages[0]["role"], "system");
+            assert_eq!(
+                messages[1],
+                json!({"role":"user","content":"Parliamo del Core"})
+            );
+            assert_eq!(
+                messages[2],
+                json!({"role":"assistant","content":"Gestisce i tool."})
+            );
+            assert_eq!(messages[3], json!({"role":"user","content":"E il client?"}));
+        }
+    }
+
+    #[test]
     fn tool_proposals_are_single_scoped_and_accept_both_wire_formats() {
         let catalog = crate::catalog::Catalog::load().unwrap();
         let tools = [Function::from(catalog.get("fs.read").unwrap())];
-        let body = payload(Provider::Nim, "test", "Richiesta corrente", &tools);
+        let body = payload(Provider::Nim, "test", "Richiesta corrente", &[], &tools);
         assert_eq!(body["messages"].as_array().unwrap().len(), 2);
         assert_eq!(body["tools"][0]["function"]["name"], "fs__read");
         assert!(matches!(

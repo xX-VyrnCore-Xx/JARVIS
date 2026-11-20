@@ -792,14 +792,32 @@ impl Jarvis {
             .map(str::trim)
             .filter(|message| !message.is_empty() && message.chars().count() <= MAX_MESSAGE)
             .ok_or_else(|| CoreError::BadRequest("messaggio mancante o troppo lungo".into()))?;
+        let recent = if body["use_context"] == true {
+            self.store.recent_cloud_turns().map_err(internal)?
+        } else {
+            Vec::new()
+        };
         let settings = crate::cloud::settings(&self.cfg.data_dir);
         let mut targets = Vec::new();
         for provider in providers {
             if let Some(key) = self.secrets.get(&provider.secret()).map_err(internal)? {
+                let mut history: Vec<_> = recent
+                    .iter()
+                    .take_while(|turn| turn.cloud_provider.as_deref() == Some(provider.id()))
+                    .filter_map(|turn| {
+                        let assistant = turn.assistant.as_deref()?;
+                        Some(crate::cloud::Turn {
+                            user: clip(&turn.user, 1300),
+                            assistant: clip(assistant, 1300),
+                        })
+                    })
+                    .collect();
+                history.reverse();
                 targets.push(Target {
                     provider,
                     key,
                     model: provider.model(&settings).to_string(),
+                    history,
                 });
             }
         }
@@ -808,6 +826,8 @@ impl Jarvis {
                 "configura la chiave API in Sistema".into(),
             ));
         }
+        // In modalità automatica si continua, se possibile, con il provider che ha il contesto.
+        targets.sort_by_key(|target| target.history.is_empty());
         let task = Task::new(message, json!({"kind": "owner", "id": "owner"}));
         let allows = self.task_scope(&task);
         let tools = crate::cloud::TOOLS
@@ -861,7 +881,7 @@ impl Jarvis {
             self.audit(event)?;
         }
         self.store
-            .message_add("user", &message, &task.id(), &now(), None)
+            .message_add("user", &message, &task.id(), &now(), None, None)
             .map_err(internal)?;
         let backend = json!({"name": provider.id(), "location": "cloud", "model": model});
         let mut out = Outcome {
@@ -870,12 +890,12 @@ impl Jarvis {
             ..Outcome::default()
         };
         if let Some((first, _)) = fallback {
-            out.steps.insert(0, json!({"kind": "cloud_fallback", "reason": format!("{} non ha completato la richiesta", first.id()), "backend": out.backend}));
+            out.steps.insert(0, json!({"kind": "cloud_fallback", "reason": format!("{} non ha completato la richiesta", first.label()), "backend": out.backend}));
         }
         let result = match response {
             Ok(Answer::Text(text)) => {
                 task.transition("succeeded", "Risposta del modello");
-                self.finish(task, out, text)
+                self.finish_reply(task, out, text, Some(provider.id()))
             }
             Ok(Answer::Call(call)) => {
                 self.save(&task)?;
@@ -951,10 +971,33 @@ impl Jarvis {
             )));
         }
         self.expire_pending()?;
+        let previous_sources = if is_source_followup(message) {
+            Some(self.store.last_turn_sources().map_err(internal)?)
+        } else {
+            None
+        };
         let mut task = Task::new(message, json!({"kind": "owner", "id": "owner"}));
         self.store
-            .message_add("user", message, &task.id(), &now(), None)
+            .message_add("user", message, &task.id(), &now(), None, None)
             .map_err(internal)?;
+        if let Some(sources) = previous_sources {
+            let text = if sources.is_empty() {
+                "La risposta precedente non ha fonti verificate. Quale informazione vuoi controllare?"
+            } else {
+                "Qui sotto trovi le fonti associate alla risposta precedente."
+            };
+            task.transition("planned", "Riferimento all’ultimo turno");
+            task.transition("running", "Recupero delle fonti locali");
+            task.transition("succeeded", "Risposta sulle fonti");
+            return self.finish(
+                task,
+                Outcome {
+                    sources,
+                    ..Outcome::default()
+                },
+                text.into(),
+            );
+        }
         task.transition("planned", "Delega all'agente");
         task.transition("running", "Agente in esecuzione");
         self.save(&task)?;
@@ -1157,7 +1200,7 @@ impl Jarvis {
             conf["expected_effect"].as_str().unwrap_or_default()
         );
         self.store
-            .message_add("assistant", &text, &task.id(), &now(), None)
+            .message_add("assistant", &text, &task.id(), &now(), None, None)
             .map_err(internal)?;
         out.task = task.doc.clone();
         out.reply = Some(text);
@@ -1640,7 +1683,17 @@ impl Jarvis {
         }
     }
 
-    fn finish(&mut self, task: Task, mut out: Outcome, text: String) -> Result<Outcome, CoreError> {
+    fn finish(&mut self, task: Task, out: Outcome, text: String) -> Result<Outcome, CoreError> {
+        self.finish_reply(task, out, text, None)
+    }
+
+    fn finish_reply(
+        &mut self,
+        task: Task,
+        mut out: Outcome,
+        text: String,
+        cloud_provider: Option<&str>,
+    ) -> Result<Outcome, CoreError> {
         self.save(&task)?;
         let created = task.doc["created_at"]
             .as_str()
@@ -1673,6 +1726,7 @@ impl Jarvis {
                 &task.id(),
                 &now(),
                 Some(&Value::Array(out.sources.clone())),
+                cloud_provider,
             )
             .map_err(internal)?;
         out.task = task.doc;
@@ -4393,6 +4447,28 @@ fn explicit_connector_tool(objective: &str) -> Option<String> {
         }
         _ => None,
     }
+}
+
+pub(crate) fn is_source_followup(message: &str) -> bool {
+    let normalized = message
+        .trim()
+        .trim_end_matches(['?', '!', '.'])
+        .to_lowercase();
+    matches!(
+        normalized.as_str(),
+        "fonte"
+            | "fonti"
+            | "fonte della risposta"
+            | "fonti della risposta"
+            | "qual è la fonte"
+            | "quali sono le fonti"
+            | "mi dai la fonte"
+            | "mi dai le fonti"
+            | "link della fonte"
+            | "link delle fonti"
+            | "mostra le fonti"
+            | "e le fonti"
+    )
 }
 
 /// Cronologia entro il budget (ADR-0024): l'ultimo messaggio resta intero (fino a MAX_MESSAGE), i turni

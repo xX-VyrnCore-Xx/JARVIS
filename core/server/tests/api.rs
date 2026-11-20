@@ -413,6 +413,99 @@ async fn security_posture_and_cloud_configuration_are_local_and_hide_keys() {
 }
 
 #[test]
+fn cloud_context_requires_opt_in_and_stays_with_the_provider() {
+    use jarvis_core::cloud::{Answer, Completed, Provider};
+
+    let dir = std::env::temp_dir().join(format!(
+        "jarvis-cloud-context-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let mut core = test_core(&dir);
+    for provider in ["nvidia_nim", "ollama_cloud"] {
+        core.configure_cloud(&json!({"provider":provider, "model":"synthetic", "key":"synthetic"}))
+            .unwrap();
+    }
+    let turn = |core: &mut Jarvis, question: &str, answer: &str| {
+        core.finish_cloud_chat(
+            question.into(),
+            Completed {
+                provider: Provider::Nim,
+                model: "synthetic".into(),
+                fallback: None,
+                answer: Ok(Answer::Text(answer.into())),
+            },
+            jarvis_core::observability::Timer::start(),
+        )
+        .unwrap();
+    };
+    core.chat("scrivi privata.txt: appunto offline").unwrap();
+    turn(
+        &mut core,
+        "Parliamo di JARVIS",
+        "Possiamo esaminare il Core e il client.",
+    );
+    turn(&mut core, "E il Core?", "Il Core gestisce gli strumenti.");
+    let ask = |core: &Jarvis, use_context| {
+        core.prepare_cloud_chat(&json!({
+            "provider":"auto", "use_context":use_context, "message":"E il secondo?"
+        }))
+        .unwrap()
+    };
+    let standalone = ask(&core, false);
+    assert_eq!(standalone.targets[0].provider.id(), "ollama_cloud");
+    assert!(standalone
+        .targets
+        .iter()
+        .all(|target| target.history.is_empty()));
+    let connected = ask(&core, true);
+    assert_eq!(connected.targets[0].provider.id(), "nvidia_nim");
+    let history = &connected.targets[0].history;
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].user, "Parliamo di JARVIS");
+    assert_eq!(history[1].assistant, "Il Core gestisce gli strumenti.");
+    assert!(connected.targets[1].history.is_empty());
+
+    let long = "a".repeat(3000);
+    turn(&mut core, "Terzo", &long);
+    turn(&mut core, "Quarto", "quarto esito");
+    let bounded = ask(&core, true);
+    let history = &bounded.targets[0].history;
+    assert_eq!(history.len(), 3);
+    assert_eq!(history[0].user, "E il Core?");
+    assert!(history[1].assistant.chars().count() <= 1300);
+
+    core.chat("che ore sono").unwrap();
+    assert!(ask(&core, true)
+        .targets
+        .iter()
+        .all(|target| target.history.is_empty()));
+    drop(core);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn source_followup_uses_only_the_previous_turn_and_stays_local() {
+    let e = env();
+    let out = e.chat("che ore sono").await;
+    assert_eq!(out["task"]["state"], "succeeded");
+    let (status, out) = e
+        .api(
+            "POST",
+            "/api/cloud/chat",
+            Some(json!({
+                "provider": "ollama_cloud", "message": "Qual è la fonte?"
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(out["sources"], json!([]));
+    assert!(out["reply"]
+        .as_str()
+        .unwrap()
+        .contains("risposta precedente"));
+}
+
+#[test]
 fn cloud_tool_calls_use_core_policy_before_workspace_changes() {
     use jarvis_core::cloud::{Answer, Completed, Failure, Provider};
     use jarvis_core::observability::Timer;

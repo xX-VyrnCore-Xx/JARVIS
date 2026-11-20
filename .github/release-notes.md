@@ -1,3 +1,9 @@
+## Novità in JARVIS 1.12.0
+
+- **Conversazioni con contesto.** In Chat, «Continua la conversazione» riusa fino a tre scambi testuali con lo stesso provider. «Qual è la fonte?» ripropone i collegamenti verificati del turno precedente. Per i riferimenti ambigui, JARVIS chiede chiarimenti.
+- **Modelli cloud.** Ollama Cloud e NVIDIA NIM gestiscono la conversazione libera. Configura le chiavi in **Sistema → Modelli cloud**. NIM ha un limite di 35 richieste al minuto per Core. Voce e comandi a regole sono disponibili offline.
+- **Strumenti e automazioni.** Il Core verifica le proposte dei modelli e richiede una conferma per le scritture. L’avatar interattivo offre controlli vocali, il Centro sicurezza mostra lo stato del Core e n8n gestisce routine locali per promemoria e audit.
+
 ## Installazione
 
 | Sistema | File | Primo avvio |

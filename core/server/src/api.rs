@@ -624,6 +624,16 @@ async fn configure_cloud(State(state): State<Shared>, Json(body): Json<Value>) -
 }
 
 async fn cloud_chat(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    if let Some(message) = body["message"]
+        .as_str()
+        .filter(|m| crate::orchestrator::is_source_followup(m))
+    {
+        let message = message.to_string();
+        return match with_core(&state, move |j| j.chat(&message)).await {
+            Ok(out) => Json(out.to_json()).into_response(),
+            Err(error) => error.into_response(),
+        };
+    }
     let request = match with_core(&state, move |j| j.prepare_cloud_chat(&body)).await {
         Ok(request) => request,
         Err(error) => return error.into_response(),
