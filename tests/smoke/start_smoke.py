@@ -52,20 +52,40 @@ def main() -> int:
     page = get(f"{base}/", {"Host": f"localhost:{port}"})
     token = re.search(r'name="jarvis-token" content="([0-9a-f]{32})"', page).group(1)
 
-    def chat(message: str) -> str:
+    def api(path: str, body: dict | None = None) -> dict:
         req = urllib.request.Request(
-            f"{base}/api/chat",
-            data=json.dumps({"message": message}).encode("utf-8"),
+            f"{base}/api/{path}",
+            data=json.dumps(body).encode("utf-8") if body is not None else None,
             headers={"Content-Type": "application/json", "X-Jarvis-Token": token, "Host": f"localhost:{port}"},
         )
         with urllib.request.urlopen(req, timeout=60) as r:
-            return json.loads(r.read().decode("utf-8"))["reply"]
+            return json.loads(r.read().decode("utf-8"))
 
-    hello = chat("ciao")
+    def chat(message: str) -> dict:
+        return api("chat", {"message": message})
+
+    hello = chat("ciao")["reply"]
     assert "JARVIS" in hello and "modalità" in hello, f"risposta inattesa o caratteri alterati: {hello!r}"
     print("✓ chat e caratteri accentati integri")
-    assert chat("che ore sono").startswith("Sono le"), "strumento time.now non eseguito"
+    assert chat("che ore sono")["reply"].startswith("Sono le"), "strumento time.now non eseguito"
     print("✓ strumento eseguito tramite policy")
+    pending = chat("scrivi prova-installazione.txt: verifica JARVIS")
+    assert pending["task"]["state"] == "waiting_confirmation"
+    confirmation = pending["confirmation"]["confirmation_id"]
+    assert api(f"confirmations/{confirmation}", {"approve": True})["task"]["state"] == "succeeded"
+    assert "verifica JARVIS" in chat("leggi prova-installazione.txt")["reply"]
+    assert api("security")["audit_chain_valid"] is True
+    print("✓ scrittura confermata, lettura e catena di audit")
+
+    settings = {"provider": "nvidia_nim", "model": "moonshotai/kimi-k3.1-pro"}
+    key = "synthetic-smoke-key"
+    configured = api("cloud", dict(settings, key=key))
+    nim = next(item for item in configured["providers"] if item["id"] == "nvidia_nim")
+    assert nim["configured"] and nim["effective_rpm"] == 35
+    assert key not in json.dumps(configured)
+    removed = api("cloud", dict(settings, remove_key=True))
+    assert not next(item for item in removed["providers"] if item["id"] == "nvidia_nim")["configured"]
+    print("✓ configurazione NVIDIA NIM, limite e rimozione della credenziale di prova")
     return 0
 
 

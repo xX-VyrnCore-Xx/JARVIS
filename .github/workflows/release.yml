@@ -1,9 +1,7 @@
 name: release
 
-# Programmi di installazione per Linux (.deb, .AppImage; .deb anche ARM64), macOS (.dmg Apple Silicon e Intel) e
-# Windows (.msi, setup .exe), con Core,
-# runtime AI e Python autonomo inclusi (ADR-0016). Ogni installer viene installato davvero sul runner (Linux e
-# Windows; su macOS l'app copiata dal .dmg montato) e il Core installato supera la prova di avvio.
+# Installer macOS (.dmg per Apple Silicon e Intel) e Windows (setup .exe), con Core,
+# runtime AI e Python autonomo inclusi. Ogni installer viene installato e il Core supera la prova di avvio.
 # Con un tag vX.Y.Z pubblica la release con installer e impronte (decisione del proprietario del 2026-11-17); i tag con suffisso, es. v1.0.0-rc.1, restano prerelease.
 on:
   push:
@@ -32,15 +30,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-22.04, target: linux-x86_64, bundles: "deb,appimage" }
           - { os: macos-latest, target: macos-aarch64, bundles: "dmg" }
-          - { os: windows-latest, target: windows-x86_64, bundles: "msi,nsis" }
-          # Piattaforme aggiuntive (ADR-0050): Mac con processore Intel e Linux ARM64 (Raspberry Pi 5, server
-          # ARM). Facoltative: se il runner non è disponibile la release esce con le piattaforme principali.
-          - { os: macos-15-intel, target: macos-x86_64, bundles: "dmg", optional: true }
-          - { os: ubuntu-22.04-arm, target: linux-aarch64, bundles: "deb", optional: true }
+          - { os: macos-15-intel, target: macos-x86_64, bundles: "dmg" }
+          - { os: windows-latest, target: windows-x86_64, bundles: "nsis" }
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.optional == true }}
     timeout-minutes: 90
     env:
       JARVIS_AI_BACKEND: offline
@@ -54,16 +47,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - name: Librerie di sistema (Linux)
-        if: runner.os == 'Linux'
-        # Il mirror Ubuntu dei runner a volte serve un indice più nuovo dei pacchetti (404): nuovo tentativo con
-        # indice aggiornato, al massimo 3 volte.
-        run: |
-          for i in 1 2 3; do
-            sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf && exit 0
-            echo "::warning::installazione dei pacchetti non riuscita (tentativo $i), nuovo tentativo"; sleep 30
-          done
-          exit 1
       - name: Core in modalità release, incluso come sidecar
         shell: bash
         run: |
@@ -106,17 +89,6 @@ jobs:
           else
             tauri build --config tauri.bundle.conf.json --bundles ${{ matrix.bundles }}
           fi
-      - name: Installazione reale e avvio del Core installato (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          sudo dpkg -i apps/desktop/src-tauri/target/release/bundle/deb/*.deb
-          root=$(dirname "$(dirname "$(dirname "$(dpkg -L jarvis | grep 'jarvis_ai/worker.py$')")")")
-          echo "risorse installate in $root"
-          test -x /usr/bin/jarvis-core || { echo "manca /usr/bin/jarvis-core"; exit 1; }
-          test -x "$root/python/bin/python3" || { echo "manca $root/python/bin/python3"; ls -la "$root/python/bin" | head; exit 1; }
-          JARVIS_HOME="$root" JARVIS_PYTHON="$root/python/bin/python3" JARVIS_DATA_DIR="$RUNNER_TEMP/dati" /usr/bin/jarvis-core > core.log 2>&1 &
-          python tests/smoke/start_smoke.py http://127.0.0.1:8765 120 || { cat core.log; exit 1; }
       - name: Installazione dal .dmg e avvio del Core installato (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -137,17 +109,17 @@ jobs:
           test -x "$app/Contents/MacOS/jarvis-core" && test -x "$res/python/bin/python3"
           JARVIS_HOME="$res" JARVIS_PYTHON="$res/python/bin/python3" JARVIS_DATA_DIR="$RUNNER_TEMP/dati" "$app/Contents/MacOS/jarvis-core" > core.log 2>&1 &
           python tests/smoke/start_smoke.py http://127.0.0.1:8765 120 || { cat core.log; exit 1; }
-      - name: Installazione reale (MSI) e avvio del Core installato (Windows)
+      - name: Installazione reale (setup EXE) e avvio del Core installato (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $msi = (Get-ChildItem apps/desktop/src-tauri/target/release/bundle/msi/*.msi)[0].FullName
-          $p = Start-Process msiexec.exe -ArgumentList '/i', "`"$msi`"", '/qn', '/l*v', "$env:RUNNER_TEMP\msi.log" -Wait -PassThru
-          if ($p.ExitCode -ne 0) { Get-Content "$env:RUNNER_TEMP\msi.log" -Tail 50; exit 1 }
-          $core = Get-ChildItem -Path "$env:ProgramFiles", "${env:ProgramFiles(x86)}", "$env:LOCALAPPDATA\Programs" -Recurse -Filter jarvis-core.exe -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $core) { Write-Host "jarvis-core.exe non trovato dopo l'installazione"; exit 1 }
-          $root = $core.DirectoryName
-          if (-not (Test-Path "$root\python\python.exe")) { Write-Host "Python incluso assente in $root"; exit 1 }
+          $setup = (Get-ChildItem apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe)[0].FullName
+          $root = Join-Path $env:RUNNER_TEMP 'JARVIS-installato'
+          # Per NSIS /D deve essere l'ultimo argomento e va passato senza virgolette.
+          $p = Start-Process -FilePath $setup -ArgumentList "/S /D=$root" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Installazione non riuscita: $($p.ExitCode)" }
+          $core = Get-Item "$root\jarvis-core.exe"
+          if (-not (Test-Path "$root\python\python.exe")) { throw "Python incluso assente in $root" }
           $env:JARVIS_HOME = $root; $env:JARVIS_PYTHON = "$root\python\python.exe"; $env:JARVIS_DATA_DIR = "$env:RUNNER_TEMP\dati"
           Start-Process -FilePath $core.FullName -RedirectStandardOutput core.log -RedirectStandardError core.err -NoNewWindow
           python tests/smoke/start_smoke.py http://127.0.0.1:8765 120
@@ -156,7 +128,8 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          find apps/desktop/src-tauri/target/release/bundle \( -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' -o -name '*.msi' -o -name '*-setup.exe' \) -type f -exec cp {} dist/ \;
+          find apps/desktop/src-tauri/target/release/bundle \( -name '*.dmg' -o -name '*-setup.exe' \) -type f -exec cp {} dist/ \;
+          test "$(find dist -type f | wc -l)" -eq 1
           ls -la dist
       - uses: actions/upload-artifact@v4
         with:
@@ -187,11 +160,16 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: Elenco delle impronte SHA-256
+      - name: Verifica dei pacchetti e impronte SHA-256
         working-directory: dist
+        env:
+          TAG: ${{ steps.tag.outputs.name }}
         run: |
-          rm -f ./*.sha256
-          sha256sum -- * > SHA256SUMS
+          version="${TAG#v}"
+          installers=("JARVIS_${version}_aarch64.dmg" "JARVIS_${version}_x64.dmg" "JARVIS_${version}_x64-setup.exe")
+          test "$(find . -maxdepth 1 -type f | wc -l)" -eq "${#installers[@]}"
+          for installer in "${installers[@]}"; do test -s "$installer"; done
+          sha256sum -- "${installers[@]}" > SHA256SUMS
           cat SHA256SUMS
       # Firma senza chiavi da custodire (ADR-0020): attestazione di provenienza di GitHub per ogni installer e
       # firma Sigstore dell'elenco delle impronte, legate a questo workflow e a questo commit.
@@ -199,10 +177,7 @@ jobs:
         uses: actions/attest-build-provenance@v2
         with:
           subject-path: |
-            dist/*.deb
-            dist/*.AppImage
             dist/*.dmg
-            dist/*.msi
             dist/*-setup.exe
       - uses: sigstore/cosign-installer@v3
       - name: Firma Sigstore dell'elenco delle impronte

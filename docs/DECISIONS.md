@@ -1151,6 +1151,12 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - «Cloud automatico» dà priorità al provider con contesto e, se passa all’altro, invia il messaggio corrente. L'istruzione del modello chiede di chiarire i riferimenti ambigui e separare fatti, ipotesi e fonti.
 - Una richiesta esplicita come «Qual è la fonte?» legge solo le fonti archiviate con il turno precedente e viene risolta dal Core anche quando è selezionato un provider. La modalità offline chiede quale sia il riferimento di richieste vaghe e confronta parole intere per suggerire un ricordo.
 
+### ADR-0056 — Tre installer desktop per Windows e macOS
+
+- **Data** 2026-11-20 · **Fonte** richiesta del proprietario.
+- La release pubblica contiene il setup NSIS Windows x64 e un’immagine macOS per ciascuna architettura (Apple Silicon e Intel). Tutti e tre i pacchetti sono necessari alla pubblicazione. La CI prova l’installazione con lo stesso setup o la stessa immagine che verrà pubblicata.
+- La verifica prima della firma controlla la presenza dei tre file attesi. La configurazione di sviluppo e i test Linux rimangono disponibili. Le credenziali NIM si configurano per ciascuna installazione nell’archivio cifrato locale.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

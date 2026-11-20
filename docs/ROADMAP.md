@@ -28,6 +28,8 @@ Il checkpoint è la sezione di ripresa versionata con Git. Ogni voce va aggiorna
 
 **Continuità della chat da `69b204a` (2026-11-20).** ADR-0055. Contesto cloud opzionale con provenienza per provider, recupero locale delle fonti dell’ultimo turno e chiarimenti per riferimenti ambigui offline. Verifiche locali: 194 test Rust, 97 controlli Chromium, unità Python e contratti. Le regressioni sono in `core/server/tests/api.rs`, `core/server/src/cloud.rs`, `tests/ai/test_gateway.py` e `tests/e2e/ui_smoke.cjs`. Il collaudo qualitativo con i modelli cloud richiede credenziali dei provider.
 
+**JARVIS 1.12.1 (2026-11-20).** ADR-0056. La release pubblica comprende solo il setup Windows x64 e le immagini macOS Apple Silicon e Intel. Il workflow verifica nomi dei pacchetti, firma e prove di avvio prima della pubblicazione.
+
 Il checkpoint precedente è riportato qui sotto per riferimento.
 
 | Campo | Stato al 2026-11-18 (diciottesima ripresa) |

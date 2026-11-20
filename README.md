@@ -7,9 +7,8 @@ L’inferenza usa Ollama Cloud o NVIDIA NIM quando il proprietario seleziona un 
 ## Installa JARVIS
 
 **Con il programma di installazione (consigliato):** dalla pagina Releases di GitHub scarica il file per il tuo sistema:
-- **Windows:** `JARVIS_<versione>_x64_en-US.msi` oppure `JARVIS_<versione>_x64-setup.exe`;
-- **macOS:** `JARVIS_<versione>_aarch64.dmg` (chip Apple) oppure `JARVIS_<versione>_x64.dmg` (Intel);
-- **Linux:** `.deb` per Debian/Ubuntu oppure `.AppImage`; su ARM64 (es. Raspberry Pi 5) `JARVIS_<versione>_arm64.deb`.
+- **Windows x64:** `JARVIS_<versione>_x64-setup.exe`.
+- **macOS:** `JARVIS_<versione>_aarch64.dmg` (chip Apple) oppure `JARVIS_<versione>_x64.dmg` (Intel).
 
 Installalo e apri **JARVIS** dal menu delle applicazioni. Core, runtime AI e Python sono inclusi: non serve installare altro.
 
