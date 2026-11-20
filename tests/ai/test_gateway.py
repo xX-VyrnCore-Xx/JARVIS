@@ -393,6 +393,12 @@ class OfflineBackend(unittest.TestCase):
         r = self.call("x", tool_result={"tool": "memory.search", "status": "succeeded", "output": {"query": "q", "items": [{"id": "b", "text": "u", "kind": "procedural"}]}})
         self.assertIn("[b] (preferenza) u", r["text"])
 
+    def test_followup_asks_for_a_reference_and_ignores_unrelated_memory(self):
+        answer = self.call("E quello di prima?", memory=["prima di pranzo leggo", "quello è un promemoria"])
+        self.assertIn("A quale elemento ti riferisci?", answer["text"])
+        answer = self.call("rete?", memory=["il segreto va custodito"])
+        self.assertNotIn("Dalla memoria", answer["text"])
+
     def test_memory_recall_and_help(self):
         self.assertIn("caffè", self.call("caffè?", memory=["amo il caffè"])["text"])
         self.assertIn("Prova con", self.call("qualcosa di incomprensibile")["text"])

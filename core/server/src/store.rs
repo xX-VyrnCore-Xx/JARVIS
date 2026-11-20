@@ -14,7 +14,13 @@ pub struct Store {
 pub type StoreResult<T> = Result<T, rusqlite::Error>;
 
 /// Versione dello schema (ADR-0037): 1 = schema fino a 1.3.x con migrazioni additive; 3 = tracce dei task (ADR-0039); 4 = passkey (ADR-0042); 5 = note e cose da fare (ADR-0046).
-pub const SCHEMA_VERSION: i64 = 6;
+pub const SCHEMA_VERSION: i64 = 7;
+
+pub(crate) struct ConversationTurn {
+    pub user: String,
+    pub assistant: Option<String>,
+    pub cloud_provider: Option<String>,
+}
 
 impl Store {
     pub fn open(path: &Path) -> StoreResult<Self> {
@@ -66,6 +72,12 @@ impl Store {
         let has_sources = conn.prepare("SELECT sources FROM messages LIMIT 0").is_ok();
         if !has_sources {
             conn.execute_batch("ALTER TABLE messages ADD COLUMN sources TEXT;")?;
+        }
+        if conn
+            .prepare("SELECT cloud_provider FROM messages LIMIT 0")
+            .is_err()
+        {
+            conn.execute_batch("ALTER TABLE messages ADD COLUMN cloud_provider TEXT;")?;
         }
         let store = Self {
             conn,
@@ -261,10 +273,19 @@ impl Store {
         task_id: &str,
         at: &str,
         sources: Option<&Value>,
+        cloud_provider: Option<&str>,
     ) -> StoreResult<()> {
         self.conn.execute(
-            "INSERT INTO messages (role, content, task_id, at, sources) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![role, content, task_id, at, sources.map(|s| s.to_string())],
+            "INSERT INTO messages (role, content, task_id, at, sources, cloud_provider)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                role,
+                content,
+                task_id,
+                at,
+                sources.map(|s| s.to_string()),
+                cloud_provider
+            ],
         )?;
         Ok(())
     }
@@ -280,6 +301,41 @@ impl Store {
                       "task_id": r.get::<_, Option<String>>(2)?, "at": r.get::<_, String>(3)?,
                       "sources": r.get::<_, Option<String>>(4)?.and_then(|s| serde_json::from_str::<Value>(&s).ok()).unwrap_or(Value::Array(vec![]))}),
             )
+        })?;
+        rows.collect()
+    }
+
+    /// Fonti del turno immediatamente precedente, incluse eventuali risposte dopo conferma.
+    pub(crate) fn last_turn_sources(&self) -> StoreResult<Vec<Value>> {
+        let sources: Option<String> = self.conn.query_row(
+            "SELECT sources FROM messages
+             WHERE task_id = (SELECT task_id FROM messages WHERE role = 'user' ORDER BY seq DESC LIMIT 1)
+                 AND role = 'assistant'
+             ORDER BY seq DESC LIMIT 1",
+            [],
+            |r| r.get::<_, Option<String>>(0),
+        ).optional()?.flatten();
+        Ok(sources
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default())
+    }
+
+    /// Ultimi turni, dal più recente. Solo una risposta cloud testuale ha la provenienza registrata.
+    pub(crate) fn recent_cloud_turns(&self) -> StoreResult<Vec<ConversationTurn>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT user.content, answer.content, answer.cloud_provider
+             FROM (SELECT seq, task_id, content FROM messages WHERE role = 'user'
+                   ORDER BY seq DESC LIMIT 3) AS user
+             LEFT JOIN messages AS answer ON answer.task_id = user.task_id
+                 AND answer.role = 'assistant' AND answer.cloud_provider IS NOT NULL
+             ORDER BY user.seq DESC",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(ConversationTurn {
+                user: r.get(0)?,
+                assistant: r.get(1)?,
+                cloud_provider: r.get(2)?,
+            })
         })?;
         rows.collect()
     }

@@ -115,17 +115,27 @@ function StepChips({ steps }: { steps?: Step[] }) {
 }
 
 function Sources({ sources }: { sources?: Source[] }) {
-  const safe = (sources || []).filter((s) => /^https?:\/\//i.test(s.url || ""));
+  const seen = new Set<string>();
+  const safe = (sources || []).flatMap((source) => {
+    try {
+      const url = new URL(source.url);
+      if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || seen.has(url.href)) return [];
+      seen.add(url.href);
+      return [{ source, url }];
+    } catch {
+      return [];
+    }
+  });
   if (!safe.length) return null;
   return (
     <div className="sources">
       <div className="sources-title">Fonti</div>
       <ol>
-        {safe.map((s, i) => (
-          <li key={i}>
-            <a href={s.url} target="_blank" rel="noopener noreferrer nofollow">{s.title || s.url}</a>
+        {safe.map(({ source: s, url }) => (
+          <li key={url.href}>
+            <a href={url.href} target="_blank" rel="noopener noreferrer nofollow">{s.title || url.href}</a>
             <span className="src-meta">
-              {` · ${new URL(s.url).hostname} · ${fmtTime(s.retrieved_at)}${s.content_sha256 ? " · sha256 " + s.content_sha256.slice(0, 12) + "…" : ""}${s.provider ? " · " + s.provider : ""}`}
+              {` · ${url.hostname} · ${fmtTime(s.retrieved_at)}${s.content_sha256 ? " · sha256 " + s.content_sha256.slice(0, 12) + "…" : ""}${s.provider ? " · " + s.provider : ""}`}
             </span>
           </li>
         ))}
@@ -141,6 +151,7 @@ export function Chat({ active }: { active: boolean }) {
   const [pending, setPending] = useState(false);
   const sending = useRef(false);
   const [text, setText] = useState("");
+  const [useContext, setUseContext] = useState(false);
   const [provider, setProvider] = useState<CloudProvider["id"] | "auto" | "">("");
   const { data: cloud } = useViewData(active && !DEVICE_MODE, () => api<{ providers: CloudProvider[] }>("/api/cloud"));
   const cloudChoices = cloud?.providers.filter((item) => item.configured) || [];
@@ -164,7 +175,7 @@ export function Chat({ active }: { active: boolean }) {
   }, [items, pending]);
 
   const send = useCallback(
-    async (raw: string, remote?: CloudProvider["id"] | "auto") => {
+    async (raw: string, remote?: CloudProvider["id"] | "auto", useContext = false) => {
       const message = raw.trim();
       if (!message || sending.current) return;
       sending.current = true;
@@ -187,7 +198,7 @@ export function Chat({ active }: { active: boolean }) {
         }
       };
       try {
-        const out = remote ? await post("/api/cloud/chat", { message, provider: remote }) : await chatStream(message, onDelta);
+        const out = remote ? await post("/api/cloud/chat", { message, provider: remote, use_context: useContext }) : await chatStream(message, onDelta);
         const final = { kind: "msg" as const, role: "assistant" as const, text: out.reply || "(nessuna risposta)", steps: out.steps, sources: out.sources,
           error: out.task && out.task.state === "failed" };
         if (streamId != null) {
@@ -275,7 +286,7 @@ export function Chat({ active }: { active: boolean }) {
     const t = text;
     setText("");
     if (input.current) input.current.style.height = "";
-    void send(t, provider || undefined);
+    void send(t, provider || undefined, useContext);
   };
 
   const available = voice.available;
@@ -362,9 +373,17 @@ export function Chat({ active }: { active: boolean }) {
               {cloudChoices.map((item) => <option key={item.id} value={item.id}>{CLOUD_LABELS[item.id]} · {item.model}</option>)}
             </select>
           </label>
-          {provider ? <small>{provider === "auto"
-            ? "Usa Ollama Cloud e, in caso di errore, prova NVIDIA NIM con lo stesso messaggio."
-            : "I messaggi digitati vengono inviati al provider selezionato."}</small> : null}
+          {provider ? (
+            <>
+              <label className="check" title="Condivide fino a tre scambi testuali consecutivi con lo stesso provider.">
+                <input type="checkbox" checked={useContext} disabled={thinking} onChange={(event) => setUseContext(event.target.checked)} />
+                Continua la conversazione
+              </label>
+              <small>{provider === "auto"
+                ? "Può inviare il messaggio a entrambi i provider. I turni precedenti tornano solo al provider che li ha gestiti."
+                : "Invia il messaggio digitato. Con la continuità attiva può includere fino a tre scambi testuali con questo provider."}</small>
+            </>
+          ) : null}
         </div>
       ) : null}
       <form className="composer" id="composer" onSubmit={submit}>

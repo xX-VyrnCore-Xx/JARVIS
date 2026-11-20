@@ -62,7 +62,7 @@ export function CloudSettings({ active }: { active: boolean }) {
   return (
     <>
       <h3 className="sub-head">Modelli cloud</h3>
-      <p className="hint">Scegli il provider in chat. Riceve il messaggio corrente e gli schemi degli strumenti disponibili. Cronologia, memoria e risultati degli strumenti restano sul dispositivo.</p>
+      <p className="hint">Scegli il provider in chat. Riceve il messaggio corrente e gli schemi degli strumenti disponibili. In Chat puoi condividere fino a tre scambi testuali con lo stesso provider. Memoria e risultati degli strumenti restano sul dispositivo.</p>
       {error ? <p className="form-error" role="alert">{error}</p> : null}
       {data?.providers.map((provider) => <ProviderSettings key={provider.id} provider={provider} onChange={setData} />)}
     </>

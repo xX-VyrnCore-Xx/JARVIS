@@ -1144,6 +1144,13 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - Al provider arrivano il messaggio corrente e gli schemi degli strumenti selezionati dal catalogo. Il Core accetta una sola proposta e applica ambito, convalida, policy ed eventuale conferma. Il worker offline compone la risposta usando l’esito dello strumento locale. I connettori continuano a usare i moduli guidati e il motore a regole.
 - **Evidenza** Test dei due formati API, del raffreddamento su 429 e del percorso proposta–policy–conferma nel Core. README e ROADMAP riportano la configurazione corrente.
 
+### ADR-0055 — Continuità esplicita delle conversazioni cloud e riferimenti alle fonti
+
+- **Data** 2026-11-20 · **Stato** implementato · **Fonte** richiesta del proprietario.
+- «Continua la conversazione» autorizza l’invio di un massimo di tre scambi testuali consecutivi al provider che ha gestito quegli scambi. Il Core registra la provenienza delle nuove risposte testuali. I messaggi precedenti alla migrazione, i turni locali, i risultati degli strumenti, le conferme e gli errori restano fuori dal contesto cloud.
+- «Cloud automatico» dà priorità al provider con contesto e, se passa all’altro, invia il messaggio corrente. L'istruzione del modello chiede di chiarire i riferimenti ambigui e separare fatti, ipotesi e fonti.
+- Una richiesta esplicita come «Qual è la fonte?» legge solo le fonti archiviate con il turno precedente e viene risolta dal Core anche quando è selezionato un provider. La modalità offline chiede quale sia il riferimento di richieste vaghe e confronta parole intere per suggerire un ricordo.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

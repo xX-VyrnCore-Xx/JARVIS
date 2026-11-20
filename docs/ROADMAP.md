@@ -26,6 +26,8 @@ Il checkpoint è la sezione di ripresa versionata con Git. Ogni voce va aggiorna
 
 **JARVIS 1.12.0 (2026-11-20).** ADR-0054. Solo inferenza cloud, strumenti mediati dal Core, voce e comandi a regole offline, ricerca della memoria nell’indice locale. La CI prepara i pacchetti desktop e l’APK Android; per iOS verifica la compilazione del client sul simulatore. Le richieste HTTP autenticate ai provider richiedono una chiave reale per il collaudo.
 
+**Continuità della chat da `69b204a` (2026-11-20).** ADR-0055. Contesto cloud opzionale con provenienza per provider, recupero locale delle fonti dell’ultimo turno e chiarimenti per riferimenti ambigui offline. Verifiche locali: 194 test Rust, 97 controlli Chromium, unità Python e contratti. Le regressioni sono in `core/server/tests/api.rs`, `core/server/src/cloud.rs`, `tests/ai/test_gateway.py` e `tests/e2e/ui_smoke.cjs`. Il collaudo qualitativo con i modelli cloud richiede credenziali dei provider.
+
 Il checkpoint precedente è riportato qui sotto per riferimento.
 
 | Campo | Stato al 2026-11-18 (diciottesima ripresa) |
