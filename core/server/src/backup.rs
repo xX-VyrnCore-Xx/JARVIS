@@ -10,7 +10,7 @@
 //! i dati precedenti in una cartella `…before-restore-<istante>`.
 
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 
 use argon2::{Algorithm, Argon2, Params, Version};
@@ -46,6 +46,46 @@ fn sha256(bytes: &[u8]) -> String {
 fn stamp() -> String {
     chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string()
 }
+
+fn private_file(path: &Path) -> std::io::Result<fs::File> {
+    let mut options = fs::OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
+pub(crate) fn atomic_write(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    let staging = path.with_file_name(format!(".jarvis-write-{}", uuid::Uuid::new_v4().simple()));
+    let result = (|| {
+        let mut file = private_file(&staging)?;
+        file.write_all(data)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&staging, path)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(staging);
+    }
+    result
+}
+
+pub(crate) fn private_dir(path: &Path) -> std::io::Result<()> {
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder.create(path)
+}
+
+/// Preferenze e identità da conservare anche attraverso gli aggiornamenti.
+pub(crate) const DATA_SETTINGS: &[&str] =
+    &["setup.json", "updates.json", "tls/core.crt", "tls/core.key"];
 
 /// File regolari della workspace (i link simbolici sono esclusi: potrebbero puntare fuori).
 fn workspace_files(root: &Path) -> Vec<PathBuf> {
@@ -87,8 +127,8 @@ pub fn create(
         ".snapshot-{}.sqlite3",
         uuid::Uuid::new_v4().simple()
     ));
-    snapshot(&tmp)?;
-    let db = fs::read(&tmp).map_err(|e| e.to_string());
+    private_file(&tmp).map_err(|e| e.to_string())?;
+    let db = snapshot(&tmp).and_then(|()| fs::read(&tmp).map_err(|e| e.to_string()));
     let _ = fs::remove_file(&tmp);
     let db = db?;
 
@@ -115,6 +155,13 @@ pub fn create(
     // l'apertura successiva la sposta di nuovo nel portachiavi.
     if let Some(key) = crate::secrets::read_key(data_dir) {
         files.push(("data/.secrets.key".into(), key));
+    }
+    for &name in DATA_SETTINGS {
+        match fs::read(data_dir.join(name)) {
+            Ok(data) => files.push((format!("data/{name}"), data)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+            Err(e) => return Err(format!("lettura di {name}: {e}")),
+        }
     }
     let workspace = data_dir.join("workspace");
     for path in workspace_files(&workspace) {
@@ -177,13 +224,9 @@ pub fn create(
     out.extend_from_slice(&nonce);
     out.extend_from_slice(&sealed);
 
-    let path = out_dir.join(format!("jarvis-{}.jbak", stamp()));
-    fs::write(&path, &out).map_err(|e| format!("scrittura del backup: {e}"))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
-    }
+    let id = uuid::Uuid::new_v4().simple();
+    let path = out_dir.join(format!("jarvis-{}-{id}.jbak", stamp()));
+    atomic_write(&path, &out).map_err(|e| format!("scrittura del backup: {e}"))?;
     Ok(json!({
         "path": path.to_string_lossy(), "file": path.file_name().map(|f| f.to_string_lossy().into_owned()),
         "bytes": out.len(), "files": files.len(), "created_at": created_at, "audit": manifest["audit"],
@@ -213,6 +256,7 @@ pub fn open(file: &Path, passphrase: &str) -> Result<(Value, Entries), String> {
         .map_err(|_| "passphrase errata oppure backup alterato".to_string())?;
     let mut manifest = None;
     let mut files = Vec::new();
+    let mut names = std::collections::HashSet::new();
     let mut reader = tar::Archive::new(archive.as_slice());
     for entry in reader.entries().map_err(|e| e.to_string())? {
         let mut entry = entry.map_err(|e| e.to_string())?;
@@ -223,6 +267,9 @@ pub fn open(file: &Path, passphrase: &str) -> Result<(Value, Entries), String> {
             .into_owned();
         safe_relative(&name)
             .ok_or_else(|| format!("percorso non ammesso nell'archivio: {name}"))?;
+        if !entry.header().entry_type().is_file() || !names.insert(name.clone()) {
+            return Err(format!("voce non regolare o duplicata: {name}"));
+        }
         let mut data = Vec::new();
         entry.read_to_end(&mut data).map_err(|e| e.to_string())?;
         if name == "manifest.json" {
@@ -231,6 +278,9 @@ pub fn open(file: &Path, passphrase: &str) -> Result<(Value, Entries), String> {
                     .map_err(|_| "manifest non valido".to_string())?,
             );
         } else {
+            if !name.starts_with("data/") || name.len() == "data/".len() {
+                return Err(format!("percorso inatteso: {name}"));
+            }
             files.push((name, data));
         }
     }
@@ -262,73 +312,112 @@ pub fn open(file: &Path, passphrase: &str) -> Result<(Value, Entries), String> {
     Ok((manifest, files))
 }
 
-/// Ripristina in `data_dir` (il Core deve essere fermo). I dati esistenti vengono spostati, non cancellati.
+/// Controlla SQLite, inclusa la presenza dello schema JARVIS, prima di sostituire i dati.
+pub(crate) fn validate_database(path: &Path) -> Result<(), String> {
+    let conn =
+        rusqlite::Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| format!("apertura del database: {e}"))?;
+    let check: String = conn
+        .query_row("PRAGMA integrity_check", [], |r| r.get(0))
+        .map_err(|e| format!("verifica del database: {e}"))?;
+    if check != "ok" {
+        return Err(format!("database non integro: {check}"));
+    }
+    let tables: u32 = conn.query_row(
+        "SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name IN ('tasks','messages')",
+        [], |r| r.get(0),
+    ).map_err(|e| e.to_string())?;
+    if tables != 2 {
+        return Err("schema del database JARVIS assente".into());
+    }
+    Ok(())
+}
+
+fn inspect(staging: &Path, manifest: &Value, files: &Entries) -> Result<Value, String> {
+    validate_database(&staging.join("jarvis.sqlite3"))?;
+    let audit = files
+        .iter()
+        .find(|(name, _)| name == "data/audit/core-security.jsonl")
+        .ok_or("registro di audit assente")?;
+    let events: Vec<Value> = String::from_utf8_lossy(&audit.1)
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(serde_json::from_str)
+        .collect::<Result<_, _>>()
+        .map_err(|e| format!("registro di audit non valido: {e}"))?;
+    let chain = jarvis_contracts::audit_chain_errors(&events);
+    if manifest["audit"]["chain_valid"] == true && !chain.is_empty() {
+        return Err(format!("catena di audit non valida: {}", chain.join("; ")));
+    }
+    Ok(json!({
+        "created_at": manifest["created_at"], "core_version": manifest["core_version"], "files": files.len(),
+        "audit_events": events.len(), "audit_chain_valid": chain.is_empty(), "database": "ok",
+    }))
+}
+
+/// Verifica un backup presente nella cartella dei backup, senza sostituire i dati.
+pub fn verify_saved(dir: &Path, name: &str, passphrase: &str) -> Result<Value, String> {
+    if name.contains(['/', '\\', ':']) || !name.ends_with(".jbak") || name == ".jbak" {
+        return Err("nome del backup non valido".into());
+    }
+    let path = dir.join(name);
+    if !fs::symlink_metadata(&path).is_ok_and(|m| m.is_file()) {
+        return Err("backup non trovato".into());
+    }
+    let (manifest, files) = open(&path, passphrase)?;
+    let db = files
+        .iter()
+        .find(|(name, _)| name == "data/jarvis.sqlite3")
+        .ok_or("database assente")?;
+    let staging = dir.join(format!(".verifica-{}", uuid::Uuid::new_v4().simple()));
+    private_dir(&staging).map_err(|e| e.to_string())?;
+    let result = (|| {
+        private_file(&staging.join("jarvis.sqlite3"))
+            .and_then(|mut f| f.write_all(&db.1))
+            .map_err(|e| format!("copia di verifica: {e}"))?;
+        inspect(&staging, &manifest, &files)
+    })();
+    let _ = fs::remove_dir_all(staging);
+    result
+}
+
+/// Ripristina in `data_dir` con il Core fermo. I dati sostituiti restano nella cartella di recupero.
 pub fn restore(file: &Path, passphrase: &str, data_dir: &Path) -> Result<Value, String> {
     let (manifest, files) = open(file, passphrase)?;
+    let name = data_dir
+        .file_name()
+        .ok_or("cartella dati non valida")?
+        .to_string_lossy();
     let parent = data_dir
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
     fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    let staging = parent.join(format!(".jarvis-restore-{}", uuid::Uuid::new_v4().simple()));
-    let result = (|| -> Result<Value, String> {
+    let id = uuid::Uuid::new_v4().simple();
+    let staging = parent.join(format!(".jarvis-restore-{id}"));
+    let aside = parent.join(format!("{name}.before-restore-{}-{id}", stamp()));
+    private_dir(&staging).map_err(|e| e.to_string())?;
+    let result = (|| {
         for (name, data) in &files {
-            let rel = safe_relative(name).ok_or("percorso non ammesso")?;
-            let rel = rel
+            let rel = Path::new(name)
                 .strip_prefix("data")
                 .map_err(|_| format!("percorso inatteso: {name}"))?;
             let target = staging.join(rel);
-            fs::create_dir_all(target.parent().expect("cartella")).map_err(|e| e.to_string())?;
-            fs::write(&target, data).map_err(|e| e.to_string())?;
+            fs::create_dir_all(target.parent().ok_or("cartella non valida")?)
+                .map_err(|e| e.to_string())?;
+            private_file(&target)
+                .and_then(|mut file| file.write_all(data))
+                .map_err(|e| e.to_string())?;
         }
         fs::create_dir_all(staging.join("workspace")).map_err(|e| e.to_string())?;
-        // Verifiche prima della sostituzione.
-        let audit =
-            fs::read_to_string(staging.join("audit/core-security.jsonl")).unwrap_or_default();
-        let events: Vec<Value> = audit
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-            .filter_map(|l| serde_json::from_str(l).ok())
-            .collect();
-        let chain = jarvis_contracts::audit_chain_errors(&events);
-        if manifest["audit"]["chain_valid"] == true && !chain.is_empty() {
-            return Err(format!(
-                "catena di audit non valida dopo l'estrazione: {}",
-                chain.join("; ")
-            ));
-        }
-        let conn = rusqlite::Connection::open(staging.join("jarvis.sqlite3"))
-            .map_err(|e| e.to_string())?;
-        let check: String = conn
-            .query_row("PRAGMA integrity_check", [], |r| r.get(0))
-            .map_err(|e| e.to_string())?;
-        drop(conn);
-        if check != "ok" {
-            return Err(format!("database non integro: {check}"));
-        }
-        let previous = if data_dir.exists()
-            && fs::read_dir(data_dir)
-                .map(|mut d| d.next().is_some())
-                .unwrap_or(false)
-        {
-            let keep = PathBuf::from(format!("{}.before-restore-{}", data_dir.display(), stamp()));
-            fs::rename(data_dir, &keep)
-                .map_err(|e| format!("spostamento dei dati attuali: {e}"))?;
-            Some(keep)
-        } else {
-            let _ = fs::remove_dir(data_dir);
-            None
-        };
-        fs::rename(&staging, data_dir)
-            .map_err(|e| format!("installazione dei dati ripristinati: {e}"))?;
-        Ok(json!({
-            "restored_from": file.to_string_lossy(), "created_at": manifest["created_at"], "files": files.len(),
-            "audit_events": events.len(), "audit_chain_valid": chain.is_empty(), "database": "ok",
-            "previous_data": previous.map(|p| p.to_string_lossy().into_owned()),
-        }))
+        let mut summary = inspect(&staging, &manifest, &files)?;
+        let previous = crate::rollback::replace_data(data_dir, &staging, &aside)?;
+        summary["restored_from"] = json!(file.to_string_lossy());
+        summary["previous_data"] = json!(previous.then(|| aside.to_string_lossy()));
+        Ok(summary)
     })();
     if result.is_err() {
-        let _ = fs::remove_dir_all(&staging);
+        let _ = fs::remove_dir_all(staging);
     }
     result
 }
@@ -338,7 +427,7 @@ pub fn list(dir: &Path) -> Vec<Value> {
     let mut items: Vec<Value> = fs::read_dir(dir)
         .map(|it| {
             it.flatten()
-                .filter(|e| e.path().extension().is_some_and(|x| x == "jbak"))
+                .filter(|e| e.file_type().is_ok_and(|kind| kind.is_file()) && e.path().extension().is_some_and(|x| x == "jbak"))
                 .map(|e| json!({"file": e.file_name().to_string_lossy(), "bytes": e.metadata().map(|m| m.len()).unwrap_or(0)}))
                 .collect()
         })

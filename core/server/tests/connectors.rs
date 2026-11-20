@@ -501,6 +501,14 @@ fn connector_faults_are_retried_safely_and_notified() {
         (Some("web.timeout"), Some("unknown")),
         "{done}"
     );
+    assert_eq!(done["task"]["error"]["effect"], "unknown", "{done}");
+    assert!(
+        done["reply"]
+            .as_str()
+            .unwrap()
+            .contains("Verifica lo stato"),
+        "{done}"
+    );
     std::thread::sleep(Duration::from_millis(1500));
     assert_eq!(
         count("/segnalazioni"),

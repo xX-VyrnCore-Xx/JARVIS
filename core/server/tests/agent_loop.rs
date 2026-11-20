@@ -270,7 +270,7 @@ async fn invalid_arguments_are_explained_and_the_model_can_retry() {
     // Primo tentativo con un campo sbagliato; il modello riceve i difetti e riprova correttamente (ADR-0045).
     let (url, seen) = fake_ollama(
         vec![
-            ("memory__search", json!({"domanda": "caffè"})),
+            ("memory__search", json!({"query": ""})),
             ("memory__search", json!({"query": "caffè"})),
         ],
         false,
@@ -295,6 +295,24 @@ async fn invalid_arguments_are_explained_and_the_model_can_retry() {
         text.contains("policy.invalid_arguments") && text.contains("expected"),
         "{text}"
     );
+}
+
+#[tokio::test]
+async fn missing_required_tool_arguments_are_requested_without_a_retry() {
+    let (url, seen) = fake_ollama(vec![("memory__search", json!({}))], false);
+    let out = chat(url, 18779, "cerca nella memoria").await;
+    assert!(out["reply"].as_str().unwrap().contains("query"), "{out}");
+    assert!(out["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["kind"] == "clarification"));
+    assert!(!out["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["kind"] == "tool_result"));
+    assert_eq!(seen.lock().unwrap().len(), 1);
 }
 
 #[tokio::test]

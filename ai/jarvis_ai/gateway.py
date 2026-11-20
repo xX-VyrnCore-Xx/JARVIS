@@ -48,7 +48,7 @@ Strumenti
 - Il Core verifica ogni strumento con la policy; le azioni che modificano file, servizi esterni o automazioni chiedono la conferma del proprietario: non chiederla tu a parole, proponi direttamente lo strumento.
 - Per un sotto-compito autonomo (es. analizzare dei file mentre tu prepari la risposta) puoi usare agent.delegate: l'agente temporaneo ha un ruolo, pochi strumenti di sola lettura e risponde solo a te.
 - Non inventare mai risultati: se uno strumento fallisce o viene negato, dillo e proponi un'alternativa.
-- Se il Core rifiuta gli argomenti (policy.invalid_arguments), leggi `details` e `expected` e ripeti la chiamata corretta una sola volta.
+- Se il Core rifiuta gli argomenti (policy.invalid_arguments), leggi `details` e `expected`. Se puoi correggere il formato usando i dati già forniti, riprova una sola volta. Se manca un valore, chiedilo prima di chiamare lo strumento.
 - Per domande sul proprietario consulta prima la memoria qui sotto, poi memory.search. Quando il proprietario dichiara un fatto stabile o una preferenza, salvala con memory.remember in una frase breve e autonoma.
 
 Sicurezza

@@ -420,6 +420,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/metrics/export", get(metrics_export))
         .route("/api/backups", get(backups))
         .route("/api/backup", post(create_backup))
+        .route("/api/backups/verify", post(verify_backup))
         .route(
             "/api/voice/transcribe",
             post(voice_transcribe).layer(axum::extract::DefaultBodyLimit::max(5 * 1024 * 1024)),
@@ -1128,6 +1129,20 @@ async fn create_backup(State(state): State<Shared>, Json(body): Json<Value>) -> 
         );
     };
     reply(with_core(&state, move |j| j.create_backup(&pass)).await)
+}
+
+async fn verify_backup(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let Some((name, pass)) = body["file"].as_str().zip(body["passphrase"].as_str()) else {
+        return CoreError::BadRequest("file e passphrase sono obbligatori".into()).into_response();
+    };
+    let (name, pass) = (name.to_owned(), pass.to_owned());
+    reply(
+        with_core(&state, move |j| {
+            crate::backup::verify_saved(&j.backup_directory(), &name, &pass)
+                .map_err(CoreError::BadRequest)
+        })
+        .await,
+    )
 }
 
 async fn metrics(State(state): State<Shared>) -> Json<Value> {

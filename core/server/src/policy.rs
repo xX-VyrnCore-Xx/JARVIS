@@ -105,6 +105,38 @@ fn resource_uri(tool: &str, args: &Value) -> String {
     }
 }
 
+fn connector_parameters(path: &str, value: &Value, rows: &mut Vec<String>) {
+    match value {
+        Value::Object(properties) if !properties.is_empty() => {
+            for (key, value) in properties {
+                let label = if path.is_empty() {
+                    key.clone()
+                } else {
+                    format!("{path} › {key}")
+                };
+                connector_parameters(&label, value, rows);
+            }
+        }
+        Value::Array(items) if !items.is_empty() => {
+            for (i, item) in items.iter().enumerate() {
+                connector_parameters(&format!("{path} ({})", i + 1), item, rows);
+            }
+        }
+        Value::Object(_) | Value::Array(_) if path.is_empty() => (),
+        _ => {
+            let text = match value {
+                Value::Object(_) => "gruppo vuoto".to_owned(),
+                Value::Array(_) => "lista vuota".to_owned(),
+                _ => value
+                    .as_str()
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| value.to_string()),
+            };
+            rows.push(format!("{path} = {text}"));
+        }
+    }
+}
+
 fn expected_effect(tool: &str, args: &Value) -> String {
     match tool {
         "web.form" => {
@@ -205,10 +237,14 @@ fn expected_effect(tool: &str, args: &Value) -> String {
             "Cancellare definitivamente l'elemento di memoria {}",
             args["id"].as_str().unwrap_or("?")
         ),
-        t if t.starts_with("connector.") => format!(
-            "Inviare al servizio esterno del connettore ({t}) i dati: {}",
-            args.to_string().chars().take(300).collect::<String>()
-        ),
+        t if t.starts_with("connector.") => {
+            let mut rows = Vec::new();
+            connector_parameters("", args, &mut rows);
+            let values = rows.join("\n");
+            let details = values.chars().take(810).collect::<String>();
+            let suffix = if values.chars().count() > 810 { "… (anteprima abbreviata)" } else { "" };
+            format!("Eseguire {t} sul servizio esterno.\n{details}{suffix}")
+        },
         t if t.starts_with("node.") => {
             let (slug, base) = t["node.".len()..].split_once('.').unwrap_or(("?", t));
             let target = if slug == "auto" {

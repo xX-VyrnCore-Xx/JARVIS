@@ -1122,6 +1122,14 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza** Test di selezione nel gateway, test dei connettori nel Core ed E2E della nuova preparazione dalla dashboard.
 - **Documenti interessati** README.md, AUTONOMY_AND_TOOLS.md, ROADMAP.md.
 
+### ADR-0052 — Moduli dei connettori, chiarimenti e recupero dei dati
+
+- **Data** 2026-11-20 · **Fonte** richiesta del proprietario.
+- Il modulo delle operazioni genera campi da proprietà e tipi dello schema. Il Core applica lo schema completo. L’importazione di manifest per servizi personalizzati mantiene il suo formato.
+- I parametri obbligatori assenti interrompono il turno con una domanda. Una scrittura il cui esito è incerto chiude il task come fallito e chiede di verificare la destinazione prima di ripetere.
+- Il pannello Sistema verifica passphrase, impronte, SQLite e audit dei backup cifrati e mostra le copie prima degli aggiornamenti. Il Core e i comandi di recupero condividono un blocco esterno alla cartella dati. Il rollback verifica SQLite prima di installare la copia e conserva i dati precedenti.
+- I nuovi backup e le copie prima degli aggiornamenti includono le preferenze e l’identità TLS locale. I pacchetti Python e i modelli scaricati restano installazioni locali.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

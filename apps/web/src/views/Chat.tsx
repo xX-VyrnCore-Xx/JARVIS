@@ -18,6 +18,7 @@ interface Step {
   approved?: boolean;
   status?: string;
   error?: string;
+  effect?: string;
 }
 interface Source {
   url: string;
@@ -99,7 +100,11 @@ function StepChips({ steps }: { steps?: Step[] }) {
     if (s.kind === "policy") chips.push(<span key={i} className={`step ${s.decision}`}>policy · {s.decision} · rischio {s.risk}</span>);
     if (s.kind === "confirmation")
       chips.push(<span key={i} className={`step ${s.approved ? "allow" : "deny"}`}>{s.approved ? "confermato" : "rifiutato"}</span>);
-    if (s.kind === "tool_result")
+    if (s.kind === "clarification")
+      chips.push(<span key={i} className="step require_confirmation">parametri da completare · {s.tool}</span>);
+    if (s.kind === "tool_result" && s.effect === "unknown")
+      chips.push(<span key={i} className="step require_confirmation">esito incerto · verifica prima di ripetere</span>);
+    else if (s.kind === "tool_result")
       chips.push(<span key={i} className={`step ${s.status}`}>esito · {s.status}{s.error ? " · " + s.error : ""}</span>);
   });
   return chips.length ? <div className="meta">{chips}</div> : null;
@@ -279,7 +284,9 @@ export function Chat({ active }: { active: boolean }) {
           it.kind === "msg" ? (
             <div key={it.id} className={`msg ${it.role}${it.error ? " error" : ""}${it.streaming ? " streaming" : ""}`} aria-busy={it.streaming || undefined}
               data-who={it.role === "user" ? "Tu" : "JARVIS"}>
-              {it.text}
+              {it.role === "user"
+                ? it.text.replace(/^connettore\s+([a-z][a-z0-9_]*)\s+([a-z][a-z0-9_]*)\s+\{.*\}$/is, "Usa il connettore $1 · $2")
+                : it.text}
               <Sources sources={it.sources} />
               <StepChips steps={it.steps} />
             </div>
