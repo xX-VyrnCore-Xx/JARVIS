@@ -51,6 +51,7 @@ function ProviderSettings({ provider, onChange }: { provider: CloudProvider; onC
         {provider.configured ? <button className="ghost" type="button" disabled={busy} onClick={() => void save(true)}>Rimuovi chiave</button> : null}
       </div>
       {provider.effective_rpm ? <small className="sub">Massimo {provider.effective_rpm} richieste al minuto da questo Core.</small> : null}
+      {provider.cooldown_seconds > 0 ? <small className="sub">In pausa dopo un limite del provider. Attesa indicata al controllo: {provider.cooldown_seconds} s.</small> : null}
       {message ? <p role={failed ? "alert" : "status"} className={failed ? "form-error" : "hint"}>{message}</p> : null}
     </form>
   );
@@ -61,7 +62,7 @@ export function CloudSettings({ active }: { active: boolean }) {
   return (
     <>
       <h3 className="sub-head">Modelli cloud</h3>
-      <p className="hint">Scegli il provider in chat per inviare un singolo messaggio. Memoria, cronologia e strumenti restano locali.</p>
+      <p className="hint">Scegli il provider in chat. Riceve il messaggio corrente e gli schemi degli strumenti disponibili. Cronologia, memoria e risultati degli strumenti restano sul dispositivo.</p>
       {error ? <p className="form-error" role="alert">{error}</p> : null}
       {data?.providers.map((provider) => <ProviderSettings key={provider.id} provider={provider} onChange={setData} />)}
     </>

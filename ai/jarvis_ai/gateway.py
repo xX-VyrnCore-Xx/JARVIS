@@ -6,7 +6,7 @@ Backend disponibili, tutti locali (RNF-05: nessun backend cloud in questo protot
 * ``offline``: modello deterministico a regole, sempre disponibile; garantisce
   il funzionamento senza rete né modelli (RNF-06) e rende i test riproducibili.
 
-Routing (``JARVIS_AI_BACKEND``): ``auto`` (predefinito) usa Ollama se risponde e
+Il Core usa ``offline``. Per le prove del worker, ``auto`` usa Ollama se risponde e
 ha almeno un modello, altrimenti ``offline``; ``ollama`` o ``offline`` forzano
 la scelta. Se Ollama fallisce durante una richiesta, il gateway degrada su
 ``offline`` e lo dichiara in ``backend.degraded_reason``. Dopo una breve attesa,
@@ -564,7 +564,7 @@ Prova con:
 • "cerca intelligenza artificiale" · "apri https://it.wikipedia.org/wiki/Rust"
 • "connettore <id> <operazione> chiave=valore" (connettori installati nella sezione Connettori)
 • "nodo <nome> system.info" · "nodo <nome> fs.list path=." (nodi esecutori associati nella sezione Dispositivi)
-Con Ollama attivo sul tuo computer posso conversare liberamente."""
+Per la conversazione libera configura un modello in Sistema → Modelli cloud."""
 
 
 class OfflineBackend:
@@ -966,7 +966,7 @@ class Gateway:
     def __init__(self, env: dict[str, str] | None = None):
         env = dict(os.environ if env is None else env)
         self.catalog = load_catalog()
-        mode = env.get("JARVIS_AI_BACKEND", "auto")
+        mode = env.get("JARVIS_AI_BACKEND", "offline")
         self.ollama_url = (
             env.get("JARVIS_OLLAMA_URL", "http://127.0.0.1:11434").rstrip("/")
             if mode in ("auto", "ollama") else None

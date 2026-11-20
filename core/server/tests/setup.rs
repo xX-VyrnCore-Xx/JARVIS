@@ -76,7 +76,7 @@ async fn guided_setup_runs_steps_records_choices_and_restarts_the_worker() {
     assert_eq!(status["first_run"], true);
     assert_eq!(status["choices"]["stt_models"][2], "small");
 
-    // Valori fuori elenco rifiutati: niente argomenti arbitrari a pip o a Ollama.
+    // Valori fuori elenco rifiutati: niente argomenti arbitrari a pip.
     let (code, _) = call(
         &app,
         "POST",
@@ -87,7 +87,7 @@ async fn guided_setup_runs_steps_records_choices_and_restarts_the_worker() {
     .await;
     assert_eq!(code, StatusCode::BAD_REQUEST);
 
-    let plan = json!({"voice": true, "stt_model": "base", "tts_voice": "it_IT-paola-medium", "ollama_model": "qwen2.5:3b"});
+    let plan = json!({"voice": true, "stt_model": "base", "tts_voice": "it_IT-paola-medium"});
     let (code, _) = call(&app, "POST", "/api/setup/start", Some(plan.clone()), true).await;
     assert_eq!(code, StatusCode::ACCEPTED);
     let (code, _) = call(&app, "POST", "/api/setup/start", Some(plan), true).await;
@@ -110,13 +110,7 @@ async fn guided_setup_runs_steps_records_choices_and_restarts_the_worker() {
     let ids: Vec<&str> = steps.iter().filter_map(|s| s["id"].as_str()).collect();
     assert_eq!(
         ids,
-        [
-            "voice.packages",
-            "voice.stt",
-            "voice.tts",
-            "voice.wake",
-            "ollama.model"
-        ]
+        ["voice.packages", "voice.stt", "voice.tts", "voice.wake"]
     );
     assert!(steps.iter().all(|s| s["status"] == "done"), "{last}");
     assert_eq!(last["first_run"], false);
@@ -156,8 +150,5 @@ fn worker_env_points_to_installed_packages_and_models() {
         env["PYTHONPATH"].starts_with(&data.join("python-packages").to_string_lossy().into_owned())
     );
     assert!(env["JARVIS_TTS_VOICE"].ends_with("it_IT-paola-medium.onnx"));
-    assert_eq!(
-        env.get("JARVIS_OLLAMA_MODEL").map(String::as_str),
-        Some("qwen2.5:3b")
-    );
+    assert!(!env.contains_key("JARVIS_OLLAMA_MODEL"));
 }

@@ -624,7 +624,24 @@ async fn configure_cloud(State(state): State<Shared>, Json(body): Json<Value>) -
 }
 
 async fn cloud_chat(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
-    match with_core(&state, move |j| j.cloud_chat(&body)).await {
+    let request = match with_core(&state, move |j| j.prepare_cloud_chat(&body)).await {
+        Ok(request) => request,
+        Err(error) => return error.into_response(),
+    };
+    let timer = crate::observability::Timer::start();
+    let completed = tokio::task::spawn_blocking(move || {
+        let completed = request.execute();
+        (request.message, completed)
+    })
+    .await;
+    let Ok((message, completed)) = completed else {
+        return CoreError::Internal("richiesta cloud interrotta".into()).into_response();
+    };
+    match with_core(&state, move |j| {
+        j.finish_cloud_chat(message, completed, timer)
+    })
+    .await
+    {
         Ok(out) => Json(out.to_json()).into_response(),
         Err(error) => error.into_response(),
     }

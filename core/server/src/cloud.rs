@@ -1,6 +1,7 @@
 //! Modelli remoti selezionati dal proprietario per un singolo messaggio.
 use std::io::Read;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -41,11 +42,11 @@ impl Provider {
 
     fn models(self) -> &'static [&'static str] {
         match self {
-            Self::Ollama => &["kimi-k2.7-code", "deepseek-v4-pro:0813", "gemma4:31b"],
+            Self::Ollama => &["kimi-k2.7-code", "glm-5.3-flash", "gemma4:31b"],
             Self::Nim => &[
-                "qwen/qwen3-coder-480b-a35b-instruct",
-                "nvidia/nemotron-3-super-120b-a12b",
-                "meta/llama-3.3-70b-instruct",
+                "moonshotai/kimi-k3.1-pro",
+                "nvidia/nemotron-3.5-lightning-30b-a3b",
+                "mistralai/mistral-large-4-1t-a52b",
             ],
         }
     }
@@ -114,7 +115,11 @@ impl Limiter {
             return Ok(Duration::ZERO);
         }
         let slot = self.nim_next.unwrap_or(now).max(now);
-        self.nim_next = Some(slot + Duration::from_millis(60_000_u64.div_ceil(NIM_RPM)));
+        let spacing = Duration::from_millis(60_000_u64.div_ceil(NIM_RPM));
+        if slot.duration_since(now) > spacing {
+            return Err(Failure::RateLimited(slot.duration_since(now)));
+        }
+        self.nim_next = Some(slot + spacing);
         Ok(slot.duration_since(now))
     }
 
@@ -127,11 +132,23 @@ impl Limiter {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum Failure {
     RateLimited(Duration),
     InvalidKey,
+    InvalidTool,
     Unavailable,
+}
+
+impl Failure {
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::InvalidKey => "cloud.credentials",
+            Self::InvalidTool => "cloud.invalid_tool",
+            Self::RateLimited(_) => "cloud.rate_limited",
+            Self::Unavailable => "cloud.unavailable",
+        }
+    }
 }
 
 fn retry_after(raw: Option<&str>, now: chrono::DateTime<chrono::Utc>) -> Duration {
@@ -147,50 +164,187 @@ fn retry_after(raw: Option<&str>, now: chrono::DateTime<chrono::Utc>) -> Duratio
     Duration::from_secs(seconds.unwrap_or(60).clamp(1, 86_400))
 }
 
-fn payload(provider: Provider, model: &str, prompt: &str) -> Value {
+pub const TOOLS: &[&str] = &[
+    "date.calc",
+    "math.calc",
+    "units.convert",
+    "time.now",
+    "system.info",
+    "system.disks",
+    "fs.list",
+    "fs.read",
+    "fs.search",
+    "fs.write",
+    "memory.list",
+    "memory.search",
+    "security.status",
+];
+
+pub struct Function {
+    pub name: String,
+    pub version: String,
+    wire: Value,
+}
+
+impl From<&crate::catalog::Tool> for Function {
+    fn from(tool: &crate::catalog::Tool) -> Self {
+        let name = tool.name().to_string();
+        let wire = json!({"type": "function", "function": {
+            "name": name.replace('.', "__"),
+            "description": tool.descriptor["summary"],
+            "parameters": tool.descriptor["input_schema"],
+        }});
+        Self {
+            name,
+            version: tool.version().to_string(),
+            wire,
+        }
+    }
+}
+
+pub enum Answer {
+    Text(String),
+    Call(Value),
+}
+
+pub struct Target {
+    pub provider: Provider,
+    pub model: String,
+    pub key: String,
+}
+
+pub struct Request {
+    pub message: String,
+    pub tools: Vec<Function>,
+    pub targets: Vec<Target>,
+    pub limiter: Arc<Mutex<Limiter>>,
+}
+
+pub struct Completed {
+    pub provider: Provider,
+    pub model: String,
+    pub fallback: Option<(Provider, Failure)>,
+    pub answer: Result<Answer, Failure>,
+}
+
+impl Request {
+    pub fn execute(&self) -> Completed {
+        let first = &self.targets[0];
+        let answer = self.ask(first);
+        if let (Some(second), Err(error)) = (self.targets.get(1), &answer) {
+            if !matches!(error, Failure::InvalidTool) {
+                return Completed {
+                    provider: second.provider,
+                    model: second.model.clone(),
+                    fallback: Some((first.provider, error.clone())),
+                    answer: self.ask(second),
+                };
+            }
+        }
+        Completed {
+            provider: first.provider,
+            model: first.model.clone(),
+            fallback: None,
+            answer,
+        }
+    }
+
+    fn ask(&self, target: &Target) -> Result<Answer, Failure> {
+        chat_at(
+            target.provider.endpoint(),
+            target.provider,
+            &target.key,
+            payload(target.provider, &target.model, &self.message, &self.tools),
+            &self.tools,
+            &self.limiter,
+        )
+    }
+}
+
+fn payload(provider: Provider, model: &str, prompt: &str, tools: &[Function]) -> Value {
     let messages = json!([
-        {"role": "system", "content": "Sei JARVIS. Rispondi nella lingua dell’utente. Aiuta a programmare, verificare codice, diagnosticare sistemi e migliorare la sicurezza difensiva. Non puoi eseguire strumenti. Distingui le ipotesi dai risultati osservati."},
+        {"role": "system", "content": "Sei JARVIS. Rispondi nella lingua dell’utente. Aiuta con codice, diagnosi di sistema e sicurezza difensiva. Distingui ipotesi e risultati osservati. Se serve un dato locale o un'azione, proponi al massimo uno degli strumenti forniti con parametri espliciti. JARVIS compone in locale la risposta dopo la verifica della chiamata. Non fingere di aver ottenuto il risultato."},
         {"role": "user", "content": prompt},
     ]);
-    match provider {
+    let mut body = match provider {
         Provider::Ollama => {
             json!({"model": model, "messages": messages, "stream": false, "options": {"num_predict": 2048}})
         }
         Provider::Nim => {
             json!({"model": model, "messages": messages, "stream": false, "max_tokens": 2048, "temperature": 0.2})
         }
+    };
+    if !tools.is_empty() {
+        body["tools"] = json!(tools.iter().map(|tool| &tool.wire).collect::<Vec<_>>());
+        if provider == Provider::Nim {
+            body["tool_choice"] = json!("auto");
+        }
     }
+    body
 }
 
-fn decode(provider: Provider, body: &Value) -> Option<String> {
-    let text = match provider {
-        Provider::Ollama => body["message"]["content"].as_str(),
-        Provider::Nim => body["choices"][0]["message"]["content"].as_str(),
-    }?;
-    let text = text.trim();
-    (!text.is_empty()).then(|| text.chars().take(16_000).collect())
-}
-
-pub fn chat(
-    provider: Provider,
-    model: &str,
-    key: &str,
-    prompt: &str,
-    limiter: &mut Limiter,
-) -> Result<String, Failure> {
-    chat_at(provider.endpoint(), provider, model, key, prompt, limiter)
+fn decode(provider: Provider, body: &Value, tools: &[Function]) -> Result<Answer, Failure> {
+    let message = match provider {
+        Provider::Ollama => &body["message"],
+        Provider::Nim => &body["choices"][0]["message"],
+    };
+    if !message["tool_calls"].is_null() {
+        let calls = message["tool_calls"]
+            .as_array()
+            .ok_or(Failure::InvalidTool)?;
+        if !calls.is_empty() {
+            let [only] = calls.as_slice() else {
+                return Err(Failure::InvalidTool);
+            };
+            let call = &only["function"];
+            let tool = tools
+                .iter()
+                .find(|t| t.wire["function"]["name"] == call["name"])
+                .ok_or(Failure::InvalidTool)?;
+            let arguments = match &call["arguments"] {
+                Value::String(raw) => {
+                    serde_json::from_str(raw).map_err(|_| Failure::InvalidTool)?
+                }
+                object => object.clone(),
+            };
+            if !arguments.is_object() {
+                return Err(Failure::InvalidTool);
+            }
+            return Ok(Answer::Call(json!({
+                "tool": tool.name, "version": tool.version, "arguments": arguments,
+            })));
+        }
+    }
+    message["content"]
+        .as_str()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(|text| Answer::Text(text.chars().take(16_000).collect()))
+        .ok_or(Failure::Unavailable)
 }
 
 fn chat_at(
     endpoint: &str,
     provider: Provider,
-    model: &str,
     key: &str,
-    prompt: &str,
-    limiter: &mut Limiter,
-) -> Result<String, Failure> {
-    let wait = limiter.reserve(provider, Instant::now())?;
-    std::thread::sleep(wait);
+    body: Value,
+    tools: &[Function],
+    limiter: &Mutex<Limiter>,
+) -> Result<Answer, Failure> {
+    let wait = limiter
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .reserve(provider, Instant::now())?;
+    if !wait.is_zero() {
+        std::thread::sleep(wait);
+        let cooldown = limiter
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remaining(provider);
+        if !cooldown.is_zero() {
+            return Err(Failure::RateLimited(cooldown));
+        }
+    }
     // Gli endpoint sono fissi e il bearer token non viene inoltrato su redirect.
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(45))
@@ -200,12 +354,15 @@ fn chat_at(
         .post(endpoint)
         .set("Authorization", &format!("Bearer {key}"))
         .set("Content-Type", "application/json")
-        .send_string(&payload(provider, model, prompt).to_string());
+        .send_string(&body.to_string());
     let response = match response {
         Ok(response) => response,
         Err(ureq::Error::Status(429, response)) => {
             let wait = retry_after(response.header("Retry-After"), chrono::Utc::now());
-            limiter.cooldown(provider, wait);
+            limiter
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .cooldown(provider, wait);
             return Err(Failure::RateLimited(wait));
         }
         Err(ureq::Error::Status(401 | 403, _)) => return Err(Failure::InvalidKey),
@@ -221,7 +378,7 @@ fn chat_at(
         return Err(Failure::Unavailable);
     }
     let body = serde_json::from_slice(&bytes).map_err(|_| Failure::Unavailable)?;
-    decode(provider, &body).ok_or(Failure::Unavailable)
+    decode(provider, &body, tools)
 }
 
 #[cfg(test)]
@@ -267,41 +424,61 @@ mod tests {
             assert!(authorized);
             write!(conn, "HTTP/1.1 429 Too Many Requests\r\nRetry-After: 25\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
         });
-        let mut limiter = Limiter::default();
-        assert!(
-            matches!(chat_at(&endpoint, Provider::Nim, "m", "synthetic", "test", &mut limiter),
-            Err(Failure::RateLimited(wait)) if wait.as_secs() == 25)
-        );
-        server.join().unwrap();
-        assert!(matches!(
+        let limiter = Mutex::new(Limiter::default());
+        let send = || {
             chat_at(
                 &endpoint,
                 Provider::Nim,
-                "m",
                 "synthetic",
-                "test",
-                &mut limiter
-            ),
-            Err(Failure::RateLimited(_))
-        ));
+                json!({"model":"test"}),
+                &[],
+                &limiter,
+            )
+        };
+        assert!(matches!(send(), Err(Failure::RateLimited(wait)) if wait.as_secs() == 25));
+        server.join().unwrap();
+        assert!(matches!(send(), Err(Failure::RateLimited(_))));
     }
 
     #[test]
-    fn wire_formats_only_contain_the_current_message_and_decode_responses() {
-        let body = payload(Provider::Ollama, "test", "Richiesta corrente");
+    fn tool_proposals_are_single_scoped_and_accept_both_wire_formats() {
+        let catalog = crate::catalog::Catalog::load().unwrap();
+        let tools = [Function::from(catalog.get("fs.read").unwrap())];
+        let body = payload(Provider::Nim, "test", "Richiesta corrente", &tools);
         assert_eq!(body["messages"].as_array().unwrap().len(), 2);
-        assert!(body.get("tools").is_none());
-        assert_eq!(
-            decode(Provider::Ollama, &json!({"message":{"content":"ok"}})).as_deref(),
-            Some("ok")
-        );
-        assert_eq!(
+        assert_eq!(body["tools"][0]["function"]["name"], "fs__read");
+        assert!(matches!(
+            decode(Provider::Ollama, &json!({"message":{"content":"ok"}}), &tools),
+            Ok(Answer::Text(text)) if text == "ok"
+        ));
+        let function = |name, arguments| json!({"function": {"name":name,"arguments":arguments}});
+        let ollama = |calls| json!({"message":{"tool_calls":calls}});
+        let nim = |calls| json!({"choices":[{"message":{"tool_calls":calls}}]});
+        let call = function("fs__read", json!({"path":"note.txt"}));
+        for response in [
+            decode(Provider::Ollama, &ollama(json!([call])), &tools),
             decode(
                 Provider::Nim,
-                &json!({"choices":[{"message":{"content":"ok"}}]})
-            )
-            .as_deref(),
-            Some("ok")
-        );
+                &nim(json!([function(
+                    "fs__read",
+                    json!(r#"{"path":"note.txt"}"#)
+                )])),
+                &tools,
+            ),
+        ] {
+            assert!(
+                matches!(response, Ok(Answer::Call(args)) if args["tool"] == "fs.read" && args["arguments"]["path"] == "note.txt")
+            );
+        }
+        for calls in [
+            json!([function("shell__run", json!({}))]),
+            json!([function("fs__read", json!("invalid"))]),
+            json!([call, call]),
+        ] {
+            assert!(matches!(
+                decode(Provider::Nim, &nim(calls), &tools),
+                Err(Failure::InvalidTool)
+            ));
+        }
     }
 }

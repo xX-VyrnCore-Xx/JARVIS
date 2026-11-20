@@ -24,6 +24,8 @@ Il checkpoint è la sezione di ripresa versionata con Git. Ogni voce va aggiorna
 
 **Ripresa del 2026-11-20 da `9866380`.** Avatar con controlli vocali, Centro sicurezza e strumento difensivo di sola lettura, n8n isolato per promemoria e audit, Ollama Cloud e NVIDIA NIM per il singolo messaggio (ADR-0053). 95 controlli in Chromium superati, suite mirate Rust e Python verdi, test HTTP sintetico per `Retry-After` e promemoria ricevuto da n8n 2.48.7 in Docker reale. L’inferenza cloud va collaudata con chiavi e account dei rispettivi provider.
 
+**JARVIS 1.12.0 (2026-11-20).** ADR-0054. Solo inferenza cloud, strumenti mediati dal Core, voce e comandi a regole offline, ricerca della memoria nell’indice locale. La CI prepara i pacchetti desktop e l’APK Android; per iOS verifica la compilazione del client sul simulatore. Le richieste HTTP autenticate ai provider richiedono una chiave reale per il collaudo.
+
 Il checkpoint precedente è riportato qui sotto per riferimento.
 
 | Campo | Stato al 2026-11-18 (diciottesima ripresa) |

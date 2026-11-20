@@ -1,4 +1,4 @@
-//! Configurazione guidata al primo avvio (ADR-0019): voce locale e modello AI scaricati con avanzamento.
+//! Configurazione guidata al primo avvio (ADR-0019): download della voce locale con avanzamento.
 //!
 //! Gli installer non eseguono codice durante l'installazione (il `.dmg` di macOS non può farlo), quindi la
 //! scelta dei modelli avviene al primo avvio, con opzioni già selezionate. I pacchetti Python vanno in
@@ -21,61 +21,14 @@ pub const TTS_VOICES: [&str; 3] = [
     "it_IT-riccardo-x_low",
     "en_US-lessac-medium",
 ];
-/// Modelli Ollama proposti (ADR-0045): i più recenti con buon supporto agli strumenti in testa.
-pub const OLLAMA_MODELS: [&str; 7] = [
-    "qwen3:4b",
-    "qwen3:8b",
-    "llama3.1:8b",
-    "qwen2.5:3b",
-    "llama3.2:3b",
-    "qwen2.5:7b",
-    "gemma3:4b",
-];
-
-/// Memoria fisica in GB, se il sistema la espone senza permessi speciali.
-pub fn total_memory_gb() -> Option<u64> {
-    if let Ok(t) = std::fs::read_to_string("/proc/meminfo") {
-        let kb: u64 = t
-            .lines()
-            .find(|l| l.starts_with("MemTotal:"))?
-            .split_whitespace()
-            .nth(1)?
-            .parse()
-            .ok()?;
-        return Some(kb / 1024 / 1024);
-    }
-    if cfg!(target_os = "macos") {
-        let out = std::process::Command::new("/usr/sbin/sysctl")
-            .args(["-n", "hw.memsize"])
-            .output()
-            .ok()?;
-        let bytes: u64 = String::from_utf8_lossy(&out.stdout).trim().parse().ok()?;
-        return Some(bytes / 1024 / 1024 / 1024);
-    }
-    None
-}
-
-/// Modello consigliato: con almeno 16 GB un modello da 8 miliardi di parametri, altrimenti uno da 4.
-pub fn recommended_model(memory_gb: Option<u64>) -> &'static str {
-    match memory_gb {
-        Some(gb) if gb >= 16 => "qwen3:8b",
-        _ => "qwen3:4b",
-    }
-}
-/// Modelli di embedding per la ricerca nella memoria con i sinonimi (ADR-0028).
-pub const EMBED_MODELS: [&str; 2] = ["nomic-embed-text", "mxbai-embed-large"];
-
 #[derive(Clone, Debug)]
 pub struct Plan {
-    pub voice: bool,
     pub stt_model: String,
     pub tts_voice: String,
-    pub ollama_model: Option<String>,
-    pub embed_model: Option<String>,
 }
 
 impl Plan {
-    /// Valida la scelta dell'interfaccia: solo valori dagli elenchi noti (niente argomenti arbitrari a pip o a Ollama).
+    /// Valida la scelta dell'interfaccia: solo valori dagli elenchi noti (niente argomenti arbitrari a pip).
     pub fn from_json(body: &Value) -> Result<Self, String> {
         let pick = |key: &str, allowed: &[&str], default: &str| -> Result<String, String> {
             let v = body[key].as_str().unwrap_or(default);
@@ -85,31 +38,23 @@ impl Plan {
                 Err(format!("valore non ammesso per {key}: {v}"))
             }
         };
-        let ollama_model = match body["ollama_model"].as_str() {
-            None | Some("") => None,
-            Some(m) if OLLAMA_MODELS.contains(&m) => Some(m.to_string()),
-            Some(m) => return Err(format!("modello Ollama non ammesso: {m}")),
-        };
-        let embed_model = match body["embed_model"].as_str() {
-            None | Some("") => None,
-            Some(m) if EMBED_MODELS.contains(&m) => Some(m.to_string()),
-            Some(m) => return Err(format!("modello di embedding non ammesso: {m}")),
-        };
-        let plan = Self {
-            embed_model,
-            voice: body["voice"].as_bool().unwrap_or(true),
+        if body["voice"] == false {
+            return Err("scegli la configurazione della voce".into());
+        }
+        if ["ollama_model", "embed_model"]
+            .iter()
+            .any(|key| !body[key].is_null() && body[key].as_str() != Some(""))
+        {
+            return Err("i modelli AI si configurano in Sistema → Modelli cloud".into());
+        }
+        Ok(Self {
             stt_model: pick("stt_model", &STT_MODELS, "small")?,
             tts_voice: pick("tts_voice", &TTS_VOICES, "it_IT-paola-medium")?,
-            ollama_model,
-        };
-        if !plan.voice && plan.ollama_model.is_none() && plan.embed_model.is_none() {
-            return Err("niente da configurare: scegli la voce o un modello".into());
-        }
-        Ok(plan)
+        })
     }
 
     fn to_json(&self) -> Value {
-        json!({"voice": self.voice, "stt_model": self.stt_model, "tts_voice": self.tts_voice, "ollama_model": self.ollama_model, "embed_model": self.embed_model})
+        json!({"voice": true, "stt_model": self.stt_model, "tts_voice": self.tts_voice})
     }
 }
 
@@ -125,7 +70,6 @@ pub struct Setup {
     data_dir: PathBuf,
     python: String,
     ai_dir: PathBuf,
-    ollama_url: String,
     state: Mutex<State>,
     restart_worker: AtomicBool,
 }
@@ -136,10 +80,6 @@ impl Setup {
             data_dir: data_dir.to_path_buf(),
             python: python.to_string(),
             ai_dir: ai_dir.to_path_buf(),
-            ollama_url: std::env::var("JARVIS_OLLAMA_URL")
-                .unwrap_or_else(|_| "http://127.0.0.1:11434".into())
-                .trim_end_matches('/')
-                .to_string(),
             state: Mutex::default(),
             restart_worker: AtomicBool::new(false),
         }
@@ -202,29 +142,8 @@ impl Setup {
                     env.push(("JARVIS_STT_MODEL".into(), stt.into()));
                 }
             }
-            if let Some(model) = plan["ollama_model"].as_str() {
-                if !set("JARVIS_OLLAMA_MODEL") {
-                    env.push(("JARVIS_OLLAMA_MODEL".into(), model.into()));
-                }
-            }
         }
         env
-    }
-
-    /// Modello di embedding scelto: variabile `JARVIS_EMBED_MODEL` oppure configurazione guidata salvata.
-    pub fn embed_model(&self) -> Option<String> {
-        std::env::var("JARVIS_EMBED_MODEL")
-            .ok()
-            .filter(|m| !m.is_empty())
-            .or_else(|| {
-                self.saved()?["plan"]["embed_model"]
-                    .as_str()
-                    .map(str::to_string)
-            })
-    }
-
-    pub fn ollama_url(&self) -> &str {
-        &self.ollama_url
     }
 
     /// Vero una volta dopo una configurazione completata: il Core riavvia il worker.
@@ -232,34 +151,8 @@ impl Setup {
         self.restart_worker.swap(false, Ordering::SeqCst)
     }
 
-    fn ollama_models(&self) -> Option<Vec<String>> {
-        let agent = ureq::AgentBuilder::new()
-            .timeout(Duration::from_secs(2))
-            .build();
-        let body = agent
-            .get(&format!("{}/api/tags", self.ollama_url))
-            .call()
-            .ok()?
-            .into_string()
-            .ok()?;
-        let v: Value = serde_json::from_str(&body).ok()?;
-        Some(
-            v["models"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|m| m["name"].as_str().map(str::to_string))
-                .collect(),
-        )
-    }
-
     pub fn status(&self) -> Value {
         let s = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        let ollama = if std::env::var("JARVIS_SETUP_FAKE").is_ok_and(|v| v == "1") {
-            Some(vec![])
-        } else {
-            self.ollama_models()
-        };
         json!({
             "first_run": self.saved().is_none(),
             "running": s.running,
@@ -268,46 +161,30 @@ impl Setup {
             "finished_at": s.finished_at,
             "saved": self.saved(),
             "detected": {
-                "ollama": ollama.is_some(),
-                "ollama_models": ollama.unwrap_or_default(),
                 "voice_packages": self.packages_dir().join("faster_whisper").is_dir(),
             },
-            "choices": {"stt_models": STT_MODELS, "tts_voices": TTS_VOICES, "ollama_models": OLLAMA_MODELS, "embed_models": EMBED_MODELS},
-            "recommended": {"ollama_model": recommended_model(total_memory_gb()), "memory_gb": total_memory_gb()},
-            "sizes_mb": {"voice_packages": 350, "stt": {"tiny": 75, "base": 145, "small": 470, "medium": 1500}, "tts": 65, "ollama": {"qwen3:4b": 2600, "qwen3:8b": 5200, "llama3.1:8b": 4900, "qwen2.5:3b": 1900, "llama3.2:3b": 2000, "qwen2.5:7b": 4700, "gemma3:4b": 3300}, "embed": {"nomic-embed-text": 280, "mxbai-embed-large": 670}},
+            "choices": {"stt_models": STT_MODELS, "tts_voices": TTS_VOICES},
+            "sizes_mb": {"voice_packages": 350, "stt": {"tiny": 75, "base": 145, "small": 470, "medium": 1500}, "tts": 65},
         })
     }
 
     /// Avvia la configurazione in un thread separato. Errore se ne è già in corso una.
     pub fn start(self: &Arc<Self>, plan: Plan) -> Result<(), String> {
-        let mut steps = Vec::new();
-        if plan.voice {
-            steps.push(step(
+        let steps = vec![
+            step(
                 "voice.packages",
                 "Pacchetti della voce (faster-whisper, Piper, openWakeWord)",
-            ));
-            steps.push(step(
+            ),
+            step(
                 "voice.stt",
                 &format!("Riconoscimento vocale: modello «{}»", plan.stt_model),
-            ));
-            steps.push(step(
+            ),
+            step(
                 "voice.tts",
                 &format!("Voce di sintesi «{}»", plan.tts_voice),
-            ));
-            steps.push(step("voice.wake", "Parola di attivazione «Ehi Jarvis»"));
-        }
-        if let Some(m) = &plan.ollama_model {
-            steps.push(step(
-                "ollama.model",
-                &format!("Modello AI locale «{m}» (Ollama)"),
-            ));
-        }
-        if let Some(m) = &plan.embed_model {
-            steps.push(step(
-                "ollama.embed",
-                &format!("Memoria con i sinonimi: modello «{m}» (Ollama)"),
-            ));
-        }
+            ),
+            step("voice.wake", "Parola di attivazione «Ehi Jarvis»"),
+        ];
         {
             let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
             if s.running {
@@ -346,7 +223,7 @@ impl Setup {
         let mut failed = false;
         for id in &ids {
             // Senza i pacchetti della voce i modelli non si possono scaricare: i passi successivi si saltano.
-            if failed && id.starts_with("voice.") {
+            if failed {
                 self.update(
                     id,
                     "skipped",
@@ -484,47 +361,7 @@ impl Setup {
                 &["-c", "import openwakeword, os\nreg = getattr(openwakeword, 'MODELS', None) or getattr(openwakeword, 'models', {})\np = reg.get('hey_jarvis', {}).get('model_path', '')\nif not (p and os.path.isfile(p)):\n    from openwakeword import utils\n    utils.download_models(['hey_jarvis'])\nprint('parola di attivazione pronta')"],
                 id,
             ),
-            "ollama.model" => self.pull_ollama(id, plan.ollama_model.as_deref().unwrap_or_default()),
-            "ollama.embed" => self.pull_ollama(id, plan.embed_model.as_deref().unwrap_or_default()),
             other => Err(format!("passo sconosciuto: {other}")),
-        }
-    }
-
-    /// Scarica il modello con l'API di Ollama, riportando l'avanzamento in byte.
-    fn pull_ollama(&self, id: &str, model: &str) -> Result<String, String> {
-        if self.ollama_models().is_none() {
-            return Err("Ollama non è installato o non è avviato: scaricalo da https://ollama.com/download, aprilo e ripeti la configurazione".into());
-        }
-        let agent = ureq::AgentBuilder::new()
-            .timeout_connect(Duration::from_secs(5))
-            .timeout_read(Duration::from_secs(600))
-            .build();
-        let res = agent
-            .post(&format!("{}/api/pull", self.ollama_url))
-            .set("Content-Type", "application/json")
-            .send_string(&json!({"model": model, "stream": true}).to_string())
-            .map_err(|e| format!("Ollama: {e}"))?;
-        let mut last = String::new();
-        for line in BufReader::new(res.into_reader())
-            .lines()
-            .map_while(Result::ok)
-        {
-            let v: Value = serde_json::from_str(&line).unwrap_or(Value::Null);
-            if let Some(err) = v["error"].as_str() {
-                return Err(format!("Ollama: {err}"));
-            }
-            let status = v["status"].as_str().unwrap_or_default().to_string();
-            let progress = match (v["completed"].as_f64(), v["total"].as_f64()) {
-                (Some(c), Some(t)) if t > 0.0 => Some(c / t),
-                _ => None,
-            };
-            self.update(id, "running", &status, progress);
-            last = status;
-        }
-        if last == "success" {
-            Ok(format!("{model} pronto"))
-        } else {
-            Err(format!("download interrotto ({last})"))
         }
     }
 }
@@ -538,41 +375,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn plan_accepts_only_known_values() {
-        let p = Plan::from_json(&json!({})).unwrap();
-        assert!(
-            p.voice
-                && p.stt_model == "small"
-                && p.tts_voice == "it_IT-paola-medium"
-                && p.ollama_model.is_none()
-        );
-        assert!(Plan::from_json(&json!({"stt_model": "large; rm -rf /"})).is_err());
-        assert!(Plan::from_json(&json!({"ollama_model": "evil/model"})).is_err());
-        assert!(
-            Plan::from_json(&json!({"voice": false})).is_err(),
-            "niente da fare"
-        );
-        assert_eq!(
-            Plan::from_json(&json!({"voice": false, "ollama_model": "qwen2.5:3b"}))
-                .unwrap()
-                .ollama_model
-                .as_deref(),
-            Some("qwen2.5:3b")
-        );
-    }
-}
-
-#[cfg(test)]
-mod model_tests {
-    use super::*;
-
-    #[test]
-    fn recommendation_follows_memory_and_is_in_the_list() {
-        assert_eq!(recommended_model(Some(32)), "qwen3:8b");
-        assert_eq!(recommended_model(Some(8)), "qwen3:4b");
-        assert_eq!(recommended_model(None), "qwen3:4b");
-        for gb in [None, Some(8), Some(16)] {
-            assert!(OLLAMA_MODELS.contains(&recommended_model(gb)));
-        }
+    fn plan_accepts_only_voice_settings() {
+        let plan = Plan::from_json(&json!({})).unwrap();
+        assert_eq!(plan.stt_model, "small");
+        assert_eq!(plan.tts_voice, "it_IT-paola-medium");
+        assert!(Plan::from_json(&json!({"stt_model": "--index-url=http://x"})).is_err());
+        assert!(Plan::from_json(&json!({"ollama_model": "qwen3:4b"})).is_err());
+        assert!(Plan::from_json(&json!({"embed_model": "nomic-embed-text"})).is_err());
+        assert!(Plan::from_json(&json!({"voice": false})).is_err());
     }
 }

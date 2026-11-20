@@ -91,7 +91,7 @@ function StepChips({ steps }: { steps?: Step[] }) {
   if (!steps || !steps.length) return null;
   const chips: React.ReactElement[] = [];
   steps.forEach((s, i) => {
-    if (s.kind === "cloud_fallback") chips.push(<span key={i} className="step require_confirmation">risposta locale · {s.reason}</span>);
+    if (s.kind === "cloud_fallback") chips.push(<span key={i} className="step require_confirmation">provider alternativo · {s.reason}</span>);
     if (s.kind === "delegation" && s.backend) chips.push(<span key={i} className="step">agente · {s.backend.name}</span>);
     if (s.kind === "delegation" && s.agent && AGENTS[s.agent])
       chips.push(<span key={`${i}-a`} className="step specialist">specialista · {AGENTS[s.agent]}</span>);
@@ -141,7 +141,7 @@ export function Chat({ active }: { active: boolean }) {
   const [pending, setPending] = useState(false);
   const sending = useRef(false);
   const [text, setText] = useState("");
-  const [provider, setProvider] = useState<CloudProvider["id"] | "">("");
+  const [provider, setProvider] = useState<CloudProvider["id"] | "auto" | "">("");
   const { data: cloud } = useViewData(active && !DEVICE_MODE, () => api<{ providers: CloudProvider[] }>("/api/cloud"));
   const cloudChoices = cloud?.providers.filter((item) => item.configured) || [];
   const nextId = useRef(1);
@@ -164,7 +164,7 @@ export function Chat({ active }: { active: boolean }) {
   }, [items, pending]);
 
   const send = useCallback(
-    async (raw: string, remote?: CloudProvider["id"]) => {
+    async (raw: string, remote?: CloudProvider["id"] | "auto") => {
       const message = raw.trim();
       if (!message || sending.current) return;
       sending.current = true;
@@ -275,9 +275,7 @@ export function Chat({ active }: { active: boolean }) {
     const t = text;
     setText("");
     if (input.current) input.current.style.height = "";
-    const remote = cloudChoices.find((item) => item.id === provider);
-    setProvider("");
-    void send(t, remote?.id);
+    void send(t, provider || undefined);
   };
 
   const available = voice.available;
@@ -350,17 +348,23 @@ export function Chat({ active }: { active: boolean }) {
         <span className="mic-live" id="mic-live" hidden={!voice.micOpen} aria-live="polite">● Microfono attivo</span>
         <PasskeySetup />
       </div>
-      {cloudChoices.length ? (
+      {cloudChoices.length || provider ? (
         <div className="voice-bar cloud-selector">
-          <label>Modello per il prossimo messaggio
+          <label>Instradamento chat
             <select value={provider} disabled={thinking} onChange={(event) => {
-              setProvider(cloudChoices.find((item) => item.id === event.target.value)?.id || "");
+              const choice = event.target.value;
+              setProvider(choice === "auto" ? choice : cloudChoices.find((item) => item.id === choice)?.id || "");
             }}>
-              <option value="">Locale</option>
+              <option value="">Comandi offline</option>
+              {cloudChoices.length > 1 || provider === "auto" ? <option value="auto">Cloud automatico</option> : null}
+              {provider && provider !== "auto" && !cloudChoices.some((item) => item.id === provider)
+                ? <option value={provider} disabled>{CLOUD_LABELS[provider]} · da configurare</option> : null}
               {cloudChoices.map((item) => <option key={item.id} value={item.id}>{CLOUD_LABELS[item.id]} · {item.model}</option>)}
             </select>
           </label>
-          {provider ? <small>Il testo di questo messaggio verrà inviato al provider scelto.</small> : null}
+          {provider ? <small>{provider === "auto"
+            ? "Usa Ollama Cloud e, in caso di errore, prova NVIDIA NIM con lo stesso messaggio."
+            : "I messaggi digitati vengono inviati al provider selezionato."}</small> : null}
         </div>
       ) : null}
       <form className="composer" id="composer" onSubmit={submit}>

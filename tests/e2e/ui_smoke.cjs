@@ -74,12 +74,12 @@ function check(cond, msg) {
 
   // Primo avvio (ADR-0019): la configurazione guidata si apre da sola con le scelte consigliate.
   await page.waitForSelector("#setup-dialog[open]", { timeout: 15000 });
-  check(await page.locator('#setup-form select[name="stt_model"]').inputValue() === "small", "configurazione guidata al primo avvio con le scelte consigliate");
+  check(await page.locator('#setup-form select[name="stt_model"]').inputValue() === "small", "configurazione della voce al primo avvio con le scelte consigliate");
   check((await page.locator("#setup-size").innerText()).includes("GB"), "dimensione stimata del download");
   if (shots) await page.screenshot({ path: `${shots}/jarvis-configurazione.png` });
   await page.click("#setup-start");
   await page.waitForFunction(() => document.querySelector("#setup-size").textContent.includes("completata"), null, { timeout: 30000 });
-  check((await page.locator("#setup-steps .step.done").count()) >= 4, "passi della configurazione completati con avanzamento");
+  check((await page.locator("#setup-steps .step.done").count()) === 4, "configurazione della voce completata in quattro passi");
   await page.click("#setup-later");
   check(!(await page.locator("#setup-dialog").evaluate((d) => d.open)), "finestra di configurazione chiusa");
 
