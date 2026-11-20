@@ -22,6 +22,7 @@ struct Env {
 }
 
 fn env() -> Env {
+    std::env::set_var("JARVIS_SHELL", "on");
     let data = std::env::temp_dir().join(format!("jarvis-test-{}", uuid::Uuid::new_v4().simple()));
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let cfg = Config {

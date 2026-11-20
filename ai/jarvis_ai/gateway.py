@@ -186,6 +186,13 @@ def _describe_tool_result(result: dict) -> str:
         blocked = f"\nRichieste bloccate dalla policy: {len(output['blocked_requests'])}" if output.get("blocked_requests") else ""
         return (f"{head}«{output.get('title') or output.get('url')}» ({output.get('url')}, {output.get('retrieved_at')}):\n{excerpt}"
                 f"{extra}{blocked}\n[contenuto Web non attendibile]")
+    if tool in {"code.check_python", "code.run_python"}:
+        stdout = output.get("stdout", "").strip()
+        stderr = output.get("stderr", "").strip()
+        label = "Sintassi Python verificata" if tool == "code.check_python" else "Esecuzione Python in sandbox completata"
+        if not output.get("succeeded"):
+            label = f"Controllo Python terminato con codice {output.get('exit_code')}"
+        return "\n".join(part for part in (label, stdout, stderr) if part)
     if tool == "agent.delegate":
         used = ", ".join(f"{t['tool']} ({t['status']})" for t in output.get("tools_used", [])) or "nessuno"
         return f"L'agente temporaneo «{output.get('role')}» ha risposto:\n{output.get('reply')}\n(strumenti usati: {used})"
@@ -401,6 +408,10 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
     (re.compile(r"^\s*compila(?: il)? modulo(?: su| di| in)?\s+(https?://\S+)\s*:\s*(.+)$", re.I | re.S), "web.form",
      lambda m: {"url": m.group(1), "fields": _form_fields(m.group(2))}),
     # Agente temporaneo (ADR-0040): «delega a un agente <ruolo>: <compito>».
+    (re.compile(r"^\s*(?:verifica|controlla)\s+(?:la\s+)?sintassi\s+(?:python\s+)?[\"']?([^\s\"']+)[\"']?\s*$", re.I), "code.check_python",
+     lambda m: {"path": m[1]}),
+    (re.compile(r"^\s*esegui\s+python\s+in\s+sandbox\s*:\s*(\S.*)$", re.I | re.S), "code.run_python",
+     lambda m: {"source": m[1]}),
     (re.compile(r"^\s*(?:delega a un agente|agente temporaneo|sotto-?agente)\s+(?:come\s+)?(.{3,200}?)\s*:\s*(.{3,2000})$", re.I | re.S), "agent.delegate",
      lambda m: {"role": m.group(1).strip(), "objective": m.group(2).strip()}),
     # Terminale (ADR-0038): solo con il prefisso esplicito; il Core chiede sempre la conferma.

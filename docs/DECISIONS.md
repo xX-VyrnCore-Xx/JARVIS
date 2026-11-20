@@ -1157,6 +1157,14 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - La release pubblica contiene il setup NSIS Windows x64 e un’immagine macOS per ciascuna architettura (Apple Silicon e Intel). Tutti e tre i pacchetti sono necessari alla pubblicazione. La CI prova l’installazione con lo stesso setup o la stessa immagine che verrà pubblicata.
 - La verifica prima della firma controlla la presenza dei tre file attesi. La configurazione di sviluppo e i test Linux rimangono disponibili. Le credenziali NIM si configurano per ciascuna installazione nell’archivio cifrato locale.
 
+### ADR-0057 — Voce locale, sandbox Python e rilascio automatico
+
+- **Data** 2026-11-20 · **Fonte** richiesta del proprietario.
+- XTTS v2 usa checkpoint e audio di riferimento locali. Il worker carica i pesi al primo utilizzo, conserva il condizionamento e ripiega su Piper se il modello non è utilizzabile. La trascrizione usa faster-whisper con VAD, parole chiave tecniche e correzioni conservative. La chat richiede revisione manuale della dettatura destinata ai provider.
+- Le istruzioni privilegiano verifiche di sviluppo riproducibili. Gli agenti temporanei di coding partono da strumenti di lettura e verifica della sintassi. L’esecuzione Python richiede conferma, Docker locale e un container effimero senza volumi o rete. Il terminale del PC è disabilitato per impostazione iniziale.
+- Il Core limita contesto e risultati degli strumenti. Esclude dalla richiesta cloud le credenziali riconosciute e interrompe l’inclusione di turni precedenti che le contengono.
+- Una CI `contracts` verde su `main` avvia il rilascio per una versione stabile senza tag. La build e il tag usano il commit verificato. Rimangono validi i tre pacchetti e le verifiche di ADR-0056.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

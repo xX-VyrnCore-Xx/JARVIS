@@ -412,6 +412,56 @@ async fn security_posture_and_cloud_configuration_are_local_and_hide_keys() {
     );
 }
 
+#[tokio::test]
+async fn credential_like_content_is_rejected_before_the_cloud_request() {
+    let e = env();
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/cloud",
+            Some(json!({
+                "provider":"nvidia_nim", "model":"synthetic", "key":"synthetic"
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = e
+        .api(
+            "POST",
+            "/api/cloud/chat",
+            Some(json!({
+                "provider":"nvidia_nim", "message":"Authorization: Bearer valore-di-prova"
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(!body.to_string().contains("valore-di-prova"));
+    let (_, turns) = e.api("GET", "/api/conversation", None).await;
+    assert_eq!(turns["items"], json!([]));
+}
+
+#[tokio::test]
+async fn python_sandbox_execution_requires_confirmation_and_cannot_be_scheduled() {
+    let e = env();
+    let pending = e.chat("esegui python in sandbox: print(2 + 2)").await;
+    assert_eq!(
+        pending["task"]["state"], "waiting_confirmation",
+        "{pending}"
+    );
+    assert_eq!(pending["confirmation"]["tool"], "code.run_python");
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/workflows",
+            Some(json!({
+                "name":"Test Python", "trigger":{"kind":"interval","every_seconds":60},
+                "steps":[{"tool":"code.run_python","arguments":{"source":"print(1)"}}]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
 #[test]
 fn cloud_context_requires_opt_in_and_stays_with_the_provider() {
     use jarvis_core::cloud::{Answer, Completed, Provider};

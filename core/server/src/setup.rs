@@ -126,6 +126,18 @@ impl Setup {
                 models.to_string_lossy().into_owned(),
             ));
         }
+        let xtts = models.join("xtts-v2");
+        let reference = models.join("xtts-reference.wav");
+        if xtts.join("model.pth").is_file() && reference.is_file() {
+            for (key, path) in [
+                ("JARVIS_XTTS_DIR", xtts),
+                ("JARVIS_XTTS_REFERENCE", reference),
+            ] {
+                if !set(key) {
+                    env.push((key.into(), path.to_string_lossy().into_owned()));
+                }
+            }
+        }
         if let Some(saved) = self.saved() {
             let plan = &saved["plan"];
             if let Some(voice) = plan["tts_voice"].as_str() {

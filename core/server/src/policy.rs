@@ -17,9 +17,9 @@ pub const POLICY_VERSION: &str = "0.1.0";
 pub const CONFIRMATION_TTL_SECS: i64 = 300;
 
 /// Spiegazione leggibile di un motivo di policy.
-/// Terminale disattivato dal proprietario (`JARVIS_SHELL=off`); attivo per impostazione, sempre con conferma.
+/// Il terminale del sistema richiede un consenso esplicito e conferma ogni comando.
 pub(crate) fn shell_disabled() -> bool {
-    std::env::var("JARVIS_SHELL").is_ok_and(|v| matches!(v.as_str(), "off" | "0" | "false"))
+    !std::env::var("JARVIS_SHELL").is_ok_and(|v| matches!(v.as_str(), "on" | "1" | "true"))
 }
 
 pub fn explain(reason: &str) -> &'static str {
@@ -38,7 +38,9 @@ pub fn explain(reason: &str) -> &'static str {
         "policy.not_delegated" => {
             "lo strumento non rientra nell'ambito concesso all'agente per questa richiesta"
         }
-        "policy.shell_disabled" => "il terminale è disattivato (JARVIS_SHELL=off)",
+        "policy.shell_disabled" => {
+            "il terminale del sistema richiede JARVIS_SHELL=on; per Python puoi usare la sandbox"
+        }
         "policy.command_blocked" => {
             "comando distruttivo o con privilegi di amministratore: JARVIS non lo esegue"
         }
@@ -169,6 +171,10 @@ fn expected_effect(tool: &str, args: &Value) -> String {
         "fs.delete" => format!(
             "Eliminare definitivamente «{}» dalla workspace di JARVIS (le cartelle solo se vuote).",
             args["path"].as_str().unwrap_or("?")
+        ),
+        "code.run_python" => format!(
+            "Eseguire {} byte di Python in un container temporaneo, senza rete né accesso ai file del PC.",
+            args["source"].as_str().unwrap_or_default().len()
         ),
         "shell.run" => format!(
             "Eseguire nel terminale, nella workspace di JARVIS, il comando: «{}». Può modificare file e avviare programmi con i tuoi permessi; si interrompe dopo 60 secondi.",

@@ -1,0 +1,36 @@
+name: pubblica dopo CI
+
+on:
+  workflow_run:
+    workflows: [contracts]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: release-after-ci-main
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - name: Avvia la release del commit con CI verde
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          main=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
+          if [[ "$main" != "$VERIFIED_SHA" ]]; then exit 0; fi
+          contents=$(gh api "repos/$GITHUB_REPOSITORY/contents/core/server/Cargo.toml?ref=$VERIFIED_SHA" --jq .content)
+          version=$(printf '%s' "$contents" | base64 -d | sed -n 's/^version *= *"\([0-9][0-9.]*\)"$/\1/p')
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          tag="v$version"
+          tags=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag" --jq '.[].ref')
+          if grep -Fxq "refs/tags/$tag" <<< "$tags"; then exit 0; fi
+          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main -f "tag=$tag" -f "commit=$VERIFIED_SHA"

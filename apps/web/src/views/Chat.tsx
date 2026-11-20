@@ -104,6 +104,8 @@ function StepChips({ steps }: { steps?: Step[] }) {
     if (s.kind === "policy") chips.push(<span key={i} className={`step ${s.decision}`}>policy · {s.decision} · rischio {s.risk}</span>);
     if (s.kind === "confirmation")
       chips.push(<span key={i} className={`step ${s.approved ? "allow" : "deny"}`}>{s.approved ? "confermato" : "rifiutato"}</span>);
+    if (s.kind === "next_action" && s.reason)
+      chips.push(<span key={i} className="step">{s.reason}</span>);
     if (s.kind === "clarification")
       chips.push(<span key={i} className="step require_confirmation">parametri da completare · {s.tool}</span>);
     if (s.kind === "tool_result" && s.effect === "unknown")
@@ -229,17 +231,28 @@ export function Chat({ active }: { active: boolean }) {
 
   useEffect(() => {
     voice.handlers = {
-      onCommand: (t) => void send(t),
+      onCommand: (t) => {
+        if (!provider) {
+          void send(t);
+          return;
+        }
+        setText((draft) => draft.trim() ? `${draft.trimEnd()} ${t}` : t);
+        app.show("chat");
+        input.current?.focus();
+      },
       onError: (m) => say(m, { error: true }),
       onNothingHeard: () => say("Non ho sentito nulla: riprova parlando più vicino al microfono."),
     };
+  }, [send, say, provider, app.show]);
+
+  useEffect(() => {
     voice.setReplies(pref("jarvis.voice.replies"));
     const esc = (e: KeyboardEvent) => {
       if (e.key === "Escape") voice.stopSpeaking();
     };
     document.addEventListener("keydown", esc);
     return () => document.removeEventListener("keydown", esc);
-  }, [send, say]);
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -382,6 +395,7 @@ export function Chat({ active }: { active: boolean }) {
               <small>{provider === "auto"
                 ? "Può inviare il messaggio a entrambi i provider. I turni precedenti tornano solo al provider che li ha gestiti."
                 : "Invia il messaggio digitato. Con la continuità attiva può includere fino a tre scambi testuali con questo provider."}</small>
+              <small>La dettatura viene inserita nella chat per essere verificata prima dell’invio al cloud.</small>
             </>
           ) : null}
         </div>

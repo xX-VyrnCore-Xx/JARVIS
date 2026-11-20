@@ -27,10 +27,10 @@ const MEMORY_SMALL: usize = 30;
 const MEMORY_RELEVANT: usize = 8;
 const HISTORY_MESSAGES: u32 = 10;
 /// Budget del contesto in caratteri (circa 3,5 caratteri per token): cronologia e memoria (ADR-0024).
-const CONTEXT_CHARS: usize = 9000;
+const CONTEXT_CHARS: usize = 15_000;
 const MEMORY_CHARS: usize = 3000;
 /// Lunghezza massima dei turni più vecchi: la richiesta corrente resta intera.
-const OLD_TURN_CHARS: usize = 700;
+const OLD_TURN_CHARS: usize = 1200;
 const MAX_MESSAGE: usize = 8000;
 
 #[derive(Debug)]
@@ -129,7 +129,9 @@ const SUBAGENT_DEFAULT_TOOLS: [&str; 7] = [
     "web.fetch",
 ];
 /// Caratteri conservati degli esiti precedenti all'ultimo nel contesto dell'agente.
-const EARLIER_OUTPUT_CHARS: usize = 3000;
+const EARLIER_OUTPUT_CHARS: usize = 1500;
+const LATEST_OUTPUT_CHARS: usize = 6000;
+const CLOUD_CONVERSATION_TOKENS: usize = 4000;
 
 /// Identificativi W3C Trace Context (ADR-0039): traccia = correlation_id del task (32 esadecimali), intervallo
 /// radice = prime 16 cifre dell'id del task, intervalli figli casuali.
@@ -792,6 +794,12 @@ impl Jarvis {
             .map(str::trim)
             .filter(|message| !message.is_empty() && message.chars().count() <= MAX_MESSAGE)
             .ok_or_else(|| CoreError::BadRequest("messaggio mancante o troppo lungo".into()))?;
+        if crate::cloud::contains_credentials(message) {
+            return Err(CoreError::BadRequest(
+                "La richiesta contiene una credenziale. Rimuovila prima dell’invio al provider."
+                    .into(),
+            ));
+        }
         let recent = if body["use_context"] == true {
             self.store.recent_cloud_turns().map_err(internal)?
         } else {
@@ -801,17 +809,31 @@ impl Jarvis {
         let mut targets = Vec::new();
         for provider in providers {
             if let Some(key) = self.secrets.get(&provider.secret()).map_err(internal)? {
-                let mut history: Vec<_> = recent
+                let mut budget = CLOUD_CONVERSATION_TOKENS
+                    .saturating_sub(crate::cloud::estimated_tokens(message));
+                let mut history = Vec::new();
+                for turn in recent
                     .iter()
                     .take_while(|turn| turn.cloud_provider.as_deref() == Some(provider.id()))
-                    .filter_map(|turn| {
-                        let assistant = turn.assistant.as_deref()?;
-                        Some(crate::cloud::Turn {
-                            user: clip(&turn.user, 1300),
-                            assistant: clip(assistant, 1300),
-                        })
-                    })
-                    .collect();
+                {
+                    let Some(assistant) = turn.assistant.as_deref() else {
+                        break;
+                    };
+                    if crate::cloud::contains_credentials(&turn.user)
+                        || crate::cloud::contains_credentials(assistant)
+                    {
+                        break;
+                    }
+                    let user = clip(&turn.user, 1300);
+                    let assistant = clip(assistant, 1300);
+                    let cost = crate::cloud::estimated_tokens(&user)
+                        + crate::cloud::estimated_tokens(&assistant);
+                    if cost > budget {
+                        break;
+                    }
+                    budget -= cost;
+                    history.push(crate::cloud::Turn { user, assistant });
+                }
                 history.reverse();
                 targets.push(Target {
                     provider,
@@ -897,7 +919,11 @@ impl Jarvis {
                 task.transition("succeeded", "Risposta del modello");
                 self.finish_reply(task, out, text, Some(provider.id()))
             }
-            Ok(Answer::Call(call)) => {
+            Ok(Answer::Call(mut call)) => {
+                if call["tool"] == "agent.delegate" {
+                    call["arguments"]["tools"] =
+                        json!(["fs.list", "fs.search", "code.check_python"]);
+                }
                 self.save(&task)?;
                 let inputs = json!({
                     "messages": [{"role": "user", "content": message}],
@@ -1169,6 +1195,12 @@ impl Jarvis {
                 _ if tool == "agent.delegate" => self.run_subagent(&task, &arguments, &mut out)?,
                 _ => self.run_tool(&task, &tool, &arguments, false, &mut out)?,
             };
+            if tool == "code.check_python" && output["succeeded"] == true {
+                out.steps.push(json!({
+                    "kind": "next_action",
+                    "reason": "Sintassi verificata. Valuta un test con gli input previsti."
+                }));
+            }
             let retryable = output["code"] == "policy.invalid_arguments";
             history.push(step_record(&tool, &arguments, &digest, status, output));
             let last = history.len() >= MAX_STEPS || (status == "denied" && !retryable);
@@ -1258,22 +1290,33 @@ impl Jarvis {
         }
         let role = args["role"].as_str().unwrap_or_default().to_string();
         let objective = args["objective"].as_str().unwrap_or_default().to_string();
+        let default_tools =
+            if crate::agents::route(&objective).is_some_and(|agent| agent.name == "coding") {
+                &[
+                    "fs.list",
+                    "fs.read",
+                    "fs.search",
+                    "code.check_python",
+                    "math.calc",
+                ][..]
+            } else {
+                &SUBAGENT_DEFAULT_TOOLS[..]
+            };
         let requested: Vec<String> = match args["tools"].as_array() {
             Some(list) if !list.is_empty() => list
                 .iter()
                 .filter_map(|t| t.as_str().map(str::to_string))
                 .collect(),
-            _ => SUBAGENT_DEFAULT_TOOLS
-                .iter()
-                .map(|t| t.to_string())
-                .collect(),
+            _ => default_tools.iter().map(|t| t.to_string()).collect(),
         };
         let invalid: Vec<&String> = requested
             .iter()
             .filter(|t| {
                 t.as_str() == "agent.delegate"
                     || self.catalog.get(t).is_none_or(|d| {
-                        d.needs_confirmation() || matches!(d.risk(), "high" | "critical")
+                        !matches!(d.descriptor["effects"].as_str(), Some("read" | "none"))
+                            || d.needs_confirmation()
+                            || matches!(d.risk(), "high" | "critical")
                     })
             })
             .collect();
@@ -1437,8 +1480,9 @@ impl Jarvis {
             .enumerate()
             .map(|(i, h)| {
                 let raw = h["output"].to_string();
-                let output = if i + 1 < history.len() && raw.chars().count() > EARLIER_OUTPUT_CHARS {
-                    json!({"truncated": true, "excerpt": raw.chars().take(EARLIER_OUTPUT_CHARS).collect::<String>()})
+                let limit = if i + 1 == history.len() { LATEST_OUTPUT_CHARS } else { EARLIER_OUTPUT_CHARS };
+                let output = if raw.chars().count() > limit {
+                    json!({"truncated": true, "excerpt": clip(&raw, limit)})
                 } else {
                     h["output"].clone()
                 };
@@ -2106,6 +2150,13 @@ impl Jarvis {
                     .map_err(|e| tool_error("workflow.unavailable", e.to_string()))?;
                 Ok(json!({"id": short(&doc), "name": doc["name"]}))
             }
+            "code.run_python" if confirmed => {
+                crate::sandbox::run_python(arguments["source"].as_str().unwrap_or_default())
+            }
+            "code.run_python" => Err(tool_error(
+                "code.not_confirmed",
+                "L’esecuzione richiede la conferma del proprietario",
+            )),
             "shell.run" => {
                 if !confirmed {
                     return Err(tool_error(
@@ -2172,7 +2223,7 @@ impl Jarvis {
                 )));
             }
             // Il terminale chiede la conferma a ogni comando: non può girare senza il proprietario.
-            if name == "shell.run" {
+            if matches!(name, "shell.run" | "code.run_python") {
                 return Err(invalid(format!(
                     "passo {}: i comandi del terminale non sono ammessi nelle automazioni",
                     i + 1
