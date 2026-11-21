@@ -73,11 +73,11 @@ Dopo la pubblicazione, `scripts/prune_releases.py` conserva la release con la ve
 
 ### Firma degli installer
 
-La release automatica da `main` attesta e firma con Sigstore il DMG, il setup EXE e `SHA256SUMS`. Le firme sono bundle separati e vengono verificate prima della pubblicazione.
+Le release firmano DMG e app macOS e setup Windows con un certificato autofirmato privato, senza
+acquisti o account commerciali. Il proprietario deve configurare i certificati e i secret elencati
+in [GITHUB_ACTIONS_SECRETS.md](./GITHUB_ACTIONS_SECRETS.md); se mancano, la pubblicazione fallisce
+in modo esplicito. La CI verifica la firma, ma l'utente deve considerare attendibile il certificato
+sui propri dispositivi. Non viene eseguita la notarizzazione Apple.
 
-Per aggiungere le firme native, configura GitHub Actions e imposta la variabile `JARVIS_NATIVE_SIGNING=true` dopo aver predisposto entrambi i sistemi.
-
-- **Apple.** Serve un certificato **Developer ID Application**. Aggiungi il P12 codificato Base64 a `APPLE_CERTIFICATE` e la password a `APPLE_CERTIFICATE_PASSWORD`. Imposta la variabile `APPLE_SIGNING_IDENTITY` con il nome esatto del certificato. Aggiungi ai secret `APPLE_API_KEY` (ID chiave di App Store Connect), `APPLE_API_ISSUER` (issuer ID) e `JARVIS_APPLE_API_KEY_BASE64` (contenuto del file P8 codificato Base64). Lo script di release firma l'app egui e il DMG; la CI verifica le firme e allega i ticket ottenuti dalla notarizzazione.
-- **Windows.** Serve un profilo pubblico Azure Artifact Signing. Configura la federazione GitHub OIDC per il solo subject `repo:xX-VyrnCore-Xx/JARVIS:ref:refs/heads/main` e assegna il ruolo **Artifact Signing Certificate Profile Signer** al profilo. Imposta le variabili `AZURE_SIGNING_CLIENT_ID`, `AZURE_SIGNING_TENANT_ID`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT` e `AZURE_SIGNING_PROFILE`. La CI verifica Authenticode e la marca temporale prima della prova d’installazione.
-
-Le PR compilano i pacchetti con la configurazione di test. Se abiliti la firma nativa per la pubblicazione automatica, un errore di firma impedisce la pubblicazione.
+Le PR verificano build e installazione senza usare i certificati privati. Sigstore e le attestazioni
+di provenienza continuano a usare OIDC GitHub.

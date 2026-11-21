@@ -49,8 +49,10 @@ def main() -> int:
         return 1
     print("✓ chiave dei segreti custodita in:", store)
 
-    page = get(f"{base}/", {"Host": f"localhost:{port}"})
-    token = re.search(r'name="jarvis-token" content="([0-9a-f]{32})"', page).group(1)
+    token = os.environ.get("JARVIS_TOKEN", "")
+    if not re.fullmatch(r"[A-Za-z0-9]{32,}", token):
+        print("✗ JARVIS_TOKEN di test deve contenere almeno 32 caratteri alfanumerici")
+        return 1
 
     def api(path: str, body: dict | None = None) -> dict:
         req = urllib.request.Request(

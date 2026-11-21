@@ -16,17 +16,9 @@ sed "s/@VERSION@/$version/g" apps/desktop/installer/macos/Info.plist \
   > "$contents/Info.plist"
 
 if [[ "${NATIVE_SIGNING:-false}" == "true" ]]; then
-  : "${APPLE_CERTIFICATE:?Configurare il certificato Developer ID Application}"
-  : "${APPLE_CERTIFICATE_PASSWORD:?Configurare la password del certificato}"
-  : "${APPLE_SIGNING_IDENTITY:?Configurare l’identità di firma}"
-  : "${APPLE_API_KEY:?Configurare l’identificativo della chiave di notarizzazione}"
-  : "${APPLE_API_ISSUER:?Configurare l’emittente della chiave di notarizzazione}"
-  : "${JARVIS_APPLE_API_KEY_BASE64:?Configurare la chiave di notarizzazione}"
-
-  case "$APPLE_SIGNING_IDENTITY" in
-    "Developer ID Application:"*) ;;
-    *) echo "È richiesto un certificato Developer ID Application" >&2; exit 1 ;;
-  esac
+  : "${JARVIS_MACOS_SIGNING_P12_BASE64:?Configurare il certificato autofirmato macOS}"
+  : "${JARVIS_MACOS_SIGNING_PASSWORD:?Configurare la password del certificato macOS}"
+  : "${JARVIS_MACOS_SIGNING_IDENTITY:?Configurare l’impronta SHA-1 del certificato}"
 
   umask 077
   signing_dir=$(mktemp -d)
@@ -37,15 +29,16 @@ if [[ "${NATIVE_SIGNING:-false}" == "true" ]]; then
   security unlock-keychain -p "" "$keychain"
 
   certificate="$signing_dir/certificate.p12"
-  printf '%s' "$APPLE_CERTIFICATE" | base64 -D > "$certificate"
-  unset APPLE_CERTIFICATE
-  security import "$certificate" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+  printf '%s' "$JARVIS_MACOS_SIGNING_P12_BASE64" | base64 -D > "$certificate"
+  unset JARVIS_MACOS_SIGNING_P12_BASE64
+  security import "$certificate" -k "$keychain" -P "$JARVIS_MACOS_SIGNING_PASSWORD" -T /usr/bin/codesign
+  unset JARVIS_MACOS_SIGNING_PASSWORD
   security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain"
   security list-keychains -d user -s "$keychain"
 
-  codesign --force --deep --options runtime --timestamp \
-    --sign "$APPLE_SIGNING_IDENTITY" "$app"
+  codesign --force --deep --sign "$JARVIS_MACOS_SIGNING_IDENTITY" "$app"
   codesign --verify --deep --strict --verbose=2 "$app"
+  codesign -dv --verbose=4 "$app" 2>&1 | grep -F "Authority=JARVIS Private Code Signing"
 else
   codesign --force --deep --sign - "$app"
 fi
@@ -58,17 +51,7 @@ dmg="$bundle/dmg/JARVIS_${version}_aarch64.dmg"
 hdiutil create -volname JARVIS -srcfolder "$stage" -ov -format UDZO "$dmg"
 
 if [[ "${NATIVE_SIGNING:-false}" == "true" ]]; then
-  codesign --force --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$dmg"
+  codesign --force --sign "$JARVIS_MACOS_SIGNING_IDENTITY" "$dmg"
   codesign --verify --strict "$dmg"
-  codesign -dv --verbose=4 "$dmg" 2>&1 | grep -F "Authority=$APPLE_SIGNING_IDENTITY"
-
-  api_key="$signing_dir/AuthKey.p8"
-  printf '%s' "$JARVIS_APPLE_API_KEY_BASE64" | base64 -D > "$api_key"
-  unset JARVIS_APPLE_API_KEY_BASE64
-  xcrun notarytool submit "$dmg" --key "$api_key" --key-id "$APPLE_API_KEY" \
-    --issuer "$APPLE_API_ISSUER" --wait --timeout 20m --output-format json \
-    > "$signing_dir/notary.json"
-  jq -e '.status == "Accepted"' "$signing_dir/notary.json" > /dev/null
-  xcrun stapler staple "$dmg"
-  xcrun stapler validate "$dmg"
+  codesign -dv --verbose=4 "$dmg" 2>&1 | grep -F "Authority=JARVIS Private Code Signing"
 fi

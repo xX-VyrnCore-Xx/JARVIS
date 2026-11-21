@@ -2,7 +2,7 @@ name: contracts
 
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
     paths: ["contracts/**", "tests/**", "core/**", "ai/**", "apps/**", "jarvis.sh", "jarvis.ps1", "jarvis.cmd", ".github/workflows/**", "scripts/**"]
 
@@ -153,6 +153,7 @@ jobs:
     env:
       # Portachiavi del sistema su macOS e Windows, file 0600 su Linux (ADR-0021).
       JARVIS_EXPECT_SECRETS_STORE: ${{ matrix.os == 'ubuntu-latest' && 'file' || 'keychain' }}
+      JARVIS_TOKEN: jarvise2eownertoken0000000000000000
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
@@ -172,6 +173,7 @@ jobs:
           # Analisi sintattica con Windows PowerShell 5.1 (quello del doppio clic): fallisce subito invece di attendere.
           powershell -NoProfile -Command "`$e = `$null; [void][System.Management.Automation.Language.Parser]::ParseFile('jarvis.ps1', [ref]`$null, [ref]`$e); if (`$e) { `$e; exit 1 }"
           if ($LASTEXITCODE -ne 0) { exit 1 }
+          $env:JARVIS_TOKEN = 'jarvise2eownertoken0000000000000000'
           $p = Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','jarvis.ps1' -RedirectStandardOutput jarvis.log -RedirectStandardError jarvis.err -PassThru -NoNewWindow
           python tests/smoke/start_smoke.py http://127.0.0.1:8765 1500
           if ($LASTEXITCODE -ne 0) { Get-Content jarvis.log, jarvis.err; exit 1 }
