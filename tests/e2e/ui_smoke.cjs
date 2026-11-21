@@ -477,10 +477,8 @@ function check(cond, msg) {
   page.once("dialog", (d) => d.accept());
   await page.click("#devices .card button.danger");
   await page.waitForSelector("#devices .badge.denied");
-  await phone.fill("#input", "che ore sono");
-  await phone.keyboard.press("Enter");
-  // Più richieste possono fallire insieme: si attende l'URL finale senza dipendere da una singola navigazione.
-  for (let i = 0; i < 60 && !phone.url().endsWith("/pair"); i++) await new Promise((r) => setTimeout(r, 250));
+  // Il polling già attivo può ricevere la revoca e navigare prima che il test invii un altro messaggio.
+  await phone.waitForURL(/\/pair/, { timeout: 30_000 });
   await phone.waitForSelector("#pair-form");
   check(phone.url().endsWith("/pair"), "dispositivo revocato: accesso perso subito");
   await phoneCtx.close();

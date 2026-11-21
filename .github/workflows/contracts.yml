@@ -37,7 +37,12 @@ jobs:
           apk=apps/android/app/build/outputs/apk/release/app-release.apk
           test -s "$apk"
           test ! -e apps/android/app/build/outputs/apk/debug/app-debug.apk
-          apksigner verify --verbose "$apk"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner -print -quit)"
+          if [ -z "$apksigner" ]; then
+            echo "::error::apksigner non trovato negli Android SDK build-tools."
+            exit 1
+          fi
+          "$apksigner" verify --verbose "$apk"
 
   validate:
     name: validate (python)
