@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, us
 import type { ReactNode } from "react";
 import { api, DEVICE_MODE } from "./lib/api";
 import { voice } from "./lib/voice";
+import type { AvatarActivity } from "./lib/avatarActivity";
 
 export type View =
   | "dashboard" | "chat" | "tasks" | "automations" | "memory" | "skills" | "workspace"
@@ -45,6 +46,8 @@ interface Ctx {
   notifTick: number;
   thinking: boolean;
   setThinking: (b: boolean) => void;
+  avatarActivity: AvatarActivity;
+  setAvatarActivity: (activity: AvatarActivity) => void;
   /** Invia un messaggio alla chat (registrato dalla vista Chat). */
   sendRef: React.MutableRefObject<(text: string) => void>;
   /** Contatore che cambia dopo ogni risposta: le viste dati si aggiornano. */
@@ -78,6 +81,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [unread, setUnread] = useState(0);
   const [notifTick, setNotifTick] = useState(0);
   const [thinking, setThinking] = useState(false);
+  const [avatarActivity, setAvatarActivity] = useState<AvatarActivity>({ category: "general" });
   const [activity, setActivity] = useState(0);
   const sendRef = useRef<(text: string) => void>(() => {});
   const notifSince = useRef<string | null>(null);
@@ -154,6 +158,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     notifTick,
     thinking,
     setThinking,
+    avatarActivity,
+    setAvatarActivity,
     sendRef,
     activity,
     bumpActivity: useCallback(() => setActivity((x) => x + 1), []),

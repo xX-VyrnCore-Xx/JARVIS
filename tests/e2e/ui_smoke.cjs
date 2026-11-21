@@ -93,12 +93,47 @@ function check(cond, msg) {
   check((await avatar.getAttribute("aria-expanded")) === "false", "controlli avatar richiudibili da tastiera");
   check((await page.locator("#view-dashboard").innerText()).includes("IN ATTESA DI CONFERMA") || (await page.locator("#view-dashboard").innerText()).toLowerCase().includes("in attesa di conferma"), "plancia con il pannello delle conferme");
   check((await page.locator("#dash-conditions").innerText()).includes("modalità offline"), "plancia mostra le condizioni offline");
+  check(await page.locator(".hud-hero").evaluate((hero) => {
+    const x = (selector) => hero.querySelector(selector).getBoundingClientRect().x;
+    return x(".hero-side") < x("#avatar-core") && x("#avatar-core") < x(".hero-telemetry");
+  }), "il ritratto è al centro della Plancia desktop");
+  await page.getByRole("button", { name: "Riduci il menu" }).click();
+  check(await page.locator(".layout.nav-collapsed").count() === 1, "la barra laterale può essere ridotta");
+  await page.getByRole("button", { name: "Espandi il menu" }).click();
+  await page.click('[data-view="chat"]');
+  await page.getByRole("heading", { name: "Come posso aiutarti?" }).waitFor();
+  check(await page.getByRole("button", { name: "Cerca su Wikipedia" }).isVisible(), "la chat vuota propone azioni pertinenti");
+  await page.click('[data-view="dashboard"]');
   if (shots) await page.screenshot({ path: `${shots}/jarvis-plancia.png` });
+  const dashboardReplies = page.locator("#view-dashboard").getByRole("checkbox", { name: "Risposte vocali" });
+  await dashboardReplies.check();
+  const talk = page.getByRole("button", { name: "Parla con JARVIS", exact: true });
+  await talk.click();
+  await page.waitForSelector('#avatar-core[data-state="listening"]');
+  await page.waitForTimeout(1500);
+  await page.getByRole("button", { name: "Invia registrazione" }).click();
+  await page.locator(".msg.assistant").filter({ hasText: /^Sono le/ }).waitFor({ state: "attached" });
+  check(true, "l’avatar della Plancia avvia e invia una registrazione");
+  await page.waitForSelector('#avatar-core[data-state="speaking"]');
+  await page.locator("#view-dashboard").getByRole("button", { name: "Interrompi risposta", exact: true }).click();
+  await page.waitForSelector('#avatar-core[data-state="idle"]');
+  await dashboardReplies.uncheck();
+  check(true, "la risposta vocale si può interrompere dalla Plancia");
   await page.fill("#dashboard-command input", "info sistema");
   await page.click("#dashboard-command button");
   await page.waitForSelector("#view-chat.active");
   await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant")].some((m) => m.textContent.includes("Informazioni sul sistema")), null, { timeout: 30000 });
   check(true, "comando rapido dalla plancia eseguito in chat");
+  await page.waitForSelector('#avatar[data-tone="system"]');
+  check((await page.locator(".avatar-panel .avatar-status-category").innerText()).includes("Sistema"), "l’avatar usa colore ed etichetta dell’attività Sistema");
+  if (shots) await page.screenshot({ path: `${shots}/jarvis-chat.png` });
+  await page.locator("#pc-controls summary").click();
+  await page.locator("#pc-controls").getByRole("button", { name: "Calcolatrice" }).click();
+  const desktopApproval = page.getByRole("group", { name: "Conferma richiesta" });
+  await desktopApproval.waitFor();
+  check((await desktopApproval.innerText()).includes("Aprire la Calcolatrice"), "i controlli PC richiedono conferma per la destinazione scelta");
+  await desktopApproval.getByRole("button", { name: "Rifiuta" }).click();
+  await page.getByText("✗ Rifiutato", { exact: true }).waitFor();
   let releaseChat;
   const pendingChat = new Promise((resolve) => { releaseChat = resolve; });
   await page.route("**/api/chat/stream", async (route) => {
@@ -148,6 +183,8 @@ function check(cond, msg) {
   await send("scrivi diario.txt: nota creata dal test E2E");
   await page.waitForSelector(".confirm button.primary");
   check((await page.locator(".confirm").last().innerText()).includes("diario.txt"), "scheda di conferma con effetto atteso");
+  await page.waitForSelector('#avatar[data-tone="attention"]');
+  check((await page.locator(".avatar-panel .avatar-status-category").innerText()).includes("Attende conferma"), "l’avatar segnala quando serve confermare un’azione");
   // Notifiche (RF-13): la conferma in attesa compare come notifica e toast, e si chiude quando viene risolta.
   await page.waitForFunction(() => document.querySelector("#notif-count").textContent === "1" && !document.querySelector("#notif-count").hidden);
   check(true, "contatore notifiche: 1 conferma in attesa");
@@ -300,6 +337,20 @@ function check(cond, msg) {
   await page.waitForFunction(() => document.querySelector("#connectors").innerText.includes("GitHub") && document.querySelector("#connectors").innerText.includes("Google Calendar"));
   check((await page.locator("#connectors").innerText()).includes("connector.google_calendar.crea_evento"), "Google Calendar e GitHub aggiunti dal catalogo con le loro operazioni");
   if (shots) await page.screenshot({ path: `${shots}/jarvis-catalogo.png` });
+  await page.getByRole("searchbox", { name: "Cerca nel catalogo" }).fill("Open-Meteo");
+  await page.locator('[data-template="open_meteo"]').getByRole("button", { name: "Installa" }).click();
+  await page.waitForSelector('[data-connector="open_meteo"]');
+  check(await page.locator('[data-connector="open_meteo"] .badge').innerText() === "autorizzato", "il catalogo installa un connettore pubblico senza JSON o token");
+  await page.getByText("Configura un altro servizio API", { exact: true }).click();
+  await page.fill('#guided-connector-form [name="name"]', "Controllo guidato");
+  await page.fill('#guided-connector-form [name="id"]', "controllo_guidato");
+  await page.fill('#guided-connector-form [name="base"]', `http://127.0.0.1:${WEB_PORT}/svc`);
+  await page.fill('#guided-connector-form [name="path"]', "/stato/{nome}");
+  await page.fill('#guided-connector-form [name="summary"]', "Stato del servizio");
+  await page.locator('#guided-connector-form').getByRole("button", { name: "Installa" }).click();
+  await page.waitForSelector('[data-connector="controllo_guidato"]');
+  check(true, "il modulo guidato installa un servizio con parametro nel percorso");
+  await page.locator("#connector-advanced summary").click();
   await page.fill('#connector-form textarea[name="manifest"]', JSON.stringify({
     contract: "jarvis.connector/1", id: "stato", name: "Stato servizi", version: "1.0.0", description: "Servizio sintetico",
     base_url: `http://127.0.0.1:${WEB_PORT}/svc`, allowed_hosts: ["127.0.0.1"], auth: { type: "bearer" },
@@ -351,6 +402,9 @@ function check(cond, msg) {
   await page.click('#pairing-form button[type="submit"]');
   await page.waitForFunction(() => !document.querySelector("#pairing-code .node-cmd"));
   const code = (await page.locator("#pairing-code strong").innerText()).trim();
+  const invite = new (require("url").URL)(await page.getByRole("button", { name: "Copia invito" }).getAttribute("data-invite"));
+  check(await page.getByAltText("Codice QR per associare il dispositivo").isVisible(), "invito con QR e collegamento generati localmente");
+  check(invite.search === "" && invite.hash.endsWith(code), "il codice d’invito resta nel frammento del collegamento");
   const phoneCtx = await browser.newContext({ viewport: { width: 390, height: 800 } });
   const phone = await phoneCtx.newPage();
   phone.on("pageerror", (e) => errors.push("telefono: " + e.message));
@@ -358,7 +412,10 @@ function check(cond, msg) {
   await phone.goto(`http://jarvis.localhost:${port}/`);
   await phone.waitForURL(/\/pair$/);
   check(true, "dispositivo non associato rimandato all'associazione");
-  await phone.fill('#pair-form input[name="code"]', code);
+  await phone.goto(`http://jarvis.localhost:${port}/pair${invite.hash}`);
+  await phone.waitForFunction((expected) => document.querySelector('#pair-form input[name="code"]').value === expected, code);
+  check(true, "il link precompila il codice di associazione");
+  check(new (require("url").URL)(phone.url()).hash === "", "il client rimuove il codice dall’indirizzo dopo la lettura");
   await phone.click('#pair-form button[type="submit"]');
   await phone.waitForURL(/\/$/);
   await phone.waitForSelector("#input");
@@ -461,7 +518,7 @@ function check(cond, msg) {
   const desktopUrl = new (require("url").URL)(URL);
   desktopUrl.searchParams.set("app", "desktop");
   await desktop.goto(desktopUrl.href);
-  await desktop.getByRole("heading", { name: "Plancia" }).waitFor();
+  await desktop.getByRole("heading", { name: /Ciao, sono JARVIS/ }).waitFor();
   check(await desktop.locator("html").evaluate((el) => el.classList.contains("app-desktop") && el.classList.contains("platform-mac")), "stili desktop macOS attivi");
   check(await desktop.locator(".hud-hero").evaluate((el) => getComputedStyle(el, "::before").animationName === "none"), "movimento ridotto nella plancia desktop");
   await desktop.locator("#theme-toggle").click();

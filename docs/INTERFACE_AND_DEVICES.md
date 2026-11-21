@@ -56,11 +56,13 @@ Si adatta al tema chiaro e scuro e allo schermo dello smartphone (verificata a 3
 **Telefono e altri dispositivi (ADR-0014):**
 1. Pubblica JARVIS nella tua rete privata con un proxy HTTPS fidato, per esempio `tailscale serve 8765`.
 2. Avvia JARVIS con `JARVIS_ALLOWED_HOSTS=<nome-host>`.
-3. Sul telefono apri l'indirizzo e inserisci il codice generato nella sezione **Dispositivi**.
+3. In **Dispositivi**, genera un invito e scansiona il QR dal browser del telefono, oppure copia il collegamento. Conferma il nome nella pagina di associazione. Puoi ancora digitare manualmente il codice, anche nei client nativi. Il codice è monouso, scade dopo dieci minuti e può essere annullato dal Core.
 
 L'interfaccia si installa come app («Aggiungi a schermata Home»). Dal dispositivo sono disponibili chat, attività, notifiche, voce e, se concesso, le conferme. La revoca è immediata. Se il Core o il proxy è irraggiungibile durante la navigazione, la PWA mostra una pagina con «Riprova». Al ritorno della connessione una scheda già aperta aggiorna stato e notifiche. Il service worker evita di salvare pagine, risposte o credenziali.
 
-La chat mostra un avatar astratto con anelli CSS 3D. L'etichetta annuncia gli stati pronto, elaborazione, ascolto, trascrizione e risposta vocale. L'avatar segue l'effettivo avvio della riproduzione. Durante la riproduzione la bocca segue i **visemi** della frase (ADR-0029): vocali aperte o arrotondate, labbra chiuse per M/B/P. L'apertura dipende anche dall'intensità dell'audio locale. Rispetta la preferenza per il movimento ridotto.
+La Plancia e la Chat mostrano il ritratto maschile di JARVIS. Il pulsante **Parla con JARVIS** avvia il microfono dalla Plancia e permette di inviare la registrazione o interrompere una risposta. Il colore segue la categoria dell’attività, con un’etichetta leggibile e indicazioni specifiche per conferme ed errori. Gli stati vocali indicano ascolto, trascrizione e riproduzione. L’indicatore di voce segue l’intensità dell’audio locale e rispetta la preferenza per il movimento ridotto.
+
+**Controlli PC.** Su macOS e Windows, dalla Chat locale il proprietario può aprire la cartella di JARVIS, la Calcolatrice, le impostazioni di sistema e il monitor delle attività. Può scegliere il comando dal menu **Controlli PC** oppure dire o scrivere «Apri la calcolatrice». Ogni richiesta viene eseguita dopo la conferma del proprietario, anche quando nella Chat è selezionato un provider cloud. I dispositivi associati e le automazioni non possono avviare queste azioni.
 
 **Client Android (ADR-0018):** `apps/android` contiene l'app Jetpack Compose con associazione, cronologia, chat e conferme secondo i permessi. Segue le stesse regole del client iOS e conserva la sessione cifrata con l'Android Keystore. La CI produce l'APK di debug.
 

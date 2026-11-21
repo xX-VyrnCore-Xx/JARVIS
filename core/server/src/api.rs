@@ -435,6 +435,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/voice/speak", post(voice_speak))
         .route("/api/devices", get(devices))
         .route("/api/devices/pairing", post(create_pairing))
+        .route("/api/devices/pairing/cancel", post(cancel_pairing))
         .route("/api/devices/pair", post(pair_device))
         .route("/api/devices/me", get(device_me))
         .route("/api/setup", get(setup_status))
@@ -500,6 +501,7 @@ pub fn router(state: Shared) -> Router {
         )
         .route("/api/connectors/templates", get(connector_templates))
         .route("/api/connectors/templates/{id}", post(install_template))
+        .route("/api/connectors/new", post(install_new_connector))
         .route("/api/connectors/{id}", delete(uninstall_connector))
         .route("/api/connectors/{id}/authorize", post(authorize_connector))
         .route("/api/connectors/{id}/revoke", post(revoke_connector))
@@ -624,10 +626,10 @@ async fn configure_cloud(State(state): State<Shared>, Json(body): Json<Value>) -
 }
 
 async fn cloud_chat(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
-    if let Some(message) = body["message"]
-        .as_str()
-        .filter(|m| crate::orchestrator::is_source_followup(m))
-    {
+    if let Some(message) = body["message"].as_str().filter(|m| {
+        crate::orchestrator::is_source_followup(m)
+            || crate::desktop::Target::from_request(m).is_some()
+    }) {
         let message = message.to_string();
         return match with_core(&state, move |j| j.chat(&message)).await {
             Ok(out) => Json(out.to_json()).into_response(),
@@ -657,7 +659,11 @@ async fn cloud_chat(State(state): State<Shared>, Json(body): Json<Value>) -> Res
     }
 }
 
-async fn chat(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+async fn chat(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Json(body): Json<Value>,
+) -> Response {
     let Some(message) = body["message"].as_str().map(str::to_string) else {
         return error(
             StatusCode::BAD_REQUEST,
@@ -665,6 +671,13 @@ async fn chat(State(state): State<Shared>, Json(body): Json<Value>) -> Response 
             "campo 'message' mancante",
         );
     };
+    if device.is_some() && crate::desktop::Target::from_request(&message).is_some() {
+        return error(
+            StatusCode::FORBIDDEN,
+            "owner_only",
+            "Azione disponibile dal computer del proprietario",
+        );
+    }
     match with_core(&state, move |j| j.chat(&message)).await {
         Ok(out) => Json(out.to_json()).into_response(),
         Err(e) => e.into_response(),
@@ -673,7 +686,11 @@ async fn chat(State(state): State<Shared>, Json(body): Json<Value>) -> Response 
 
 /// Chat in streaming (ADR-0025): risposta NDJSON con righe `{"type":"delta","text":…}` mentre il modello
 /// genera, poi `{"type":"done","result":…}` (lo stesso oggetto di `/api/chat`) oppure `{"type":"error",…}`.
-async fn chat_stream(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+async fn chat_stream(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Json(body): Json<Value>,
+) -> Response {
     let Some(message) = body["message"].as_str().map(str::to_string) else {
         return error(
             StatusCode::BAD_REQUEST,
@@ -681,6 +698,13 @@ async fn chat_stream(State(state): State<Shared>, Json(body): Json<Value>) -> Re
             "campo 'message' mancante",
         );
     };
+    if device.is_some() && crate::desktop::Target::from_request(&message).is_some() {
+        return error(
+            StatusCode::FORBIDDEN,
+            "owner_only",
+            "Azione disponibile dal computer del proprietario",
+        );
+    }
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let core = state.core.clone();
     let deltas = tx.clone();
@@ -830,8 +854,15 @@ async fn channel_test(State(state): State<Shared>, Path(id): Path<String>) -> Re
     }
 }
 
-async fn confirmations(State(state): State<Shared>) -> Json<Value> {
-    Json(json!({"items": with_core(&state, |j| j.pending_confirmations()).await}))
+async fn confirmations(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+) -> Json<Value> {
+    let mut items = with_core(&state, |j| j.pending_confirmations()).await;
+    if device.is_some() {
+        items.retain(|item| item["tool"] != crate::desktop::TOOL);
+    }
+    Json(json!({"items": items}))
 }
 
 async fn confirm(
@@ -848,6 +879,16 @@ async fn confirm(
             "campo 'approve' booleano mancante",
         );
     };
+    if device.is_some() {
+        let id = id.clone();
+        if with_core(&state, move |j| j.is_desktop_confirmation(&id)).await {
+            return error(
+                StatusCode::FORBIDDEN,
+                "owner_only",
+                "Conferma dal computer del proprietario",
+            );
+        }
+    }
     // Passkey (ADR-0042): da un dispositivo con passkey registrata, approvare richiede un'asserzione legata
     // a questa conferma. Rifiutare resta sempre possibile senza passkey.
     if let (true, Some(axum::Extension(DeviceCtx(device)))) = (approve, device) {
@@ -1117,7 +1158,7 @@ async fn install_template(
         Ok(m) => m,
         Err(e) => return error(StatusCode::BAD_REQUEST, "bad_request", &e),
     };
-    reply(with_core(&state, move |j| j.install_connector(&manifest)).await)
+    reply(with_core(&state, move |j| j.install_new_connector(&manifest)).await)
 }
 
 fn limit(q: &Value, default: u32) -> u32 {
@@ -1389,7 +1430,18 @@ async fn workflows(State(state): State<Shared>) -> Response {
 }
 
 async fn devices(State(state): State<Shared>) -> Response {
-    reply(with_core(&state, |j| j.devices().map(|items| json!({"items": items}))).await)
+    let pairing_urls: Vec<_> = state
+        .remote_hosts
+        .iter()
+        .map(|host| format!("https://{host}"))
+        .collect();
+    reply(
+        with_core(&state, move |j| {
+            j.devices()
+                .map(|items| json!({"items": items, "pairing_urls": pairing_urls}))
+        })
+        .await,
+    )
 }
 
 async fn create_pairing(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
@@ -1399,7 +1451,27 @@ async fn create_pairing(State(state): State<Shared>, Json(body): Json<Value>) ->
         .flatten()
         .filter_map(|s| s.as_str().map(str::to_string))
         .collect();
-    reply(with_core(&state, move |j| j.create_pairing(&scopes)).await)
+    reply(
+        with_core(&state, move |j| {
+            let invite = j.create_pairing(&scopes)?;
+            if let Some(previous) = body["replace"]
+                .as_str()
+                .filter(|old| invite["code"] != *old)
+            {
+                j.cancel_pairing(previous);
+            }
+            Ok(invite)
+        })
+        .await,
+    )
+}
+
+async fn cancel_pairing(State(state): State<Shared>, Json(body): Json<Value>) -> Json<Value> {
+    let cancelled = with_core(&state, move |j| {
+        j.cancel_pairing(body["code"].as_str().unwrap_or_default())
+    })
+    .await;
+    Json(json!({"cancelled": cancelled}))
 }
 
 async fn pair_device(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
@@ -1635,6 +1707,10 @@ async fn connectors(State(state): State<Shared>) -> Response {
         })
         .await,
     )
+}
+
+async fn install_new_connector(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply(with_core(&state, move |j| j.install_new_connector(&body)).await)
 }
 
 async fn install_connector(State(state): State<Shared>, Json(body): Json<Value>) -> Response {

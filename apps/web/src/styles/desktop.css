@@ -1,9 +1,3 @@
-.hero-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 1rem; }
-.hero-heading h1 { margin: 0; font: 680 clamp(1.8rem, 4vw, 3.15rem)/1.05 var(--display); letter-spacing: -.05em; }
-.hero-heading .hud-clock .time { font-size: clamp(1.3rem, 2vw, 2rem); letter-spacing: -.04em; text-shadow: none; }
-.hero-heading .hud-clock .date { letter-spacing: 0; text-transform: none; }
-.hero-heading .hud-clock { text-align: right; }
-.hero-core { order: 1; }
 
 .connector-card { display: flex; flex-direction: column; align-items: stretch; gap: .85rem; }
 .connector-head { display: flex; align-items: center; gap: .8rem; }
@@ -87,21 +81,6 @@ dialog.connector-dialog h2 { margin: 0; font-size: 1.25rem; letter-spacing: -.02
 .app-desktop .view-head h2 { font-size: 1.85rem; font-weight: 670; letter-spacing: -.045em; text-transform: none; }
 .app-desktop .view-head h2::after { display: none; }
 .app-desktop .hud-grid { gap: 1rem; }
-:root.app-desktop .hud-hero {
-  background: radial-gradient(ellipse at 86% 44%, var(--desktop-hero), transparent 62%), var(--panel);
-  padding: clamp(1.2rem, 2.6vw, 2.4rem);
-  box-shadow: var(--glow-soft);
-  gap: clamp(1rem, 3.5vw, 3.2rem);
-}
-.app-desktop .hud-hero::before { display: none; }
-.app-desktop .hero-core { flex-basis: clamp(130px, 21vw, 270px); }
-.app-desktop .avatar-large { width: clamp(124px, 18vw, 220px); height: clamp(124px, 18vw, 220px); }
-.app-desktop .avatar-large .iris { box-shadow: 0 0 24px color-mix(in srgb, currentColor 65%, transparent); }
-.app-desktop .avatar-large .halo { box-shadow: 0 0 20px color-mix(in srgb, currentColor 16%, transparent) inset; }
-.app-desktop .hero-state { font: 630 .86rem/1.2 var(--display); letter-spacing: .04em; text-transform: none; text-shadow: none; }
-.app-desktop .hero-readouts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.app-desktop .hero-readouts div { background: var(--desktop-field); }
-.app-desktop .hero-readouts span, .app-desktop .kpi span { font-family: var(--display); font-size: .76rem; color: var(--muted); letter-spacing: 0; text-transform: none; }
 .app-desktop .kpi, .app-desktop .hud-panel { backdrop-filter: none; box-shadow: var(--glow-soft); }
 .app-desktop .hud-panel { transform: none; }
 .app-desktop .hud-panel h3 { font-size: .96rem; letter-spacing: 0; text-transform: none; }
@@ -123,12 +102,11 @@ dialog.connector-dialog h2 { margin: 0; font-size: 1.25rem; letter-spacing: -.02
 @media (max-width: 720px) {
   .app-desktop .nav, .app-desktop .layout.nav-collapsed .nav { width: auto; padding: .4rem .6rem; }
   .app-desktop .hero-core { flex-basis: auto; }
-  .hero-heading .hud-clock { text-align: left; }
   .hero-side { width: 100%; }
 }
 @media (prefers-reduced-motion: reduce) {
   .hud-hero::before, .msg.streaming::after, .app-desktop .notif-panel:not([hidden]), .connector-dialog[open] { animation: none; }
-  .app-desktop button:not(:disabled), .nav, .gauge .arc, .avatar-large .mouth { transition: none; }
+  .app-desktop button:not(:disabled), .nav, .gauge .arc { transition: none; }
   .app-desktop button:not(:disabled):active { transform: none; }
 }
 
@@ -141,10 +119,7 @@ dialog.connector-dialog h2 { margin: 0; font-size: 1.25rem; letter-spacing: -.02
 .avatar-control { position: relative; line-height: 0; flex: none; }
 .avatar-trigger, .avatar-trigger:hover { display: block; padding: 0; border: 0; background: none; box-shadow: none; border-radius: 50%; }
 .avatar-trigger .avatar { display: block; }
-.avatar-trigger .avatar-small { width: 30px; }
-.avatar-trigger .iris { translate: var(--avatar-x, 0) var(--avatar-y, 0); transition: translate .18s ease-out; }
 .avatar-tools { position: absolute; z-index: 4; top: calc(100% + .45rem); left: 0; line-height: 1.4; display: flex; gap: .35rem;
   padding: .35rem; white-space: nowrap; background: var(--panel-solid); border: 1px solid var(--border-strong); border-radius: 10px; }
 .avatar-control-large .avatar-tools { left: 50%; translate: -50% 0; top: auto; bottom: .25rem; }
 .avatar-tools[hidden] { display: none; }
-@media (prefers-reduced-motion: reduce) { .avatar-trigger .iris { translate: none; transition: none; } }

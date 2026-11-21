@@ -469,6 +469,7 @@ impl Jarvis {
             .iter()
             .filter(|t| {
                 in_scope(t.name())
+                    && t.name() != crate::desktop::TOOL
                     && !dynamic(t)
                     && (t.name() != "n8n.create" || self.n8n.enabled())
             })
@@ -552,7 +553,9 @@ impl Jarvis {
                 .filter_map(|v| v.as_str().map(str::to_string))
                 .collect()
         };
+        let explicit_desktop = crate::desktop::Target::from_request(&objective).is_some();
         move |tool: &str| match &temporary {
+            _ if tool == crate::desktop::TOOL => temporary.is_none() && explicit_desktop,
             Some(tools) => tools.iter().any(|t| t == tool),
             None => {
                 explicit.as_deref() == Some(tool)
@@ -727,7 +730,6 @@ impl Jarvis {
     }
 
     pub fn cloud_status(&self) -> Result<Value, CoreError> {
-        let settings = crate::cloud::settings(&self.cfg.data_dir);
         let limiter = self.cloud_limiter.lock().unwrap_or_else(|e| e.into_inner());
         let providers = crate::cloud::Provider::ALL
             .into_iter()
@@ -737,7 +739,7 @@ impl Jarvis {
                     .get(&provider.secret())
                     .map_err(internal)?
                     .is_some();
-                Ok(provider.view(&settings, configured, &limiter))
+                Ok(provider.view(configured, &limiter))
             })
             .collect::<Result<Vec<_>, CoreError>>()?;
         Ok(json!({"providers": providers}))
@@ -749,12 +751,17 @@ impl Jarvis {
         if body["remove_key"] == true {
             self.secrets.delete(&provider.secret()).map_err(internal)?;
         } else {
-            let model = body["model"]
-                .as_str()
-                .filter(|m| crate::cloud::valid_model(m))
-                .ok_or_else(|| {
-                    CoreError::BadRequest("identificativo del modello non valido".into())
-                })?;
+            let model = body
+                .get("model")
+                .map(|value| {
+                    value
+                        .as_str()
+                        .filter(|model| crate::cloud::valid_model(model))
+                        .ok_or_else(|| {
+                            CoreError::BadRequest("identificativo del modello non valido".into())
+                        })
+                })
+                .transpose()?;
             if let Some(key) = body["key"].as_str().filter(|key| !key.is_empty()) {
                 if key.len() > 1024 || key.bytes().any(|b| !b.is_ascii_graphic()) {
                     return Err(CoreError::BadRequest("chiave API non valida".into()));
@@ -763,13 +770,15 @@ impl Jarvis {
                     .put(&provider.secret(), key)
                     .map_err(internal)?;
             }
-            let mut settings = crate::cloud::settings(&self.cfg.data_dir);
-            settings[provider.id()] = json!(model);
-            crate::backup::atomic_write(
-                &self.cfg.data_dir.join("cloud.json"),
-                settings.to_string().as_bytes(),
-            )
-            .map_err(internal)?;
+            if let Some(model) = model {
+                let mut settings = crate::cloud::settings(&self.cfg.data_dir);
+                settings[provider.id()] = json!(model);
+                crate::backup::atomic_write(
+                    &self.cfg.data_dir.join("cloud.json"),
+                    settings.to_string().as_bytes(),
+                )
+                .map_err(internal)?;
+            }
         }
         let action = if body["remove_key"] == true {
             "cloud.remove_key"
@@ -781,7 +790,7 @@ impl Jarvis {
     }
 
     pub fn prepare_cloud_chat(&self, body: &Value) -> Result<crate::cloud::Request, CoreError> {
-        use crate::cloud::{Function, Provider, Request, Target};
+        use crate::cloud::{Function, Provider, Request};
 
         let providers = if body["provider"] == "auto" {
             Provider::ALL.to_vec()
@@ -835,12 +844,7 @@ impl Jarvis {
                     history.push(crate::cloud::Turn { user, assistant });
                 }
                 history.reverse();
-                targets.push(Target {
-                    provider,
-                    key,
-                    model: provider.model(&settings).to_string(),
-                    history,
-                });
+                targets.push(provider.target(key, message, history, &settings));
             }
         }
         if targets.is_empty() {
@@ -876,7 +880,7 @@ impl Jarvis {
 
         self.expire_pending()?;
         let mut task = Task::new(&message, json!({"kind": "owner", "id": "owner"}));
-        task.transition("planned", "Modello remoto scelto dal proprietario");
+        task.transition("planned", "Modello remoto selezionato per l’attività");
         task.transition("running", "Inferenza remota");
         let crate::cloud::Completed {
             provider,
@@ -943,6 +947,7 @@ impl Jarvis {
                     Failure::InvalidKey => ("Il provider ha rifiutato la chiave o il modello. Controlla la configurazione in Sistema.".to_string(), false),
                     Failure::InvalidTool => ("Il modello ha proposto una chiamata non valida. Riformula la richiesta o usa i comandi offline.".to_string(), false),
                     Failure::RateLimited(wait) => (format!("Limite del provider raggiunto. Riprova tra {} s o scegli un altro provider.", wait.as_secs_f64().ceil() as u64), true),
+                    Failure::ModelUnavailable => ("I modelli selezionati non sono disponibili presso il provider. Riprova o scegli un altro provider.".to_string(), true),
                     Failure::Unavailable => ("Il provider non ha completato la richiesta. Controlla la connessione e il modello in Sistema o scegli un altro provider.".to_string(), true),
                 };
                 task.fail(
@@ -1028,6 +1033,13 @@ impl Jarvis {
         task.transition("running", "Agente in esecuzione");
         self.save(&task)?;
 
+        if let Some(target) = crate::desktop::Target::from_request(message) {
+            let result = json!({"kind":"tool_call", "tool_call":{
+                "tool":crate::desktop::TOOL, "version":"1.0.0", "arguments":{"target":target.id()}
+            }});
+            return self.drive(task, json!({}), result, Outcome::default(), Vec::new());
+        }
+
         let inputs = self.inputs()?;
         let mut out = Outcome::default();
         let result = match self.call_agent(&task, &inputs) {
@@ -1078,15 +1090,27 @@ impl Jarvis {
                     "Strumenti eseguiti e risposta composta"
                 };
                 let text = result["text"].as_str().unwrap_or_default().to_string();
-                if history
-                    .last()
-                    .is_some_and(|h| h["output"]["effect"] == "unknown")
-                {
+                let last = history.last().unwrap_or(&Value::Null);
+                let output = &last["output"];
+                if output["effect"] == "unknown" {
                     task.fail(
                         json!({"code": "tool.uncertain_effect", "category": "unavailable",
                                "message": "Effetto della scrittura non verificabile", "retryable": false, "effect": "unknown"}),
                         "Esito dello strumento incerto",
                     );
+                } else if matches!(last["status"].as_str(), Some("failed" | "denied")) {
+                    let category = match (last["status"].as_str(), output["code"].as_str()) {
+                        (_, Some("policy.invalid_arguments")) => "validation",
+                        (Some("denied"), _) => "policy_denied",
+                        _ => "unavailable",
+                    };
+                    task.fail(json!({
+                        "code": output["code"].as_str().unwrap_or("tool.failed"),
+                        "category": category,
+                        "message": clip(output["message"].as_str().unwrap_or("Strumento non riuscito"), 2000),
+                        "retryable": false,
+                        "effect": output["effect"].as_str().unwrap_or("not_applied"),
+                    }), "Strumento non riuscito");
                 } else {
                     task.transition("succeeded", reason);
                 }
@@ -1462,6 +1486,24 @@ impl Jarvis {
         last: bool,
         out: &mut Outcome,
     ) -> Value {
+        if let Some(step) = history
+            .last()
+            .filter(|step| step["tool"] == crate::desktop::TOOL)
+        {
+            let output = &step["output"];
+            let text = match step["status"].as_str() {
+                Some("succeeded") => format!(
+                    "Ho richiesto di aprire {}.",
+                    output["label"].as_str().unwrap_or("questo strumento")
+                ),
+                Some("cancelled") => "Apertura annullata.".to_string(),
+                _ => output["message"]
+                    .as_str()
+                    .unwrap_or("Apertura non riuscita.")
+                    .to_string(),
+            };
+            return json!({"kind":"reply", "text":text});
+        }
         let last = last || inputs["cloud_backend"].is_object();
         if let Some(uncertain) = history
             .last()
@@ -1516,6 +1558,12 @@ impl Jarvis {
                 )})
             }
         }
+    }
+
+    pub(crate) fn is_desktop_confirmation(&self, id: &str) -> bool {
+        self.pending
+            .get(id)
+            .is_some_and(|pending| pending.tool == crate::desktop::TOOL)
     }
 
     pub fn confirm(&mut self, confirmation_id: &str, approve: bool) -> Result<Outcome, CoreError> {
@@ -2150,6 +2198,18 @@ impl Jarvis {
                     .map_err(|e| tool_error("workflow.unavailable", e.to_string()))?;
                 Ok(json!({"id": short(&doc), "name": doc["name"]}))
             }
+            crate::desktop::TOOL if confirmed => {
+                let target =
+                    crate::desktop::Target::parse(arguments["target"].as_str().unwrap_or_default())
+                        .ok_or_else(|| {
+                            tool_error("pc.unavailable", "Destinazione desktop non disponibile")
+                        })?;
+                crate::desktop::open(target, &self.cfg.workspace())
+            }
+            crate::desktop::TOOL => Err(tool_error(
+                "pc.unavailable",
+                "È richiesta una conferma locale",
+            )),
             "code.run_python" if confirmed => {
                 crate::sandbox::run_python(arguments["source"].as_str().unwrap_or_default())
             }
@@ -2216,18 +2276,8 @@ impl Jarvis {
         let mut steps = Vec::new();
         for (i, step) in raw_steps.iter().enumerate() {
             let name = step["tool"].as_str().unwrap_or_default();
-            if name.starts_with("workflow.") {
-                return Err(invalid(format!(
-                    "passo {}: un'automazione non può gestire altre automazioni",
-                    i + 1
-                )));
-            }
-            // Il terminale chiede la conferma a ogni comando: non può girare senza il proprietario.
-            if matches!(name, "shell.run" | "code.run_python") {
-                return Err(invalid(format!(
-                    "passo {}: i comandi del terminale non sono ammessi nelle automazioni",
-                    i + 1
-                )));
+            if let Some(reason) = workflow_tool_restriction(name) {
+                return Err(invalid(format!("passo {}: {reason}", i + 1)));
             }
             let tool = self.catalog.get(name).ok_or_else(|| {
                 invalid(format!("passo {}: strumento sconosciuto '{name}'", i + 1))
@@ -2650,7 +2700,7 @@ impl Jarvis {
             .map(|t| {
                 let d = &t.descriptor;
                 json!({"name": d["name"], "summary": d["summary"], "risk": d["risk"], "confirmation": d["confirmation"],
-                       "input_schema": d["input_schema"], "workflow_step": !t.name().starts_with("workflow.")})
+                       "input_schema": d["input_schema"], "workflow_step": workflow_tool_restriction(t.name()).is_none()})
             })
             .collect()
     }
@@ -3348,6 +3398,10 @@ impl Jarvis {
         )
     }
 
+    pub(crate) fn cancel_pairing(&mut self, code: &str) -> bool {
+        self.pairings.remove(code).is_some()
+    }
+
     /// Associa un dispositivo con un codice valido. Il token è restituito una sola volta; il Core ne
     /// conserva solo l'impronta SHA-256. Dopo 5 codici errati tutti i codici in attesa vengono annullati.
     /// Registra una passkey verificata per un dispositivo attivo (ADR-0042), con voce di audit.
@@ -3937,6 +3991,19 @@ impl Jarvis {
             .collect())
     }
 
+    pub fn install_new_connector(&mut self, manifest: &Value) -> Result<Value, CoreError> {
+        if self
+            .store
+            .connectors()
+            .map_err(internal)?
+            .iter()
+            .any(|(item, _, _)| item["id"] == manifest["id"])
+        {
+            return Err(CoreError::BadRequest("Connettore già installato".into()));
+        }
+        self.install_connector(manifest)
+    }
+
     /// Installa (o aggiorna) un connettore dal manifest. Gli strumenti diventano disponibili solo dopo
     /// l'autorizzazione; un connettore senza autenticazione è autorizzato dall'installazione stessa,
     /// che è un'azione esplicita del proprietario. Il segreto del webhook è mostrato una sola volta.
@@ -4469,6 +4536,19 @@ fn clip(text: &str, max: usize) -> String {
     }
     let head: String = text.chars().take(max.saturating_sub(1)).collect();
     format!("{head}…")
+}
+
+fn workflow_tool_restriction(tool: &str) -> Option<&'static str> {
+    match tool {
+        name if name.starts_with("workflow.") => {
+            Some("un'automazione non può gestire altre automazioni")
+        }
+        crate::desktop::TOOL => Some("le azioni sul PC richiedono una richiesta diretta"),
+        "shell.run" | "code.run_python" => {
+            Some("i comandi del terminale e del sandbox richiedono una conferma diretta")
+        }
+        _ => None,
+    }
 }
 
 fn missing_tool_parameters(tool: &crate::catalog::Tool, arguments: &Value) -> Vec<String> {

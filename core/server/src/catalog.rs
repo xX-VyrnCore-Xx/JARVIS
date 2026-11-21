@@ -47,6 +47,7 @@ const SOURCES: &[&str] = &[
     tool_file!("memory.search"),
     tool_file!("n8n.create"),
     tool_file!("process.list"),
+    tool_file!("pc.open"),
     tool_file!("security.status"),
     tool_file!("shell.run"),
     tool_file!("system.info"),

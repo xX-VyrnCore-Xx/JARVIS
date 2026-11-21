@@ -1,6 +1,8 @@
 // Viste elenco: Attività, Workspace, Audit e Dispositivi.
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import qrcode from "qrcode-generator";
+import { Icon } from "../components/Icon";
 import { api, fmtTime, guard, post } from "../lib/api";
 import { useApp, useViewData } from "../state";
 
@@ -243,78 +245,174 @@ function PhoneChannels({ active }: { active: boolean }) {
 
 const PLATFORM: Record<string, string> = { android: "Android", ios: "iOS", desktop: "desktop", web: "browser", other: "altro" };
 
+interface PairedDevice {
+  device_id: string;
+  name: string;
+  platform: string;
+  scopes: string[];
+  slug?: string;
+  capabilities?: string[];
+  enrolled_at: string;
+  last_seen_at?: string;
+  revoked_at?: string;
+}
+
+interface Pairing {
+  code: string;
+  expires_at: string;
+  scopes: string[];
+}
+
 export function Devices({ active }: { active: boolean }) {
-  const { data, reload } = useViewData(active, async () => {
-    const [devices, nodes] = await Promise.all([api("/api/devices"), api("/api/nodes")]);
-    return { devices: devices.items as any[], online: new Map<string, boolean>(nodes.items.map((n: any) => [n.device_id, n.online])) };
+  const { data, error, reload } = useViewData(active, async () => {
+    const [devices, nodes] = await Promise.all([
+      api<{ items: PairedDevice[]; pairing_urls: string[] }>("/api/devices"),
+      api<{ items: { device_id: string; online: boolean }[] }>("/api/nodes"),
+    ]);
+    return { ...devices, online: new Map(nodes.items.map((node) => [node.device_id, node.online])) };
   });
   const [confirmScope, setConfirmScope] = useState(false);
   const [node, setNode] = useState(false);
-  const [pairing, setPairing] = useState<{ code: string; expires: string; node: boolean } | null>(null);
+  const [selectedAddress, setSelectedAddress] = useState("");
+  const [pairing, setPairing] = useState<Pairing | null>(null);
+  const [pending, setPending] = useState(false);
+  const [now, setNow] = useState(Date.now);
+  const [feedback, setFeedback] = useState<{ text: string; failed: boolean } | null>(null);
+  const [query, setQuery] = useState("");
+  const address = selectedAddress || data?.pairing_urls?.[0] || "";
+  const seconds = pairing ? Math.max(0, Math.ceil((Date.parse(pairing.expires_at) - now) / 1000)) : 0;
+  const code = pairing ? `${pairing.code.slice(0, 4)}-${pairing.code.slice(4)}` : "";
+  const nodeInvite = pairing?.scopes.includes("node");
+  const invite = seconds && address && !nodeInvite ? `${address}/pair#code=${encodeURIComponent(code)}` : "";
+  const qr = useMemo(() => {
+    if (!invite) return "";
+    const image = qrcode(0, "M");
+    image.addData(invite);
+    image.make();
+    return image.createDataURL(5, 20);
+  }, [invite]);
+  const term = query.trim().toLocaleLowerCase("it-IT");
+  const filtered = data?.items.filter((item) => `${item.name} ${item.slug || ""} ${PLATFORM[item.platform] || item.platform}`.toLocaleLowerCase("it-IT").includes(term));
 
-  const generate = async (e: React.FormEvent) => {
-    e.preventDefault();
+  useEffect(() => {
+    if (!active || !pairing || !seconds) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [active, pairing, Boolean(seconds)]);
+  useEffect(() => {
+    if (!active) return;
+    setNow(Date.now());
+    const timer = window.setInterval(reload, 8000);
+    return () => window.clearInterval(timer);
+  }, [active, reload]);
+
+  async function generate(event: React.FormEvent) {
+    event.preventDefault();
+    setPending(true);
+    setFeedback(null);
     try {
       const scopes = node ? ["node"] : confirmScope ? ["chat", "confirm"] : ["chat"];
-      const out = await post("/api/devices/pairing", { scopes });
-      setPairing({ code: `${out.code.slice(0, 4)}-${out.code.slice(4)}`, expires: out.expires_at, node });
+      const next = await post<Pairing>("/api/devices/pairing", { scopes, replace: pairing?.code });
+      setNow(Date.now());
+      setPairing(next);
     } catch (err) {
-      alert((err as Error).message);
+      setFeedback({ text: (err as Error).message, failed: true });
+    } finally {
+      setPending(false);
     }
-  };
+  }
+
+  async function cancel() {
+    if (!pairing) return;
+    setPending(true);
+    try {
+      await post("/api/devices/pairing/cancel", { code: pairing.code });
+      setPairing(null);
+      setFeedback({ text: "Invito chiuso.", failed: false });
+    } catch (err) {
+      setFeedback({ text: (err as Error).message, failed: true });
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function copy(value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      setFeedback({ text: "Copiato.", failed: false });
+    } catch {
+      setFeedback({ text: "Seleziona e copia il testo manualmente.", failed: true });
+    }
+  }
 
   return (
     <section className={`view${active ? " active" : ""}`} id="view-devices" aria-label="Dispositivi">
       <ViewHead title="Dispositivi" refreshKey="devices" onRefresh={reload} />
-      <p className="hint">
-        Usa JARVIS dal telefono senza esporlo su Internet: pubblicalo con un proxy fidato verso questo computer (per esempio{" "}
-        <code>tailscale serve 8765</code>), avvia JARVIS con <code>JARVIS_ALLOWED_HOSTS=&lt;nome-host&gt;</code>, apri l'indirizzo sul
-        telefono e inserisci il codice. Dal telefono puoi chattare, vedere attività e notifiche e, se lo consenti, confermare azioni; il
-        resto si gestisce solo da qui.
-      </p>
-      <form id="pairing-form" className="form" onSubmit={generate}>
-        <div className="row">
-          <label className="check">
-            <input type="checkbox" name="confirm" checked={confirmScope} onChange={(e) => setConfirmScope(e.target.checked)} /> Il dispositivo
-            può confermare azioni rischiose
-          </label>
-          <label className="check">
-            <input type="checkbox" name="node" checked={node} onChange={(e) => setNode(e.target.checked)} /> Nodo esecutore (un altro
-            computer che esegue strumenti per JARVIS)
-          </label>
-          <button type="submit" className="primary">Genera codice di associazione</button>
-        </div>
-        <p className="pairing-code" id="pairing-code" hidden={!pairing}>
-          {pairing ? (
-            <>
-              <strong>{pairing.code}</strong> valido fino alle {new Date(pairing.expires).toLocaleTimeString("it-IT")}, una sola volta.
-              {pairing.node ? (
-                <span className="sub node-cmd">
-                  {" "}Sull'altro computer, nella cartella di JARVIS: <code>./jarvis.sh node &lt;indirizzo del Core&gt; {pairing.code}</code> (Windows:{" "}
-                  <code>jarvis.cmd node &lt;indirizzo&gt; {pairing.code}</code>). L'indirizzo è quello del proxy fidato, per esempio
-                  https://&lt;computer&gt;.ts.net.
-                </span>
-              ) : null}
-            </>
+      <div className="device-enrol">
+        <h3><Icon name="devices" /> Associa un dispositivo</h3>
+        <form id="pairing-form" className="form" onSubmit={(event) => void generate(event)}>
+          <div className="row">
+            <label className="check">
+              <input type="checkbox" name="node" checked={node} onChange={(e) => setNode(e.target.checked)} /> Nodo esecutore
+            </label>
+            <label className="check">
+              <input type="checkbox" name="confirm" disabled={node} checked={confirmScope && !node} onChange={(e) => setConfirmScope(e.target.checked)} /> Consenti conferme dal dispositivo
+            </label>
+            <button type="submit" className="primary" disabled={pending}>{pending ? "Attendi…" : pairing ? "Genera nuovo codice" : "Genera codice di associazione"}</button>
+          </div>
+          <p className="hint">{node ? "Associa un computer che può eseguire gli strumenti assegnati dal Core." : "Usa JARVIS da un telefono o dal browser di un altro computer."}</p>
+          {(data?.pairing_urls?.length || 0) > 1 ? (
+            <label>Indirizzo del Core<select value={address} onChange={(event) => setSelectedAddress(event.target.value)}>
+              {data?.pairing_urls.map((url) => <option key={url}>{url}</option>)}
+            </select></label>
           ) : null}
-        </p>
-      </form>
+        </form>
+        {data && !address ? <details>
+          <summary>Configura l’accesso da altri dispositivi</summary>
+          <p className="hint">Configura un proxy HTTPS fidato, ad esempio <code>tailscale serve 8765</code>. Avvia JARVIS con <code>JARVIS_ALLOWED_HOSTS=&lt;nome-host&gt;</code>. L’indirizzo HTTPS comparirà qui al riavvio.</p>
+        </details> : null}
+        <div className="pairing-code" id="pairing-code" hidden={!pairing}>
+          {pairing ? seconds ? (
+            <div className="device-invite">
+              {qr ? <img width="164" height="164" src={qr} alt="Codice QR per associare il dispositivo" /> : null}
+              <div>
+                <strong>{code}</strong>
+                <p className="hint">Monouso · scade tra {Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</p>
+                {nodeInvite ? (
+                  <div className="sub node-cmd">
+                    <p>Su macOS o Linux esegui <code>./jarvis.sh node {address || "<indirizzo del Core>"} {code}</code></p>
+                    <p>Su Windows esegui <code>jarvis.cmd node {address || "<indirizzo del Core>"} {code}</code></p>
+                  </div>
+                ) : invite ? <p className="hint">Scansiona il QR o invia l’invito al dispositivo da collegare.</p>
+                  : <p className="hint">Apri l’indirizzo HTTPS del Core sul dispositivo e inserisci il codice.</p>}
+                <div className="row">
+                  <button type="button" className="ghost" onClick={() => void copy(code)}>Copia codice</button>
+                  {invite ? <button type="button" className="ghost" data-invite={invite} onClick={() => void copy(invite)}>Copia invito</button> : null}
+                  <button type="button" className="ghost" disabled={pending} onClick={() => void cancel()}>Annulla invito</button>
+                </div>
+              </div>
+            </div>
+          ) : <p className="hint">Codice scaduto. Generane uno nuovo per associare un dispositivo.</p> : null}
+        </div>
+        {feedback ? <p className={feedback.failed ? "form-error" : "hint"} role={feedback.failed ? "alert" : "status"}>{feedback.text}</p> : null}
+      </div>
+      <div className="row device-list-head">
+        <h3>Dispositivi associati</h3>
+        <input type="search" aria-label="Cerca un dispositivo" placeholder="Nome o piattaforma" value={query} onChange={(event) => setQuery(event.target.value)} />
+      </div>
       <div id="devices" className="list">
-        {data && !data.devices.length ? <Empty>Nessun dispositivo associato.</Empty> : null}
-        {(data?.devices || []).map((d) => (
-          <div className="card" key={d.device_id}>
+        {error ? <p className="form-error" role="alert">{error}</p> : null}
+        {data && !data.items.length ? <Empty>Nessun dispositivo associato.</Empty> : null}
+        {data?.items.length && !filtered?.length ? <Empty>Nessun dispositivo corrisponde alla ricerca.</Empty> : null}
+        {filtered?.map((d) => (
+          <div className="card device-card" key={d.device_id}>
+            <span className="device-icon"><Icon name={d.slug ? "node" : "devices"} /></span>
             <div className="body">
               <div className="title">{d.name} <span className="sub">{PLATFORM[d.platform] || d.platform}</span></div>
               {d.slug ? (
-                <div className="sub">
-                  nodo esecutore «{d.slug}» · {data!.online.get(d.device_id) ? "in linea" : "non in linea"} · strumenti:{" "}
-                  {(d.capabilities || []).join(", ")} · in chat: «nodo {d.slug} system.info»
-                </div>
+                <div className="sub">Nodo {d.slug} · {data?.online.get(d.device_id) ? "In linea" : "Non in linea"} · {(d.capabilities || []).join(", ")}</div>
               ) : (
-                <div className="sub">
-                  associato {fmtTime(d.enrolled_at)} · ultimo accesso {d.last_seen_at ? fmtTime(d.last_seen_at) : "mai"} · permessi:{" "}
-                  {d.scopes.join(", ")}
-                </div>
+                <div className="sub">Ultimo accesso {d.last_seen_at ? fmtTime(d.last_seen_at) : "mai"} · {d.scopes.includes("confirm") ? "Chat e conferme" : "Chat"}</div>
               )}
             </div>
             {d.revoked_at ? (
@@ -324,9 +422,7 @@ export function Devices({ active }: { active: boolean }) {
                 if (!confirm(`Revocare «${d.name}»? Perderà subito l'accesso.`)) return;
                 await post(`/api/devices/${encodeURIComponent(d.device_id)}/revoke`);
                 reload();
-              })}>
-                Revoca
-              </button>
+              })}>Revoca</button>
             )}
           </div>
         ))}

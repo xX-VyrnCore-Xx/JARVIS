@@ -1,0 +1,60 @@
+{
+  "contract": "jarvis.connector/1",
+  "id": "open_meteo",
+  "name": "Open-Meteo",
+  "version": "1.0.0",
+  "description": "Previsioni per coordinate geografiche.",
+  "base_url": "https://api.open-meteo.com/v1",
+  "allowed_hosts": [
+    "api.open-meteo.com"
+  ],
+  "auth": {
+    "type": "none"
+  },
+  "operations": [
+    {
+      "name": "previsioni",
+      "summary": "Previsioni per latitudine e longitudine",
+      "method": "GET",
+      "path": "/forecast",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "latitude": {
+            "type": "number",
+            "minimum": -90,
+            "maximum": 90
+          },
+          "longitude": {
+            "type": "number",
+            "minimum": -180,
+            "maximum": 180
+          },
+          "current": {
+            "enum": [
+              "temperature_2m,weather_code",
+              "temperature_2m,wind_speed_10m"
+            ]
+          },
+          "daily": {
+            "enum": [
+              "temperature_2m_max,temperature_2m_min",
+              "precipitation_probability_max"
+            ]
+          },
+          "forecast_days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 7
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude"
+        ]
+      }
+    }
+  ]
+}

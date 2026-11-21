@@ -8,6 +8,17 @@ on:
     tags: ["v*"]
   pull_request:
     paths: ["scripts/fetch_python.py", ".github/workflows/release.yml", "apps/desktop/**", "core/server/src/main.rs", "core/server/src/rollback.rs"]
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+      commit:
+        type: string
+        required: true
+      automatico:
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       tag:
@@ -34,6 +45,8 @@ permissions:
 jobs:
   build:
     name: installer (${{ matrix.target }})
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -56,6 +69,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Imposta la versione automatica degli installer
+        if: inputs.automatico
+        env:
+          TAG: ${{ inputs.tag }}
+        run: python scripts/stamp_release.py "$TAG"
+        shell: bash
       - name: Core in modalità release, incluso come sidecar
         shell: bash
         run: |
@@ -147,7 +166,7 @@ jobs:
 
   publish:
     name: pubblicazione della release
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
+    if: inputs.automatico || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -158,6 +177,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.commit || github.sha }}
+      - name: Imposta la versione automatica per la verifica
+        if: inputs.automatico
+        env:
+          TAG: ${{ inputs.tag }}
+        run: python3 scripts/stamp_release.py "$TAG"
       - name: Tag coerente con la versione del Core
         id: tag
         env:
@@ -202,6 +226,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.name }}
+          AUTOMATIC: ${{ inputs.automatico }}
           REPLACE: ${{ inputs.sostituisci && 'true' || 'false' }}
         run: |
           git config user.name "github-actions[bot]"
@@ -210,6 +235,14 @@ jobs:
             echo "sostituzione della release $TAG"
             gh release delete "$TAG" --yes --cleanup-tag --repo "$GITHUB_REPOSITORY"
             sleep 5
+          fi
+          remote=$(git ls-remote origin "refs/tags/$TAG" "refs/tags/$TAG^{}")
+          if [ -n "$remote" ]; then
+            existing=$(printf '%s\n' "$remote" | tail -1 | cut -f1)
+            test "$existing" = "$(git rev-parse HEAD)" || { echo "::error::Il tag appartiene a un altro commit"; exit 1; }
+            if [ "$AUTOMATIC" = "true" ] && gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              exit 0
+            fi
           fi
           extra=""
           case "$TAG" in *-*) extra="--prerelease" ;; esac
@@ -233,7 +266,7 @@ jobs:
       # precedenti e i loro tag vengono eliminati. Una prerelease non elimina nulla. Il ritorno a una versione
       # precedente resta possibile in locale con `jarvis rollback` (ADR-0015).
       - name: Solo l'ultima release stabile
-        if: ${{ !contains(steps.tag.outputs.name, '-') }}
+        if: ${{ !inputs.automatico && !contains(steps.tag.outputs.name, '-') }}
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.name }}

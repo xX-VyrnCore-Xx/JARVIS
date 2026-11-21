@@ -1170,6 +1170,27 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Data** 2026-11-20 · **Fonte** richiesta del proprietario.
 - La matrice del workflow `release` pubblica il `.dmg` Apple Silicon e il setup Windows x64. Entrambi devono superare la prova di avvio e il controllo delle impronte. La decisione aggiorna l’elenco di pacchetti di ADR-0056.
 
+### ADR-0059 — Plancia vocale e colori dell’attività
+
+- **Data** 2026-11-21 · **Fonte** richiesta del proprietario e immagine di riferimento.
+- Un ritratto maschile originale nel bundle locale è al centro della Plancia. Il pulsante vocale usa il motore esistente, con stato, categoria e segnalazioni condivisi fra Plancia e Chat. La categoria iniziale deriva dal comando e viene aggiornata con agente e strumento restituiti dal Core.
+- I colori accompagnano etichette testuali, con animazioni ridotte quando indicate dal sistema. Le viste usano le metriche già esposte dal Core.
+
+### ADR-0060 — Controlli locali del PC dalla Chat
+
+- **Data** 2026-11-21 · **Fonte** richiesta del proprietario.
+- La Sidebar raggruppa le sezioni, mostra le conferme e conserva la preferenza di riduzione. La Chat riunisce avatar, conversazione, comandi vocali e instradamento.
+- Il Core riconosce richieste di apertura esplicite, anche in Chat cloud, e autorizza solo destinazioni di sistema predefinite. La conferma monouso resta locale al computer del proprietario. Il Core applica i controlli anche ai client associati, alle deleghe e alla creazione di automazioni.
+
+### ADR-0061 — Release dopo CI, routing cloud, catalogo e inviti
+
+- **Data** 2026-11-21 · **Fonte** richiesta del proprietario.
+- L’avanzamento di `main` avvia la CI anche per modifiche ai workflow e alla documentazione. Ogni esecuzione verde costruisce dallo SHA verificato e usa una versione numerica applicata alla build. I due installer e le attestazioni vengono pubblicati dopo i test. La pubblicazione automatica conserva le release delle altre revisioni.
+- Il Core sceglie per entrambi i provider fra risposta rapida, analisi e sviluppo usando contenuto e lunghezza del contesto autorizzato. Mantiene il limite NIM a 35 RPM e prova una sola alternativa nello stesso provider su HTTP 404. La qualità è verificata con scenari sintetici; i pesi dei modelli ospitati restano gestiti dai provider.
+- Il catalogo include Open-Meteo, GitLab e Airtable. Il modulo guidato crea manifest su campi tipizzati con la stessa validazione del Core. Una nuova installazione non può sovrascrivere un connettore esistente.
+- L’esito finale di un tool fallito o negato risulta negli stati di attività. Il catalogo rispetta i vincoli delle automazioni e si aggiorna dopo nuove integrazioni.
+- Gli inviti web usano un URL HTTPS di un host già autorizzato. Il codice è nel frammento, che il browser cancella dopo la lettura. Il nome e l’invio sono confermati sulla pagina di associazione. Il Core può sostituire o annullare un invito.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

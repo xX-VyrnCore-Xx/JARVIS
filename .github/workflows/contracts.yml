@@ -2,9 +2,9 @@ name: contracts
 
 on:
   push:
-    paths: ["contracts/**", "tests/**", "core/**", "ai/**", "apps/**", "jarvis.sh", "jarvis.ps1", "jarvis.cmd", ".github/workflows/contracts.yml"]
+    branches: ["**"]
   pull_request:
-    paths: ["contracts/**", "tests/**", "core/**", "ai/**", "apps/**", "jarvis.sh", "jarvis.ps1", "jarvis.cmd", ".github/workflows/contracts.yml"]
+    paths: ["contracts/**", "tests/**", "core/**", "ai/**", "apps/**", "jarvis.sh", "jarvis.ps1", "jarvis.cmd", ".github/workflows/**", "scripts/**"]
 
 permissions:
   contents: read

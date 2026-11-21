@@ -8,29 +8,41 @@ on:
 
 permissions:
   contents: read
-  actions: write
-
-concurrency:
-  group: release-after-ci-main
-  cancel-in-progress: false
 
 jobs:
-  dispatch:
+  version:
     if: github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
     steps:
-      - name: Avvia la release del commit con CI verde
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - id: version
+        name: Assegna una versione univoca al commit verificato
         env:
-          GH_TOKEN: ${{ github.token }}
-          VERIFIED_SHA: ${{ github.event.workflow_run.head_sha }}
+          CI_RUN: ${{ github.event.workflow_run.run_number }}
         run: |
-          set -euo pipefail
-          main=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/main" --jq .object.sha)
-          if [[ "$main" != "$VERIFIED_SHA" ]]; then exit 0; fi
-          contents=$(gh api "repos/$GITHUB_REPOSITORY/contents/core/server/Cargo.toml?ref=$VERIFIED_SHA" --jq .content)
-          version=$(printf '%s' "$contents" | base64 -d | sed -n 's/^version *= *"\([0-9][0-9.]*\)"$/\1/p')
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          tag="v$version"
-          tags=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag" --jq '.[].ref')
-          if grep -Fxq "refs/tags/$tag" <<< "$tags"; then exit 0; fi
-          gh workflow run release.yml --repo "$GITHUB_REPOSITORY" --ref main -f "tag=$tag" -f "commit=$VERIFIED_SHA"
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import os, tomllib
+
+          with open("core/server/Cargo.toml", "rb") as manifest:
+              major, minor, patch = map(int, tomllib.load(manifest)["package"]["version"].split("."))
+          patch += int(os.environ["CI_RUN"])
+          if max(major, minor, patch) > 65535:
+              raise SystemExit("Versione incompatibile con l’installer Windows")
+          print(f"tag=v{major}.{minor}.{patch}")
+          PY
+  release:
+    needs: version
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+      commit: ${{ github.event.workflow_run.head_sha }}
+      automatico: true

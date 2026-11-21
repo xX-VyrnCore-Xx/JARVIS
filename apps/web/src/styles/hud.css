@@ -122,34 +122,8 @@ main { flex: 1; min-width: 0; min-height: 0; display: flex; }
 .empty { color: var(--muted); font-style: italic; margin: .2rem 0; }
 .empty.pad { padding: .8rem; }
 
-/* ------------------------------------------------------------------ avatar olografico */
-.avatar { --avatar-color: var(--accent); position: relative; flex: 0 0 30px; height: 30px; border-radius: 50%; color: var(--avatar-color); perspective: 90px; background: radial-gradient(circle, currentColor 0 16%, transparent 20%); filter: drop-shadow(0 0 6px currentColor); }
-.avatar span { position: absolute; inset: 2px; border: 1px solid currentColor; border-radius: 50%; transform: rotateX(52deg) rotateY(var(--angle)); }
-.avatar span:nth-child(1) { --angle: 0deg; } .avatar span:nth-child(2) { --angle: 60deg; } .avatar span:nth-child(3) { --angle: 120deg; }
-.avatar[data-state="listening"] { --avatar-color: var(--ok); animation: avatar-pulse .8s ease-in-out infinite alternate; }
-.avatar[data-state="transcribing"] { --avatar-color: var(--warn); }
-.avatar[data-state="thinking"] { --avatar-color: var(--accent-2); }
-.avatar[data-state="thinking"] span, .avatar[data-state="transcribing"] span { animation: avatar-rotate 1.4s linear infinite; }
-.avatar[data-state="speaking"]::after { content: ""; position: absolute; inset: auto 20% 8%; height: 16%; background: currentColor; border-radius: 50%; transform: scale(calc(.4 + 1.2 * var(--mouth-width, .5)), calc(.2 + .8 * var(--mouth-opening, 0))); transition: transform 50ms linear; }
-.avatar-large { flex: 0 0 auto; width: min(240px, 52vw); height: min(240px, 52vw); perspective: 600px; background: radial-gradient(circle, color-mix(in srgb, currentColor 75%, #fff) 0 9%, color-mix(in srgb, currentColor 35%, transparent) 14%, transparent 34%); filter: drop-shadow(0 0 18px currentColor); }
-.avatar-large span { inset: 6%; border-width: 2px; animation: avatar-rotate 18s linear infinite; }
-.avatar-large span:nth-child(2) { animation-duration: 24s; animation-direction: reverse; inset: 10%; }
-.avatar-large span:nth-child(3) { animation-duration: 30s; inset: 14%; border-style: dashed; }
-.avatar-large[data-state="thinking"] span { animation-duration: 2.2s; }
-.avatar-large .halo { position: absolute; inset: -4%; border-radius: 50%; border: 1px solid color-mix(in srgb, currentColor 40%, transparent); box-shadow: 0 0 40px color-mix(in srgb, currentColor 30%, transparent) inset; }
-.avatar-large .ticks { position: absolute; inset: 0; border-radius: 50%; background: repeating-conic-gradient(currentColor 0 1.2deg, transparent 1.2deg 10deg); mask: radial-gradient(circle, transparent 66%, #000 67%, #000 70%, transparent 71%); opacity: .55; animation: spin 40s linear infinite; }
-.avatar-large .iris { position: absolute; inset: 40%; border-radius: 50%; background: radial-gradient(circle, #fff, currentColor 60%); box-shadow: 0 0 30px currentColor; animation: breathe-core 3s ease-in-out infinite; }
-.avatar-large[data-state="speaking"] .iris { transform: scale(calc(.85 + .45 * var(--mouth-opening, 0))); animation: none; }
-.avatar-large[data-state="speaking"]::after { display: none; }
-.avatar-large .mouth { position: absolute; left: 50%; bottom: 22%; width: 34%; height: 9%; margin-left: -17%; border-radius: 50%; border: 2px solid currentColor; box-shadow: 0 0 12px currentColor; opacity: 0; transform: scale(calc(.4 + 1.2 * var(--mouth-width, .5)), calc(.15 + .85 * var(--mouth-opening, 0))); transition: transform 50ms linear, opacity .2s; }
-.avatar-large[data-state="speaking"] .mouth { opacity: .9; }
-@keyframes avatar-rotate { to { transform: rotateX(52deg) rotateY(calc(var(--angle) + 360deg)); } }
-@keyframes avatar-pulse { to { transform: scale(1.1); } }
-@keyframes spin { to { transform: rotate(360deg); } }
-@keyframes breathe-core { 50% { transform: scale(1.08); } }
 @media (prefers-reduced-motion: reduce) {
-  .avatar, .avatar span, .avatar i, .avatar b, .brand-mark, .toast, .view.active { animation: none !important; }
-  .avatar[data-state="speaking"]::after { transform: scaleY(.2); }
+  .brand-mark, .toast, .view.active { animation: none !important; }
 }
 
 /* ------------------------------------------------------------------ chat */
@@ -257,21 +231,11 @@ svg.graph .node-label { fill: var(--text); font-size: 12px; }
 /* ------------------------------------------------------------------ plancia */
 .hud { padding: 1.1rem 1.3rem 2rem; }
 .hud-grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 1rem; }
-.hud-hero { grid-column: span 12; display: flex; align-items: center; gap: 2rem; padding: 1.4rem 1.6rem; border: 1px solid var(--border); border-radius: 18px; background: linear-gradient(135deg, rgba(10, 40, 70, .7), rgba(8, 20, 40, .45)); box-shadow: var(--glow-soft); position: relative; overflow: hidden; }
-:root[data-theme="light"] .hud-hero { background: linear-gradient(135deg, #fff, #e6f2fb); }
-.hud-hero::before { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(63, 208, 255, .08), transparent); transform: translateX(-100%); animation: sweep 6s ease-in-out infinite; pointer-events: none; }
-@keyframes sweep { 60%, 100% { transform: translateX(100%); } }
+.hud-hero { grid-column: span 12; position: relative; }
 .hero-core { display: flex; flex-direction: column; align-items: center; gap: .8rem; flex: none; }
-.hero-state { font-family: var(--display); letter-spacing: .3em; text-transform: uppercase; color: var(--accent); font-size: .9rem; text-shadow: var(--glow); }
 .hero-side { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1rem; }
 .hud-clock .time { font-family: var(--display); font-size: clamp(2.4rem, 6vw, 3.8rem); font-weight: 700; letter-spacing: .06em; line-height: 1; text-shadow: var(--glow); }
 .hud-clock .date { display: block; color: var(--muted); text-transform: capitalize; letter-spacing: .08em; }
-.hero-readouts { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: .5rem; }
-.hero-readouts div { border: 1px solid var(--border); border-radius: 10px; padding: .45rem .7rem; background: rgba(3, 12, 24, .35); min-width: 0; }
-:root[data-theme="light"] .hero-readouts div { background: rgba(255, 255, 255, .6); }
-.hero-readouts span { display: block; color: var(--accent); font-family: var(--mono); font-size: .68rem; letter-spacing: .14em; text-transform: uppercase; }
-.hero-readouts b { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hero-readouts b.ok { color: var(--ok); } .hero-readouts b.warn { color: var(--warn); } .hero-readouts b.bad { color: var(--bad); }
 .hud-command { display: flex; gap: .5rem; }
 .hud-command input { flex: 1; min-width: 0; padding: .65rem .9rem; border-radius: 12px; border-color: var(--border-strong); }
 .hud-panel { grid-column: span 4; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 16px; background: var(--panel); backdrop-filter: blur(8px); position: relative; min-width: 0; }
@@ -357,7 +321,6 @@ dialog.setup legend { padding: 0 .3rem; }
   .view, .hud { padding: 1rem 16px; }
   .hud-grid { grid-template-columns: minmax(0, 1fr); }
   .hud-panel, .hud-panel.wide, .hud-hero { grid-column: auto; }
-  .hud-hero { flex-direction: column; gap: 1rem; padding: 1.1rem; }
 }
 
 

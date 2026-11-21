@@ -14,6 +14,41 @@ export function Stat({ k, v, d }: { k: string; v: React.ReactNode; d?: React.Rea
   );
 }
 
+interface SystemTool {
+  name: string;
+  summary: string;
+  risk: string;
+  confirmation: string;
+  workflow_step: boolean;
+}
+
+function ToolDirectory({ active }: { active: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const { data, error, reload } = useViewData(active && open, () => api<{ items: SystemTool[] }>("/api/tools"));
+  const term = query.trim().toLocaleLowerCase("it-IT");
+  const tools = data?.items.filter((item) => `${item.name} ${item.summary}`.toLocaleLowerCase("it-IT").includes(term));
+  return (
+    <details className="backup-form tool-directory" onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary>Strumenti disponibili{data ? ` · ${data.items.length}` : ""}</summary>
+      <div className="row">
+        <input type="search" aria-label="Cerca uno strumento" placeholder="Nome o descrizione" value={query} onChange={(event) => setQuery(event.target.value)} />
+        <button type="button" className="ghost" onClick={reload}>Aggiorna catalogo</button>
+      </div>
+      {error ? <p className="form-error" role="alert">{error}</p> : null}
+      {tools?.length === 0 ? <p className="hint">Nessuno strumento corrispondente.</p> : null}
+      {tools?.length ? <ul className="connector-operations">
+        {tools.map((tool) => (
+          <li key={tool.name}>
+            <div className="body"><strong>{tool.summary}</strong><div className="sub"><code>{tool.name}</code></div></div>
+            <span className="sub">{tool.confirmation === "required" ? "Con conferma" : tool.confirmation === "conditional" ? "Conferma secondo policy" : "Senza conferma dal catalogo"}{tool.workflow_step ? " · Automazioni" : ""}</span>
+          </li>
+        ))}
+      </ul> : null}
+    </details>
+  );
+}
+
 /** Aggiornamenti (ADR-0034): spenti per impostazione, canali Stable e Beta, controllo manuale. */
 function UpdatesPanel({ active }: { active: boolean }) {
   const { data, reload, setData } = useViewData(active, () => api("/api/updates"));
@@ -172,6 +207,7 @@ export function System({ active, onSetup }: { active: boolean; onSetup: () => vo
       </div>
       <div className="row"><button className="ghost" type="button" id="open-setup" onClick={onSetup}>Configura la voce</button></div>
       <CloudSettings active={active} />
+      <ToolDirectory active={active} />
       <h3 className="sub-head">Database locale</h3>
       <DatabasePanel active={active} />
       <h3 className="sub-head">Aggiornamenti</h3>

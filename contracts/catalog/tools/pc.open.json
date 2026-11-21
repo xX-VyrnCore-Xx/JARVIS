@@ -1,0 +1,41 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "pc.open",
+  "version": "1.0.0",
+  "summary": "Apre un’applicazione di sistema richiesta esplicitamente dal proprietario",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "target"
+    ],
+    "properties": {
+      "target": {
+        "enum": [
+          "workspace",
+          "calculator",
+          "settings",
+          "activity"
+        ]
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "write_local",
+  "risk": "medium",
+  "permissions": [
+    "core.desktop:execute"
+  ],
+  "errors": [
+    "pc.unavailable"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "required"
+}

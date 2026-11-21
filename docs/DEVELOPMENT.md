@@ -50,3 +50,7 @@ Prima di chiudere, distinguere modifiche nel checkout, commit locali, revisioni 
 ## Integrazione delle modifiche
 
 Il proprietario ha autorizzato, il 2026-11-17, il merge automatico delle pull request di Claude Code quando tutti i job della CI (`.github/workflows/contracts.yml`) sono verdi. Il merge resta vietato con CI rossa, conflitti o revisioni che chiedono modifiche. Dopo il merge il branch di lavoro riparte da `main`, avanzando senza riscrivere la storia.
+
+### Pubblicazione automatica dopo il merge
+
+Il workflow `contracts` verifica ogni push su `main`. Dopo il successo, `release-after-ci.yml` chiama `release.yml` sullo SHA verificato. Per assegnare una versione univoca, somma il numero dell’esecuzione CI alla patch dichiarata e applica il risultato alla build del Core e degli installer, senza modificare il branch. La revisione riceve il tag dopo i test di installazione del setup Windows x64 e del DMG Apple Silicon. La pubblicazione automatica mantiene i tag e gli installer delle altre revisioni e il rilancio sullo stesso SHA con lo stesso numero CI è idempotente.

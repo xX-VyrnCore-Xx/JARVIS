@@ -205,6 +205,58 @@ async fn rejected_confirmation_cancels_without_effects() {
 }
 
 #[tokio::test]
+async fn desktop_request_stays_local_with_cloud_selected() {
+    let e = env();
+    let (status, pending) = e
+        .api(
+            "POST",
+            "/api/cloud/chat",
+            Some(json!({"provider":"nim", "message":"Apri la calcolatrice"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{pending}");
+    assert_eq!(pending["task"]["state"], "waiting_confirmation");
+    assert_eq!(pending["confirmation"]["tool"], "pc.open");
+    assert!(pending["backend"].is_null());
+    let id = pending["confirmation"]["confirmation_id"].as_str().unwrap();
+
+    let (status, done) = e
+        .api(
+            "POST",
+            &format!("/api/confirmations/{id}"),
+            Some(json!({"approve": false})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(done["task"]["state"], "cancelled");
+
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/workflows",
+            Some(json!({"name":"Avvio", "steps":[{"tool":"pc.open", "arguments":{"target":"calculator"}}]})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn tool_failure_is_visible_in_task_state_and_catalog_matches_policy() {
+    let e = env();
+    let failed = e.chat("leggi file_inesistente.txt").await;
+    assert_eq!(failed["task"]["state"], "failed", "{failed}");
+    assert_eq!(failed["task"]["error"]["effect"], "not_applied");
+
+    let (_, catalog) = e.api("GET", "/api/tools", None).await;
+    let list = catalog["items"].as_array().unwrap();
+    for name in ["pc.open", "code.run_python", "shell.run"] {
+        assert!(list
+            .iter()
+            .any(|tool| tool["name"] == name && tool["workflow_step"] == false));
+    }
+}
+
+#[tokio::test]
 async fn path_traversal_is_denied_by_policy() {
     let e = env();
     for message in ["leggi ../../etc/passwd", "leggi /etc/passwd"] {
