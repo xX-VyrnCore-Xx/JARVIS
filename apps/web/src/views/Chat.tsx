@@ -394,75 +394,77 @@ export function Chat({ active }: { active: boolean }) {
           ) : null}
         </div>
       </div>
-      <div className="chat-dock">
-        <div className="voice-bar" id="voice-bar">
-          <VoiceReplySwitch id="voice-replies" />
-          <label className="check">
-            <input type="checkbox" id="voice-handsfree" checked={voice.handsFree} disabled={!available}
-              onChange={(e) => void voice.setHandsFree(e.target.checked)} />{" "}
-            Mani libere («Ehi Jarvis»)
-          </label>
-          <button type="button" className="ghost small" id="voice-stop" hidden={voice.state !== "speaking"} onClick={() => voice.stopSpeaking()}>
-            <Icon name="stop" size={14} /> Interrompi
-          </button>
-          <span className="mic-live" id="mic-live" hidden={!voice.micOpen} aria-live="polite">● Microfono attivo</span>
-          <PasskeySetup />
-        </div>
-        {cloudChoices.length || provider ? (
-          <div className="voice-bar cloud-selector">
-            <label>Instradamento chat
-              <select value={provider} disabled={thinking} onChange={(event) => {
-                const choice = event.target.value;
-                setProvider(choice === "auto" ? choice : cloudChoices.find((item) => item.id === choice)?.id || "");
-              }}>
-                <option value="">Comandi offline</option>
-                {cloudChoices.length > 1 || provider === "auto" ? <option value="auto">Cloud automatico</option> : null}
-                {provider && provider !== "auto" && !cloudChoices.some((item) => item.id === provider)
-                  ? <option value={provider} disabled>{CLOUD_LABELS[provider]} · da configurare</option> : null}
-                {cloudChoices.map((item) => <option key={item.id} value={item.id}>{CLOUD_LABELS[item.id]} · modello automatico</option>)}
-              </select>
+      <div className="chat-composer-bar">
+        <div className="chat-dock">
+          <div className="voice-bar" id="voice-bar">
+            <VoiceReplySwitch id="voice-replies" />
+            <label className="check">
+              <input type="checkbox" id="voice-handsfree" checked={voice.handsFree} disabled={!available}
+                onChange={(e) => void voice.setHandsFree(e.target.checked)} />{" "}
+              Mani libere («Ehi Jarvis»)
             </label>
-            {provider ? (
-              <>
-                <label className="check" title="Condivide fino a tre scambi testuali consecutivi con lo stesso provider.">
-                  <input type="checkbox" checked={useContext} disabled={thinking} onChange={(event) => setUseContext(event.target.checked)} />
-                  Continua la conversazione
-                </label>
-                <small>{provider === "auto"
-                  ? "Può inviare il messaggio a entrambi i provider. I turni precedenti tornano solo al provider che li ha gestiti."
-                  : "Invia il messaggio digitato. Con la continuità attiva può includere fino a tre scambi testuali con questo provider."}</small>
-                <small>La dettatura viene inserita nella chat per essere verificata prima dell’invio al cloud.</small>
-              </>
-            ) : null}
+            <button type="button" className="ghost small" id="voice-stop" hidden={voice.state !== "speaking"} onClick={() => voice.stopSpeaking()}>
+              <Icon name="stop" size={14} /> Interrompi
+            </button>
+            <span className="mic-live" id="mic-live" hidden={!voice.micOpen} aria-live="polite">● Microfono attivo</span>
+            <PasskeySetup />
           </div>
-        ) : null}
-        <form className="composer" id="composer" onSubmit={submit}>
-          <button
-            type="button" className="mic" id="mic" aria-pressed={voice.state === "listening" && voice.pushing}
-            disabled={!available} aria-label="Parla a JARVIS"
-            title={available ? "Parla (clic per iniziare e per terminare)" : `Voce non disponibile: ${(voice.status?.reasons || []).join("; ")}`}
-            onClick={() => void voice.togglePushToTalk()}
-          >
-            <Icon name="mic" size={20} />
-          </button>
-          <textarea
-            id="input" ref={input} rows={1} placeholder="Scrivi a JARVIS…" maxLength={8000} value={text}
-            title="Invio per inviare, Maiusc+Invio per andare a capo"
-            aria-label="Messaggio (Invio per inviare, Maiusc+Invio per andare a capo)"
-            onChange={(e) => {
-              setText(e.target.value);
-              e.target.style.height = "";
-              e.target.style.height = Math.min(e.target.scrollHeight, 200) + "px";
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-          />
-          <button type="submit" id="send" className="primary send" disabled={thinking}><Icon name="send" size={16} /> Invia</button>
-        </form>
+          {cloudChoices.length || provider ? (
+            <div className="voice-bar cloud-selector">
+              <label>Instradamento chat
+                <select value={provider} disabled={thinking} onChange={(event) => {
+                  const choice = event.target.value;
+                  setProvider(choice === "auto" ? choice : cloudChoices.find((item) => item.id === choice)?.id || "");
+                }}>
+                  <option value="">Comandi offline</option>
+                  {cloudChoices.length > 1 || provider === "auto" ? <option value="auto">Cloud automatico</option> : null}
+                  {provider && provider !== "auto" && !cloudChoices.some((item) => item.id === provider)
+                    ? <option value={provider} disabled>{CLOUD_LABELS[provider]} · da configurare</option> : null}
+                  {cloudChoices.map((item) => <option key={item.id} value={item.id}>{CLOUD_LABELS[item.id]} · modello automatico</option>)}
+                </select>
+              </label>
+              {provider ? (
+                <>
+                  <label className="check" title="Condivide fino a tre scambi testuali consecutivi con lo stesso provider.">
+                    <input type="checkbox" checked={useContext} disabled={thinking} onChange={(event) => setUseContext(event.target.checked)} />
+                    Continua la conversazione
+                  </label>
+                  <small>{provider === "auto"
+                    ? "Può inviare il messaggio a entrambi i provider. I turni precedenti tornano solo al provider che li ha gestiti."
+                    : "Invia il messaggio digitato. Con la continuità attiva può includere fino a tre scambi testuali con questo provider."}</small>
+                  <small>La dettatura viene inserita nella chat per essere verificata prima dell’invio al cloud.</small>
+                </>
+              ) : null}
+            </div>
+          ) : null}
+          <form className="composer" id="composer" onSubmit={submit}>
+            <button
+              type="button" className="mic" id="mic" aria-pressed={voice.state === "listening" && voice.pushing}
+              disabled={!available} aria-label="Parla a JARVIS"
+              title={available ? "Parla (clic per iniziare e per terminare)" : `Voce non disponibile: ${(voice.status?.reasons || []).join("; ")}`}
+              onClick={() => void voice.togglePushToTalk()}
+            >
+              <Icon name="mic" size={20} />
+            </button>
+            <textarea
+              id="input" ref={input} rows={1} placeholder="Scrivi a JARVIS…" maxLength={8000} value={text}
+              title="Invio per inviare, Maiusc+Invio per andare a capo"
+              aria-label="Messaggio (Invio per inviare, Maiusc+Invio per andare a capo)"
+              onChange={(e) => {
+                setText(e.target.value);
+                e.target.style.height = "";
+                e.target.style.height = Math.min(e.target.scrollHeight, 200) + "px";
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+            />
+            <button type="submit" id="send" className="primary send" disabled={thinking}><Icon name="send" size={16} /> Invia</button>
+          </form>
+        </div>
       </div>
     </section>
   );
