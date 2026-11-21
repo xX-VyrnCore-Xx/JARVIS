@@ -735,6 +735,18 @@ async fn web_pages_and_pwa_assets_are_not_served() {
 }
 
 #[tokio::test]
+async fn loopback_root_only_handles_stateful_oauth_callbacks() {
+    let e = env();
+    let request = Request::builder()
+        .uri("/?state=unknown&code=synthetic")
+        .header("host", format!("localhost:{PORT}"))
+        .body(Body::empty())
+        .unwrap();
+    let response = e.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn conversation_and_tasks_persist_across_restart() {
     let e = env();
     e.chat("ciao").await;

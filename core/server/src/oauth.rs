@@ -2,8 +2,8 @@
 //! sul loopback del Core (RFC 8252), adatto a un'app desktop senza segreto del client.
 //!
 //! - Il Core genera `state` e `code_verifier` casuali, validi 10 minuti e una sola volta.
-//! - Il proprietario apre la pagina di consenso nel proprio browser; il servizio rimanda a
-//!   `http://localhost:<porta>/api/connectors/oauth/callback`.
+//! - Il proprietario apre la pagina di consenso nel proprio browser; Google Desktop usa il redirect
+//!   loopback `http://127.0.0.1:<porta>`, mentre gli altri provider usano la route callback API.
 //! - Il Core scambia il codice con i token sull'endpoint dichiarato dal manifest, il cui host deve essere
 //!   tra gli `allowed_hosts`, con le stesse protezioni dei connettori: HTTPS, niente redirect, indirizzi
 //!   privati bloccati.
@@ -61,9 +61,14 @@ impl Flows {
         let auth = &manifest["auth"];
         let mut url = Url::parse(auth["authorize_url"].as_str().unwrap_or_default())
             .map_err(|_| "authorize_url non valido".to_string())?;
+        let google_oauth = url.host_str() == Some("accounts.google.com");
         let state = random(32);
         let verifier = random(48);
-        let redirect_uri = format!("http://localhost:{port}/api/connectors/oauth/callback");
+        let redirect_uri = if google_oauth {
+            format!("http://127.0.0.1:{port}")
+        } else {
+            format!("http://localhost:{port}/api/connectors/oauth/callback")
+        };
         let scopes: Vec<&str> = auth["scopes"]
             .as_array()
             .into_iter()
@@ -80,6 +85,10 @@ impl Flows {
                 .append_pair("code_challenge_method", "S256");
             if !scopes.is_empty() {
                 q.append_pair("scope", &scopes.join(" "));
+            }
+            if google_oauth {
+                q.append_pair("access_type", "offline")
+                    .append_pair("prompt", "consent");
             }
         }
         self.pending.insert(
@@ -305,10 +314,25 @@ mod tests {
             (q["code_challenge_method"].as_str(), q["scope"].as_str()),
             ("S256", "read mail.send")
         );
+        assert!(!q.contains_key("access_type"));
+        assert!(!q.contains_key("prompt"));
         let p = flows.take(&q["state"]).expect("state valido");
         assert_eq!(p.connector, "posta");
         assert_eq!(challenge(&p.verifier), q["code_challenge"]);
         assert!(flows.take(&q["state"]).is_none(), "state monouso");
         assert!(flows.take("inventato").is_none());
+    }
+
+    #[test]
+    fn google_oauth_requests_a_refresh_token() {
+        let manifest = json!({"id": "gmail", "auth": {"type": "oauth2",
+            "authorize_url": "https://accounts.google.com/o/oauth2/v2/auth",
+            "token_url": "https://oauth2.googleapis.com/token", "client_id": "jarvis",
+            "scopes": ["mail.read"]}});
+        let url = Url::parse(&Flows::default().start(&manifest, 8765, None).unwrap()).unwrap();
+        let q: HashMap<String, String> = url.query_pairs().into_owned().collect();
+        assert_eq!(q["redirect_uri"], "http://127.0.0.1:8765");
+        assert_eq!(q["access_type"], "offline");
+        assert_eq!(q["prompt"], "consent");
     }
 }

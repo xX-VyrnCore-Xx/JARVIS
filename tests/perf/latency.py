@@ -1,13 +1,13 @@
 """Misura le latenze di un Core avviato e le confronta con gli obiettivi di tests/perf/slo.json.
 
-Uso: python tests/perf/latency.py http://127.0.0.1:8765 [richieste_per_scenario]
+Uso: JARVIS_TOKEN=<token> python tests/perf/latency.py http://127.0.0.1:8765 [richieste_per_scenario]
 Esce con codice 1 se un p95 supera l'obiettivo. Solo libreria standard.
 """
 
 from __future__ import annotations
 
 import json
-import re
+import os
 import sys
 import time
 import urllib.request
@@ -19,8 +19,10 @@ def main() -> int:
     n = int(sys.argv[2]) if len(sys.argv) > 2 else 30
     port = base.rsplit(":", 1)[1]
     host = {"Host": f"localhost:{port}"}
-    page = urllib.request.urlopen(urllib.request.Request(f"{base}/", headers=host), timeout=10).read().decode()
-    token = re.search(r'name="jarvis-token" content="([0-9a-f]{32})"', page).group(1)
+    token = os.environ.get("JARVIS_TOKEN", "")
+    if len(token) < 32 or not token.isalnum():
+        print("JARVIS_TOKEN deve contenere almeno 32 caratteri alfanumerici.", file=sys.stderr)
+        return 2
     slo = json.loads((Path(__file__).parent / "slo.json").read_text(encoding="utf-8"))
     failed = []
     print(f"{'scenario':<12} {'n':>4} {'p50':>9} {'p95':>9} {'max':>9} {'obiettivo p95':>14}")
