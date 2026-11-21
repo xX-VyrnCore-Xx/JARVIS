@@ -757,12 +757,12 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - nuovo tipo `auth.type = "oauth2"` nel contratto `connector` (aggiunta compatibile) con `authorize_url`, `token_url`, `client_id` e `scopes`;
   - `token_url` deve stare tra gli `allowed_hosts` ed entrambi gli URL devono usare HTTPS (HTTP solo su loopback con la policy di prova);
   - `POST /api/connectors/{id}/oauth/start` genera `state` (256 bit) e `code_verifier` casuali, validi 10 minuti e una sola volta, e restituisce la pagina di consenso; l'interfaccia la apre nel browser di sistema;
-  - `GET /api/connectors/oauth/callback`, solo da questo computer e senza token di sessione, è autenticato dallo `state`. Scambia il codice sull'endpoint dei token con le protezioni dei connettori (niente redirect, indirizzi privati bloccati, timeout) e mostra una pagina di esito;
+  - il callback OAuth è autenticato dallo `state` monouso. La route API generica è `GET /api/connectors/oauth/callback`; Google Desktop usa il redirect loopback `http://127.0.0.1:<porta>` senza percorso e la radice gestisce solo callback con `state`, restando 404 per le altre richieste;
   - access token e stato del rinnovo (refresh token, scadenza, eventuale segreto del client) sono cifrati nell'archivio dei segreti;
   - rinnovo automatico a 60 secondi dalla scadenza; revoca e disinstallazione cancellano tutto;
   - audit di avvio, consenso negato, scambio fallito, autorizzazione e revoca; contatori `connector.oauth.*`.
 - **Conseguenze:**
-  - il proprietario registra un'app OAuth presso il servizio con redirect `http://localhost:8765/api/connectors/oauth/callback` e scrive `client_id` nel manifest;
+  - il proprietario registra un'app OAuth presso il servizio con il redirect richiesto dal provider e scrive `client_id` nel manifest; Google Desktop richiede l'IP loopback senza percorso;
   - i servizi che richiedono un segreto del client lo ricevono da un campo dell'interfaccia: resta cifrato e non entra nel manifest;
   - la revoca presso il servizio (endpoint di revoca) non è automatica: JARVIS cancella i token locali.
 - **Evidenza:**
@@ -1251,6 +1251,15 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - Il proprietario deve installare il certificato pubblico solo sui propri dispositivi per rendere attendibili i programmi. La firma autofirmata identifica il publisher e rileva alterazioni, ma non dà automaticamente reputazione SmartScreen/Gatekeeper e non equivale alla notarizzazione.
 - **Conseguenze:** la pubblicazione automatica si blocca in modo esplicito finché i quattro secrets desktop e la variable macOS non sono configurati. I secrets Android per firmare l'APK restano separati. Questa scelta sostituisce per le release future la firma ad hoc/macOS e il percorso commerciale opzionale descritti da ADR-0020.
 - **Documenti interessati:** DEVELOPMENT.md, GITHUB_ACTIONS_SECRETS.md, SECURITY_AND_PRIVACY.md, DEVOPS_QA_OBSERVABILITY.md e workflow `release.yml` / `release-after-ci.yml`.
+
+### ADR-0069 — Credenziali OAuth Google locali per Gmail e Calendar
+
+- **Data** 2026-11-21 · **Stato** implementazione locale; consenso Google del proprietario ancora da completare · **Fonte** scelta del proprietario per Gmail e Google Calendar.
+- **Decisione:** lo script `scripts/configure_google_connectors.py` legge il client OAuth desktop locale, installa i manifest Gmail e Google Calendar con il suo ID client e invia il client secret soltanto al Core raggiunto su loopback. Il proprietario approva nel browser gli scope già dichiarati nei manifest; il Core conserva i token nel proprio archivio cifrato.
+- Google Desktop richiede il redirect loopback `http://127.0.0.1:<porta>` senza percorso. La route `/` delega al callback OAuth solo se contiene `state`; altrimenti continua a restituire 404, senza ripristinare la pagina Web. Per gli endpoint Google il Core richiede anche `access_type=offline` e `prompt=consent`, così l'autorizzazione può fornire un refresh token per l'uso successivo. Lo script non autorizza automaticamente un account e non deve puntare a un Core remoto o non fidato.
+- Il JSON OAuth non è un segreto Firebase né una variabile Actions. Dopo aver verificato entrambi i connettori autorizzati, il proprietario può eliminare il JSON client locale; prima di allora va mantenuto privato e ignorato da Git.
+- **Evidenza:** test unitario `google_oauth_requests_a_refresh_token`; script di configurazione verificato sintatticamente. Il consenso reale e le chiamate ai servizi richiedono l'account Google del proprietario.
+- **Documenti interessati:** FIREBASE_SETUP.md, `core/server/src/oauth.rs`, `scripts/configure_google_connectors.py`.
 
 ### Decisione operativa — Merge automatico con CI verde
 

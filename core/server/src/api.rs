@@ -168,6 +168,9 @@ async fn guard(State(state): State<Shared>, mut req: Request, next: Next) -> Res
         return error(StatusCode::FORBIDDEN, "forbidden_host", "host non ammesso");
     }
     let path = req.uri().path().to_string();
+    if path == "/" && !local {
+        return error(StatusCode::NOT_FOUND, "not_found", "risorsa non trovata");
+    }
     let route = req
         .extensions()
         .get::<axum::extract::MatchedPath>()
@@ -369,6 +372,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/connectors/{id}/revoke", post(revoke_connector))
         .route("/api/connectors/{id}/oauth/start", post(oauth_start))
         .route("/api/connectors/oauth/callback", get(oauth_callback))
+        .route("/", get(oauth_loopback_callback))
         .route(
             "/api/hooks/{id}",
             post(connector_hook).layer(axum::extract::DefaultBodyLimit::max(256 * 1024)),
@@ -635,6 +639,16 @@ async fn oauth_callback(
         html,
     )
         .into_response()
+}
+
+async fn oauth_loopback_callback(
+    State(state): State<Shared>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    if !q.contains_key("state") {
+        return error(StatusCode::NOT_FOUND, "not_found", "risorsa non trovata");
+    }
+    oauth_callback(State(state), Query(q)).await
 }
 
 async fn updates_get(State(state): State<Shared>) -> Json<Value> {
