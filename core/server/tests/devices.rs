@@ -312,6 +312,51 @@ async fn paired_devices_cannot_request_or_confirm_desktop_actions() {
 }
 
 #[tokio::test]
+async fn pairing_invites_can_be_replaced_and_revoked_by_owner() {
+    let app = app();
+    let owner = Some(("x-jarvis-token", "t"));
+    let (status, list, _) = call(&app, "GET", "/api/devices", &local(), owner, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list["pairing_urls"], json!([format!("https://{REMOTE}")]));
+
+    let (_, old, _) = call(
+        &app,
+        "POST",
+        "/api/devices/pairing",
+        &local(),
+        owner,
+        Some(json!({"scopes":["chat"]})),
+    )
+    .await;
+    let (status, new, _) = call(
+        &app,
+        "POST",
+        "/api/devices/pairing",
+        &local(),
+        owner,
+        Some(json!({"scopes":["chat"],"replace":old["code"]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _, _) = call(&app, "POST", "/api/devices/pair", REMOTE, None, Some(old)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let (status, cancelled, _) = call(
+        &app,
+        "POST",
+        "/api/devices/pairing/cancel",
+        &local(),
+        owner,
+        Some(new.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cancelled["cancelled"], true);
+    let (status, _, _) = call(&app, "POST", "/api/devices/pair", REMOTE, None, Some(new)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn pairing_codes_are_single_use_and_brute_force_is_stopped() {
     let app = app();
     let (_, code, _) = call(

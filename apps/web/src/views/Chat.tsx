@@ -14,7 +14,7 @@ interface Step {
   agent?: string;
   role?: string;
   name?: string;
-  backend?: { name: string };
+  backend?: { name: string; location?: string; model?: string };
   tool?: string;
   decision?: string;
   risk?: string;
@@ -100,7 +100,7 @@ function StepChips({ steps }: { steps?: Step[] }) {
   const chips: React.ReactElement[] = [];
   steps.forEach((s, i) => {
     if (s.kind === "cloud_fallback") chips.push(<span key={i} className="step require_confirmation">provider alternativo · {s.reason}</span>);
-    if (s.kind === "delegation" && s.backend) chips.push(<span key={i} className="step">agente · {s.backend.name}</span>);
+    if (s.kind === "delegation" && s.backend) chips.push(<span key={i} className="step">agente · {s.backend.name}{s.backend.location === "cloud" && s.backend.model ? ` · ${s.backend.model}` : ""}</span>);
     if (s.kind === "delegation" && s.agent && AGENTS[s.agent])
       chips.push(<span key={`${i}-a`} className="step specialist">specialista · {AGENTS[s.agent]}</span>);
     if (s.kind === "subagent")
@@ -419,7 +419,7 @@ export function Chat({ active }: { active: boolean }) {
                 {cloudChoices.length > 1 || provider === "auto" ? <option value="auto">Cloud automatico</option> : null}
                 {provider && provider !== "auto" && !cloudChoices.some((item) => item.id === provider)
                   ? <option value={provider} disabled>{CLOUD_LABELS[provider]} · da configurare</option> : null}
-                {cloudChoices.map((item) => <option key={item.id} value={item.id}>{CLOUD_LABELS[item.id]} · {item.model}</option>)}
+                {cloudChoices.map((item) => <option key={item.id} value={item.id}>{CLOUD_LABELS[item.id]} · modello automatico</option>)}
               </select>
             </label>
             {provider ? (

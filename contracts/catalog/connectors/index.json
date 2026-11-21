@@ -107,6 +107,52 @@
         "messaggi",
         "invia"
       ]
+    },
+    {
+      "id": "open_meteo",
+      "name": "Open-Meteo",
+      "provider": "Open-Meteo",
+      "category": "meteo",
+      "auth": "none",
+      "description": "Previsioni per coordinate geografiche.",
+      "setup": "Inserisci latitudine e longitudine nel modulo della previsione.",
+      "setup_url": "https://open-meteo.com/en/docs",
+      "needs_client_id": false,
+      "needs_client_secret": false,
+      "operations": [
+        "previsioni"
+      ]
+    },
+    {
+      "id": "gitlab",
+      "name": "GitLab",
+      "provider": "GitLab",
+      "category": "sviluppo",
+      "auth": "bearer",
+      "description": "Consulta i tuoi progetti e le issue GitLab.",
+      "setup": "Crea un token personale con permesso read_api.",
+      "setup_url": "https://gitlab.com/-/user_settings/personal_access_tokens",
+      "needs_client_id": false,
+      "needs_client_secret": false,
+      "operations": [
+        "progetti",
+        "issue"
+      ]
+    },
+    {
+      "id": "airtable",
+      "name": "Airtable",
+      "provider": "Airtable",
+      "category": "produttività",
+      "auth": "bearer",
+      "description": "Leggi le righe delle tabelle a cui hai accesso.",
+      "setup": "Crea un token con data.records:read e concedigli l’accesso alle basi necessarie.",
+      "setup_url": "https://airtable.com/create/tokens",
+      "needs_client_id": false,
+      "needs_client_secret": false,
+      "operations": [
+        "record"
+      ]
     }
   ]
 }

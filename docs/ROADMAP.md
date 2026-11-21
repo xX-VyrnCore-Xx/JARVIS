@@ -34,7 +34,9 @@ Il checkpoint è la sezione di ripresa versionata con Git. Ogni voce va aggiorna
 
 **JARVIS 1.13.1 da `7b79ceb` (2026-11-20).** ADR-0058. Il workflow di rilascio prepara e verifica due pacchetti, il `.dmg` Apple Silicon e il setup Windows x64.
 
-**Plancia, Chat e controlli PC su `993f50e` (2026-11-21).** Gli interventi sono nel checkout locale (ADR-0059 e ADR-0060). Ritratto maschile nel bundle, colori condivisi fra Plancia e Chat, Sidebar riducibile e comandi PC con conferma locale. Chromium ha superato 105 controlli, inclusi voce, conferme e finestra stretta. I test Core coprono conferma, instradamento locale con cloud selezionato e limiti per dispositivi associati e automazioni. L’apertura effettiva delle applicazioni richiede il collaudo su macOS e Windows.
+**Plancia, Chat e controlli PC in `d359fc7` (2026-11-21).** Gli interventi sono nel branch locale (ADR-0059 e ADR-0060). Ritratto maschile nel bundle, colori condivisi fra Plancia e Chat, Sidebar riducibile e comandi PC con conferma locale. Chromium ha superato 105 controlli, inclusi voce, conferme e finestra stretta. I test Core coprono conferma, instradamento locale con cloud selezionato e limiti per dispositivi associati e automazioni. L’apertura effettiva delle applicazioni richiede il collaudo su macOS e Windows.
+
+**Release, routing, connettori e associazione da `e56a6f1` (2026-11-21).** ADR-0061. Il flusso CI pubblica macOS Apple Silicon e Windows x64 dallo SHA verificato. Il Core seleziona i modelli remoti per attività, aggiorna il catalogo degli strumenti e distingue gli errori dagli esiti riusciti. Catalogo ampliato, installazione guidata, invito web con QR e possibilità di annullamento. Verifiche locali: 203 test Rust e prova Docker della sandbox, 111 controlli Chromium, suite Python e convalida dei workflow. Restano da collaudare la prima pubblicazione automatica su GitHub, i dispositivi fisici e l’inferenza autenticata presso i provider.
 
 Il checkpoint precedente è riportato qui sotto per riferimento.
 

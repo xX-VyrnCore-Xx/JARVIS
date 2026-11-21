@@ -326,3 +326,21 @@ button:not(.avatar-trigger):hover { box-shadow: var(--glow); }
 @media (prefers-reduced-motion: reduce) {
   .jarvis-ring, .jarvis-speech, .jarvis-face { animation: none !important; transition: none !important; }
 }
+
+.connector-install, .device-enrol {
+  margin: .8rem 0;
+  padding: .9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+}
+:is(.connector-install, .device-enrol, .tool-directory) summary { cursor: pointer; color: var(--accent); }
+:is(.connector-install, .tool-directory)[open] > summary { margin-bottom: .8rem; }
+.device-enrol h3 { display: flex; align-items: center; gap: .55rem; margin: 0 0 .6rem; }
+.device-enrol .pairing-code:not([hidden]) { display: block; margin-top: .65rem; }
+.device-invite { display: flex; align-items: center; flex-wrap: wrap; gap: .8rem 1.2rem; }
+.device-invite img { background: #fff; border-radius: 7px; object-fit: contain; }
+.device-invite strong { color: var(--accent); font: 680 1.36rem var(--mono); letter-spacing: .12em; }
+.device-list-head { justify-content: space-between; margin: .65rem 0; }
+.device-icon { display: grid; place-items: center; flex: none; color: var(--accent); border-radius: 9px; width: 36px; height: 36px; background: var(--panel-2); }
+.device-card .body { min-width: 0; overflow-wrap: anywhere; }

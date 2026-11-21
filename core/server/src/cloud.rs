@@ -1,4 +1,4 @@
-//! Modelli remoti selezionati dal proprietario per un singolo messaggio.
+//! Selezione locale del modello remoto per ciascun messaggio autorizzato.
 use std::io::Read;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -47,14 +47,14 @@ impl Provider {
         }
     }
 
-    fn models(self) -> &'static [&'static str] {
-        match self {
-            Self::Ollama => &["kimi-k2.7-code", "glm-5.3-flash", "gemma4:31b"],
-            Self::Nim => &[
-                "moonshotai/kimi-k3.1-pro",
-                "nvidia/nemotron-3.5-lightning-30b-a3b",
-                "mistralai/mistral-large-4-1t-a52b",
-            ],
+    fn model(self, route: Route) -> &'static str {
+        match (self, route) {
+            (Self::Ollama, Route::Fast) => "glm-5.3-flash:cloud",
+            (Self::Ollama, Route::Reasoning) => "deepseek-v4-pro:cloud",
+            (Self::Ollama, Route::Coding) => "kimi-k2.7-code:cloud",
+            (Self::Nim, Route::Fast) => "nvidia/nemotron-3.5-lightning-30b-a3b",
+            (Self::Nim, Route::Reasoning) => "mistralai/mistral-large-4-1t-a52b",
+            (Self::Nim, Route::Coding) => "qwen/qwen3-coder-480b-a35b-instruct",
         }
     }
 
@@ -62,17 +62,122 @@ impl Provider {
         format!("cloud:{}", self.id())
     }
 
-    pub fn model(self, settings: &Value) -> &str {
-        settings[self.id()].as_str().unwrap_or(self.models()[0])
-    }
-
-    pub fn view(self, settings: &Value, configured: bool, limiter: &Limiter) -> Value {
+    pub fn view(self, configured: bool, limiter: &Limiter) -> Value {
         json!({
-            "id": self.id(), "model": self.model(settings), "models": self.models(),
+            "id": self.id(),
+            "routing": {
+                "fast": self.model(Route::Fast),
+                "reasoning": self.model(Route::Reasoning),
+                "coding": self.model(Route::Coding)
+            },
             "configured": configured,
             "effective_rpm": (self == Self::Nim).then_some(NIM_RPM),
             "cooldown_seconds": limiter.remaining(self).as_secs_f64().ceil() as u64,
         })
+    }
+
+    pub fn target(self, key: String, prompt: &str, history: Vec<Turn>, settings: &Value) -> Target {
+        let route = Route::select(prompt, &history);
+        let model = self.model(route);
+        let alternative = settings[self.id()]
+            .as_str()
+            .filter(|value| valid_model(value) && *value != model)
+            .unwrap_or_else(|| {
+                self.model(if route == Route::Fast {
+                    Route::Reasoning
+                } else {
+                    Route::Fast
+                })
+            });
+        Target {
+            provider: self,
+            model: model.to_string(),
+            alternative: alternative.to_string(),
+            key,
+            history,
+            route,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Route {
+    Fast,
+    Reasoning,
+    Coding,
+}
+
+impl Route {
+    fn select(prompt: &str, history: &[Turn]) -> Self {
+        let tokens = estimated_tokens(prompt)
+            + history
+                .iter()
+                .map(|turn| estimated_tokens(&turn.user) + estimated_tokens(&turn.assistant))
+                .sum::<usize>();
+        let text = prompt.to_lowercase();
+        let needs_steps = [
+            "confronta",
+            "progetta",
+            "analizza",
+            "diagnosi",
+            "architettura",
+            "trade-off",
+            "passo per passo",
+            "compare",
+            "design",
+            "root cause",
+            "migration",
+        ]
+        .iter()
+        .any(|term| text.contains(term));
+        let complex = tokens >= 420
+            || needs_steps
+            || prompt
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .count()
+                >= 5;
+        let coding_topic = crate::agents::route(prompt).is_some_and(|agent| agent.name == "coding");
+        let coding_task = text.contains("```")
+            || [
+                "implementa",
+                "debug",
+                "stack trace",
+                "review del codice",
+                "refactor",
+                "write code",
+                "unit tests",
+            ]
+            .iter()
+            .any(|term| text.contains(term))
+            || (coding_topic
+                && (complex
+                    || ["scrivi", "correggi", "modifica", "genera", "verifica"]
+                        .iter()
+                        .any(|term| text.contains(term))));
+        if coding_task {
+            Self::Coding
+        } else if complex {
+            Self::Reasoning
+        } else {
+            Self::Fast
+        }
+    }
+
+    fn guidance(self) -> &'static str {
+        match self {
+            Self::Fast => "Rispondi in modo conciso. Per un dato attuale usa uno strumento pertinente, se disponibile.",
+            Self::Reasoning => "Organizza i requisiti prima di rispondere. Confronta le opzioni sulla base dei vincoli espliciti e indica le verifiche mancanti.",
+            Self::Coding => "Verifica linguaggio, interfacce e vincoli di compatibilità. Se serve il repository, chiedi il file o usa gli strumenti concessi prima di suggerire modifiche.",
+        }
+    }
+
+    fn output_tokens(self) -> usize {
+        match self {
+            Self::Fast => 1536,
+            Self::Reasoning => 3072,
+            Self::Coding => 4096,
+        }
     }
 }
 
@@ -171,6 +276,7 @@ pub enum Failure {
     RateLimited(Duration),
     InvalidKey,
     InvalidTool,
+    ModelUnavailable,
     Unavailable,
 }
 
@@ -180,6 +286,7 @@ impl Failure {
             Self::InvalidKey => "cloud.credentials",
             Self::InvalidTool => "cloud.invalid_tool",
             Self::RateLimited(_) => "cloud.rate_limited",
+            Self::ModelUnavailable => "cloud.model_unavailable",
             Self::Unavailable => "cloud.unavailable",
         }
     }
@@ -205,6 +312,11 @@ pub const TOOLS: &[&str] = &[
     "time.now",
     "system.info",
     "system.disks",
+    "process.list",
+    "weather.forecast",
+    "web.search",
+    "todo.list",
+    "notes.list",
     "fs.list",
     "fs.read",
     "fs.search",
@@ -253,6 +365,8 @@ pub struct Target {
     pub model: String,
     pub key: String,
     pub history: Vec<Turn>,
+    alternative: String,
+    route: Route,
 }
 
 pub struct Request {
@@ -272,40 +386,47 @@ pub struct Completed {
 impl Request {
     pub fn execute(&self) -> Completed {
         let first = &self.targets[0];
-        let answer = self.ask(first);
-        if let (Some(second), Err(error)) = (self.targets.get(1), &answer) {
+        let mut completed = self.complete(first);
+        if let (Some(second), Err(error)) = (self.targets.get(1), &completed.answer) {
             if !matches!(error, Failure::InvalidTool) {
-                return Completed {
-                    provider: second.provider,
-                    model: second.model.clone(),
-                    fallback: Some((first.provider, error.clone())),
-                    answer: self.ask(second),
-                };
+                let fallback = Some((first.provider, error.clone()));
+                completed = self.complete(second);
+                completed.fallback = fallback;
             }
         }
+        completed
+    }
+
+    fn complete(&self, target: &Target) -> Completed {
+        let mut model = &target.model;
+        let ask = |model: &str| {
+            chat_at(
+                target.provider.endpoint(),
+                target.provider,
+                &target.key,
+                payload(
+                    target.provider,
+                    model,
+                    &self.message,
+                    &target.history,
+                    &self.tools,
+                    target.route,
+                ),
+                &self.tools,
+                &self.limiter,
+            )
+        };
+        let mut answer = ask(model);
+        if matches!(answer, Err(Failure::ModelUnavailable)) {
+            model = &target.alternative;
+            answer = ask(model);
+        }
         Completed {
-            provider: first.provider,
-            model: first.model.clone(),
+            provider: target.provider,
+            model: model.clone(),
             fallback: None,
             answer,
         }
-    }
-
-    fn ask(&self, target: &Target) -> Result<Answer, Failure> {
-        chat_at(
-            target.provider.endpoint(),
-            target.provider,
-            &target.key,
-            payload(
-                target.provider,
-                &target.model,
-                &self.message,
-                &target.history,
-                &self.tools,
-            ),
-            &self.tools,
-            &self.limiter,
-        )
     }
 }
 
@@ -315,8 +436,11 @@ fn payload(
     prompt: &str,
     history: &[Turn],
     tools: &[Function],
+    route: Route,
 ) -> Value {
-    let mut messages = vec![json!({"role": "system", "content": concat!(
+    let output_tokens = route.output_tokens();
+    let mut messages = vec![
+        json!({"role": "system", "content": format!("{} {}", concat!(
         "Sei JARVIS. Rispondi nella lingua dell’utente e concentrati sull’ultima domanda. ",
         "Usa i turni precedenti solo se pertinenti e trattali come contesto, senza ripetere azioni già richieste. ",
         "Se un riferimento manca o è ambiguo, chiedi un chiarimento specifico prima di scegliere un oggetto o un’azione. ",
@@ -327,7 +451,8 @@ fn payload(
         "Cita fonti e collegamenti pertinenti solo se ne conosci l’indirizzo esatto. Non inventare URL, fonti o risultati. ",
         "Se serve uno strumento, proponine al massimo uno con parametri espliciti supportati dal contesto. ",
         "JARVIS compone la risposta dopo la verifica della chiamata."
-    )})];
+    ), route.guidance())}),
+    ];
     for turn in history {
         messages.push(json!({"role": "user", "content": turn.user}));
         messages.push(json!({"role": "assistant", "content": turn.assistant}));
@@ -335,10 +460,10 @@ fn payload(
     messages.push(json!({"role": "user", "content": prompt}));
     let mut body = match provider {
         Provider::Ollama => {
-            json!({"model": model, "messages": messages, "stream": false, "options": {"num_predict": 2048}})
+            json!({"model": model, "messages": messages, "stream": false, "options": {"num_predict": output_tokens}})
         }
         Provider::Nim => {
-            json!({"model": model, "messages": messages, "stream": false, "max_tokens": 2048, "temperature": 0.2})
+            json!({"model": model, "messages": messages, "stream": false, "max_tokens": output_tokens, "temperature": 0.2})
         }
     };
     if !tools.is_empty() {
@@ -432,6 +557,7 @@ fn chat_at(
                 .cooldown(provider, wait);
             return Err(Failure::RateLimited(wait));
         }
+        Err(ureq::Error::Status(404, _)) => return Err(Failure::ModelUnavailable),
         Err(ureq::Error::Status(401 | 403, _)) => return Err(Failure::InvalidKey),
         Err(_) => return Err(Failure::Unavailable),
     };
@@ -451,6 +577,37 @@ fn chat_at(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn routes_both_providers_by_task_and_context() {
+        for provider in Provider::ALL {
+            let request =
+                |prompt: &str, history| provider.target("test".into(), prompt, history, &json!({}));
+            let fast = request("Cos’è una variabile?", vec![]);
+            assert_eq!(fast.route, Route::Fast);
+            assert_eq!(
+                request("Cos’è una funzione in Python?", vec![]).model,
+                fast.model
+            );
+            let long_request = "Scrivi un riepilogo di questo documento. ".repeat(50);
+            let long = request(&long_request, vec![]);
+            assert_eq!(long.route, Route::Reasoning);
+            let design = request("Confronta i due approcci", vec![]);
+            assert_eq!(design.model, long.model);
+            let coding = request("Analizza questo script Python", vec![]);
+            assert_eq!(coding.route, Route::Coding);
+            assert_ne!(fast.model, long.model);
+            assert_ne!(coding.model, long.model);
+            let followup = request(
+                "Continua",
+                vec![Turn {
+                    user: long_request,
+                    assistant: "D'accordo".into(),
+                }],
+            );
+            assert_eq!(followup.route, Route::Reasoning);
+        }
+    }
 
     #[test]
     fn pacing_respects_the_limit_and_keeps_provider_cooldowns_separate() {
@@ -514,7 +671,7 @@ mod tests {
             assistant: "Gestisce i tool.".into(),
         }];
         for provider in Provider::ALL {
-            let body = payload(provider, "test", "E il client?", &history, &[]);
+            let body = payload(provider, "test", "E il client?", &history, &[], Route::Fast);
             let messages = body["messages"].as_array().unwrap();
             assert_eq!(messages.len(), 4);
             assert_eq!(messages[0]["role"], "system");
@@ -534,7 +691,14 @@ mod tests {
     fn tool_proposals_are_single_scoped_and_accept_both_wire_formats() {
         let catalog = crate::catalog::Catalog::load().unwrap();
         let tools = [Function::from(catalog.get("fs.read").unwrap())];
-        let body = payload(Provider::Nim, "test", "Richiesta corrente", &[], &tools);
+        let body = payload(
+            Provider::Nim,
+            "test",
+            "Richiesta corrente",
+            &[],
+            &tools,
+            Route::Fast,
+        );
         assert_eq!(body["messages"].as_array().unwrap().len(), 2);
         assert_eq!(body["tools"][0]["function"]["name"], "fs__read");
         assert!(matches!(

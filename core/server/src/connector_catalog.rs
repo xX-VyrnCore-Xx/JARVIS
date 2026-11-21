@@ -5,7 +5,7 @@
 use serde_json::Value;
 
 const INDEX: &str = include_str!("../../../contracts/catalog/connectors/index.json");
-const MANIFESTS: [(&str, &str); 6] = [
+const MANIFESTS: &[(&str, &str)] = &[
     (
         "gmail",
         include_str!("../../../contracts/catalog/connectors/gmail.json"),
@@ -29,6 +29,18 @@ const MANIFESTS: [(&str, &str); 6] = [
     (
         "slack",
         include_str!("../../../contracts/catalog/connectors/slack.json"),
+    ),
+    (
+        "open_meteo",
+        include_str!("../../../contracts/catalog/connectors/open_meteo.json"),
+    ),
+    (
+        "gitlab",
+        include_str!("../../../contracts/catalog/connectors/gitlab.json"),
+    ),
+    (
+        "airtable",
+        include_str!("../../../contracts/catalog/connectors/airtable.json"),
     ),
 ];
 

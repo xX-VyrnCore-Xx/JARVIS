@@ -435,6 +435,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/voice/speak", post(voice_speak))
         .route("/api/devices", get(devices))
         .route("/api/devices/pairing", post(create_pairing))
+        .route("/api/devices/pairing/cancel", post(cancel_pairing))
         .route("/api/devices/pair", post(pair_device))
         .route("/api/devices/me", get(device_me))
         .route("/api/setup", get(setup_status))
@@ -500,6 +501,7 @@ pub fn router(state: Shared) -> Router {
         )
         .route("/api/connectors/templates", get(connector_templates))
         .route("/api/connectors/templates/{id}", post(install_template))
+        .route("/api/connectors/new", post(install_new_connector))
         .route("/api/connectors/{id}", delete(uninstall_connector))
         .route("/api/connectors/{id}/authorize", post(authorize_connector))
         .route("/api/connectors/{id}/revoke", post(revoke_connector))
@@ -1156,7 +1158,7 @@ async fn install_template(
         Ok(m) => m,
         Err(e) => return error(StatusCode::BAD_REQUEST, "bad_request", &e),
     };
-    reply(with_core(&state, move |j| j.install_connector(&manifest)).await)
+    reply(with_core(&state, move |j| j.install_new_connector(&manifest)).await)
 }
 
 fn limit(q: &Value, default: u32) -> u32 {
@@ -1428,7 +1430,18 @@ async fn workflows(State(state): State<Shared>) -> Response {
 }
 
 async fn devices(State(state): State<Shared>) -> Response {
-    reply(with_core(&state, |j| j.devices().map(|items| json!({"items": items}))).await)
+    let pairing_urls: Vec<_> = state
+        .remote_hosts
+        .iter()
+        .map(|host| format!("https://{host}"))
+        .collect();
+    reply(
+        with_core(&state, move |j| {
+            j.devices()
+                .map(|items| json!({"items": items, "pairing_urls": pairing_urls}))
+        })
+        .await,
+    )
 }
 
 async fn create_pairing(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
@@ -1438,7 +1451,27 @@ async fn create_pairing(State(state): State<Shared>, Json(body): Json<Value>) ->
         .flatten()
         .filter_map(|s| s.as_str().map(str::to_string))
         .collect();
-    reply(with_core(&state, move |j| j.create_pairing(&scopes)).await)
+    reply(
+        with_core(&state, move |j| {
+            let invite = j.create_pairing(&scopes)?;
+            if let Some(previous) = body["replace"]
+                .as_str()
+                .filter(|old| invite["code"] != *old)
+            {
+                j.cancel_pairing(previous);
+            }
+            Ok(invite)
+        })
+        .await,
+    )
+}
+
+async fn cancel_pairing(State(state): State<Shared>, Json(body): Json<Value>) -> Json<Value> {
+    let cancelled = with_core(&state, move |j| {
+        j.cancel_pairing(body["code"].as_str().unwrap_or_default())
+    })
+    .await;
+    Json(json!({"cancelled": cancelled}))
 }
 
 async fn pair_device(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
@@ -1674,6 +1707,10 @@ async fn connectors(State(state): State<Shared>) -> Response {
         })
         .await,
     )
+}
+
+async fn install_new_connector(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply(with_core(&state, move |j| j.install_new_connector(&body)).await)
 }
 
 async fn install_connector(State(state): State<Shared>, Json(body): Json<Value>) -> Response {

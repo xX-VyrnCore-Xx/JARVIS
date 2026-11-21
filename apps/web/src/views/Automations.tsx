@@ -30,8 +30,7 @@ interface Workflow {
   last_run?: { status: string; started_at: string };
 }
 
-let toolCache: Tool[] | null = null;
-const loadTools = async () => (toolCache ??= (await api<{ items: Tool[] }>("/api/tools")).items.filter((t) => t.workflow_step));
+const loadTools = async () => (await api<{ items: Tool[] }>("/api/tools")).items.filter((t) => t.workflow_step);
 
 function StepEditor({ step, tools, onChange, onRemove }: {
   step: StepDraft; tools: Tool[]; onChange: (s: StepDraft) => void; onRemove: () => void;

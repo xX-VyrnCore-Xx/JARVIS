@@ -1,0 +1,53 @@
+{
+  "contract": "jarvis.connector/1",
+  "id": "airtable",
+  "name": "Airtable",
+  "version": "1.0.0",
+  "description": "Leggi le righe delle tabelle a cui hai accesso.",
+  "base_url": "https://api.airtable.com/v0",
+  "allowed_hosts": [
+    "api.airtable.com"
+  ],
+  "auth": {
+    "type": "bearer"
+  },
+  "operations": [
+    {
+      "name": "record",
+      "summary": "Leggi i record per ID della base e nome o ID della tabella",
+      "method": "GET",
+      "path": "/{base}/{table}",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "base": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "table": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "maxRecords": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "view": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          }
+        },
+        "required": [
+          "base",
+          "table"
+        ]
+      }
+    }
+  ]
+}

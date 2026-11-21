@@ -241,6 +241,22 @@ async fn desktop_request_stays_local_with_cloud_selected() {
 }
 
 #[tokio::test]
+async fn tool_failure_is_visible_in_task_state_and_catalog_matches_policy() {
+    let e = env();
+    let failed = e.chat("leggi file_inesistente.txt").await;
+    assert_eq!(failed["task"]["state"], "failed", "{failed}");
+    assert_eq!(failed["task"]["error"]["effect"], "not_applied");
+
+    let (_, catalog) = e.api("GET", "/api/tools", None).await;
+    let list = catalog["items"].as_array().unwrap();
+    for name in ["pc.open", "code.run_python", "shell.run"] {
+        assert!(list
+            .iter()
+            .any(|tool| tool["name"] == name && tool["workflow_step"] == false));
+    }
+}
+
+#[tokio::test]
 async fn path_traversal_is_denied_by_policy() {
     let e = env();
     for message in ["leggi ../../etc/passwd", "leggi /etc/passwd"] {

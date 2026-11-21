@@ -337,6 +337,20 @@ function check(cond, msg) {
   await page.waitForFunction(() => document.querySelector("#connectors").innerText.includes("GitHub") && document.querySelector("#connectors").innerText.includes("Google Calendar"));
   check((await page.locator("#connectors").innerText()).includes("connector.google_calendar.crea_evento"), "Google Calendar e GitHub aggiunti dal catalogo con le loro operazioni");
   if (shots) await page.screenshot({ path: `${shots}/jarvis-catalogo.png` });
+  await page.getByRole("searchbox", { name: "Cerca nel catalogo" }).fill("Open-Meteo");
+  await page.locator('[data-template="open_meteo"]').getByRole("button", { name: "Installa" }).click();
+  await page.waitForSelector('[data-connector="open_meteo"]');
+  check(await page.locator('[data-connector="open_meteo"] .badge').innerText() === "autorizzato", "il catalogo installa un connettore pubblico senza JSON o token");
+  await page.getByText("Configura un altro servizio API", { exact: true }).click();
+  await page.fill('#guided-connector-form [name="name"]', "Controllo guidato");
+  await page.fill('#guided-connector-form [name="id"]', "controllo_guidato");
+  await page.fill('#guided-connector-form [name="base"]', `http://127.0.0.1:${WEB_PORT}/svc`);
+  await page.fill('#guided-connector-form [name="path"]', "/stato/{nome}");
+  await page.fill('#guided-connector-form [name="summary"]', "Stato del servizio");
+  await page.locator('#guided-connector-form').getByRole("button", { name: "Installa" }).click();
+  await page.waitForSelector('[data-connector="controllo_guidato"]');
+  check(true, "il modulo guidato installa un servizio con parametro nel percorso");
+  await page.locator("#connector-advanced summary").click();
   await page.fill('#connector-form textarea[name="manifest"]', JSON.stringify({
     contract: "jarvis.connector/1", id: "stato", name: "Stato servizi", version: "1.0.0", description: "Servizio sintetico",
     base_url: `http://127.0.0.1:${WEB_PORT}/svc`, allowed_hosts: ["127.0.0.1"], auth: { type: "bearer" },
@@ -388,6 +402,9 @@ function check(cond, msg) {
   await page.click('#pairing-form button[type="submit"]');
   await page.waitForFunction(() => !document.querySelector("#pairing-code .node-cmd"));
   const code = (await page.locator("#pairing-code strong").innerText()).trim();
+  const invite = new (require("url").URL)(await page.getByRole("button", { name: "Copia invito" }).getAttribute("data-invite"));
+  check(await page.getByAltText("Codice QR per associare il dispositivo").isVisible(), "invito con QR e collegamento generati localmente");
+  check(invite.search === "" && invite.hash.endsWith(code), "il codice d’invito resta nel frammento del collegamento");
   const phoneCtx = await browser.newContext({ viewport: { width: 390, height: 800 } });
   const phone = await phoneCtx.newPage();
   phone.on("pageerror", (e) => errors.push("telefono: " + e.message));
@@ -395,7 +412,10 @@ function check(cond, msg) {
   await phone.goto(`http://jarvis.localhost:${port}/`);
   await phone.waitForURL(/\/pair$/);
   check(true, "dispositivo non associato rimandato all'associazione");
-  await phone.fill('#pair-form input[name="code"]', code);
+  await phone.goto(`http://jarvis.localhost:${port}/pair${invite.hash}`);
+  await phone.waitForFunction((expected) => document.querySelector('#pair-form input[name="code"]').value === expected, code);
+  check(true, "il link precompila il codice di associazione");
+  check(new (require("url").URL)(phone.url()).hash === "", "il client rimuove il codice dall’indirizzo dopo la lettura");
   await phone.click('#pair-form button[type="submit"]');
   await phone.waitForURL(/\/$/);
   await phone.waitForSelector("#input");

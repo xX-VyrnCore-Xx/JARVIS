@@ -56,7 +56,7 @@ Si adatta al tema chiaro e scuro e allo schermo dello smartphone (verificata a 3
 **Telefono e altri dispositivi (ADR-0014):**
 1. Pubblica JARVIS nella tua rete privata con un proxy HTTPS fidato, per esempio `tailscale serve 8765`.
 2. Avvia JARVIS con `JARVIS_ALLOWED_HOSTS=<nome-host>`.
-3. Sul telefono apri l'indirizzo e inserisci il codice generato nella sezione **Dispositivi**.
+3. In **Dispositivi**, genera un invito e scansiona il QR dal browser del telefono, oppure copia il collegamento. Conferma il nome nella pagina di associazione. Puoi ancora digitare manualmente il codice, anche nei client nativi. Il codice è monouso, scade dopo dieci minuti e può essere annullato dal Core.
 
 L'interfaccia si installa come app («Aggiungi a schermata Home»). Dal dispositivo sono disponibili chat, attività, notifiche, voce e, se concesso, le conferme. La revoca è immediata. Se il Core o il proxy è irraggiungibile durante la navigazione, la PWA mostra una pagina con «Riprova». Al ritorno della connessione una scheda già aperta aggiorna stato e notifiche. Il service worker evita di salvare pagine, risposte o credenziali.
 
