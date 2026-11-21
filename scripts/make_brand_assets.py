@@ -214,23 +214,6 @@ def nsis_header(w: int = 150, h: int = 57) -> Image.Image:
     return img
 
 
-def wix_banner(w: int = 493, h: int = 58) -> Image.Image:
-    img = Image.new("RGBA", (w, h), (255, 255, 255, 255))
-    plate = vgradient(150, h, NAVY_TOP, NAVY_BOTTOM).convert("RGBA")
-    em = reactor(52)
-    plate.alpha_composite(em, (90, 3))
-    d = ImageDraw.Draw(plate)
-    d.text((12, h // 2), "JARVIS", font=font(16, "Bold"), fill=(227, 244, 255), anchor="lm")
-    img.paste(plate, (w - 150, 0))
-    return img
-
-
-def wix_dialog(w: int = 493, h: int = 312) -> Image.Image:
-    img = Image.new("RGBA", (w, h), (255, 255, 255, 255))
-    img.paste(nsis_sidebar(164, h), (0, 0))
-    return img
-
-
 def bmp(img: Image.Image, path: Path) -> None:
     img.convert("RGB").save(path, format="BMP")
 
@@ -248,8 +231,6 @@ def main() -> None:
     dmg_background().convert("RGB").save(INST / "dmg-background.png")
     bmp(nsis_sidebar(), INST / "nsis-sidebar.bmp")
     bmp(nsis_header(), INST / "nsis-header.bmp")
-    bmp(wix_banner(), INST / "wix-banner.bmp")
-    bmp(wix_dialog(), INST / "wix-dialog.bmp")
     print("risorse generate in", ICONS.relative_to(ROOT), "e", INST.relative_to(ROOT))
 
 

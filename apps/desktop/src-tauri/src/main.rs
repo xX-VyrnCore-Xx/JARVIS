@@ -86,30 +86,6 @@ fn local_page(url: &url::Url) -> bool {
     matches!(url.scheme(), "tauri") || url.host_str() == Some("tauri.localhost")
 }
 
-/// macOS: dopo che il proprietario ha autorizzato l'apertura dell'app (ADR-0020, firma ad hoc), toglie l'attributo
-/// di quarantena ereditato dal .dmg dai file del pacchetto, così il Core e il Python inclusi non vengono bloccati
-/// da Gatekeeper come programmi scaricati. Nessun effetto se l'app gira dal .dmg o da una copia traslocata.
-#[cfg(target_os = "macos")]
-fn clear_quarantine() {
-    let Ok(exe) = std::env::current_exe() else {
-        return;
-    };
-    let Some(bundle) = exe.ancestors().nth(3) else {
-        return;
-    };
-    let path = bundle.to_string_lossy();
-    if !path.ends_with(".app")
-        || path.contains("/AppTranslocation/")
-        || path.starts_with("/Volumes/")
-    {
-        return;
-    }
-    let _ = std::process::Command::new("/usr/bin/xattr")
-        .args(["-dr", "com.apple.quarantine"])
-        .arg(bundle)
-        .status();
-}
-
 fn main() {
     let app = tauri::Builder::default()
         // Una seconda apertura porta in primo piano la finestra esistente invece di avviare un altro Core.
@@ -179,8 +155,6 @@ fn main() {
                 .title_bar_style(tauri::TitleBarStyle::Transparent)
                 .hidden_title(true);
             let window = window.build()?;
-            #[cfg(target_os = "macos")]
-            clear_quarantine();
             #[cfg(target_os = "macos")]
             app.set_menu(native::app_menu(app.handle())?)?;
             native::tray(app.handle())?;

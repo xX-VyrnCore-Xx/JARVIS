@@ -1,44 +1,18 @@
-# Stack tecnologico
+# Stack tecnologico di JARVIS
 
-| Componente | Scelta | Confine |
+| Componente | Tecnologie in uso | Responsabilità |
 |---|---|---|
-| Core Linux | Rust | API, lifecycle, concorrenza, policy ed esecuzione |
-| AI e agenti | Python | Modelli, pipeline e integrazioni AI tramite contratti con il Core |
-| Desktop | Tauri, React e TypeScript | Integrazione nativa Rust e interfaccia client |
-| Web | React e TypeScript | Dashboard e streaming attraverso API |
-| Dati centrali | PostgreSQL | Dati applicativi, metadati e stati durevoli |
-| Dati sul nodo | SQLite | Persistenza e code locali, supporto offline |
-| Ricerca semantica | pgvector e Qdrant | Indice integrato e motore dedicato secondo i carichi |
-| Inferenza locale | Ollama, con llama.cpp come alternativa | Adapter separati dietro AI Gateway |
-| Escalation | Ollama Cloud | Accesso e payload soggetti a verifica di compatibilità e policy |
-| Browser | Playwright | Navigazione e automazione Web autorizzata |
-| Deploy del Core | systemd e Docker | Servizi nativi e componenti isolati |
-| Versionamento | GitHub privato e mirror locale | Sorgenti, contratti e checkpoint |
+| Core multipiattaforma | Rust, Axum 0.8, Tokio 1, Serde | API HTTP, orchestrazione, policy, audit, scheduler e strumenti |
+| Bridge e contratti | JSON Lines su stdin/stdout, JSON Schema 2020-12 | Deleghe, esiti, progressi ed errori fra Core e worker Python |
+| Desktop | Tauri 2, WKWebView su macOS, WebView2 su Windows e WebKitGTK 4.1 su Linux | Finestra nativa, tray, avvio supervisionato del Core e notifiche |
+| Web e PWA | React 19, TypeScript 5.9, Vite 8 | Chat, dashboard e client associato. Il bundle è incorporato nel Core |
+| App mobili | SwiftUI e URLSession su iOS/iPadOS, Kotlin e Jetpack Compose su Android | Chat, attività, notifiche e conferme del Core HTTPS |
+| Dati | SQLite con rusqlite 0.43, FTS5/BM25 | Conversazioni, attività, notifiche, memoria e automazioni |
+| Memoria | Vettori lessicali locali, FTS5 e grafo in SQLite | Recupero di fatti, preferenze ed episodi |
+| Inferenza | Ollama Cloud e NVIDIA NIM via HTTPS | Routing per attività e contesto, limitazione delle richieste, proposte di strumenti |
+| Worker locale | Python 3, faster-whisper, Piper, openWakeWord, XTTS v2 facoltativo | Comandi deterministici, riconoscimento, sintesi e attivazione vocale |
+| Automazioni | Tokio e n8n isolato tramite Docker | Routine persistenti e sandbox Python con risorse limitate |
+| Sicurezza | rustls, WebAuthn, portachiavi di sistema, Argon2 e ChaCha20-Poly1305 | Identità, passkey, protezione dei segreti e backup cifrati |
+| Qualità e distribuzione | GitHub Actions, Playwright, Tauri/NSIS, Sigstore | Test, pacchetti DMG e EXE, attestazione e firma |
 
-Lo stack mobile richiede valutazione comparativa. Restano da selezionare le implementazioni per event bus, RPC, object storage, knowledge graph, gestione dei segreti, VPN mesh e aggiornamento Desktop. Il piano conferma le relative capacità. Revisioni minime, modelli e soglie prestazionali saranno fissati con prove riproducibili.
-
-Versionare dipendenze e contratti alla loro introduzione. Per Rust/Python, descrivere input, output, compatibilità, propagazione degli errori, timeouts e stato. Mantenere frontend e adapter indipendenti dalle credenziali dei provider. Verificare prestazioni sul primo host e documentare il profilo hardware prima di stabilire il catalogo dei modelli.
-
-## Versioni introdotte
-
-| Componente | Versione | Uso | Evidenza |
-|---|---|---|---|
-| JSON Schema | draft 2020-12 | Contratti `contracts/v1/` | ADR-0001 |
-| Python | 3.13 (CI), 3.13.18 (container di sviluppo) | Test dei contratti | `.github/workflows/contracts.yml` |
-| `jsonschema` (Python) | 4.26.0 | Validazione dei contratti | `tests/contracts/requirements.txt` |
-| Rust | MSRV dichiarata 1.89 (`File::try_lock`), verificata solo con 1.97.0 | Workspace `core/` | `core/Cargo.toml` |
-| `jsonschema` (Rust) | 0.30, senza feature predefinite | Validazione dei contratti nel Core | `core/Cargo.lock` |
-| `sha2`, `hex`, `chrono`, `serde_json` | Vedi `core/Cargo.lock` | Catena di audit e timestamp | ADR-0002 |
-| `uuid` (Rust) | 1, feature `v4` | Identificativi dei messaggi del bridge | ADR-0003 |
-| Bridge Core–AI | JSON Lines su stdio (prototipo) | `core/bridge` ↔ `ai/jarvis_ai/worker.py` | ADR-0003 |
-| axum / tokio | 0.8 / 1 | API HTTP locale del Core | ADR-0004 |
-| rusqlite | 0.32, `bundled` | Memoria, task e conversazione | ADR-0004 |
-| Ollama (opzionale) | API `/api/chat` e `/api/tags` | Backend AI locale; nessuna libreria client, solo `urllib` | ADR-0004 |
-| Playwright | 1.63.0 | Test E2E dell'interfaccia | `tests/e2e/ui_smoke.cjs` |
-| Interfaccia Web (dashboard) | React 19.3, TypeScript 5.9, Vite 8 | `apps/web`, bundle `app.js`/`app.css` incluso nel Core; tema HUD olografico | ADR-0023 (sostituisce la deviazione dell'ADR-0004) |
-| keyring (Rust) | 3, nativo su macOS e Windows | Chiave dei segreti nel portachiavi | ADR-0021 |
-| Pianificatore | `tokio::time::interval` nel Core | Automazioni (RF-07) | ADR-0005 |
-| faster-whisper / Piper / openWakeWord | 1.2.1 / 1.8.0 / 0.4.0 (opzionali) | Voce locale | ADR-0010 |
-| argon2 / chacha20poly1305 / tar (Rust) | 0.5 / 0.10 / 0.4 | Backup cifrato | ADR-0012 |
-| Tauri | 2.12 (WebKitGTK 4.1 su Linux, WebView2 su Windows, WKWebView su macOS) | App desktop `apps/desktop/src-tauri` | ADR-0009 |
-| `ureq` / `url` (Rust) | 2.12 / 2.5 | Client HTTP del Web Agent con risolutore vincolato | ADR-0007 |
+Le versioni esatte sono risolte in `core/Cargo.lock`, `apps/desktop/src-tauri/Cargo.lock`, `apps/web/package-lock.json` e `ai/requirements-voice.txt`. [Architettura](ARCHITECTURE.md) · [Sviluppo](DEVELOPMENT.md)

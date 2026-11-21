@@ -54,3 +54,14 @@ Il proprietario ha autorizzato, il 2026-11-17, il merge automatico delle pull re
 ### Pubblicazione automatica dopo il merge
 
 Il workflow `contracts` verifica ogni push su `main`. Dopo il successo, `release-after-ci.yml` chiama `release.yml` sullo SHA verificato. Per assegnare una versione univoca, somma il numero dell’esecuzione CI alla patch dichiarata e applica il risultato alla build del Core e degli installer, senza modificare il branch. La revisione riceve il tag dopo i test di installazione del setup Windows x64 e del DMG Apple Silicon. La pubblicazione automatica mantiene i tag e gli installer delle altre revisioni e il rilancio sullo stesso SHA con lo stesso numero CI è idempotente.
+
+### Firma degli installer
+
+La release automatica da `main` attesta e firma con Sigstore il DMG, il setup EXE e `SHA256SUMS`. Le firme sono bundle separati e vengono verificate prima della pubblicazione.
+
+Per aggiungere le firme native, configura GitHub Actions e imposta la variabile `JARVIS_NATIVE_SIGNING=true` dopo aver predisposto entrambi i sistemi.
+
+- **Apple.** Serve un certificato **Developer ID Application**. Aggiungi il P12 codificato Base64 a `APPLE_CERTIFICATE` e la password a `APPLE_CERTIFICATE_PASSWORD`. Imposta la variabile `APPLE_SIGNING_IDENTITY` con il nome esatto del certificato. Aggiungi ai secret `APPLE_API_KEY` (ID chiave di App Store Connect), `APPLE_API_ISSUER` (issuer ID) e `JARVIS_APPLE_API_KEY_BASE64` (contenuto del file P8 codificato Base64). Tauri firma l’app e il DMG. La CI verifica le firme e allega i ticket ottenuti dalla notarizzazione.
+- **Windows.** Serve un profilo pubblico Azure Artifact Signing. Configura la federazione GitHub OIDC per il solo subject `repo:xX-VyrnCore-Xx/JARVIS:ref:refs/heads/main` e assegna il ruolo **Artifact Signing Certificate Profile Signer** al profilo. Imposta le variabili `AZURE_SIGNING_CLIENT_ID`, `AZURE_SIGNING_TENANT_ID`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT` e `AZURE_SIGNING_PROFILE`. La CI verifica Authenticode e la marca temporale prima della prova d’installazione.
+
+Le PR compilano i pacchetti con la configurazione di test. Se abiliti la firma nativa per la pubblicazione automatica, un errore di firma impedisce la pubblicazione.

@@ -1,12 +1,8 @@
 ## Pacchetti desktop di JARVIS
 
-La distribuzione desktop include un `.dmg` per Mac Apple Silicon e un setup `.exe` per Windows x64. Entrambi gli installer vengono installati e provati dalla CI.
-
-## Installazione
-
-| Sistema | File | Primo avvio |
+| Sistema | Installer | Installazione |
 |---|---|---|
-| **macOS Apple Silicon** 11 o successivo | `JARVIS_*_aarch64.dmg` | Apri il `.dmg` e trascina JARVIS in **Applicazioni**. Al primo avvio macOS avvisa che l'app non è firmata da Apple: **Impostazioni di Sistema › Privacy e sicurezza › Apri comunque**. Se compare «JARVIS è danneggiato», esegui nel Terminale `xattr -cr /Applications/JARVIS.app` e riapri. |
-| **Windows** 10/11 (64 bit) | `JARVIS_*_x64-setup.exe` | Se SmartScreen avvisa: **Ulteriori informazioni › Esegui comunque**. Il setup installa per l'utente corrente, senza permessi di amministratore. |
+| **macOS Apple Silicon** (macOS 11 o successivo) | `JARVIS_*_aarch64.dmg` | Apri il DMG e trascina JARVIS in **Applicazioni**. |
+| **Windows x64** (Windows 10 o 11) | `JARVIS_*_x64-setup.exe` | Avvia il setup per l’utente corrente. |
 
-Al primo avvio si apre la configurazione guidata. Verifica dell'integrità: `SHA256SUMS` è firmato con Sigstore (`SHA256SUMS.sigstore.json`), ogni installer ha l'attestazione di provenienza di GitHub.
+Al primo avvio si apre la configurazione guidata. Ogni installer ha un’attestazione GitHub e un file di firma `.sigstore.json`. La release include anche l’elenco firmato delle impronte `SHA256SUMS`. Verifica la firma prima di installare il pacchetto.

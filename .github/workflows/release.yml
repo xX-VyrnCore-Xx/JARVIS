@@ -7,7 +7,7 @@ on:
   push:
     tags: ["v*"]
   pull_request:
-    paths: ["scripts/fetch_python.py", ".github/workflows/release.yml", "apps/desktop/**", "core/server/src/main.rs", "core/server/src/rollback.rs"]
+    paths: ["scripts/fetch_python.py", ".github/workflows/release.yml", "scripts/sign_macos_release.sh", "apps/desktop/**", "core/server/src/main.rs", "core/server/src/rollback.rs"]
   workflow_call:
     inputs:
       tag:
@@ -19,6 +19,17 @@ on:
       automatico:
         type: boolean
         default: false
+    secrets:
+      APPLE_CERTIFICATE:
+        required: false
+      APPLE_CERTIFICATE_PASSWORD:
+        required: false
+      APPLE_API_KEY:
+        required: false
+      APPLE_API_ISSUER:
+        required: false
+      JARVIS_APPLE_API_KEY_BASE64:
+        required: false
   workflow_dispatch:
     inputs:
       tag:
@@ -47,6 +58,7 @@ jobs:
     name: installer (${{ matrix.target }})
     permissions:
       contents: read
+      id-token: write
     strategy:
       fail-fast: false
       matrix:
@@ -58,6 +70,7 @@ jobs:
     env:
       PYTHONDONTWRITEBYTECODE: "1"
       GITHUB_TOKEN: ${{ github.token }}
+      NATIVE_SIGNING: ${{ inputs.automatico && vars.JARVIS_NATIVE_SIGNING == 'true' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -99,13 +112,15 @@ jobs:
           if [ "$RUNNER_OS" = "Windows" ]; then py=apps/desktop/src-tauri/python/python.exe; else py=apps/desktop/src-tauri/python/bin/python3; fi
           "$py" -m pip install --disable-pip-version-check -q --target "$RUNNER_TEMP/voce" -r ai/requirements-voice.txt
           PYTHONPATH="$RUNNER_TEMP/voce" "$py" -c "import faster_whisper, piper, openwakeword, onnxruntime; print('pacchetti della voce importati')"
+      - name: CLI Tauri
+        run: npm install --global --no-audit --no-fund @tauri-apps/cli@2
       - name: Programmi di installazione (Tauri)
+        if: runner.os != 'macOS' || env.NATIVE_SIGNING != 'true'
         working-directory: apps/desktop/src-tauri
         shell: bash
         # CLI installato in modo esplicito: con npx il modulo nativo opzionale a volte non viene scaricato
         # (MODULE_NOT_FOUND su Windows). Il pacchetto nativo dipende dal sistema e npm lo sceglie da solo.
         run: |
-          npm install --global --no-audit --no-fund @tauri-apps/cli@2
           if [ "$RUNNER_OS" = "macOS" ]; then
             # Con CI=true Tauri salta l'impaginazione del .dmg (sfondo, posizione delle icone, ADR-0036): la si
             # chiede esplicitamente e, se Finder non risponde sul runner, si ripiega sul .dmg senza impaginazione.
@@ -116,6 +131,37 @@ jobs:
           else
             tauri build --config tauri.bundle.conf.json --bundles ${{ matrix.bundles }}
           fi
+      - name: Firma Developer ID e notarizzazione del DMG
+        if: runner.os == 'macOS' && env.NATIVE_SIGNING == 'true'
+        working-directory: apps/desktop/src-tauri
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          JARVIS_APPLE_API_KEY_BASE64: ${{ secrets.JARVIS_APPLE_API_KEY_BASE64 }}
+        run: bash ../../../scripts/sign_macos_release.sh
+      - name: Autenticazione Azure per Authenticode
+        if: runner.os == 'Windows' && env.NATIVE_SIGNING == 'true'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_SIGNING_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_SIGNING_TENANT_ID }}
+          allow-no-subscriptions: true
+      - name: Firma e marca temporale del setup Windows
+        if: runner.os == 'Windows' && env.NATIVE_SIGNING == 'true'
+        uses: azure/artifact-signing-action@v1
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}/apps/desktop/src-tauri/target/release/bundle/nsis
+          files-folder-filter: '*-setup.exe'
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
       - name: Installazione dal .dmg e avvio del Core installato (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -128,10 +174,12 @@ jobs:
           cp -R "$RUNNER_TEMP/dmg/JARVIS.app" "$RUNNER_TEMP/Applications/"
           hdiutil detach "$RUNNER_TEMP/dmg"
           app="$RUNNER_TEMP/Applications/JARVIS.app"
-          # Firma ad hoc dell'app (ADR-0020): sigillo valido su tutto il pacchetto.
           codesign --verify --deep --strict --verbose=2 "$app"
           plutil -extract LSMinimumSystemVersion raw "$app/Contents/Info.plist"
-          codesign -dv "$app" 2>&1 | grep -E "Signature=adhoc|flags=" 
+          if [ "$NATIVE_SIGNING" = "true" ]; then
+            xcrun stapler validate "$app"
+            spctl --assess --type execute --verbose=2 "$app"
+          fi
           res="$app/Contents/Resources"
           test -x "$app/Contents/MacOS/jarvis-core" && test -x "$res/python/bin/python3"
           JARVIS_HOME="$res" JARVIS_PYTHON="$res/python/bin/python3" JARVIS_DATA_DIR="$RUNNER_TEMP/dati" "$app/Contents/MacOS/jarvis-core" > core.log 2>&1 &
@@ -141,6 +189,12 @@ jobs:
         shell: pwsh
         run: |
           $setup = (Get-ChildItem apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe)[0].FullName
+          if ($env:NATIVE_SIGNING -eq 'true') {
+            $signature = Get-AuthenticodeSignature -LiteralPath $setup
+            if ($signature.Status -ne 'Valid' -or -not $signature.TimeStamperCertificate) {
+              throw "Firma Authenticode non valida o priva di marca temporale: $($signature.Status)"
+            }
+          }
           $root = Join-Path $env:RUNNER_TEMP 'JARVIS-installato'
           # Per NSIS /D deve essere l'ultimo argomento e va passato senza virgolette.
           $p = Start-Process -FilePath $setup -ArgumentList "/S /D=$root" -Wait -PassThru
@@ -214,18 +268,22 @@ jobs:
             dist/*.dmg
             dist/*-setup.exe
       - uses: sigstore/cosign-installer@v3
-      - name: Firma Sigstore dell'elenco delle impronte
+      - name: Firma e verifica Sigstore dei due installer e delle impronte
         working-directory: dist
         run: |
-          cosign sign-blob --yes --bundle SHA256SUMS.sigstore.json SHA256SUMS
-          cosign verify-blob --bundle SHA256SUMS.sigstore.json \
-            --certificate-identity "https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@$GITHUB_REF" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com SHA256SUMS
+          identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@$GITHUB_REF"
+          for file in *.dmg *-setup.exe SHA256SUMS; do
+            cosign sign-blob --yes --bundle "$file.sigstore.json" "$file"
+            cosign verify-blob --bundle "$file.sigstore.json" \
+              --certificate-identity "$identity" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com "$file"
+          done
       - name: Release pubblica con installer, impronte e firme
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.name }}
           AUTOMATIC: ${{ inputs.automatico }}
+          NATIVE_SIGNING: ${{ inputs.automatico && vars.JARVIS_NATIVE_SIGNING == 'true' }}
           REPLACE: ${{ inputs.sostituisci && 'true' || 'false' }}
         run: |
           git config user.name "github-actions[bot]"
@@ -255,7 +313,14 @@ jobs:
               exit 1
             }
           fi
-          gh release create "$TAG" dist/* --verify-tag --notes-file .github/release-notes.md --generate-notes --title "JARVIS $TAG" $extra --repo "$GITHUB_REPOSITORY" || {
+          notes=$(mktemp)
+          cp .github/release-notes.md "$notes"
+          if [ "$NATIVE_SIGNING" = "true" ]; then
+            printf '\nFirma nativa verificata su entrambi i pacchetti: Developer ID con notarizzazione Apple e Authenticode con marca temporale.\n' >> "$notes"
+          else
+            printf '\nI pacchetti sono firmati con Sigstore e attestati da GitHub Actions. macOS usa una firma ad hoc per l’app.\n' >> "$notes"
+          fi
+          gh release create "$TAG" dist/* --verify-tag --notes-file "$notes" --generate-notes --title "JARVIS $TAG" $extra --repo "$GITHUB_REPOSITORY" || {
             echo "::error::creazione della release rifiutata; diagnosi:"
             gh api "repos/$GITHUB_REPOSITORY/rulesets" || true
             gh api "repos/$GITHUB_REPOSITORY/releases?per_page=3" --jq '.[].tag_name' || true
