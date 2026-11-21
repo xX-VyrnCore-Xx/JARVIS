@@ -108,7 +108,7 @@ jobs:
           exit 1
       - name: Avvia JARVIS in modalità offline
         run: |
-          JARVIS_AI_BACKEND=offline JARVIS_PYTHON=python JARVIS_DATA_DIR="$RUNNER_TEMP/jarvis" JARVIS_PORT=8765 \
+          JARVIS_PYTHON=python JARVIS_DATA_DIR="$RUNNER_TEMP/jarvis" JARVIS_PORT=8765 \
           JARVIS_WEB_ALLOW_PRIVATE=1 JARVIS_WIKIPEDIA_URL=http://127.0.0.1:8799 JARVIS_WEB_DENY=vietato.localhost JARVIS_ALLOWED_HOSTS=jarvis.test,jarvis.localhost \
           JARVIS_VOICE_ENGINE=fake JARVIS_FAKE_STT_TEXT="che ore sono" JARVIS_SETUP_FAKE=1 JARVIS_UPDATE_URL=http://127.0.0.1:8799/releases \
             core/target/release/jarvis > "$RUNNER_TEMP/jarvis.log" 2>&1 &
@@ -182,7 +182,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       JARVIS_NO_BROWSER: "1"
-      JARVIS_AI_BACKEND: offline
       # Portachiavi del sistema su macOS e Windows, file 0600 su Linux (ADR-0021).
       JARVIS_EXPECT_SECRETS_STORE: ${{ matrix.os == 'ubuntu-latest' && 'file' || 'keychain' }}
     steps:

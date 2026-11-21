@@ -51,9 +51,11 @@ impl Provider {
         match (self, route) {
             (Self::Ollama, Route::Fast) => "glm-5.3-flash:cloud",
             (Self::Ollama, Route::Reasoning) => "deepseek-v4-pro:cloud",
+            (Self::Ollama, Route::Long) => "kimi-k3.1-pro:cloud",
             (Self::Ollama, Route::Coding) => "kimi-k2.7-code:cloud",
             (Self::Nim, Route::Fast) => "nvidia/nemotron-3.5-lightning-30b-a3b",
-            (Self::Nim, Route::Reasoning) => "mistralai/mistral-large-4-1t-a52b",
+            (Self::Nim, Route::Reasoning) => "nvidia/nemotron-3-ultra-550b-a55b",
+            (Self::Nim, Route::Long) => "moonshotai/kimi-k3",
             (Self::Nim, Route::Coding) => "qwen/qwen3-coder-480b-a35b-instruct",
         }
     }
@@ -68,7 +70,8 @@ impl Provider {
             "routing": {
                 "fast": self.model(Route::Fast),
                 "reasoning": self.model(Route::Reasoning),
-                "coding": self.model(Route::Coding)
+                "coding": self.model(Route::Coding),
+                "long": self.model(Route::Long)
             },
             "configured": configured,
             "effective_rpm": (self == Self::Nim).then_some(NIM_RPM),
@@ -82,12 +85,10 @@ impl Provider {
         let alternative = settings[self.id()]
             .as_str()
             .filter(|value| valid_model(value) && *value != model)
-            .unwrap_or_else(|| {
-                self.model(if route == Route::Fast {
-                    Route::Reasoning
-                } else {
-                    Route::Fast
-                })
+            .unwrap_or_else(|| match (self, route) {
+                (Self::Nim, Route::Reasoning | Route::Long) => "mistralai/mistral-large-4-1t-a52b",
+                (_, Route::Fast | Route::Coding | Route::Long) => self.model(Route::Reasoning),
+                (_, Route::Reasoning) => self.model(Route::Fast),
             });
         Target {
             provider: self,
@@ -105,6 +106,7 @@ enum Route {
     Fast,
     Reasoning,
     Coding,
+    Long,
 }
 
 impl Route {
@@ -157,6 +159,8 @@ impl Route {
                         .any(|term| text.contains(term))));
         if coding_task {
             Self::Coding
+        } else if tokens >= 3_200 {
+            Self::Long
         } else if complex {
             Self::Reasoning
         } else {
@@ -168,6 +172,7 @@ impl Route {
         match self {
             Self::Fast => "Rispondi in modo conciso. Per un dato attuale usa uno strumento pertinente, se disponibile.",
             Self::Reasoning => "Organizza i requisiti prima di rispondere. Confronta le opzioni sulla base dei vincoli espliciti e indica le verifiche mancanti.",
+            Self::Long => "Individua le informazioni pertinenti nel contesto lungo e mantieni i riferimenti ai passaggi originali.",
             Self::Coding => "Verifica linguaggio, interfacce e vincoli di compatibilità. Se serve il repository, chiedi il file o usa gli strumenti concessi prima di suggerire modifiche.",
         }
     }
@@ -176,7 +181,8 @@ impl Route {
         match self {
             Self::Fast => 1536,
             Self::Reasoning => 3072,
-            Self::Coding => 4096,
+            Self::Coding => 6144,
+            Self::Long => 6144,
         }
     }
 }
@@ -213,7 +219,58 @@ pub fn contains_credentials(text: &str) -> bool {
 
 /// Stima prudenziale indipendente dal tokenizer del provider, con margine per ruoli e messaggi.
 pub fn estimated_tokens(text: &str) -> usize {
-    8 + text.len().div_ceil(3)
+    let mut cost = 8;
+    let mut run = 0;
+    for ch in text.chars() {
+        if ch.is_ascii_alphanumeric() || (ch.is_alphabetic() && ch.len_utf8() == 2) {
+            run += ch.len_utf8();
+        } else {
+            cost += run.div_ceil(3);
+            run = 0;
+            cost += if matches!(ch, ' ' | '\t') {
+                0
+            } else {
+                ch.len_utf8().div_ceil(2)
+            };
+        }
+    }
+    (cost + run.div_ceil(3)).max(8 + text.len().div_ceil(4))
+}
+
+/// Limita un testo su confini UTF-8 conservando inizio e fine, senza ricomporre dati fra provider.
+pub fn clip_tokens(text: &str, budget: usize) -> String {
+    if estimated_tokens(text) <= budget {
+        return text.to_owned();
+    }
+    let boundaries: Vec<_> = text
+        .char_indices()
+        .map(|(offset, _)| offset)
+        .chain(std::iter::once(text.len()))
+        .collect();
+    let mut low = 0;
+    let mut high = boundaries.len() / 2;
+    while low < high {
+        let count = (low + high).div_ceil(2);
+        let candidate = format!(
+            "{}\n[…]\n{}",
+            &text[..boundaries[count]],
+            &text[boundaries[boundaries.len() - 1 - count]..]
+        );
+        if estimated_tokens(&candidate) <= budget {
+            low = count;
+        } else {
+            high = count - 1;
+        }
+    }
+    if low == 0 {
+        String::new()
+    } else {
+        format!(
+            "{}\n[…]\n{}",
+            &text[..boundaries[low]],
+            &text[boundaries[boundaries.len() - 1 - low]..]
+        )
+    }
 }
 
 pub fn valid_model(model: &str) -> bool {
@@ -438,7 +495,19 @@ fn payload(
     tools: &[Function],
     route: Route,
 ) -> Value {
-    let output_tokens = route.output_tokens();
+    // Plafond JARVIS, conservativo anche per i modelli di ripiego.
+    let input_tokens = estimated_tokens(prompt)
+        + history
+            .iter()
+            .map(|turn| estimated_tokens(&turn.user) + estimated_tokens(&turn.assistant))
+            .sum::<usize>()
+        + tools
+            .iter()
+            .map(|tool| estimated_tokens(&tool.wire.to_string()))
+            .sum::<usize>();
+    let output_tokens = route
+        .output_tokens()
+        .min(32_000usize.saturating_sub(input_tokens + 1_500).max(256));
     let mut messages = vec![
         json!({"role": "system", "content": format!("{} {}", concat!(
         "Sei JARVIS. Rispondi nella lingua dell’utente e concentrati sull’ultima domanda. ",
@@ -607,6 +676,17 @@ mod tests {
             );
             assert_eq!(followup.route, Route::Reasoning);
         }
+    }
+
+    #[test]
+    fn token_budget_counts_code_and_clips_unicode_at_valid_boundaries() {
+        assert!(estimated_tokens("{{}}[];::??") > estimated_tokens("conversation"));
+        let text = format!("inizio {} fine", "日本語🙂 ".repeat(180));
+        let clipped = clip_tokens(&text, 80);
+        assert!(estimated_tokens(&clipped) <= 80);
+        assert!(clipped.starts_with("inizio") && clipped.ends_with("fine"));
+        let target = Provider::Ollama.target("test".into(), &text.repeat(10), vec![], &json!({}));
+        assert_eq!(target.route, Route::Long);
     }
 
     #[test]

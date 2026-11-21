@@ -1,6 +1,6 @@
 // E2E dell'interfaccia: chat, strumento a basso rischio, conferma di scrittura, memoria e audit.
 // Uso: JARVIS_URL=http://localhost:8765 node tests/e2e/ui_smoke.cjs [cartella-screenshot]
-// Richiede un Core appena avviato con JARVIS_AI_BACKEND=offline (risposte deterministiche) e una
+// Richiede un Core appena avviato con (risposte deterministiche) e una
 // JARVIS_DATA_DIR vuota (i contatori presuppongono uno stato iniziale pulito), più il pacchetto `playwright`.
 //
 // Ricerca Web (RF-06): lo script avvia un server locale su JARVIS_E2E_WEB_PORT (8799) che imita Wikipedia.
@@ -430,6 +430,16 @@ function check(cond, msg) {
   await phone.keyboard.press("Enter");
   await phone.waitForFunction(() => document.querySelectorAll(".msg.assistant").length > 0, null, { timeout: 30000 });
   check(true, "chat dal dispositivo associato");
+  await page.click('[data-view="chat"]');
+  await phone.waitForFunction(() => !document.querySelector("#send").disabled);
+  await phone.fill("#input", "calcola 37 + 5");
+  await phone.keyboard.press("Enter");
+  await page.locator(".msg.user").getByText("calcola 37 + 5", { exact: true }).waitFor();
+  check(true, "la Chat del proprietario riceve il messaggio del dispositivo senza ricaricare");
+  await send("calcola 17 + 9");
+  await phone.locator(".msg.user").getByText("calcola 17 + 9", { exact: true }).waitFor();
+  check(true, "il dispositivo associato riceve il turno del proprietario senza ricaricare");
+  await page.click('[data-view="devices"]');
   // Passkey (ADR-0042): autenticatore virtuale di Chromium con verifica dell'utente (impronta simulata).
   const cdp = await phoneCtx.newCDPSession(phone);
   await cdp.send("WebAuthn.enable");

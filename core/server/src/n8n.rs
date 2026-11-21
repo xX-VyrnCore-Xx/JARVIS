@@ -31,8 +31,41 @@ fn docker_binary() -> PathBuf {
     "docker".into()
 }
 
+/// Docker viene usato solo sul computer che ospita il Core.
+fn docker_host() -> String {
+    #[cfg(unix)]
+    {
+        let mut sockets = Vec::new();
+        #[cfg(target_os = "macos")]
+        if let Some(home) = std::env::var_os("HOME") {
+            sockets.push(PathBuf::from(home).join(".docker/run/docker.sock"));
+        }
+        if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") {
+            sockets.push(PathBuf::from(dir).join("docker.sock"));
+        }
+        sockets.push(PathBuf::from("/var/run/docker.sock"));
+        if let Some(socket) = sockets
+            .iter()
+            .find(|socket| socket.is_absolute() && socket.exists())
+        {
+            return format!("unix://{}", socket.display());
+        }
+        "unix:///var/run/docker.sock".into()
+    }
+    #[cfg(windows)]
+    {
+        "npipe:////./pipe/docker_engine".into()
+    }
+}
+
 fn docker(args: &[&str], input: Option<&[u8]>, timeout: Duration) -> Result<String, String> {
     let mut cmd = Command::new(docker_binary());
+    cmd.env_remove("DOCKER_HOST")
+        .env_remove("DOCKER_CONTEXT")
+        .env_remove("DOCKER_TLS_VERIFY")
+        .env_remove("DOCKER_CERT_PATH")
+        .arg("--host")
+        .arg(docker_host());
     crate::hide_console(&mut cmd);
     let mut child = cmd
         .args(args)
@@ -50,7 +83,9 @@ fn docker(args: &[&str], input: Option<&[u8]>, timeout: Duration) -> Result<Stri
     let read = |pipe: Box<dyn Read + Send>| {
         std::thread::spawn(move || {
             let mut data = Vec::new();
-            let _ = pipe.take(128 * 1024).read_to_end(&mut data);
+            let mut pipe = pipe;
+            let _ = (&mut pipe).take(128 * 1024).read_to_end(&mut data);
+            let _ = std::io::copy(&mut pipe, &mut std::io::sink());
             String::from_utf8_lossy(&data).into_owned()
         })
     };
@@ -154,10 +189,10 @@ impl Manager {
         }
         match self.state() {
             Ok(state) => {
-                json!({"enabled": true, "running": state == Some(true), "items": jobs, "image": IMAGE})
+                json!({"enabled": true, "running": state == Some(true), "docker_connected": true, "container_created": state.is_some(), "items": jobs, "image": IMAGE})
             }
             Err(error) => {
-                json!({"enabled": true, "running": false, "items": jobs, "error": error, "image": IMAGE})
+                json!({"enabled": true, "running": false, "docker_connected": false, "items": jobs, "error": error, "image": IMAGE})
             }
         }
     }
@@ -170,7 +205,7 @@ impl Manager {
                 let volume = format!("{}:/home/node/.n8n", self.name);
                 docker(&["run", "-d", "--name", &self.name, "--label", "local.jarvis.n8n=1",
                     "--network", "none", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-                    "--pids-limit", "256", "--volume", &volume,
+                    "--pids-limit", "256", "--memory", "768m", "--cpus", "1.5", "--restart", "unless-stopped", "--volume", &volume,
                     "-e", "N8N_LISTEN_ADDRESS=127.0.0.1",
                     "-e", "N8N_DIAGNOSTICS_ENABLED=false", "-e", "N8N_VERSION_NOTIFICATIONS_ENABLED=false",
                     "-e", "N8N_TEMPLATES_ENABLED=false", "-e", "N8N_COMMUNITY_PACKAGES_ENABLED=false",
@@ -180,7 +215,12 @@ impl Manager {
                     IMAGE], None, Duration::from_secs(180))?;
             }
             (true, Some(false)) => {
-                docker(&["start", &self.name], None, Duration::from_secs(15))?;
+                docker(
+                    &["update", "--restart", "unless-stopped", &self.name],
+                    None,
+                    Duration::from_secs(10),
+                )?;
+                docker(&["start", &self.name], None, Duration::from_secs(25))?;
             }
             (false, Some(true)) => {
                 docker(
@@ -190,6 +230,25 @@ impl Manager {
                 )?;
             }
             _ => (),
+        }
+        if running {
+            let probe = "fetch('http://127.0.0.1:5678/healthz/readiness').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))";
+            let until = Instant::now() + Duration::from_secs(35);
+            loop {
+                if docker(
+                    &["exec", &self.name, "node", "-e", probe],
+                    None,
+                    Duration::from_secs(4),
+                )
+                .is_ok()
+                {
+                    break;
+                }
+                if Instant::now() >= until {
+                    return Err("Docker ha avviato il container, ma n8n non è ancora pronto. Controlla lo stato e riprova.".into());
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
         }
         Ok(self.status())
     }

@@ -3,11 +3,11 @@ import { api, post } from "../lib/api";
 import { useApp, useViewData } from "../state";
 
 interface Routine { id: string; name: string; kind: "audit" | "reminder"; minutes: number; last_run?: number }
-interface Status { enabled: boolean; running: boolean; items: Routine[]; image: string; error?: string }
+interface Status { enabled: boolean; running: boolean; items: Routine[]; image: string; docker_connected?: boolean; container_created?: boolean; error?: string }
 
 export function N8nPanel({ active }: { active: boolean }) {
   const { activity, notifTick } = useApp();
-  const { data, setData, error } = useViewData(active, () => api<Status>("/api/n8n"), [activity, notifTick]);
+  const { data, setData, error, reload } = useViewData(active, () => api<Status>("/api/n8n"), [activity, notifTick]);
   const [name, setName] = useState("");
   const [kind, setKind] = useState("reminder");
   const [minutes, setMinutes] = useState(15);
@@ -23,7 +23,7 @@ export function N8nPanel({ active }: { active: boolean }) {
 
   return (
     <details className="panel n8n-panel">
-      <summary>Container n8n · {data?.running ? "in esecuzione" : data?.enabled ? "fermo" : "da abilitare"}</summary>
+      <summary>Container n8n · {data?.running ? "in esecuzione" : data?.enabled ? data.docker_connected === false ? "Docker non disponibile" : "fermo" : "da abilitare"}</summary>
       {error || failure || data?.error ? <p className="form-error" role="alert">{failure || error || data?.error}</p> : null}
       {!data?.enabled ? (
         <div>
@@ -33,7 +33,9 @@ export function N8nPanel({ active }: { active: boolean }) {
       ) : (
         <>
           <div className="row">
-            <button className="ghost" type="button" disabled={busy} onClick={() => void run(() => post("/api/n8n", { running: !data.running }))}>
+            {data.docker_connected === false ? <p className="hint">Avvia Docker sul computer che ospita il Core.</p> : null}
+            <button className="ghost" type="button" disabled={busy} onClick={reload}>Ricontrolla Docker</button>
+            <button className="ghost" type="button" disabled={busy || data.docker_connected === false} onClick={() => void run(() => post("/api/n8n", { running: !data.running }))}>
               {busy ? "Operazione in corso…" : data.running ? "Ferma n8n" : "Avvia n8n"}
             </button>
           </div>

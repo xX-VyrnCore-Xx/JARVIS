@@ -88,7 +88,7 @@ function Runs({ w }: { w: Workflow }) {
 
 export function Automations({ active }: { active: boolean }) {
   const { refreshStatus, activity } = useApp();
-  const { data, reload } = useViewData(active, () => api<{ items: Workflow[] }>("/api/workflows"), [activity]);
+  const { data, reload } = useViewData(active, () => api<{ items: Workflow[] }>("/api/workflows"), [activity], 8000);
   const [tools, setTools] = useState<Tool[]>([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Workflow | null>(null);

@@ -86,6 +86,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const sendRef = useRef<(text: string) => void>(() => {});
   const notifSince = useRef<string | null>(null);
   const notifPrimed = useRef(false);
+  const lastUnread = useRef<number | null>(null);
 
   const refreshStatus = useCallback(() => {
     api<Health>("/api/health")
@@ -119,7 +120,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (data.items.length) notifSince.current = data.items[0].created_at;
         if (notifPrimed.current) data.items.filter((n) => !n.read_at).reverse().forEach(toast);
         notifPrimed.current = true;
-        if (data.items.length) setNotifTick((x) => x + 1);
+        if (data.items.length || lastUnread.current !== data.unread) setNotifTick((x) => x + 1);
+        lastUnread.current = data.unread;
       })
       .catch(() => {
         /* il Core può essere momentaneamente occupato */
@@ -168,7 +170,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 }
 
 /** Carica dati quando la vista è attiva (e a ogni `deps`), con ricarica manuale. */
-export function useViewData<T>(active: boolean, load: () => Promise<T>, deps: unknown[] = []) {
+export function useViewData<T>(active: boolean, load: () => Promise<T>, deps: unknown[] = [], pollMs?: number) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const reload = useCallback(() => {
@@ -181,7 +183,16 @@ export function useViewData<T>(active: boolean, load: () => Promise<T>, deps: un
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
   useEffect(() => {
-    if (active) reload();
-  }, [active, reload]);
+    if (!active) return;
+    reload();
+    if (!pollMs) return;
+    const poll = () => { if (!document.hidden) reload(); };
+    const timer = window.setInterval(poll, pollMs);
+    document.addEventListener("visibilitychange", poll);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", poll);
+    };
+  }, [active, reload, pollMs]);
   return { data, error, reload, setData };
 }

@@ -11,7 +11,6 @@ pub struct Config {
     pub python: String,
     pub ai_dir: PathBuf,
     /// Backend del worker. L’app usa il motore a regole; i test possono sostituirlo.
-    pub ai_backend: Option<String>,
     pub delegation_timeout_ms: u64,
     /// Variabili aggiuntive per il worker (es. iniezione di guasti nei test, `JARVIS_FAULT_INJECTION`).
     pub worker_env: Vec<(String, String)>,
@@ -74,7 +73,6 @@ impl Config {
             ai_dir: var("JARVIS_AI_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| root.join("ai")),
-            ai_backend: Some("offline".into()),
             delegation_timeout_ms: var("JARVIS_DELEGATION_TIMEOUT_MS")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(180_000),

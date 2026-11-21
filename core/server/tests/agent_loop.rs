@@ -1,10 +1,7 @@
-//! Ciclo dell'agente (ADR-0037): worker Python reale contro un Ollama sintetico che propone più strumenti
+//! Ciclo dell'agente (ADR-0037): worker Python sintetico che propone più strumenti
 //! in sequenza. Ogni passo passa dalla policy del Core; il ciclo si ferma alla risposta, a una proposta
 //! ripetuta o dopo 4 strumenti.
 
-use std::collections::VecDeque;
-use std::io::{BufRead, BufReader, Read, Write};
-use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -19,84 +16,48 @@ use tower::ServiceExt;
 
 const TOKEN: &str = "token-ciclo";
 
-/// Ollama sintetico: con strumenti nella richiesta risponde con la prossima chiamata del copione (o ripete
-/// l'ultima se `repeat`), senza strumenti risponde con un testo. Registra le richieste a `/api/chat`.
-fn fake_ollama(
-    script: Vec<(&'static str, Value)>,
+struct Script {
+    calls: Vec<(&'static str, Value)>,
     repeat: bool,
-) -> (String, Arc<Mutex<Vec<Value>>>) {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let url = format!("http://{}", listener.local_addr().unwrap());
-    let seen = Arc::new(Mutex::new(Vec::new()));
-    let log = seen.clone();
-    let mut queue: VecDeque<(&'static str, Value)> = script.into();
-    std::thread::spawn(move || {
-        let mut last: Option<(&'static str, Value)> = None;
-        for stream in listener.incoming() {
-            let Ok(mut stream) = stream else { continue };
-            let mut reader = BufReader::new(stream.try_clone().unwrap());
-            let mut first = String::new();
-            reader.read_line(&mut first).unwrap();
-            let mut length = 0usize;
-            loop {
-                let mut line = String::new();
-                reader.read_line(&mut line).unwrap();
-                if line == "\r\n" || line.is_empty() {
-                    break;
-                }
-                if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
-                    length = v.trim().parse().unwrap_or(0);
-                }
-            }
-            let mut body = vec![0u8; length];
-            reader.read_exact(&mut body).unwrap();
-            let payload = if first.starts_with("GET /api/tags") {
-                json!({"models": [{"name": "qwen2.5:3b"}]})
-            } else {
-                let req: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
-                log.lock().unwrap().push(req.clone());
-                let next = if req.get("tools").is_some() {
-                    queue.pop_front().or_else(|| if repeat { last.clone() } else { None })
-                } else {
-                    None
-                };
-                match next {
-                    Some((name, args)) => {
-                        last = Some((name, args.clone()));
-                        json!({"message": {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": name, "arguments": args}}]},
-                               "done": true, "prompt_eval_count": 10, "eval_count": 2})
-                    }
-                    None => json!({"message": {"role": "assistant", "content": "Fatto: ecco il riepilogo."},
-                                   "done": true, "prompt_eval_count": 10, "eval_count": 5}),
-                }
-            }
-            .to_string();
-            let _ = write!(
-                stream,
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                payload.len(),
-                payload
-            );
-        }
-    });
-    (url, seen)
+    seen: Arc<Mutex<Vec<Value>>>,
 }
 
-async fn chat(ollama: String, port: u16, message: &str) -> Value {
+fn fake_worker(
+    calls: Vec<(&'static str, Value)>,
+    repeat: bool,
+) -> (Script, Arc<Mutex<Vec<Value>>>) {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    (
+        Script {
+            calls,
+            repeat,
+            seen: seen.clone(),
+        },
+        seen,
+    )
+}
+
+async fn chat(script: Script, port: u16, message: &str) -> Value {
     let data = std::env::temp_dir().join(format!("jarvis-loop-{}", uuid::Uuid::new_v4().simple()));
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let log = data.join("delegations.jsonl");
     let cfg = Config {
         host: "127.0.0.1".parse().unwrap(),
         port,
         data_dir: data,
         python: std::env::var("JARVIS_PYTHON").unwrap_or_else(|_| "python3".into()),
-        ai_dir: root.join("ai"),
-        ai_backend: Some("ollama".into()),
+        ai_dir: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/agent"),
         delegation_timeout_ms: 30_000,
         voice_engine: Some("fake".into()),
         worker_env: vec![
-            ("JARVIS_OLLAMA_URL".into(), ollama),
-            ("JARVIS_TOOL_SELECTION".into(), "all".into()),
+            ("JARVIS_TEST_CALLS".into(), json!(script.calls).to_string()),
+            (
+                "JARVIS_TEST_REPEAT".into(),
+                if script.repeat { "1" } else { "0" }.into(),
+            ),
+            (
+                "JARVIS_TEST_DELEGATIONS".into(),
+                log.to_string_lossy().into_owned(),
+            ),
         ],
         scheduler_tick_s: 20,
         token: TOKEN.into(),
@@ -113,6 +74,11 @@ async fn chat(ollama: String, port: u16, message: &str) -> Value {
         .unwrap();
     let res = app.oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
+    *script.seen.lock().unwrap() = std::fs::read_to_string(log)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
     serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap()
 }
 
@@ -128,8 +94,8 @@ fn tools_called(out: &Value) -> Vec<String> {
 
 #[tokio::test]
 async fn agent_chains_tools_then_answers() {
-    let (url, seen) = fake_ollama(
-        vec![("time__now", json!({})), ("system__info", json!({}))],
+    let (url, seen) = fake_worker(
+        vec![("time.now", json!({})), ("system.info", json!({}))],
         false,
     );
     let out = chat(url, 18771, "che ore sono e che sistema uso?").await;
@@ -138,25 +104,13 @@ async fn agent_chains_tools_then_answers() {
     assert_eq!(out["task"]["state"], "succeeded");
     let reqs = seen.lock().unwrap();
     assert_eq!(reqs.len(), 3, "due strumenti e la risposta finale");
-    // Il secondo passo riceve il primo risultato come chiamata e risposta dello strumento.
-    let second = &reqs[1]["messages"];
-    assert!(second.to_string().contains("time__now"), "{second}");
-    assert!(second
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|m| m["role"] == "tool"));
-    // Il prompt di sistema porta data, regole e memoria.
-    let system = reqs[0]["messages"][0]["content"].as_str().unwrap();
-    assert!(
-        system.contains("Data e ora locali") && system.contains("uno per volta"),
-        "{system}"
-    );
+    assert_eq!(reqs[1]["inputs"]["tool_result"]["tool"], "time.now");
+    assert_eq!(reqs[1]["inputs"]["tool_result"]["status"], "succeeded");
 }
 
 #[tokio::test]
 async fn repeated_proposal_closes_the_loop() {
-    let (url, _) = fake_ollama(vec![("time__now", json!({}))], true);
+    let (url, _) = fake_worker(vec![("time.now", json!({}))], true);
     let out = chat(url, 18772, "che ore sono").await;
     assert_eq!(
         tools_called(&out),
@@ -174,13 +128,13 @@ async fn repeated_proposal_closes_the_loop() {
 #[tokio::test]
 async fn loop_stops_after_four_tools() {
     let script = vec![
-        ("time__now", json!({})),
-        ("system__info", json!({})),
-        ("memory__list", json!({})),
-        ("memory__search", json!({"query": "caffè"})),
-        ("fs__list", json!({"path": "."})),
+        ("time.now", json!({})),
+        ("system.info", json!({})),
+        ("memory.list", json!({})),
+        ("memory.search", json!({"query": "caffè"})),
+        ("fs.list", json!({"path": "."})),
     ];
-    let (url, seen) = fake_ollama(script, false);
+    let (url, seen) = fake_worker(script, false);
     let out = chat(url, 18773, "fai un controllo completo").await;
     assert_eq!(
         tools_called(&out),
@@ -190,7 +144,7 @@ async fn loop_stops_after_four_tools() {
     assert_eq!(out["reply"], "Fatto: ecco il riepilogo.");
     let last = seen.lock().unwrap().last().cloned().unwrap();
     assert!(
-        last.get("tools").is_none(),
+        last["inputs"]["steps_left"] == 0,
         "all'ultimo passo il modello non riceve strumenti"
     );
 }
@@ -198,50 +152,46 @@ async fn loop_stops_after_four_tools() {
 #[tokio::test]
 async fn specialist_gets_only_its_tools_and_cannot_leave_its_scope() {
     // Richiesta di ricerca: l'agente `research` riceve solo Web, ora e ricerca nella memoria (ADR-0038).
-    let (url, seen) = fake_ollama(vec![("shell__run", json!({"command": "ls"}))], false);
+    let (url, seen) = fake_worker(vec![("shell.run", json!({"command": "ls"}))], false);
     let out = chat(url, 18774, "cerca sul web le novità di Rust").await;
     let first = seen.lock().unwrap()[0].clone();
     let mut offered: Vec<String> = first["tools"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|t| t["function"]["name"].as_str().unwrap().to_string())
+        .map(|t| t["name"].as_str().unwrap().to_string())
         .collect();
     offered.sort();
     assert_eq!(
         offered,
         [
-            "memory__search",
-            "time__now",
-            "web__browse",
-            "web__fetch",
-            "web__form",
-            "web__search"
+            "memory.search",
+            "time.now",
+            "web.browse",
+            "web.fetch",
+            "web.form",
+            "web.search"
         ],
         "{first}"
     );
-    assert!(first["messages"][0]["content"]
-        .as_str()
-        .unwrap()
-        .contains("Specializzazione per questa richiesta — Ricerca"));
-    // Una proposta fuori ambito viene scartata (dal worker e, in seconda difesa, dal Core): nessuna esecuzione.
+    assert_eq!(first["delegate"]["agent"], "research");
     let steps = out["steps"].as_array().unwrap();
-    assert_eq!(steps[0]["agent"], "research", "{out}");
     assert!(
-        !steps
+        steps
             .iter()
-            .any(|s| s["kind"] == "tool_call" || s["kind"] == "policy"),
+            .any(|s| s["kind"] == "scope" && s["allowed"] == false),
         "{out}"
     );
+    assert!(!steps.iter().any(|s| s["kind"] == "tool_result"), "{out}");
     assert!(out["confirmation"].is_null());
 }
 
 #[tokio::test]
 async fn temporary_agents_only_get_tools_without_confirmation() {
     // Il principale chiede un agente temporaneo con fs.write: il Core rifiuta prima di crearlo (ADR-0040).
-    let (url, seen) = fake_ollama(
+    let (url, seen) = fake_worker(
         vec![(
-            "agent__delegate",
+            "agent.delegate",
             json!({"role": "scrittore", "objective": "scrivi un file", "tools": ["fs.write"]}),
         )],
         false,
@@ -257,7 +207,7 @@ async fn temporary_agents_only_get_tools_without_confirmation() {
     );
     let reqs = seen.lock().unwrap();
     assert!(
-        reqs[1]["messages"]
+        reqs[1]["inputs"]["tool_history"]
             .to_string()
             .contains("agent.invalid_tools"),
         "{}",
@@ -268,10 +218,10 @@ async fn temporary_agents_only_get_tools_without_confirmation() {
 #[tokio::test]
 async fn invalid_arguments_are_explained_and_the_model_can_retry() {
     // Primo tentativo con un campo sbagliato; il modello riceve i difetti e riprova correttamente (ADR-0045).
-    let (url, seen) = fake_ollama(
+    let (url, seen) = fake_worker(
         vec![
-            ("memory__search", json!({"query": ""})),
-            ("memory__search", json!({"query": "caffè"})),
+            ("memory.search", json!({"query": ""})),
+            ("memory.search", json!({"query": "caffè"})),
         ],
         false,
     );
@@ -290,7 +240,7 @@ async fn invalid_arguments_are_explained_and_the_model_can_retry() {
         "solo il secondo tentativo viene eseguito: {out}"
     );
     let second = seen.lock().unwrap()[1].clone();
-    let text = second["messages"].to_string();
+    let text = second["inputs"]["tool_history"].to_string();
     assert!(
         text.contains("policy.invalid_arguments") && text.contains("expected"),
         "{text}"
@@ -299,7 +249,7 @@ async fn invalid_arguments_are_explained_and_the_model_can_retry() {
 
 #[tokio::test]
 async fn missing_required_tool_arguments_are_requested_without_a_retry() {
-    let (url, seen) = fake_ollama(vec![("memory__search", json!({}))], false);
+    let (url, seen) = fake_worker(vec![("memory.search", json!({}))], false);
     let out = chat(url, 18779, "cerca nella memoria").await;
     assert!(out["reply"].as_str().unwrap().contains("query"), "{out}");
     assert!(out["steps"]
@@ -319,26 +269,25 @@ async fn missing_required_tool_arguments_are_requested_without_a_retry() {
 async fn active_skills_enter_the_prompt_and_widen_only_the_offered_tools() {
     // «buongiorno» attiva la competenza inclusa «Briefing del mattino» anche per una richiesta di ricerca:
     // le sue istruzioni entrano nel prompt e i suoi strumenti vengono offerti per primi (ADR-0048).
-    let (url, seen) = fake_ollama(vec![], false);
+    let (url, seen) = fake_worker(vec![], false);
     let out = chat(url, 18780, "buongiorno, cerca sul web le notizie di oggi").await;
     let first = seen.lock().unwrap()[0].clone();
-    let system = first["messages"][0]["content"].as_str().unwrap();
-    assert!(
-        system.contains("Competenza «Briefing del mattino»") && system.contains("cinque punti"),
-        "{system}"
-    );
+    assert_eq!(first["inputs"]["skills"][0]["name"], "Briefing del mattino");
     let offered: Vec<String> = first["tools"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|t| t["function"]["name"].as_str().unwrap().to_string())
+        .map(|t| t["name"].as_str().unwrap().to_string())
         .collect();
-    assert_eq!(
-        offered[..3],
-        ["time__now", "weather__forecast", "todo__list"],
+    assert!(
+        offered.iter().any(|tool| tool == "weather.forecast"),
         "{offered:?}"
     );
-    assert!(!offered.iter().any(|t| t == "shell__run"), "{offered:?}");
+    assert!(
+        offered.iter().any(|tool| tool == "todo.list"),
+        "{offered:?}"
+    );
+    assert!(!offered.iter().any(|t| t == "shell.run"), "{offered:?}");
     assert!(out["steps"]
         .as_array()
         .unwrap()

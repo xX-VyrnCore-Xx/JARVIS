@@ -131,7 +131,7 @@ const SUBAGENT_DEFAULT_TOOLS: [&str; 7] = [
 /// Caratteri conservati degli esiti precedenti all'ultimo nel contesto dell'agente.
 const EARLIER_OUTPUT_CHARS: usize = 1500;
 const LATEST_OUTPUT_CHARS: usize = 6000;
-const CLOUD_CONVERSATION_TOKENS: usize = 4000;
+const CLOUD_CONVERSATION_TOKENS: usize = 16_000;
 
 /// Identificativi W3C Trace Context (ADR-0039): traccia = correlation_id del task (32 esadecimali), intervallo
 /// radice = prime 16 cifre dell'id del task, intervalli figli casuali.
@@ -322,9 +322,6 @@ impl Jarvis {
             crate::hide_console(&mut cmd);
             cmd.args(["-m", "jarvis_ai.worker", "--handler", "assistant"])
                 .current_dir(&self.cfg.ai_dir);
-            if let Some(backend) = &self.cfg.ai_backend {
-                cmd.env("JARVIS_AI_BACKEND", backend);
-            }
             if let Some(engine) = &self.cfg.voice_engine {
                 cmd.env("JARVIS_VOICE_ENGINE", engine);
             }
@@ -833,8 +830,8 @@ impl Jarvis {
                     {
                         break;
                     }
-                    let user = clip(&turn.user, 1300);
-                    let assistant = clip(assistant, 1300);
+                    let user = crate::cloud::clip_tokens(&turn.user, 2200);
+                    let assistant = crate::cloud::clip_tokens(assistant, 2800);
                     let cost = crate::cloud::estimated_tokens(&user)
                         + crate::cloud::estimated_tokens(&assistant);
                     if cost > budget {

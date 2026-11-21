@@ -39,9 +39,10 @@ export interface Confirmation {
   target: string;
   expires_at: string;
 }
-type MsgItem = { id: number; kind: "msg"; role: "user" | "assistant"; text: string; steps?: Step[]; sources?: Source[]; error?: boolean; streaming?: boolean };
+type MsgItem = { id: number; kind: "msg"; role: "user" | "assistant"; text: string; steps?: Step[]; sources?: Source[]; error?: boolean; streaming?: boolean; seq?: number; taskId?: string };
 type ConfirmItem = { id: number; kind: "confirm"; c: Confirmation; decided?: boolean; approved?: boolean };
 type Item = MsgItem | ConfirmItem;
+interface SharedMessage { seq: number; task_id: string | null; role: "user" | "assistant"; content: string; sources?: Source[] }
 type NewItem = Omit<MsgItem, "id"> | Omit<ConfirmItem, "id">;
 
 const SUGGESTIONS = [
@@ -160,6 +161,9 @@ export function Chat({ active }: { active: boolean }) {
   const [items, setItems] = useState<Item[]>([]);
   const [pending, setPending] = useState(false);
   const sending = useRef(false);
+  const deciding = useRef(0);
+  const syncing = useRef(false);
+  const localRevision = useRef(0);
   const [text, setText] = useState("");
   const [useContext, setUseContext] = useState(false);
   const [provider, setProvider] = useState<CloudProvider["id"] | "auto" | "">("");
@@ -171,16 +175,19 @@ export function Chat({ active }: { active: boolean }) {
   useVoice();
 
   const add = useCallback((item: NewItem) => {
-    setItems((list) => [...list, { ...item, id: nextId.current++ } as Item]);
+    const id = nextId.current++;
+    setItems((list) => [...list, { ...item, id } as Item]);
+    return id;
   }, []);
   const say = useCallback(
-    (textOut: string, extra: { steps?: Step[]; sources?: Source[]; error?: boolean } = {}) =>
+    (textOut: string, extra: { steps?: Step[]; sources?: Source[]; error?: boolean; taskId?: string } = {}) =>
       add({ kind: "msg", role: "assistant", text: textOut, ...extra }),
     [add],
   );
 
+  const atBottom = useRef(true);
   useEffect(() => {
-    box.current?.scrollTo({ top: box.current.scrollHeight });
+    if (atBottom.current) box.current?.scrollTo({ top: box.current.scrollHeight });
   }, [items, pending]);
 
   const send = useCallback(
@@ -188,9 +195,11 @@ export function Chat({ active }: { active: boolean }) {
       const message = raw.trim();
       if (!message || sending.current) return;
       sending.current = true;
+      localRevision.current++;
+      atBottom.current = true;
       const initialActivity = activityFromPrompt(message);
       setAvatarActivity(initialActivity);
-      add({ kind: "msg", role: "user", text: message });
+      const userId = add({ kind: "msg", role: "user", text: message });
       setPending(true);
       setThinking(true);
       // Il messaggio in arrivo compare al primo frammento e cresce finché l'esito non lo sostituisce.
@@ -212,11 +221,12 @@ export function Chat({ active }: { active: boolean }) {
         const out = remote ? await post("/api/cloud/chat", { message, provider: remote, use_context: useContext }) : await chatStream(message, onDelta);
         setAvatarActivity(activityFromResult(initialActivity, out.steps || [], out.task?.state === "failed" ? "error" : out.confirmation ? "attention" : undefined));
         const final = { kind: "msg" as const, role: "assistant" as const, text: out.reply || "(nessuna risposta)", steps: out.steps, sources: out.sources,
-          error: out.task && out.task.state === "failed" };
-        if (streamId != null) {
-          const id = streamId;
-          setItems((list) => list.map((x) => (x.id === id ? { id, ...final } : x)));
-        } else add(final);
+          error: out.task && out.task.state === "failed", taskId: out.task?.task_id };
+        setItems((list) => list.map((item) => {
+          if (item.id === userId) return { ...item, taskId: out.task?.task_id } as Item;
+          return item.id === streamId ? { id: item.id, ...final } : item;
+        }));
+        if (streamId == null) add(final);
         if (out.confirmation) add({ kind: "confirm", c: out.confirmation });
         if (out.reply) void voice.speak(out.reply);
       } catch (e) {
@@ -266,37 +276,83 @@ export function Chat({ active }: { active: boolean }) {
   }, []);
 
   useEffect(() => {
-    (async () => {
+    let cancelled = false;
+    async function sync() {
+      if (document.hidden || sending.current || deciding.current || syncing.current) return;
+      syncing.current = true;
+      const revision = localRevision.current;
       try {
-        const { items: history } = await api("/api/conversation?limit=50");
-        const loaded: Item[] = [];
-        for (const m of history)
-          loaded.push({ id: nextId.current++, kind: "msg", role: m.role === "user" ? "user" : "assistant", text: m.content, sources: m.sources });
-        const conf = await api("/api/confirmations");
-        for (const c of conf.items) loaded.push({ id: nextId.current++, kind: "confirm", c });
-        setItems((list) => [...loaded, ...list]);
-      } catch (e) {
-        say(`Errore nel caricamento: ${(e as Error).message}`, { error: true });
+        const result = await api<{ messages: SharedMessage[]; confirmations: Confirmation[] }>("/api/chat/sync");
+        if (cancelled || revision !== localRevision.current) return;
+        setItems((current) => {
+          let updated = false;
+          const next = [...current];
+          const pendingIds = new Set(result.confirmations.map((confirmation) => confirmation.confirmation_id));
+          for (const message of result.messages) {
+            if (next.some((item) => item.kind === "msg" && item.seq === message.seq)) continue;
+            const itemIndex = next.findIndex((item) => item.kind === "msg" && item.seq === undefined &&
+              !!message.task_id && item.taskId === message.task_id && item.role === message.role && item.text === message.content);
+            if (itemIndex === -1) {
+              next.push({ id: nextId.current++, kind: "msg", role: message.role, text: message.content,
+                taskId: message.task_id || undefined, seq: message.seq, sources: message.sources });
+            } else {
+              next[itemIndex] = { ...next[itemIndex], seq: message.seq } as MsgItem;
+            }
+            updated = true;
+          }
+          for (const confirmation of result.confirmations) {
+            if (next.some((item) => item.kind === "confirm" && item.c.confirmation_id === confirmation.confirmation_id)) continue;
+            next.push({ id: nextId.current++, kind: "confirm", c: confirmation });
+            updated = true;
+          }
+          if (updated) {
+            const messages = next.filter((item): item is MsgItem => item.kind === "msg" && item.seq !== undefined)
+              .sort((first, second) => first.seq! - second.seq!);
+            let position = 0;
+            for (const [index, item] of next.entries()) {
+              if (item.kind === "msg" && item.seq !== undefined) next[index] = messages[position++];
+            }
+          }
+          const visible = next.filter((item) => item.kind !== "confirm" || item.decided || pendingIds.has(item.c.confirmation_id));
+          return updated || visible.length !== current.length ? visible : current;
+        });
+      } catch {
+        // Una disconnessione temporanea conserva i messaggi visibili.
+      } finally {
+        syncing.current = false;
       }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    }
+    void sync();
+    if (!active) return () => { cancelled = true; };
+    const timer = window.setInterval(sync, 3000);
+    const resume = () => { if (!document.hidden) void sync(); };
+    document.addEventListener("visibilitychange", resume);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", resume);
+    };
+  }, [active]);
 
   useEffect(() => {
     if (active) input.current?.focus();
   }, [active]);
 
   const decide = async (item: ConfirmItem, approve: boolean) => {
+    localRevision.current++;
+    deciding.current++;
     setItems((list) => list.map((x) => (x.id === item.id ? { ...item, decided: true } : x)));
     dismissToast(`confirmation:${item.c.confirmation_id}`);
     try {
       const out = await decideConfirmation<any>(item.c.confirmation_id, approve);
       setItems((list) => list.map((x) => (x.id === item.id ? { ...item, decided: true, approved: approve } : x)));
       setAvatarActivity(activityFromResult(avatarActivity, [{ kind: "tool_call", tool: item.c.tool }], out.task?.state === "failed" ? "error" : undefined));
-      say(out.reply, { steps: out.steps, sources: out.sources, error: out.task?.state === "failed" });
+      say(out.reply, { steps: out.steps, sources: out.sources, error: out.task?.state === "failed", taskId: out.task?.task_id });
     } catch (e) {
       setItems((list) => list.filter((x) => x.id !== item.id));
       say(`Errore: ${(e as Error).message}`, { error: true });
+    } finally {
+      deciding.current--;
     }
     refreshStatus();
     pollNotifications();
@@ -336,7 +392,10 @@ export function Chat({ active }: { active: boolean }) {
           </details>
         ) : null}
       </div>
-      <div className="messages" id="messages" aria-live="polite" ref={box}>
+      <div className="messages" id="messages" aria-live="polite" ref={box} onScroll={(event) => {
+        const el = event.currentTarget;
+        atBottom.current = el.scrollHeight - el.clientHeight - el.scrollTop < 64;
+      }}>
         <div className="chat-timeline">
           {items.map((it) =>
             it.kind === "msg" ? (
@@ -425,13 +484,13 @@ export function Chat({ active }: { active: boolean }) {
               </label>
               {provider ? (
                 <>
-                  <label className="check" title="Condivide fino a tre scambi testuali consecutivi con lo stesso provider.">
+                  <label className="check" title="Condivide fino a otto scambi testuali consecutivi con lo stesso provider.">
                     <input type="checkbox" checked={useContext} disabled={thinking} onChange={(event) => setUseContext(event.target.checked)} />
                     Continua la conversazione
                   </label>
                   <small>{provider === "auto"
                     ? "Può inviare il messaggio a entrambi i provider. I turni precedenti tornano solo al provider che li ha gestiti."
-                    : "Invia il messaggio digitato. Con la continuità attiva può includere fino a tre scambi testuali con questo provider."}</small>
+                    : "Invia il messaggio digitato. Con la continuità attiva può includere fino a otto scambi testuali con questo provider."}</small>
                   <small>La dettatura viene inserita nella chat per essere verificata prima dell’invio al cloud.</small>
                 </>
               ) : null}

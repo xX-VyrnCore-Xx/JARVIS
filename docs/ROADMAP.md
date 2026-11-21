@@ -38,6 +38,8 @@ Il checkpoint è la sezione di ripresa versionata con Git. Ogni voce va aggiorna
 
 **Release, routing, connettori e associazione da `e56a6f1` (2026-11-21).** ADR-0061. Il flusso CI pubblica macOS Apple Silicon e Windows x64 dallo SHA verificato. Il Core seleziona i modelli remoti per attività, aggiorna il catalogo degli strumenti e distingue gli errori dagli esiti riusciti. Catalogo ampliato, installazione guidata, invito web con QR e possibilità di annullamento. Verifiche locali: 203 test Rust e prova Docker della sandbox, 111 controlli Chromium, suite Python e convalida dei workflow. Restano da collaudare la prima pubblicazione automatica su GitHub, i dispositivi fisici e l’inferenza autenticata presso i provider.
 
+**Core condiviso e inferenza cloud da `b338a6d` (2026-11-21).** Nel checkout sono stati rimossi il gateway Ollama locale e gli embedding esterni. Il Core usa un profilo per contesto lungo con budget stimato, aggiorna le chat collegate e può essere ospitato sul Mac con proxy HTTPS e porta stabile. n8n usa il socket Docker locale e verifica la disponibilità interna dopo l’avvio. Verificati 203 test Rust, 117 controlli Chromium e l’installazione di una routine in Docker reale. Restano da verificare le app native su dispositivi fisici e le chiamate cloud con le chiavi del proprietario.
+
 Il checkpoint precedente è riportato qui sotto per riferimento.
 
 | Campo | Stato al 2026-11-18 (diciottesima ripresa) |

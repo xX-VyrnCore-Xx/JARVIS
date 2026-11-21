@@ -81,6 +81,7 @@ export function Memory({ active }: { active: boolean }) {
       return api<{ items: MemoryItem[] }>(`/api/memory${params.toString() ? "?" + params : ""}`);
     },
     [kind, debounced, activity],
+    6000,
   );
 
   useEffect(() => {

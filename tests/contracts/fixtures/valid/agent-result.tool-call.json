@@ -10,8 +10,8 @@
   "rationale": "Richiesta di lettura"
  },
  "backend": {
-  "name": "ollama",
-  "model": "qwen2.5:3b",
+  "name": "offline",
+  "model": "jarvis-offline-1",
   "location": "local"
  }
 }

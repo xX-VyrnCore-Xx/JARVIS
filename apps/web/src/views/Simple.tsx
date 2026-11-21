@@ -60,7 +60,7 @@ function TraceView({ taskId }: { taskId: string }) {
 
 export function Tasks({ active }: { active: boolean }) {
   const { activity } = useApp();
-  const { data, reload } = useViewData(active, () => api("/api/tasks?limit=50"), [activity]);
+  const { data, reload } = useViewData(active, () => api("/api/tasks?limit=50"), [activity], 5000);
   const items: any[] = data?.items || [];
   const [open, setOpen] = useState<string | null>(null);
   return (
@@ -93,7 +93,7 @@ export function Tasks({ active }: { active: boolean }) {
 
 export function Workspace({ active }: { active: boolean }) {
   const { activity } = useApp();
-  const { data, reload } = useViewData(active, () => api("/api/workspace"), [activity]);
+  const { data, reload } = useViewData(active, () => api("/api/workspace"), [activity], 8000);
   const entries: any[] = data?.entries || [];
   return (
     <section className={`view${active ? " active" : ""}`} id="view-workspace" aria-label="Workspace">

@@ -349,6 +349,7 @@ fn device_route_allowed(method: &str, route: &str, scopes: &[&str]) -> bool {
         ("POST", "/api/chat/stream"),
         ("GET", "/api/tasks"),
         ("GET", "/api/confirmations"),
+        ("GET", "/api/chat/sync"),
         ("GET", "/api/notifications"),
         ("POST", "/api/notifications/read-all"),
         ("POST", "/api/notifications/{id}/read"),
@@ -413,6 +414,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/passkeys/{id}", axum::routing::delete(passkey_delete))
         .route("/api/tasks", get(tasks))
         .route("/api/tasks/{id}/trace", get(task_trace))
+        .route("/api/chat/sync", get(chat_sync))
         .route("/api/conversation", get(conversation))
         .route("/api/memory", get(memory))
         .route("/api/memory/graph", get(memory_graph))
@@ -1183,6 +1185,22 @@ async fn tasks(
 /// Traccia di un task (ADR-0039): intervalli W3C con durata ed esito, senza contenuti.
 async fn task_trace(State(state): State<Shared>, Path(id): Path<String>) -> Response {
     reply(with_core(&state, move |j| j.task_trace(&id)).await)
+}
+
+async fn chat_sync(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+) -> Response {
+    reply(
+        with_core(&state, move |j| {
+            let mut confirmations = j.pending_confirmations();
+            if device.is_some() {
+                confirmations.retain(|item| item["tool"] != crate::desktop::TOOL);
+            }
+            Ok(json!({"messages": j.conversation(50)?, "confirmations": confirmations}))
+        })
+        .await,
+    )
 }
 
 async fn conversation(

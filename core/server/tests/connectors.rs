@@ -111,7 +111,6 @@ fn config(data: &Path, web: WebConfig) -> Config {
         data_dir: data.to_path_buf(),
         python: std::env::var("JARVIS_PYTHON").unwrap_or_else(|_| "python3".into()),
         ai_dir: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../ai"),
-        ai_backend: Some("offline".into()),
         delegation_timeout_ms: 30_000,
         voice_engine: Some("fake".into()),
         worker_env: vec![],
