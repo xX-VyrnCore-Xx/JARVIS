@@ -356,6 +356,8 @@ fn device_route_allowed(method: &str, route: &str, scopes: &[&str]) -> bool {
         ("POST", "/api/voice/transcribe"),
         ("POST", "/api/voice/speak"),
         ("GET", "/api/devices/me"),
+        ("POST", "/api/push/subscriptions"),
+        ("DELETE", "/api/push/subscriptions"),
         ("GET", "/api/passkeys"),
         ("POST", "/api/passkeys/register/options"),
         ("POST", "/api/passkeys/register"),
@@ -436,6 +438,10 @@ pub fn router(state: Shared) -> Router {
         )
         .route("/api/voice/speak", post(voice_speak))
         .route("/api/devices", get(devices))
+        .route(
+            "/api/push/subscriptions",
+            post(push_subscription_register).delete(push_subscription_delete),
+        )
         .route("/api/devices/pairing", post(create_pairing))
         .route("/api/devices/pairing/cancel", post(cancel_pairing))
         .route("/api/devices/pair", post(pair_device))
@@ -1428,6 +1434,48 @@ async fn notifications(
         })
         .await,
     )
+}
+
+async fn push_subscription_register(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Json(body): Json<Value>,
+) -> Response {
+    let Some(token) = body["token"].as_str().map(str::to_string) else {
+        return CoreError::BadRequest("campo token mancante".into()).into_response();
+    };
+    if !crate::push::validate_registration_token(&token) {
+        return CoreError::BadRequest("token FCM non valido".into()).into_response();
+    }
+    let Some(platform) = body["platform"]
+        .as_str()
+        .and_then(crate::push::Platform::parse)
+    else {
+        return CoreError::BadRequest("platform deve essere android o web".into()).into_response();
+    };
+    let principal = device
+        .map(|axum::Extension(DeviceCtx(d))| {
+            d["device_id"].as_str().unwrap_or_default().to_string()
+        })
+        .unwrap_or_else(|| "owner".into());
+    reply(
+        with_core(&state, move |j| {
+            j.push_register(&principal, &token, platform)
+        })
+        .await,
+    )
+}
+
+async fn push_subscription_delete(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+) -> Response {
+    let principal = device
+        .map(|axum::Extension(DeviceCtx(d))| {
+            d["device_id"].as_str().unwrap_or_default().to_string()
+        })
+        .unwrap_or_else(|| "owner".into());
+    reply(with_core(&state, move |j| j.push_remove(&principal)).await)
 }
 
 async fn read_one(State(state): State<Shared>, Path(id): Path<String>) -> Response {

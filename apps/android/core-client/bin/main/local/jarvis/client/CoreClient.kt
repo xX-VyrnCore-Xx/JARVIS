@@ -27,6 +27,7 @@ sealed class CoreException(message: String) : Exception(message) {
     class Revoked : CoreException("Dispositivo revocato. Genera un nuovo codice per associarlo.")
     class ScopeRequired : CoreException("Questo dispositivo non può confermare azioni.")
     class InvalidPairing : CoreException("La risposta di associazione non contiene un token utilizzabile.")
+    class InvalidPushToken : CoreException("Token di notifica non valido.")
     class Rejected(val status: Int, detail: String?) : CoreException(detail ?: "Il Core ha restituito HTTP $status.")
 }
 
@@ -116,6 +117,23 @@ class CoreClient(private val transport: Transport = UrlConnectionTransport) {
     fun markAllRead(session: DeviceSession): Int =
         request(session.origin, "/api/notifications/read-all", session.token, JSONObject()).optInt("unread", 0)
 
+    /** Registra il token FCM senza inserirlo nell'URL o nei log. */
+    fun registerPush(token: String, session: DeviceSession) {
+        if (token.isBlank() || token.length > 4096 || token.any(Char::isWhitespace) || token.any(Char::isISOControl)) {
+            throw CoreException.InvalidPushToken()
+        }
+        request(
+            session.origin,
+            "/api/push/subscriptions",
+            session.token,
+            JSONObject().put("token", token).put("platform", "android"),
+        )
+    }
+
+    fun removePush(session: DeviceSession) {
+        request(session.origin, "/api/push/subscriptions", session.token, methodOverride = "DELETE")
+    }
+
     fun send(message: String, session: DeviceSession): String? =
         request(session.origin, "/api/chat", session.token, JSONObject().put("message", message)).optString("reply").ifEmpty { null }
 
@@ -127,11 +145,18 @@ class CoreClient(private val transport: Transport = UrlConnectionTransport) {
             .optString("reply").ifEmpty { null }
     }
 
-    private fun request(origin: String, path: String, token: String?, body: JSONObject? = null): JSONObject {
+    private fun request(
+        origin: String,
+        path: String,
+        token: String?,
+        body: JSONObject? = null,
+        methodOverride: String? = null,
+    ): JSONObject {
         val headers = mutableMapOf("Accept" to "application/json")
         if (token != null) headers["X-Jarvis-Device"] = token
         if (body != null) headers["Content-Type"] = "application/json"
-        val reply = transport.send(if (body == null) "GET" else "POST", origin(origin) + path, headers, body?.toString())
+        val method = methodOverride ?: if (body == null) "GET" else "POST"
+        val reply = transport.send(method, origin(origin) + path, headers, body?.toString())
         if (reply.status == 401 && token != null) throw CoreException.Revoked()
         val json = try { JSONObject(reply.body.ifEmpty { "{}" }) } catch (e: Exception) { null }
         if (reply.status !in 200..299) {

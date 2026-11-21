@@ -110,4 +110,28 @@ class CoreClientTest {
             t.calls.map { it.second.removePrefix("https://jarvis.example") })
         assertTrue(t.calls.all { it.third["X-Jarvis-Device"] == token })
     }
+
+    @Test
+    fun pushRegistrationUsesAuthenticatedDeviceRoutesAndRejectsMalformedTokens() {
+        val t = Recorder(listOf(HttpReply(200, """{"registered":true}"""), HttpReply(200, """{"deleted":true}""")))
+        val client = CoreClient(t)
+        val session = DeviceSession("https://jarvis.example", token, listOf("chat"))
+        client.registerPush("fcm-token_123:ABC", session)
+        client.removePush(session)
+
+        assertEquals(
+            listOf(
+                "POST" to "https://jarvis.example/api/push/subscriptions",
+                "DELETE" to "https://jarvis.example/api/push/subscriptions",
+            ),
+            t.calls.map { it.first to it.second },
+        )
+        assertTrue(t.calls.all { it.third["X-Jarvis-Device"] == token })
+        assertTrue(t.bodies[0]!!.contains(""""platform":"android""""))
+        assertNull(t.bodies[1])
+        for (bad in listOf("", "has whitespace", "x\nbad", "x".repeat(4097))) {
+            assertThrows(CoreException.InvalidPushToken::class.java) { client.registerPush(bad, session) }
+        }
+        assertEquals(2, t.calls.size)
+    }
 }

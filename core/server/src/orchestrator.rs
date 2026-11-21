@@ -192,6 +192,7 @@ pub struct Jarvis {
     temporary: HashMap<String, (String, Vec<String>)>,
     obs: std::sync::Arc<Observability>,
     secrets: crate::secrets::SecretStore,
+    push: crate::push::PushSubscriptions,
     /// Ultima istantanea delle metriche salvata (RNF-07).
     metrics_saved: Option<std::time::Instant>,
     /// Ultima manutenzione del database (ADR-0037): al massimo ogni 6 ore.
@@ -241,6 +242,7 @@ impl Jarvis {
         .map_err(|e| format!("audit: {e}"))?;
         let catalog = Catalog::load()?;
         let secrets = crate::secrets::SecretStore::open(&cfg.data_dir)?;
+        let push = crate::push::PushSubscriptions::open(&cfg.data_dir.join("jarvis.sqlite3"))?;
         let cfg_logs = cfg.data_dir.join("logs");
         let (cfg_setup_dir, cfg_setup_python, cfg_setup_ai) =
             (cfg.data_dir.clone(), cfg.python.clone(), cfg.ai_dir.clone());
@@ -260,6 +262,7 @@ impl Jarvis {
             node_tls: None,
             obs: std::sync::Arc::new(Observability::new(Some(&cfg_logs))),
             secrets,
+            push,
             metrics_saved: None,
             maintained: None,
             pairings: HashMap::new(),
@@ -2775,25 +2778,50 @@ impl Jarvis {
 
     /// Inoltro ai canali esterni configurati (ADR-0026), in background e fuori dal blocco del Core.
     fn notify_external(&self, doc: &Value) {
-        let Ok(channels) = self.store.channels() else {
-            return;
-        };
-        let targets: Vec<(Value, Option<String>)> = channels
-            .into_iter()
-            .filter(|c| crate::channels::matches(c, doc))
-            .map(|c| {
-                let secret = self
-                    .secrets
-                    .get(&format!(
-                        "channel:{}",
-                        c["channel_id"].as_str().unwrap_or_default()
-                    ))
-                    .ok()
-                    .flatten();
-                (c, secret)
-            })
-            .collect();
-        crate::channels::dispatch(targets, doc.clone(), self.obs.clone());
+        if let Ok(channels) = self.store.channels() {
+            let targets: Vec<(Value, Option<String>)> = channels
+                .into_iter()
+                .filter(|c| crate::channels::matches(c, doc))
+                .map(|c| {
+                    let secret = self
+                        .secrets
+                        .get(&format!(
+                            "channel:{}",
+                            c["channel_id"].as_str().unwrap_or_default()
+                        ))
+                        .ok()
+                        .flatten();
+                    (c, secret)
+                })
+                .collect();
+            crate::channels::dispatch(targets, doc.clone(), self.obs.clone());
+        }
+        self.push.dispatch(&self.secrets, doc, self.obs.clone());
+    }
+
+    /// Registra un token FCM senza mai restituirlo. Principal: proprietario o dispositivo associato.
+    pub fn push_register(
+        &self,
+        principal: &str,
+        token: &str,
+        platform: crate::push::Platform,
+    ) -> Result<Value, CoreError> {
+        self.push
+            .register(&self.secrets, principal, token, platform)
+            .map_err(CoreError::BadRequest)?;
+        Ok(json!({
+            "registered": true,
+            "delivery_status": crate::push::delivery_config_status()
+        }))
+    }
+
+    /// Rimuove tutte le registrazioni FCM del principal corrente.
+    pub fn push_remove(&self, principal: &str) -> Result<Value, CoreError> {
+        let removed = self
+            .push
+            .remove_for_owner(&self.secrets, principal)
+            .map_err(internal)?;
+        Ok(json!({"removed": removed}))
     }
 
     // ------------------------------------------------------------------ aggiornamenti (ADR-0034)
@@ -3634,6 +3662,7 @@ impl Jarvis {
         id: &str,
         doc: &Value,
     ) -> Result<(), CoreError> {
+        let push_cleanup = self.push.remove_for_owner(&self.secrets, id);
         if let Some(slug) = doc["slug"].as_str() {
             // Un nuovo nodo può aver già riutilizzato lo slug mentre l'API aspettava il lock del Core.
             if !self.node_devices().iter().any(|d| d["slug"] == slug) {
@@ -3641,7 +3670,9 @@ impl Jarvis {
             }
             self.refresh_auto_node_tools();
         }
-        self.device_audit("device.revoke", id, "revoked")
+        let audit = self.device_audit("device.revoke", id, "revoked");
+        push_cleanup.map_err(internal)?;
+        audit
     }
 }
 

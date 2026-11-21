@@ -4,7 +4,7 @@
 |---|---|
 | Desktop Windows, macOS e Linux | Chat, voce, dashboard, notifiche, integrazioni OS e gestione risorse locali |
 | Web | Dashboard centralizzata, chat, task, memoria, automazioni, dispositivi, monitoraggio e impostazioni |
-| Mobile Android/iOS | Interazione e controllo sui dispositivi con capacità compatibili, nelle milestone successive |
+| Mobile Android | Interazione e controllo sul dispositivo associato |
 | Avatar | Identità visiva e vocale evolutiva, animazione e sincronizzazione labiale |
 | Voce | Wake word, riconoscimento lingua, STT/TTS in streaming, full-duplex e interruzione |
 
@@ -64,7 +64,7 @@ La Plancia e la Chat mostrano il ritratto maschile di JARVIS. Il pulsante **Parl
 
 **Controlli PC.** Su macOS e Windows, dalla Chat locale il proprietario può aprire la cartella di JARVIS, la Calcolatrice, le impostazioni di sistema e il monitor delle attività. Può scegliere il comando dal menu **Controlli PC** oppure dire o scrivere «Apri la calcolatrice». Ogni richiesta viene eseguita dopo la conferma del proprietario, anche quando nella Chat è selezionato un provider cloud. I dispositivi associati e le automazioni non possono avviare queste azioni.
 
-**Client Android (ADR-0018):** `apps/android` contiene l'app Jetpack Compose con associazione, cronologia, chat e conferme secondo i permessi. Segue le stesse regole del client iOS e conserva la sessione cifrata con l'Android Keystore. La CI produce l'APK di debug.
+**Client Android (ADR-0018):** `apps/android` contiene l'app Jetpack Compose con associazione, cronologia, chat, attività e notifiche secondo i permessi. Accetta solo HTTPS, rifiuta i reindirizzamenti e conserva la sessione cifrata con l'Android Keystore. Il workflow di release produce un APK `release` firmato con la chiave persistente configurata nei GitHub Actions Secrets.
 
 **Nodi esecutori (ADR-0017):** un altro computer associato con un codice «Nodo esecutore» esegue gli strumenti che dichiara (informazioni di sistema, ora, file della propria workspace) quando il Core glieli assegna. Usa `./jarvis.sh node <indirizzo> <codice>` e richieste in uscita, senza aprire porte. Nella sezione Dispositivi compaiono stato in linea, strumenti e comando da usare in chat.
 
@@ -74,17 +74,9 @@ La Plancia e la Chat mostrano il ritratto maschile di JARVIS. Il pulsante **Parl
 
 Con «nodo auto <strumento>» il Core sceglie da solo il nodo più libero fra quelli in linea (ADR-0031).
 
-Le app iOS e Android hanno tre schede: Chat, Attività e Notifiche (ADR-0032).
+L'app Android ha tre schede: Chat, Attività e Notifiche (ADR-0032).
 
-Restano da sviluppare: voce nelle app native, firma degli installer
-
-## App nativa iOS (RF-10, RF-11)
-
-Su macOS, apri `apps/ios/JARVIS.xcodeproj` in Xcode e avvia il target JARVIS su un simulatore iOS 17+ o su un iPhone/iPad. Per il dispositivo fisico seleziona il team di sviluppo in Xcode. Inserisci l'origine HTTPS già autorizzata per il Core, un nome e il codice monouso generato nella sezione **Dispositivi**.
-
-Il client mostra i 50 messaggi più recenti, invia messaggi e mostra le conferme pendenti. Le schede Attività e Notifiche mostrano lo stato delle richieste e le notifiche, con «Segna lette» (ADR-0032). Il permesso `confirm` abilita approvazione e rifiuto espliciti. Il token resta nel portachiavi del dispositivo. Il client usa una sessione HTTP effimera, rifiuta i reindirizzamenti e torna alla schermata di associazione quando una richiesta autenticata restituisce 401. L'uscita locale cancella la sessione dal portachiavi. Per revocare il token sul Core usa la sezione **Dispositivi**.
-
-La CI compila l'app per simulatore ed esegue i test Swift del protocollo. Le prove sul telefono usano la checklist in [ACCEPTANCE.md](ACCEPTANCE.md).
+Restano da sviluppare: voce nativa Android e collaudo delle notifiche push con le credenziali Firebase del proprietario.
 
 ## Voce (RF-09, ADR-0010)
 

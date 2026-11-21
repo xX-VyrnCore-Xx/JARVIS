@@ -1,9 +1,19 @@
 package local.jarvis.app
 
+import android.Manifest
 import android.os.Build
 import android.os.Bundle
+import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -12,11 +22,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -25,8 +38,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.lightColorScheme
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -36,9 +47,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
+import com.google.firebase.FirebaseApp
+import com.google.firebase.messaging.FirebaseMessaging
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -58,7 +76,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val store = SessionStore(applicationContext)
         setContent {
-            MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
+            JarvisTheme(dark = isSystemInDarkTheme()) {
                 var session by remember { mutableStateOf(store.load()) }
                 Scaffold { padding ->
                     Column(Modifier.padding(padding).fillMaxSize().imePadding()) {
@@ -85,13 +103,25 @@ private fun PairingScreen(onPaired: (DeviceSession) -> Unit) {
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
-    Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("JARVIS", style = MaterialTheme.typography.headlineMedium)
-        Text("Sul computer apri la sezione Dispositivi, genera un codice e inseriscilo qui. Vale una volta sola per 10 minuti.")
-        OutlinedTextField(origin, { origin = it }, label = { Text("Indirizzo del Core (HTTPS)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(code, { code = it.uppercase() }, label = { Text("Codice di associazione") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        OutlinedTextField(name, { name = it }, label = { Text("Nome del dispositivo") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+    Column(Modifier.fillMaxSize().imePadding().padding(horizontal = 24.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("JARVIS", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                Text("Il tuo assistente, sul tuo dispositivo", style = MaterialTheme.typography.titleMedium)
+                Text("Connessione HTTPS protetta", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Column(
+            Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text("Associa questo dispositivo", style = MaterialTheme.typography.titleLarge)
+            Text("Sul computer apri Dispositivi, genera un codice monouso e inseriscilo qui. Scade dopo 10 minuti.")
+            OutlinedTextField(origin, { origin = it }, label = { Text("Indirizzo del Core (HTTPS)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(code, { code = it.uppercase() }, label = { Text("Codice di associazione") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(name, { name = it }, label = { Text("Nome del dispositivo") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        }
         Button(enabled = !busy, onClick = {
             busy = true
             error = null
@@ -100,7 +130,7 @@ private fun PairingScreen(onPaired: (DeviceSession) -> Unit) {
                 busy = false
                 result.onSuccess(onPaired).onFailure { error = it.message ?: "Associazione non riuscita" }
             }
-        }) { Text(if (busy) "Associazione…" else "Associa") }
+        }, modifier = Modifier.fillMaxWidth()) { Text(if (busy) "Associazione…" else "Associa dispositivo") }
     }
 }
 
@@ -108,15 +138,35 @@ private fun PairingScreen(onPaired: (DeviceSession) -> Unit) {
 @Composable
 private fun ColumnScope.DeviceScreen(session: DeviceSession, onRevoked: () -> Unit) {
     var tab by remember { mutableStateOf(0) }
+    Row(
+        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Column {
+            Text("JARVIS", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+            Text("Dispositivo associato · HTTPS", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        Text("●", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
+    }
     TabRow(selectedTabIndex = tab) {
         listOf("Chat", "Attività", "Notifiche").forEachIndexed { i, label ->
             Tab(selected = tab == i, onClick = { tab = i }, text = { Text(label) })
         }
     }
-    when (tab) {
-        0 -> ChatScreen(session, onRevoked)
-        1 -> TasksScreen(session, onRevoked)
-        else -> NoticesScreen(session, onRevoked)
+    AnimatedContent(
+        targetState = tab,
+        modifier = Modifier.weight(1f).fillMaxWidth(),
+        transitionSpec = { fadeIn(tween(160)) + slideInVertically { it / 12 } togetherWith fadeOut(tween(100)) },
+        label = "mobile-tab",
+    ) { selected ->
+        Column(Modifier.fillMaxSize()) {
+            when (selected) {
+                0 -> ChatScreen(session, onRevoked)
+                1 -> TasksScreen(session, onRevoked)
+                else -> NoticesScreen(session, onRevoked)
+            }
+        }
     }
 }
 
@@ -160,18 +210,119 @@ private fun ColumnScope.TasksScreen(session: DeviceSession, onRevoked: () -> Uni
 private fun ColumnScope.NoticesScreen(session: DeviceSession, onRevoked: () -> Unit) {
     var notices by remember { mutableStateOf<Notices?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
+    val context = LocalContext.current
+    val store = remember { SessionStore(context) }
+    var pushEnabled by remember { mutableStateOf(store.pushEnabled()) }
+    var pushStatus by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+
+    fun registerToken() {
+        if (!JarvisApplication.firebaseConfigured()) {
+            pushStatus = "Push non configurato: completa i parametri Firebase per Android."
+            return
+        }
+        val firebase = FirebaseApp.getApps(context).firstOrNull { it.name == FirebaseApp.DEFAULT_APP_NAME }
+        if (firebase == null) {
+            pushStatus = "Firebase non inizializzato. Verifica la configurazione della build."
+            return
+        }
+        FirebaseMessaging.getInstance(firebase).token.addOnCompleteListener { task ->
+            if (!task.isSuccessful) {
+                pushStatus = "Impossibile ottenere il token push. Controlla la connessione e riprova."
+                return@addOnCompleteListener
+            }
+            scope.launch {
+                withContext(Dispatchers.IO) { runCatching { client.registerPush(task.result, session) } }
+                    .onSuccess { pushStatus = "Notifiche in background attive su questo dispositivo." }
+                    .onFailure {
+                        if (it is CoreException.Revoked) onRevoked()
+                        else pushStatus = it.message ?: "Registrazione push non riuscita."
+                    }
+            }
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        if (granted) {
+            store.setPushEnabled(true)
+            pushEnabled = true
+            registerToken()
+        } else {
+            store.setPushEnabled(false)
+            pushEnabled = false
+            pushStatus = "Permesso notifiche negato nelle impostazioni di Android."
+        }
+    }
+
+    fun enablePush() {
+        if (!JarvisApplication.firebaseConfigured()) {
+            pushStatus = "Push non configurato: completa i parametri Firebase per Android."
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+            pushStatus = "Le notifiche di JARVIS sono disattivate nelle impostazioni di Android."
+        } else {
+            store.setPushEnabled(true)
+            pushEnabled = true
+            registerToken()
+        }
+    }
+
+    fun disablePush() {
+        store.setPushEnabled(false)
+        pushEnabled = false
+        val firebase = FirebaseApp.getApps(context).firstOrNull { it.name == FirebaseApp.DEFAULT_APP_NAME }
+        val unregister = {
+            scope.launch {
+                withContext(Dispatchers.IO) { runCatching { client.removePush(session) } }
+                    .onSuccess { pushStatus = "Notifiche in background disattivate." }
+                    .onFailure {
+                        if (it is CoreException.Revoked) onRevoked()
+                        else pushStatus = it.message ?: "Rimozione della registrazione push non riuscita."
+                    }
+            }
+        }
+        if (firebase == null) unregister()
+        else FirebaseMessaging.getInstance(firebase).deleteToken().addOnCompleteListener { unregister() }
+    }
+
     suspend fun refresh() {
         withContext(Dispatchers.IO) { runCatching { client.notices(session) } }
             .onSuccess { notices = it; status = if (it.items.isEmpty()) "Nessuna notifica." else null }
             .onFailure { if (it is CoreException.Revoked) onRevoked() else status = it.message }
     }
     LaunchedEffect(session) {
+        if (pushEnabled && JarvisApplication.firebaseConfigured() &&
+            (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+                ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
+        ) registerToken()
         while (isActive) {
             refresh()
             delay(5_000)
         }
     }
+    Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Notifiche in background", style = MaterialTheme.typography.titleSmall)
+            Text(
+                if (pushEnabled) "JARVIS può avvisarti anche quando non stai usando l'app."
+                else "Attiva il push per ricevere gli avvisi senza tenere aperta questa schermata.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (pushEnabled) {
+                OutlinedButton(onClick = ::disablePush) { Text("Disattiva") }
+            } else {
+                Button(onClick = ::enablePush) { Text("Attiva notifiche push") }
+            }
+            pushStatus?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        }
+    }
+    HorizontalDivider(Modifier.padding(horizontal = 16.dp))
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
         Text("Non lette: ${notices?.unread ?: 0}", modifier = Modifier.padding(8.dp))
         Row {

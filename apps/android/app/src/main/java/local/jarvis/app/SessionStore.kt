@@ -60,6 +60,12 @@ class SessionStore(context: Context) {
         null
     }
 
+    fun pushEnabled(): Boolean = prefs.getBoolean("push-enabled", false)
+
+    fun setPushEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("push-enabled", enabled).apply()
+    }
+
     fun clear() {
         prefs.edit().clear().apply()
     }

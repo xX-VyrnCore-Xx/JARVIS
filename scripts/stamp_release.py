@@ -17,8 +17,12 @@ def stamp(root, tag):
     if not re.fullmatch(r"v(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*)){2}", tag):
         raise ValueError(f"tag automatico non valido: {tag}")
     version = tag[1:]
-    if max(map(int, version.split("."))) > 65535:
+    major, minor, patch = map(int, version.split("."))
+    if max(major, minor, patch) > 65535:
         raise ValueError("versione fuori dai limiti dell’installer Windows")
+    if major >= 21 or minor >= 1000 or patch >= 100_000:
+        raise ValueError("versione fuori dai limiti del versionCode Android")
+    android_version_code = major * 100_000_000 + minor * 100_000 + patch
     for folder, package in [
         (root / "core", "jarvis-core"),
         (root / "apps/desktop/src-tauri", "jarvis-desktop"),
@@ -28,6 +32,10 @@ def stamp(root, tag):
         replacement = lambda match: f'{match[1]}"{version}"'
         replace_once(manifest, prefix + r'"[^"]+"', replacement)
         replace_once(folder / "Cargo.lock", prefix + r'"[^"]+"', replacement)
+
+    android_gradle = root / "apps/android/app/build.gradle.kts"
+    replace_once(android_gradle, r"(^\s*versionCode = )[\d_]+", rf"\g<1>{android_version_code}")
+    replace_once(android_gradle, r'(^\s*versionName = )"[^"]+"', rf'\g<1>"{version}"')
 
     config = root / "apps/desktop/src-tauri/tauri.conf.json"
     document = json.loads(config.read_text(encoding="utf-8"))

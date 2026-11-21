@@ -40,7 +40,7 @@ La firma che il sistema operativo riconosce dipende dalle credenziali di pubblic
 | Core | Rust, Axum, Tokio, Serde |
 | Worker locale | Python 3, JSON Lines su stdin/stdout, JSON Schema 2020-12 |
 | Desktop e Web | Tauri 2, React 19, TypeScript, Vite, PWA |
-| Mobile | SwiftUI su iOS/iPadOS, Kotlin e Jetpack Compose su Android |
+| Mobile | Kotlin e Jetpack Compose su Android; PWA installabile su browser compatibili |
 | Dati e memoria | SQLite con rusqlite, FTS5/BM25, vettori lessicali locali e grafo delle conoscenze |
 | Inferenza | Ollama Cloud e NVIDIA NIM, routing per attività e budget, limiter NIM a 35 RPM |
 | Voce | faster-whisper, Piper, openWakeWord e XTTS v2 facoltativo |
@@ -55,7 +55,7 @@ La firma che il sistema operativo riconosce dipende dalle credenziali di pubblic
 2. Scrivi il nome host del proxy in `remote-hosts.txt` nella cartella dati del Mac host, oppure imposta `JARVIS_ALLOWED_HOSTS`. Riavvia JARVIS per usare la porta stabile.
 3. Apri **Dispositivi**, genera un invito monouso e usa il codice o il QR da un client autorizzato. Il Mac resta l’host. Le app associate vedono chat, conferme, attività e notifiche secondo i permessi assegnati.
 
-Per un secondo desktop, imposta `JARVIS_REMOTE_URL` o salva l’origine HTTPS in `remote-core-url.txt` nella sua cartella dati. Le app iOS e Android si associano con l’origine HTTPS e il codice. [Interfacce e dispositivi](docs/INTERFACE_AND_DEVICES.md)
+Per un secondo desktop, imposta `JARVIS_REMOTE_URL` o salva l’origine HTTPS in `remote-core-url.txt` nella sua cartella dati. L'app Android e la PWA si associano con l'origine HTTPS e il codice. [Interfacce e dispositivi](docs/INTERFACE_AND_DEVICES.md)
 
 ## Usa JARVIS
 

@@ -6,7 +6,7 @@
 | Bridge e contratti | JSON Lines su stdin/stdout, JSON Schema 2020-12 | Deleghe, esiti, progressi ed errori fra Core e worker Python |
 | Desktop | Tauri 2, WKWebView su macOS, WebView2 su Windows e WebKitGTK 4.1 su Linux | Finestra nativa, tray, avvio supervisionato del Core e notifiche |
 | Web e PWA | React 19, TypeScript 5.9, Vite 8 | Chat, dashboard e client associato. Il bundle è incorporato nel Core |
-| App mobili | SwiftUI e URLSession su iOS/iPadOS, Kotlin e Jetpack Compose su Android | Chat, attività, notifiche e conferme del Core HTTPS |
+| App mobile | Kotlin e Jetpack Compose su Android; PWA installabile nei browser compatibili | Chat, attività, notifiche e conferme del Core HTTPS |
 | Dati | SQLite con rusqlite 0.43, FTS5/BM25 | Conversazioni, attività, notifiche, memoria e automazioni |
 | Memoria | Vettori lessicali locali, FTS5 e grafo in SQLite | Recupero di fatti, preferenze ed episodi |
 | Inferenza | Ollama Cloud e NVIDIA NIM via HTTPS | Routing per attività e contesto, limitazione delle richieste, proposte di strumenti |

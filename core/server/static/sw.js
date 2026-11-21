@@ -1,5 +1,6 @@
 // Service worker minimo dell'app installabile (RF-10 mobile). Non memorizza nulla: l'API e le pagine
 // vengono sempre richieste al Core; senza connessione mostra solo un avviso.
+self.importScripts("/fcm-sw.js");
 self.addEventListener("install", () => self.skipWaiting());
 self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
 self.addEventListener("fetch", (e) => {

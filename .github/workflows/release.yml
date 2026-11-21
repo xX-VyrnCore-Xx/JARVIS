@@ -2,6 +2,7 @@ name: release
 
 # Installer macOS (.dmg per Apple Silicon) e Windows (setup .exe), con Core,
 # runtime AI e Python autonomo inclusi. Ogni installer viene installato e il Core supera la prova di avvio.
+# Aggiunge l'APK Android release, firmato con il keystore persistente del proprietario.
 # Con un tag vX.Y.Z pubblica la release con installer e impronte (decisione del proprietario del 2026-11-17); i tag con suffisso, es. v1.0.0-rc.1, restano prerelease.
 on:
   push:
@@ -29,6 +30,14 @@ on:
       APPLE_API_ISSUER:
         required: false
       JARVIS_APPLE_API_KEY_BASE64:
+        required: false
+      ANDROID_KEYSTORE_BASE64:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+      ANDROID_KEY_ALIAS:
+        required: false
+      ANDROID_KEY_PASSWORD:
         required: false
   workflow_dispatch:
     inputs:
@@ -217,10 +226,75 @@ jobs:
           name: jarvis-${{ matrix.target }}
           path: dist/
 
+  android:
+    name: APK Android release
+    if: inputs.automatico || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.commit || github.sha }}
+      - name: Imposta la versione automatica Android
+        if: inputs.automatico
+        env:
+          TAG: ${{ inputs.tag }}
+        run: python3 scripts/stamp_release.py "$TAG"
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
+        with:
+          gradle-version: "8.14.3"
+      - name: Configura il keystore persistente
+        shell: bash
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ] || [ -z "$ANDROID_KEYSTORE_PASSWORD" ] ||
+             [ -z "$ANDROID_KEY_ALIAS" ] || [ -z "$ANDROID_KEY_PASSWORD" ]; then
+            echo "::error::Configura ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS e ANDROID_KEY_PASSWORD."
+            exit 1
+          fi
+          keystore="$RUNNER_TEMP/jarvis-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          chmod 600 "$keystore"
+          test -s "$keystore"
+          {
+            echo "ORG_GRADLE_PROJECT_jarvisReleaseStoreFile=$keystore"
+            echo "ORG_GRADLE_PROJECT_jarvisReleaseStorePassword=$ANDROID_KEYSTORE_PASSWORD"
+            echo "ORG_GRADLE_PROJECT_jarvisReleaseKeyAlias=$ANDROID_KEY_ALIAS"
+            echo "ORG_GRADLE_PROJECT_jarvisReleaseKeyPassword=$ANDROID_KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+      - name: Compila l'APK firmato e verifica l'identità di firma
+        run: |
+          gradle -p apps/android --no-daemon :core-client:test :app:assembleRelease
+          apk=apps/android/app/build/outputs/apk/release/app-release.apk
+          test -s "$apk"
+          apksigner verify --verbose --print-certs "$apk"
+      - name: Nomina l'APK e calcola l'impronta
+        shell: bash
+        env:
+          TAG: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
+        run: |
+          version="${TAG#v}"
+          mkdir -p dist
+          cp apps/android/app/build/outputs/apk/release/app-release.apk "dist/JARVIS_${version}_android-release.apk"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: jarvis-android
+          path: dist/
+
   publish:
     name: pubblicazione della release
     if: inputs.automatico || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
-    needs: build
+    needs: [build, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -254,7 +328,7 @@ jobs:
           TAG: ${{ steps.tag.outputs.name }}
         run: |
           version="${TAG#v}"
-          installers=("JARVIS_${version}_aarch64.dmg" "JARVIS_${version}_x64-setup.exe")
+          installers=("JARVIS_${version}_aarch64.dmg" "JARVIS_${version}_x64-setup.exe" "JARVIS_${version}_android-release.apk")
           test "$(find . -maxdepth 1 -type f | wc -l)" -eq "${#installers[@]}"
           for installer in "${installers[@]}"; do test -s "$installer"; done
           sha256sum -- "${installers[@]}" > SHA256SUMS
@@ -267,12 +341,13 @@ jobs:
           subject-path: |
             dist/*.dmg
             dist/*-setup.exe
+            dist/*_android-release.apk
       - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac
-      - name: Firma e verifica Sigstore dei due installer e delle impronte
+      - name: Firma e verifica Sigstore dei pacchetti e delle impronte
         working-directory: dist
         run: |
           identity="https://github.com/$GITHUB_REPOSITORY/.github/workflows/release.yml@$GITHUB_REF"
-          for file in *.dmg *-setup.exe SHA256SUMS; do
+          for file in *.dmg *-setup.exe *_android-release.apk SHA256SUMS; do
             cosign sign-blob --yes --bundle "$file.sigstore.json" "$file"
             cosign verify-blob --bundle "$file.sigstore.json" \
               --certificate-identity "$identity" \

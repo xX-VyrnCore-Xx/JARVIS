@@ -25,6 +25,7 @@ pub mod observability;
 pub mod orchestrator;
 pub mod passkeys;
 pub mod policy;
+pub mod push;
 pub mod rollback;
 pub mod secrets;
 pub mod setup;

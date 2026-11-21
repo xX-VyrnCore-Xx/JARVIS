@@ -10,22 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  ios:
-    name: iOS (client e build simulatore)
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Verifica il client del Core
-        run: |
-          swiftc apps/ios/Jarvis/CoreClient.swift apps/ios/tests/CoreClientTests.swift -o "$RUNNER_TEMP/core-client-tests"
-          "$RUNNER_TEMP/core-client-tests"
-      - name: Compila JARVIS per simulatore
-        run: |
-          xcodebuild -project apps/ios/JARVIS.xcodeproj -scheme JARVIS -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' -derivedDataPath "$RUNNER_TEMP/jarvis-ios" CODE_SIGNING_ALLOWED=NO build
-
   android:
-    name: Android (client e build)
+    name: Android (client e APK release)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -36,12 +22,22 @@ jobs:
       - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a
         with:
           gradle-version: "8.14.3"
-      - name: Test del client del Core e APK di debug
-        run: gradle -p apps/android --no-daemon :core-client:test :app:assembleDebug
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: jarvis-android-debug
-          path: apps/android/app/build/outputs/apk/debug/*.apk
+      - name: Firma di prova temporanea per validare la variante release
+        run: |
+          keytool -genkeypair -noprompt -keystore "$RUNNER_TEMP/jarvis-ci.jks" \
+            -storepass ci-only-password -keypass ci-only-password -alias ci-only \
+            -dname "CN=JARVIS CI,OU=Test,O=JARVIS,C=IT" -keyalg RSA -keysize 2048 -validity 2
+          gradle -p apps/android --no-daemon :core-client:test :app:assembleRelease \
+            -PjarvisReleaseStoreFile="$RUNNER_TEMP/jarvis-ci.jks" \
+            -PjarvisReleaseStorePassword=ci-only-password \
+            -PjarvisReleaseKeyAlias=ci-only \
+            -PjarvisReleaseKeyPassword=ci-only-password
+      - name: Verifica firma e nome dell'APK release
+        run: |
+          apk=apps/android/app/build/outputs/apk/release/app-release.apk
+          test -s "$apk"
+          test ! -e apps/android/app/build/outputs/apk/debug/app-debug.apk
+          apksigner verify --verbose "$apk"
 
   validate:
     name: validate (python)

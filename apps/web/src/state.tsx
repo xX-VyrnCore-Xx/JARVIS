@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
-import { api, DEVICE_MODE } from "./lib/api";
+import { api, DEVICE_MODE, pref } from "./lib/api";
 import { voice } from "./lib/voice";
 import type { AvatarActivity } from "./lib/avatarActivity";
 
@@ -103,7 +103,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const toast = useCallback((n: Notification) => {
     setToasts((t) => [...t.filter((x) => toastKey(x) !== toastKey(n)), n]);
     setTimeout(() => setToasts((t) => t.filter((x) => x !== n)), 8000);
-    if ("Notification" in window && Notification.permission === "granted" && document.hidden) {
+    if ("Notification" in window && Notification.permission === "granted" && document.hidden && !pref("jarvis.push.web")) {
       try {
         new Notification(`JARVIS · ${n.title}`, { body: n.body || "", tag: toastKey(n) });
       } catch {
