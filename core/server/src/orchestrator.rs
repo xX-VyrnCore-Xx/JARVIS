@@ -2835,18 +2835,71 @@ impl Jarvis {
         self.cfg.data_dir.clone()
     }
 
-    pub fn updates_state(&self) -> Value {
-        self.updates.state()
+    pub fn updates_state(&self) -> Result<Value, CoreError> {
+        let mut state = self.updates.state();
+        state["github_token_configured"] = self
+            .secrets
+            .get("updates:github_token")
+            .map_err(internal)?
+            .is_some()
+            .into();
+        Ok(state)
     }
 
-    pub fn updates_configure(&mut self, enabled: bool, channel: &str) -> Result<Value, CoreError> {
-        let s = self
-            .updates
+    pub fn updates_configure(
+        &mut self,
+        enabled: bool,
+        channel: &str,
+        github_token: Option<&str>,
+        remove_github_token: bool,
+    ) -> Result<Value, CoreError> {
+        if !crate::updates::CHANNELS.contains(&channel) {
+            return Err(CoreError::BadRequest(format!(
+                "canale sconosciuto: {channel} (stable o beta)"
+            )));
+        }
+        if github_token.is_some() && remove_github_token {
+            return Err(CoreError::BadRequest(
+                "non puoi impostare e rimuovere il token nella stessa richiesta".into(),
+            ));
+        }
+        if let Some(token) = github_token {
+            if token.is_empty()
+                || token.len() > 512
+                || token.bytes().any(|byte| !byte.is_ascii_graphic())
+            {
+                return Err(CoreError::BadRequest("token GitHub non valido".into()));
+            }
+            self.secrets
+                .put("updates:github_token", token)
+                .map_err(internal)?;
+            self.updates.reset_check().map_err(CoreError::Internal)?;
+        } else if remove_github_token {
+            self.secrets
+                .delete("updates:github_token")
+                .map_err(internal)?;
+            self.updates.reset_check().map_err(CoreError::Internal)?;
+        }
+        self.updates
             .configure(enabled, channel)
             .map_err(CoreError::BadRequest)?;
+        let action = if github_token.is_some() {
+            "updates.github_token.configure"
+        } else if remove_github_token {
+            "updates.github_token.remove"
+        } else {
+            "updates.configure"
+        };
         self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "owner", "id": "owner"},
-                          "node": "core-local", "action": "updates.configure", "outcome": "succeeded", "effect": "applied"}))?;
-        Ok(s)
+                          "node": "core-local", "action": action, "outcome": "succeeded", "effect": "applied"}))?;
+        self.updates_state()
+    }
+
+    pub fn updates_fetch_config(&self) -> Result<(std::path::PathBuf, Option<String>), CoreError> {
+        Ok((
+            self.cfg.data_dir.clone(),
+            self.secrets.get("updates:github_token").map_err(internal)?,
+        ))
     }
 
     /// URL dell'elenco delle release se il controllo automatico è dovuto (la richiesta va fuori dal blocco).
@@ -2859,7 +2912,7 @@ impl Jarvis {
         &mut self,
         result: Result<Vec<Value>, String>,
     ) -> Result<Value, CoreError> {
-        let (state, newer) = self.updates.record(result).map_err(CoreError::Internal)?;
+        let (_, newer) = self.updates.record(result).map_err(CoreError::Internal)?;
         if let Some(r) = newer {
             let tag = r["tag"].as_str().unwrap_or_default().to_string();
             self.notify(json!({
@@ -2870,7 +2923,7 @@ impl Jarvis {
                 "link": {"view": "system"},
             }))?;
         }
-        Ok(state)
+        self.updates_state()
     }
 
     // ------------------------------------------------------------------ canali di notifica (ADR-0026)

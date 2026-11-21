@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use crate::client::ApiClient;
 use jarvis_launcher::{launch, LaunchConfig, RunningCore};
 
-const NAV: [(&str, &str, bool); 13] = [
+const NAV: [(&str, &str, bool); 14] = [
     ("dashboard", "Plancia", true),
     ("chat", "Chat", false),
     ("tasks", "Attività", false),
@@ -24,6 +24,7 @@ const NAV: [(&str, &str, bool); 13] = [
     ("audit", "Audit", true),
     ("system", "Sistema", true),
     ("models", "Modelli AI", true),
+    ("updates", "Aggiornamenti", true),
 ];
 
 #[derive(Clone, Debug)]
@@ -94,6 +95,8 @@ pub struct JarvisApp {
     cloud_action_error: Option<String>,
     cloud_action_notice: Option<String>,
     cloud_remove_confirm: bool,
+    github_update_token: String,
+    update_remove_confirm: bool,
 }
 
 impl JarvisApp {
@@ -151,6 +154,8 @@ impl JarvisApp {
             cloud_action_error: None,
             cloud_action_notice: None,
             cloud_remove_confirm: false,
+            github_update_token: String::new(),
+            update_remove_confirm: false,
         }
     }
 
@@ -712,6 +717,7 @@ impl JarvisApp {
             }
             "chat" => self.show_chat(ui, ctx),
             "models" => self.show_cloud_settings(ui, ctx),
+            "updates" => self.show_updates(ui, ctx),
             "tasks" | "automations" | "memory" | "skills" | "workspace" | "connectors"
             | "devices" | "security" | "audit" | "system" => {
                 ui.horizontal(|ui| {
@@ -876,6 +882,132 @@ impl JarvisApp {
         }
         ui.add_space(8.0);
         ui.small("Il salvataggio non prova la chiave. Per verificarla invia un messaggio in Chat: il testo sarà elaborato dal provider selezionato e può comportare costi.");
+    }
+
+    fn show_updates(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let data = self.data.clone();
+        let state = data.as_ref();
+        let mut enabled = state
+            .and_then(|state| state["enabled"].as_bool())
+            .unwrap_or(true);
+        let mut channel = state
+            .and_then(|state| state["channel"].as_str())
+            .unwrap_or("stable")
+            .to_owned();
+        let token_configured = state
+            .and_then(|state| state["github_token_configured"].as_bool())
+            .unwrap_or(false);
+        let latest = state
+            .and_then(|state| state.get("latest"))
+            .filter(|v| !v.is_null());
+
+        ui.heading("Aggiornamenti JARVIS");
+        ui.label("Controllo automatico ogni ora; download, verifica della firma e installazione restano manuali.");
+        ui.add_space(8.0);
+        ui.checkbox(&mut enabled, "Controlla automaticamente le nuove release");
+        egui::ComboBox::from_id_salt("update-channel")
+            .selected_text(if channel == "beta" { "Beta" } else { "Stable" })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut channel, "stable".into(), "Stable");
+                ui.selectable_value(&mut channel, "beta".into(), "Beta");
+            });
+        ui.label("Stable ignora le prerelease; Beta include anche le versioni di prova.");
+
+        if token_configured {
+            ui.colored_label(
+                egui::Color32::LIGHT_GREEN,
+                "Token GitHub configurato nel secret store cifrato del Core.",
+            );
+            if self.update_remove_confirm {
+                ui.horizontal(|ui| {
+                    if ui.button("Conferma rimozione token").clicked() {
+                        self.act(
+                            ctx,
+                            "/api/updates".into(),
+                            Some(json!({
+                                "enabled": enabled,
+                                "channel": channel,
+                                "remove_github_token": true
+                            })),
+                        );
+                        self.update_remove_confirm = false;
+                    }
+                    if ui.button("Annulla").clicked() {
+                        self.update_remove_confirm = false;
+                    }
+                });
+            } else if ui.button("Rimuovi token GitHub").clicked() {
+                self.update_remove_confirm = true;
+            }
+        } else {
+            ui.label("Repository pubblica: lascia il token vuoto. Repository privata: inserisci un token fine-grained con accesso Contents: read solo a JARVIS.");
+        }
+        ui.add(
+            egui::TextEdit::singleline(&mut self.github_update_token)
+                .password(true)
+                .desired_width(ui.available_width())
+                .hint_text(if token_configured {
+                    "Token attuale conservato; inserisci un nuovo token solo per sostituirlo"
+                } else {
+                    "Token GitHub opzionale per repository privata"
+                }),
+        );
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(!self.loading, egui::Button::new("Salva impostazioni"))
+                .clicked()
+            {
+                let mut body = json!({"enabled": enabled, "channel": channel});
+                let token = std::mem::take(&mut self.github_update_token);
+                if !token.is_empty() {
+                    body["github_token"] = json!(token);
+                }
+                self.act(ctx, "/api/updates".into(), Some(body));
+                self.update_remove_confirm = false;
+            }
+            if ui
+                .add_enabled(!self.loading, egui::Button::new("Controlla ora"))
+                .clicked()
+            {
+                self.act(ctx, "/api/updates/check".into(), None);
+            }
+        });
+
+        if self.loading {
+            ui.horizontal(|ui| {
+                ui.add(egui::Spinner::new());
+                ui.label("Controllo o salvataggio in corso…");
+            });
+        }
+        if let Some(error) = state.and_then(|state| state["error"].as_str()) {
+            ui.colored_label(
+                egui::Color32::LIGHT_RED,
+                format!("Ultimo controllo fallito: {error}"),
+            );
+        }
+        if let Some(checked_at) = state.and_then(|state| state["checked_at"].as_str()) {
+            ui.small(format!("Ultimo controllo: {checked_at}"));
+        }
+        if let Some(latest) = latest {
+            let tag = latest["tag"].as_str().unwrap_or("versione sconosciuta");
+            ui.separator();
+            if state.is_some_and(|state| state["update_available"] == true) {
+                ui.colored_label(
+                    egui::Color32::LIGHT_GREEN,
+                    format!("Nuova versione disponibile: {tag}"),
+                );
+            } else {
+                ui.label(format!("Versione più recente: {tag}"));
+            }
+            let release_url = latest["url"].as_str().unwrap_or_default();
+            let expected_prefix = "https://github.com/xX-VyrnCore-Xx/JARVIS/releases/tag/";
+            if release_url.starts_with(expected_prefix)
+                && ui.link("Apri release e scarica").clicked()
+            {
+                ctx.open_url(egui::OpenUrl::new_tab(release_url));
+            }
+        }
+        ui.small("Per i repository privati il Core usa il token solo per leggere le release GitHub; la chiave non viene restituita dall'API né inclusa nelle notifiche.");
     }
 
     fn show_device_invite(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -1133,6 +1265,10 @@ impl eframe::App for JarvisApp {
             self.cloud_action_notice = None;
             self.cloud_remove_confirm = false;
         }
+        if self.current != "updates" {
+            self.github_update_token.clear();
+            self.update_remove_confirm = false;
+        }
         self.focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
         if self.client.is_none() {
             if self.error.as_deref() == Some("remote-pairing") {
@@ -1249,6 +1385,7 @@ fn endpoint(page: &str) -> &'static str {
         "audit" => "/api/audit",
         "system" => "/api/setup",
         "models" => "/api/cloud",
+        "updates" => "/api/updates",
         _ => "/api/health",
     }
 }
@@ -1432,6 +1569,10 @@ mod tests {
         assert!(NAV
             .iter()
             .any(|(id, _, owner_only)| *id == "models" && *owner_only));
+        assert_eq!(endpoint("updates"), "/api/updates");
+        assert!(NAV
+            .iter()
+            .any(|(id, _, owner_only)| *id == "updates" && *owner_only));
     }
 
     #[test]
