@@ -240,7 +240,7 @@ private fun ColumnScope.NoticesScreen(session: DeviceSession, appInForeground: B
             pushStatus = "Firebase non inizializzato. Verifica la configurazione della build."
             return
         }
-        FirebaseMessaging.getInstance(firebase).token.addOnCompleteListener { task ->
+        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
             if (!task.isSuccessful) {
                 pushStatus = "Impossibile ottenere il token push. Controlla la connessione e riprova."
                 return@addOnCompleteListener
@@ -301,7 +301,7 @@ private fun ColumnScope.NoticesScreen(session: DeviceSession, appInForeground: B
             }
         }
         if (firebase == null) unregister()
-        else FirebaseMessaging.getInstance(firebase).deleteToken().addOnCompleteListener { unregister() }
+        else FirebaseMessaging.getInstance().deleteToken().addOnCompleteListener { unregister() }
     }
 
     suspend fun refresh() {
