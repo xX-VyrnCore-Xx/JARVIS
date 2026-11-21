@@ -318,7 +318,12 @@ jobs:
           gradle -p apps/android --no-daemon :core-client:test :app:assembleRelease
           apk=apps/android/app/build/outputs/apk/release/app-release.apk
           test -s "$apk"
-          apksigner verify --verbose --print-certs "$apk"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner -print -quit)"
+          if [ -z "$apksigner" ]; then
+            echo "::error::apksigner non trovato negli Android SDK build-tools."
+            exit 1
+          fi
+          "$apksigner" verify --verbose --print-certs "$apk"
       - name: Nomina l'APK e calcola l'impronta
         shell: bash
         env:

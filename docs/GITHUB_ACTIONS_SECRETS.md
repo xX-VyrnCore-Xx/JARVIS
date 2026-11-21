@@ -38,8 +38,9 @@ base64 < "$HOME/.jarvis/signing/jarvis-code-signing.pfx" | tr -d '\n' |
 ```
 
 Imposta anche `JARVIS_MACOS_SIGNING_PASSWORD` e `JARVIS_WINDOWS_SIGNING_PASSWORD` come Secrets
-tramite l'interfaccia GitHub (puoi riutilizzare la stessa password). Imposta come **Variable**
-`JARVIS_MACOS_SIGNING_IDENTITY` il fingerprint SHA-1 del certificato, copiato senza `:`. Le release
+tramite l'interfaccia GitHub (puoi riutilizzare la stessa password). La **Variable**
+`JARVIS_MACOS_SIGNING_IDENTITY` è facoltativa: se non presente, il workflow ricava il fingerprint
+SHA-1 dall'identità Code Signing importata; se presente, verifica che corrisponda. Le release
 firmano l'app e il DMG macOS e il setup Windows, poi verificano le firme. Non viene eseguita la
 notarizzazione Apple né usato un servizio di firma commerciale.
 
