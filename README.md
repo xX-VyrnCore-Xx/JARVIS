@@ -14,6 +14,7 @@ Scarica il pacchetto dalla pagina [Releases](https://github.com/xX-VyrnCore-Xx/J
 | Windows x64 | `JARVIS_<versione>_x64-setup.exe` | Avvia il setup per l’utente corrente. |
 
 Core e Python sono inclusi. Al primo avvio puoi installare il riconoscimento vocale, la voce italiana Paola e l’attivazione «Ehi Jarvis». Per configurare le chiavi cloud, apri **Sistema → Modelli cloud**.
+La pagina Releases conserva una sola versione alla volta: al rilascio successivo le release e i tag precedenti vengono rimossi.
 
 ### Verifica un installer
 

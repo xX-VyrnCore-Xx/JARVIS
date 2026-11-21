@@ -41,6 +41,18 @@ cd apps/web && npm ci && npm run build
 
 La CI ricostruisce il bundle e fallisce se differisce da quello versionato. Gli ID e le classi usati da `tests/e2e/ui_smoke.cjs` fanno parte del contratto dell'interfaccia.
 
+## Dipendenze della voce
+
+`ai/requirements-voice.in` elenca le dipendenze dirette; `ai/requirements-voice.txt` è il lock con tutte le dipendenze transitive e i rispettivi hash SHA-256. Per aggiornarlo, usa Python 3.13 e `pip-tools==7.7.0`, poi esegui:
+
+```bash
+pip-compile --generate-hashes --output-file=ai/requirements-voice.txt ai/requirements-voice.in
+```
+
+Le installazioni di sviluppo, il setup guidato e le release usano `pip install --require-hashes`; ogni aggiornamento al lock va verificato sui pacchetti Windows e macOS in CI.
+
+Le GitHub Actions nei workflow sono fissate a commit SHA; la CLI Tauri ha una versione esatta. Aggiorna i riferimenti solo dopo aver verificato la release upstream e il commit corrispondente.
+
 ## Ripresa da remoto con Claude Code
 
 Aprire la radice del checkout autorizzato. Verificare che branch e revisione corrispondano al checkpoint atteso. Scoprire comandi, dipendenze e servizi dai manifest e dalla configurazione del repository, registrando eventuali prerequisiti mancanti. Il lavoro riprendibile deve poter essere ricostruito da cronologia Git, documenti e verifiche, anche quando una nuova sessione non ha la cronologia della chat. Centralizzare le istruzioni condivise nel repository e mantenere i segreti nelle configurazioni autorizzate dell'ambiente.
@@ -53,7 +65,9 @@ Il proprietario ha autorizzato, il 2026-11-17, il merge automatico delle pull re
 
 ### Pubblicazione automatica dopo il merge
 
-Il workflow `contracts` verifica ogni push su `main`. Dopo il successo, `release-after-ci.yml` chiama `release.yml` sullo SHA verificato. Per assegnare una versione univoca, somma il numero dell’esecuzione CI alla patch dichiarata e applica il risultato alla build del Core e degli installer, senza modificare il branch. La revisione riceve il tag dopo i test di installazione del setup Windows x64 e del DMG Apple Silicon. La pubblicazione automatica mantiene i tag e gli installer delle altre revisioni e il rilancio sullo stesso SHA con lo stesso numero CI è idempotente.
+Il workflow `contracts` verifica ogni push, compresi quelli su `main`. `release-after-ci.yml` avvia la pubblicazione solo dopo il completamento verde di `contracts` per un push sul `main` dello stesso repository. La release viene costruita dallo SHA verificato; il numero dell’esecuzione assegna un tag univoco senza modificare il branch. Windows x64 e macOS Apple Silicon devono superare build, installazione e prova di avvio prima della pubblicazione.
+
+Dopo la pubblicazione, `scripts/prune_releases.py` conserva la release con la versione SemVer più alta e rimuove le altre release e i rispettivi tag, comprese le prerelease. L’ordinamento SemVer evita che una build più lenta di un merge precedente elimini una release successiva. Il rilancio sullo stesso SHA e tag è idempotente. Il workflow usa `gh release create --notes ... --generate-notes` per aggiungere le note del progetto alle note automatiche di GitHub.
 
 ### Firma degli installer
 

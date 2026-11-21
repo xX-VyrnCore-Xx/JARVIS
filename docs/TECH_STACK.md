@@ -15,4 +15,4 @@
 | Sicurezza | rustls, WebAuthn, portachiavi di sistema, Argon2 e ChaCha20-Poly1305 | Identità, passkey, protezione dei segreti e backup cifrati |
 | Qualità e distribuzione | GitHub Actions, Playwright, Tauri/NSIS, Sigstore | Test, pacchetti DMG e EXE, attestazione e firma |
 
-Le versioni esatte sono risolte in `core/Cargo.lock`, `apps/desktop/src-tauri/Cargo.lock`, `apps/web/package-lock.json` e `ai/requirements-voice.txt`. [Architettura](ARCHITECTURE.md) · [Sviluppo](DEVELOPMENT.md)
+Le versioni esatte sono risolte in `core/Cargo.lock`, `apps/desktop/src-tauri/Cargo.lock`, `apps/web/package-lock.json` e `ai/requirements-voice.txt`. Il lock Python della voce blocca tutte le dipendenze transitive con hash SHA-256. [Architettura](ARCHITECTURE.md) · [Sviluppo](DEVELOPMENT.md)

@@ -110,7 +110,7 @@ pub fn free_port() -> std::io::Result<u16> {
     Ok(TcpListener::bind(("127.0.0.1", 0))?.local_addr()?.port())
 }
 
-/// Core in esecuzione. Alla distruzione il processo viene terminato.
+/// Core in esecuzione. Alla distruzione il processo viene arrestato ordinatamente o terminato forzatamente.
 pub struct RunningCore {
     child: Child,
     /// Finché resta aperto, il Core continua a funzionare; si chiude anche se questo processo muore.
@@ -121,6 +121,8 @@ pub struct RunningCore {
     /// Token di sessione del Core, generato qui: serve all'app per leggere le notifiche (ADR-0044).
     pub token: String,
 }
+
+const CORE_STOP_TIMEOUT: Duration = Duration::from_secs(8);
 
 impl RunningCore {
     /// Solo per i test: simula la morte del processo padre chiudendo il canale.
@@ -133,16 +135,35 @@ impl RunningCore {
         matches!(self.child.try_wait(), Ok(None))
     }
 
-    pub fn stop(&mut self) {
+    pub fn stop(&mut self) -> std::io::Result<()> {
         self.parent_pipe.take();
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        let deadline = Instant::now() + CORE_STOP_TIMEOUT;
+        loop {
+            match self.child.try_wait()? {
+                Some(_) => return Ok(()),
+                None if Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(50));
+                }
+                None => break,
+            }
+        }
+
+        eprintln!("Il Core non si è arrestato in tempo; termino il processo.");
+        if let Err(error) = self.child.kill() {
+            if self.child.try_wait()?.is_some() {
+                return Ok(());
+            }
+            return Err(error);
+        }
+        self.child.wait().map(|_| ())
     }
 }
 
 impl Drop for RunningCore {
     fn drop(&mut self) {
-        self.stop();
+        if let Err(error) = self.stop() {
+            eprintln!("Errore durante l'arresto del Core JARVIS: {error}");
+        }
     }
 }
 
@@ -250,6 +271,11 @@ pub fn launch(cfg: &LaunchConfig) -> Result<RunningCore, LaunchError> {
         }
         std::thread::sleep(Duration::from_millis(150));
     }
-    core.stop();
+    if let Err(error) = core.stop() {
+        return Err(LaunchError::Io(format!(
+            "timeout di avvio e arresto del Core non riuscito: {error}; dettagli in {}",
+            log.display()
+        )));
+    }
     Err(LaunchError::Timeout { log })
 }

@@ -87,7 +87,7 @@ MODELS="${JARVIS_MODELS_DIR:-$ROOT/data/models}"
 VOICE_NAME="${JARVIS_TTS_VOICE_NAME:-it_IT-paola-medium}"
 if [ "$CMD" = "voice-setup" ]; then
   echo "→ Motori vocali locali (faster-whisper, Piper, openWakeWord)"
-  "$VENV/bin/python" -m pip install -q --disable-pip-version-check -r "$ROOT/ai/requirements-voice.txt"
+  "$VENV/bin/python" -m pip install -q --disable-pip-version-check --require-hashes -r "$ROOT/ai/requirements-voice.txt"
   mkdir -p "$MODELS/piper"
   echo "→ Modello di riconoscimento ${JARVIS_STT_MODEL:-small} (download una tantum)"
   "$VENV/bin/python" -c "import sys; from faster_whisper import WhisperModel; WhisperModel(sys.argv[1], device='cpu', compute_type='int8', download_root=sys.argv[2])" "${JARVIS_STT_MODEL:-small}" "$MODELS"

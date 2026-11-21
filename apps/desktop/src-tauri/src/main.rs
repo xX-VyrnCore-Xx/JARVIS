@@ -227,7 +227,9 @@ fn main() {
                 .unwrap_or_else(|e| e.into_inner())
                 .take()
             {
-                core.stop();
+                if let Err(error) = core.stop() {
+                    eprintln!("Errore durante l'arresto del Core JARVIS: {error}");
+                }
             }
         }
     });

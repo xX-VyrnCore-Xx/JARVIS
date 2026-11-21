@@ -280,7 +280,7 @@ async fn path_traversal_is_denied_by_policy() {
 async fn symlink_escape_is_blocked_at_execution() {
     let e = env();
     std::os::unix::fs::symlink("/etc", e.data.join("workspace/esterno")).unwrap();
-    let out = e.chat("leggi esterno/hostname").await;
+    let out = e.chat("leggi esterno/hosts").await;
     let result = out["steps"]
         .as_array()
         .unwrap()

@@ -46,6 +46,8 @@ Documentare insieme ai contratti la classificazione dei dati, i flussi egress, l
 | Integrità della release | Archivi con impronta SHA-256, bozza di release approvata dal proprietario; firma dell'autore da aggiungere | `release.yml` |
 | Nodi esecutori | Solo strumenti dichiarati all'associazione; policy, conferma e audit del Core; workspace del nodo verificata sia dal Core sia dal nodo; token come SHA-256 nell'hub e in `node.json` con permessi 0600; revoca con assegnazioni annullate e agente fermato | `core/server/tests/nodes.rs` |
 | Dati in uscita (Web) | Interruttore `JARVIS_WEB`, domini consentiti e vietati, audit di ogni chiamata | `web_can_be_disabled_or_restricted_to_an_allowlist` |
+| Dipendenze Python della voce | Versioni transitive e hash SHA-256 nel lock `ai/requirements-voice.txt`; installazione con `pip --require-hashes` | `web_can_be_disabled_or_restricted_to_an_allowlist` |
+| Azioni CI | Riferimenti a commit SHA immutabili; CLI Tauri installata con versione esatta | `web_can_be_disabled_or_restricted_to_an_allowlist` |
 
 Da completare:
 - identità con passkey o WebAuthn e MFA;

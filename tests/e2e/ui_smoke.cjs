@@ -83,7 +83,23 @@ function check(cond, msg) {
   check(await page.locator('#setup-form select[name="stt_model"]').inputValue() === "small", "configurazione della voce al primo avvio con le scelte consigliate");
   check((await page.locator("#setup-size").innerText()).includes("GB"), "dimensione stimata del download");
   if (shots) await page.screenshot({ path: `${shots}/jarvis-configurazione.png` });
+  await page.evaluate(() => {
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = (input, init) => {
+      const request = input instanceof Request ? input : null;
+      const url = request ? request.url : String(input);
+      const method = init?.method || request?.method || "GET";
+      if (!window.setupPollFailed && url.endsWith("/api/setup") && method === "GET") {
+        window.setupPollFailed = true;
+        window.fetch = originalFetch;
+        return Promise.reject(new TypeError("errore temporaneo di test"));
+      }
+      return originalFetch(input, init);
+    };
+  });
   await page.click("#setup-start");
+  await page.waitForFunction(() => document.querySelector("#setup-size").textContent.includes("Riprovo"), null, { timeout: 10000 });
+  check(await page.evaluate(() => window.setupPollFailed), "il setup segnala e riprova dopo un’interruzione temporanea");
   await page.waitForFunction(() => document.querySelector("#setup-size").textContent.includes("completata"), null, { timeout: 30000 });
   check((await page.locator("#setup-steps .step.done").count()) === 4, "configurazione della voce completata in quattro passi");
   await page.click("#setup-later");

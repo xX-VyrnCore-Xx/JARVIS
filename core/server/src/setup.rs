@@ -349,7 +349,7 @@ impl Setup {
                 let req = self.ai_dir.join("requirements-voice.txt");
                 std::fs::create_dir_all(&pkgs).map_err(|e| e.to_string())?;
                 self.python(
-                    &["-m", "pip", "install", "--progress-bar", "off", "--upgrade", "--target",
+                    &["-m", "pip", "install", "--require-hashes", "--progress-bar", "off", "--upgrade", "--target",
                       &pkgs.to_string_lossy(), "-r", &req.to_string_lossy()],
                     id,
                 )

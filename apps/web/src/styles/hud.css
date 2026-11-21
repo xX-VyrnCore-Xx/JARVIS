@@ -290,18 +290,28 @@ svg.spark .area { fill: color-mix(in srgb, var(--accent) 14%, transparent); }
 .mem-stats span { color: var(--muted); font-size: .74rem; font-family: var(--mono); text-transform: uppercase; letter-spacing: .08em; }
 
 /* ------------------------------------------------------------------ configurazione e associazione */
-dialog.setup { max-width: 560px; width: calc(100% - 32px); border: 1px solid var(--border-strong); border-radius: 16px; background: var(--panel-solid); color: var(--text); padding: 1.2rem; box-shadow: 0 20px 60px rgba(0, 0, 0, .5), var(--glow-soft); }
+dialog.setup { max-width: 560px; width: calc(100% - 32px); max-height: 90vh; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 16px; background: var(--panel-solid); color: var(--text); padding: 1.2rem; box-shadow: 0 20px 60px rgba(0, 0, 0, .5), var(--glow-soft); }
 dialog.setup::backdrop { background: rgba(0, 6, 14, .6); backdrop-filter: blur(3px); }
-dialog.setup h2 { font-family: var(--display); letter-spacing: .14em; text-transform: uppercase; margin-top: 0; }
+dialog.setup[open] { animation: setup-enter .2s ease-out both; }
+@keyframes setup-enter { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: none; } }
+dialog.setup .setup-form { max-height: calc(90vh - 2.4rem); min-height: 0; margin-top: 0; }
+dialog.setup h2 { flex: none; font-family: var(--display); letter-spacing: .14em; text-transform: uppercase; margin: 0; }
+dialog.setup .setup-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: .8rem .1rem; }
 dialog.setup fieldset { border: 1px solid var(--border); border-radius: 12px; padding: .6rem .8rem; }
 dialog.setup legend { padding: 0 .3rem; }
+.setup-actions { flex: none; padding-top: .8rem; border-top: 1px solid var(--border); background: var(--panel-solid); }
 .setup-steps { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: .4rem; }
 .setup-steps[hidden] { display: none; }
 .setup-steps .step { border: 0; font-family: inherit; font-size: .9rem; color: var(--text); padding: 0; }
 .setup-steps .step progress { width: 100%; accent-color: var(--accent); }
 .setup-steps .step.done .icon { color: var(--ok); }
 .setup-steps .step.failed .icon { color: var(--bad); }
+.setup-steps .step.running .icon { color: var(--accent); animation: setup-pulse 1.2s ease-in-out infinite alternate; }
 .setup-steps .sub { color: var(--muted); font-size: .8rem; }
+@keyframes setup-pulse { to { opacity: .45; } }
+@media (prefers-reduced-motion: reduce) {
+  dialog.setup[open], .setup-steps .step.running .icon { animation: none; }
+}
 .pair-page { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 1rem; }
 .pair-box { max-width: 420px; width: 100%; background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 1.2rem; }
 

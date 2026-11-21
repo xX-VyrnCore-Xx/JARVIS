@@ -1185,11 +1185,41 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 ### ADR-0061 — Release dopo CI, routing cloud, catalogo e inviti
 
 - **Data** 2026-11-21 · **Fonte** richiesta del proprietario.
-- L’avanzamento di `main` avvia la CI anche per modifiche ai workflow e alla documentazione. Ogni esecuzione verde costruisce dallo SHA verificato e usa una versione numerica applicata alla build. I due installer e le attestazioni vengono pubblicati dopo i test. La pubblicazione automatica conserva le release delle altre revisioni.
+- L’avanzamento di `main` avvia la CI anche per modifiche ai workflow e alla documentazione. Ogni esecuzione verde costruisce dallo SHA verificato e usa una versione numerica applicata alla build. I due installer e le attestazioni vengono pubblicati dopo i test. La retention che allora conservava le release precedenti è superata da ADR-0065.
 - Il Core sceglie per entrambi i provider fra risposta rapida, analisi e sviluppo usando contenuto e lunghezza del contesto autorizzato. Mantiene il limite NIM a 35 RPM e prova una sola alternativa nello stesso provider su HTTP 404. La qualità è verificata con scenari sintetici; i pesi dei modelli ospitati restano gestiti dai provider.
 - Il catalogo include Open-Meteo, GitLab e Airtable. Il modulo guidato crea manifest su campi tipizzati con la stessa validazione del Core. Una nuova installazione non può sovrascrivere un connettore esistente.
 - L’esito finale di un tool fallito o negato risulta negli stati di attività. Il catalogo rispetta i vincoli delle automazioni e si aggiorna dopo nuove integrazioni.
 - Gli inviti web usano un URL HTTPS di un host già autorizzato. Il codice è nel frammento, che il browser cancella dopo la lettura. Il nome e l’invio sono confermati sulla pagina di associazione. Il Core può sostituire o annullare un invito.
+
+### ADR-0062 — Integrità della supply chain
+
+- **Data** 2026-11-21 · **Stato** implementato · **Fonte** revisione di sicurezza.
+- `ai/requirements-voice.in` contiene le sole dipendenze dirette. `ai/requirements-voice.txt` blocca anche le dipendenze transitive e gli hash SHA-256 dei pacchetti.
+- L'avvio da sorgenti, il setup guidato e il workflow di release installano con `pip --require-hashes`; i pacchetti non corrispondenti al lock vengono rifiutati.
+- Il lock è generato con Python 3.13 e pip-tools 7.7.0. I test CI di release verificano l'installazione su Windows e macOS.
+- Le GitHub Actions di terze parti sono fissate a commit SHA; la CLI Tauri è installata alla versione esatta 2.12.6.
+
+### ADR-0063 — Arresto ordinato dell'app desktop
+
+- **Data** 2026-11-21 · **Stato** implementato · **Fonte** richiesta del proprietario e revisione del ciclo di vita desktop.
+- Chiudere la finestra continua a nascondere JARVIS; la voce **Esci da JARVIS** del menu dell'icona di stato chiude l'app.
+- Il launcher chiude lo stdin del Core, attende fino a otto secondi che il Core completi l'arresto e chiuda il worker, quindi forza la terminazione solo se il Core è ancora attivo; gli errori sono restituiti al chiamante per essere segnalati.
+- **Evidenza:** test d'integrazione del launcher verificano l'uscita ordinata sia con il comando di arresto esplicito sia con la chiusura del processo padre.
+
+### ADR-0064 — Leggibilità dell'icona alle dimensioni di sistema
+
+- **Data** 2026-11-21 · **Stato** implementato · **Fonte** richiesta del proprietario.
+- Si mantiene il simbolo del reattore e si riducono i dettagli minuti della corona; il nucleo e il contrasto restano riconoscibili alle dimensioni della tray di Windows e macOS.
+- `scripts/make_brand_assets.py` resta la fonte riproducibile di icone e grafiche degli installer; i file generati sono versionati.
+
+### ADR-0065 — Una sola release dopo CI verde su main
+
+- **Data** 2026-11-21 · **Stato** implementato · **Fonte** richiesta del proprietario.
+- **Contesto:** la retention precedente saltava le pubblicazioni automatiche (`inputs.automatico`) e lasciava crescere la pagina Releases.
+- **Decisione:** ogni push su `main` che completa con successo il workflow `contracts` pubblica gli installer dallo SHA verificato. Dopo la pubblicazione, `scripts/prune_releases.py` mantiene la release SemVer più alta ed elimina le altre release e i rispettivi tag, incluse le prerelease. Una build vecchia che termina dopo una nuova non può rimuovere quella con versione maggiore.
+- `gh release create` combina `--notes` e `--generate-notes` come documentato dalla CLI; il workflow rimuove il file temporaneo delle note anche in caso di errore.
+- **Conseguenze:** la pagina Releases conserva un solo elemento e i tag delle release eliminate non sono più disponibili. Per recuperare una versione precedente si usa il rollback locale (ADR-0015) o si crea una nuova release. Il 2026-11-21 la cleanup è stata applicata anche alle release esistenti: è rimasta `v1.13.193`; le precedenti release e i relativi tag sono stati rimossi.
+- **Evidenza:** test unitari SemVer, prerelease, retention e comandi di rimozione in `tests/contracts/test_release_cleanup.py`.
 
 ### Decisione operativa — Merge automatico con CI verde
 

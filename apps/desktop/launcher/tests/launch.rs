@@ -42,6 +42,15 @@ fn launches_core_on_free_port_and_stops_it() {
         page.contains(&core.token),
         "la pagina usa il token del launcher"
     );
+    let chat = ureq::post(&format!("http://127.0.0.1:{}/api/chat", core.port))
+        .set("Host", &format!("localhost:{}", core.port))
+        .set("X-Jarvis-Token", &core.token)
+        .set("Content-Type", "application/json")
+        .send_string(r#"{"message":"che ore sono"}"#)
+        .expect("richiesta al worker AI")
+        .into_string()
+        .expect("risposta del worker AI");
+    assert!(chat.contains("Sono le"), "{chat}");
     let notifications = ureq::get(&format!(
         "http://127.0.0.1:{}/api/notifications?limit=5",
         core.port
@@ -56,8 +65,15 @@ fn launches_core_on_free_port_and_stops_it() {
         cfg.data_dir.join("jarvis.sqlite3").exists(),
         "i dati vanno nella cartella dell'utente"
     );
-    core.stop();
+    let log = core.log.clone();
+    core.stop().expect("arresto del Core");
     assert!(!core.is_alive());
+    assert!(
+        std::fs::read_to_string(log)
+            .unwrap()
+            .contains("JARVIS arrestato."),
+        "il Core deve completare l'arresto ordinato"
+    );
     assert!(
         ureq::get(&format!("http://127.0.0.1:{}/api/health", core.port))
             .timeout(Duration::from_secs(1))
@@ -81,6 +97,12 @@ fn core_exits_when_the_parent_goes_away() {
     assert!(std::fs::read_to_string(&core.log)
         .unwrap()
         .contains("Processo padre terminato"));
+    assert!(
+        std::fs::read_to_string(&core.log)
+            .unwrap()
+            .contains("JARVIS arrestato."),
+        "anche la chiusura del launcher deve completare l'arresto ordinato"
+    );
 }
 
 #[test]

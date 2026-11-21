@@ -22,7 +22,7 @@ Verificare per piattaforma enrollment, revoca, segnalazione dei limiti OS, ripre
 
 **Rifinitura macOS e Windows (ADR-0035):** icone vettoriali, barra laterale a gruppi riducibile con il conteggio delle conferme, palette comandi (⌘K su macOS, Ctrl+K su Windows e Linux), riga di indicatori in Plancia, etichette e indicatore di scrittura in chat, notifiche con barra del tempo. La radice riceve `platform-mac` o `platform-win` per caratteri di sistema (SF, Segoe UI Variable), raggi e barre di scorrimento; l'app desktop apre la dashboard con `?app=desktop` in una finestra scura e mostra una schermata d'avvio animata.
 
-**Icona e installatori (ADR-0036):** icona a reattore generata da `scripts/make_brand_assets.py`; `.dmg` con sfondo e istruzioni; setup Windows in italiano con immagini dedicate; su macOS barra del titolo trasparente e rimozione della quarantena del pacchetto dopo il primo avvio autorizzato.
+**Icona e installatori (ADR-0036, ADR-0064):** icona a reattore generata da `scripts/make_brand_assets.py`, con corona semplificata per la leggibilità nella tray; `.dmg` con sfondo e istruzioni; setup Windows in italiano con immagini dedicate; su macOS barra del titolo trasparente e rimozione della quarantena del pacchetto dopo il primo avvio autorizzato.
 
 
 - il nucleo animato di JARVIS, che segue gli stati pronto, elaborazione, ascolto, trascrizione e risposta vocale;
@@ -47,7 +47,7 @@ L'interfaccia Web è servita dal Core su `http://localhost:8765` e comprende:
 
 La campanella nell'intestazione mostra le notifiche non lette. Il pannello elenca categoria, ora e task correlato, e un clic porta alla vista collegata. Le nuove notifiche compaiono come toast e, se autorizzate, come notifiche del browser quando la pagina non è in primo piano.
 
-**App desktop (ADR-0009):** `./jarvis.sh desktop` apre JARVIS in una finestra Tauri per Windows, macOS e Linux. L'app avvia il Core in automatico, tiene i dati nella cartella dell'applicazione dell'utente, apre i link esterni nel browser di sistema e alla chiusura arresta Core e worker, anche in caso di crash. La Plancia desktop usa superfici dedicate nei temi chiaro e scuro, tipografia di sistema e animazioni compatibili con la preferenza di movimento ridotto (ADR-0051). La schermata d’avvio riprende i colori dell’app e mostra lo stato del Core. Nell’app, intestazione e barra di composizione rimangono ai bordi della finestra durante lo scorrimento dei pannelli.
+**App desktop (ADR-0009, ADR-0063):** `./jarvis.sh desktop` apre JARVIS in una finestra Tauri per Windows, macOS e Linux. L'app avvia il Core in automatico, tiene i dati nella cartella dell'applicazione dell'utente e apre i link esterni nel browser di sistema. Chiudere la finestra la nasconde; **Esci da JARVIS** nel menu dell'icona di stato termina invece l'app e chiede al Core di arrestarsi ordinatamente, così il worker AI viene chiuso prima del processo. Se il Core non risponde entro otto secondi, il launcher ne forza la terminazione. La Plancia desktop usa superfici dedicate nei temi chiaro e scuro, tipografia di sistema e animazioni compatibili con la preferenza di movimento ridotto (ADR-0051). La schermata d’avvio riprende i colori dell’app e mostra lo stato del Core. Nell’app, intestazione e barra di composizione rimangono ai bordi della finestra durante lo scorrimento dei pannelli.
 
 La sezione **Sistema** mostra lo stato di Core, AI, voce, Web, audit e worker, e la tabella delle latenze (p50, p95, max, errori) per endpoint, strumento e delega.
 

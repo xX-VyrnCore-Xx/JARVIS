@@ -85,7 +85,7 @@ $env:JARVIS_PORT = $Port
 $Models = if ($env:JARVIS_MODELS_DIR) { $env:JARVIS_MODELS_DIR } else { Join-Path $Root "data\models" }
 $VoiceName = if ($env:JARVIS_TTS_VOICE_NAME) { $env:JARVIS_TTS_VOICE_NAME } else { "it_IT-paola-medium" }
 if ($Command -eq "voice-setup") {
-    & $VenvPython -m pip install -q --disable-pip-version-check -r (Join-Path $Root "ai\requirements-voice.txt")
+    & $VenvPython -m pip install -q --disable-pip-version-check --require-hashes -r (Join-Path $Root "ai\requirements-voice.txt")
     New-Item -ItemType Directory -Force -Path (Join-Path $Models "piper") | Out-Null
     $stt = if ($env:JARVIS_STT_MODEL) { $env:JARVIS_STT_MODEL } else { "small" }
     & $VenvPython -c "import sys; from faster_whisper import WhisperModel; WhisperModel(sys.argv[1], device='cpu', compute_type='int8', download_root=sys.argv[2])" $stt $Models

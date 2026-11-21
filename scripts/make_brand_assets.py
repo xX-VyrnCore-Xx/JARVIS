@@ -69,13 +69,13 @@ def reactor(size: int) -> Image.Image:
         d.ellipse((c - r, c - r, c + r, c + r), outline=color, width=max(1, round(width)))
 
     ring(s * 0.46, s * 0.012, CYAN + (110,))
-    # corona a 24 segmenti con un'interruzione ogni 6 (lettura «strumento»)
+    # corona semplificata: 16 segmenti ampi restano leggibili anche nella tray icon
     r_out, r_in = s * 0.42, s * 0.355
-    for i in range(24):
-        if i % 6 == 5:
+    for i in range(20):
+        if i % 5 == 4:
             continue
-        a0 = math.radians(i * 15 + 2.2)
-        a1 = math.radians(i * 15 + 12.8)
+        a0 = math.radians(i * 18 + 2.5)
+        a1 = math.radians(i * 18 + 15.5)
         pts = [
             (c + r_out * math.cos(a0), c + r_out * math.sin(a0)),
             (c + r_out * math.cos(a1), c + r_out * math.sin(a1)),
@@ -96,7 +96,7 @@ def reactor(size: int) -> Image.Image:
     # nucleo: alone e sfera
     halo = radial(round(s * 0.62), CYAN + (190,), CYAN + (0,), 0.7)
     out.alpha_composite(halo, (round(c - halo.width / 2), round(c - halo.height / 2)))
-    core_d = round(s * 0.30)
+    core_d = round(s * 0.34)
     core = radial(core_d, (245, 253, 255, 255), (20, 120, 200, 255), 0.85)
     mask = Image.new("L", (core_d, core_d), 0)
     ImageDraw.Draw(mask).ellipse((0, 0, core_d - 1, core_d - 1), fill=255)
@@ -139,7 +139,7 @@ def app_icon(size: int = 1024, margin: int = 100, shadow: bool = True) -> Image.
         canvas = Image.alpha_composite(canvas, sh.filter(ImageFilter.GaussianBlur(18 * k)))
     plate = vgradient(S, S, NAVY_TOP, NAVY_BOTTOM).convert("RGBA")
     # griglia leggera e riflesso in alto
-    grid(plate, M, M, S - M, S - M, (S - 2 * M) // 8, 22, k)
+    grid(plate, M, M, S - M, S - M, (S - 2 * M) // 8, 12, k)
     em = reactor(round((S - 2 * M) * 0.86))
     plate.alpha_composite(em, ((S - em.width) // 2, (S - em.height) // 2))
     shine = Image.new("RGBA", (S, S), (0, 0, 0, 0))
