@@ -62,9 +62,9 @@ Per un secondo desktop, imposta `JARVIS_REMOTE_URL` o salva l'origine HTTPS in `
 ## Usa JARVIS
 
 - **Chat.** Invia richieste al Core e consulta la cronologia della conversazione. Le azioni sensibili restano soggette a policy e conferma.
-- **Modelli cloud e voce.** Il Core instrada le richieste ai provider configurati e include il runtime vocale. La configurazione guidata dei provider e i controlli vocali non sono ancora disponibili nell'interfaccia desktop nativa.
+- **Modelli cloud e voce.** La sezione Modelli AI dell'app desktop permette di configurare o rimuovere le chiavi per Ollama Cloud e NVIDIA NIM; il Core instrada le richieste al provider selezionato. Il runtime vocale è incluso nel Core, ma i controlli vocali non sono ancora disponibili nell'interfaccia desktop nativa.
 - **Dispositivi e notifiche.** Associa client Android o desktop tramite invito monouso. Le notifiche push Android richiedono Firebase; il Core continua a conservarle anche quando un client non è connesso.
-- **Altre sezioni.** La navigazione nativa include attività, automazioni, memoria, competenze, workspace, connettori, dispositivi, sicurezza, audit e sistema. Alcune viste sono ancora generiche e non sostituiscono i moduli guidati della precedente interfaccia Web.
+- **Altre sezioni.** La navigazione nativa include attività, automazioni, memoria, competenze, workspace, connettori, dispositivi, sicurezza, audit e sistema. Alcune viste sono ancora generiche e non includono tutti i flussi guidati.
 
 [Strumenti e automazioni](docs/AUTONOMY_AND_TOOLS.md) · [Memoria e sincronizzazione](docs/MEMORY_DATA_SYNC.md) · [Sicurezza e privacy](docs/SECURITY_AND_PRIVACY.md)
 

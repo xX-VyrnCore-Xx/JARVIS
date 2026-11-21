@@ -5,7 +5,7 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 
-use crate::tools::{resolve, ToolError};
+use crate::tools::{resolve, resolve_nofollow, ToolError};
 
 fn err(code: &'static str, message: impl Into<String>) -> ToolError {
     ToolError {
@@ -406,8 +406,8 @@ pub fn fs_mkdir(workspace: &Path, rel: &str) -> Result<Value, ToolError> {
 }
 
 pub fn fs_move(workspace: &Path, from: &str, to: &str) -> Result<Value, ToolError> {
-    let src = resolve(workspace, from, true)?;
-    let dst = resolve(workspace, to, false)?;
+    let src = resolve_nofollow(workspace, from, true)?;
+    let dst = resolve_nofollow(workspace, to, false)?;
     if dst.exists() {
         return Err(err(
             "fs.exists",
@@ -422,7 +422,7 @@ pub fn fs_move(workspace: &Path, from: &str, to: &str) -> Result<Value, ToolErro
 }
 
 pub fn fs_delete(workspace: &Path, rel: &str) -> Result<Value, ToolError> {
-    let path = resolve(workspace, rel, true)?;
+    let path = resolve_nofollow(workspace, rel, true)?;
     let root = workspace
         .canonicalize()
         .map_err(|e| err("fs.unavailable", e.to_string()))?;
@@ -857,5 +857,35 @@ mod tests {
     fn disks_are_reported() {
         let d = disks().unwrap();
         assert!(!d["disks"].as_array().unwrap().is_empty(), "{d}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symbolic_links_are_not_mutation_sources_or_destinations() {
+        let base = std::env::current_dir().unwrap().join(format!(
+            "target/jarvis-audit-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let ws = base.join("workspace");
+        std::fs::create_dir_all(&ws).unwrap();
+        std::fs::write(ws.join("target.txt"), "contenuto").unwrap();
+        std::os::unix::fs::symlink(ws.join("target.txt"), ws.join("collegamento")).unwrap();
+
+        assert_eq!(
+            fs_move(&ws, "collegamento", "rinominato.txt")
+                .unwrap_err()
+                .code,
+            "fs.outside_workspace"
+        );
+        assert_eq!(
+            fs_delete(&ws, "collegamento").unwrap_err().code,
+            "fs.outside_workspace"
+        );
+        assert!(
+            ws.join("target.txt").exists(),
+            "il bersaglio non deve essere modificato"
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

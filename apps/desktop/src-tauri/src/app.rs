@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use crate::client::ApiClient;
 use jarvis_launcher::{launch, LaunchConfig, RunningCore};
 
-const NAV: [(&str, &str, bool); 12] = [
+const NAV: [(&str, &str, bool); 13] = [
     ("dashboard", "Plancia", true),
     ("chat", "Chat", false),
     ("tasks", "Attività", false),
@@ -23,6 +23,7 @@ const NAV: [(&str, &str, bool); 12] = [
     ("security", "Sicurezza", true),
     ("audit", "Audit", true),
     ("system", "Sistema", true),
+    ("models", "Modelli AI", true),
 ];
 
 #[derive(Clone, Debug)]
@@ -37,6 +38,7 @@ enum Event {
     History(Result<Value, String>),
     ActionDone(Result<Value, String>),
     PairingCreated(Result<Value, String>),
+    CloudConfigured(Result<Value, String>, bool),
     ChatDelta(String),
     ChatFinished(Result<Value, String>),
     Notifications(Result<Value, String>),
@@ -86,6 +88,12 @@ pub struct JarvisApp {
     device_invite: Option<Value>,
     invite_confirm: bool,
     invite_creating: bool,
+    cloud_provider: String,
+    cloud_api_key: String,
+    cloud_action_busy: bool,
+    cloud_action_error: Option<String>,
+    cloud_action_notice: Option<String>,
+    cloud_remove_confirm: bool,
 }
 
 impl JarvisApp {
@@ -137,6 +145,12 @@ impl JarvisApp {
             device_invite: None,
             invite_confirm: true,
             invite_creating: false,
+            cloud_provider: "ollama_cloud".into(),
+            cloud_api_key: String::new(),
+            cloud_action_busy: false,
+            cloud_action_error: None,
+            cloud_action_notice: None,
+            cloud_remove_confirm: false,
         }
     }
 
@@ -172,7 +186,10 @@ impl JarvisApp {
                         Err(error) => self.error = Some(error),
                     }
                 }
-                Event::Loaded(_, _) => {}
+                Event::Loaded(_, _) => {
+                    self.loading = false;
+                    self.refresh(ctx);
+                }
                 Event::History(Ok(history)) => {
                     self.history_loading = false;
                     self.chat = parse_history(&history);
@@ -201,6 +218,32 @@ impl JarvisApp {
                     self.data = None;
                     self.last_load = Instant::now() - Duration::from_secs(60);
                     self.refresh(ctx);
+                }
+                Event::CloudConfigured(result, removed) => {
+                    self.cloud_action_busy = false;
+                    self.cloud_remove_confirm = false;
+                    match result {
+                        Ok(status) => {
+                            if self.current == "models" {
+                                self.data = Some(status);
+                            } else {
+                                self.data = None;
+                                self.last_load = Instant::now() - Duration::from_secs(60);
+                                self.refresh(ctx);
+                            }
+                            self.cloud_action_error = None;
+                            self.cloud_action_notice = Some(if removed {
+                                "La chiave del provider è stata rimossa.".into()
+                            } else {
+                                "Chiave salvata. Prova il provider dalla Chat; l'inferenza remota può comportare costi.".into()
+                            });
+                        }
+                        Err(error) => {
+                            self.cloud_action_notice = None;
+                            self.cloud_action_error = Some(error);
+                        }
+                    }
+                    ctx.request_repaint();
                 }
                 Event::ChatDelta(delta) => {
                     self.streaming.push_str(&delta);
@@ -353,6 +396,38 @@ impl JarvisApp {
         std::thread::spawn(move || {
             let result = client.post("/api/devices/pairing", Some(&json!({"scopes": scopes})));
             let _ = tx.send(Event::PairingCreated(result));
+        });
+        ctx.request_repaint();
+    }
+
+    fn configure_cloud(&mut self, ctx: &egui::Context, remove_key: bool) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        let provider = self.cloud_provider.clone();
+        let body = if remove_key {
+            json!({"provider": provider, "remove_key": true})
+        } else {
+            let key = std::mem::take(&mut self.cloud_api_key);
+            if key.is_empty()
+                || key.len() > 1024
+                || key.bytes().any(|byte| !byte.is_ascii_graphic())
+            {
+                self.cloud_action_error = Some(
+                    "Inserisci una chiave API valida, senza spazi o caratteri di controllo.".into(),
+                );
+                return;
+            }
+            json!({"provider": provider, "key": key})
+        };
+        let tx = self.tx.clone();
+        self.cloud_action_busy = true;
+        self.cloud_action_error = None;
+        self.cloud_action_notice = None;
+        self.cloud_remove_confirm = false;
+        std::thread::spawn(move || {
+            let result = client.post("/api/cloud", Some(&body));
+            let _ = tx.send(Event::CloudConfigured(result, remove_key));
         });
         ctx.request_repaint();
     }
@@ -636,6 +711,7 @@ impl JarvisApp {
                 }
             }
             "chat" => self.show_chat(ui, ctx),
+            "models" => self.show_cloud_settings(ui, ctx),
             "tasks" | "automations" | "memory" | "skills" | "workspace" | "connectors"
             | "devices" | "security" | "audit" | "system" => {
                 ui.horizontal(|ui| {
@@ -672,6 +748,134 @@ impl JarvisApp {
             }
             _ => {}
         }
+    }
+
+    fn show_cloud_settings(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.heading("Collega un provider AI");
+        ui.label("Le chiavi vengono salvate nel secret store del Core e non sono mostrate dopo il salvataggio.");
+        ui.add_space(8.0);
+
+        let mut provider_changed = false;
+        egui::ComboBox::from_id_salt("cloud-provider")
+            .selected_text(match self.cloud_provider.as_str() {
+                "nvidia_nim" => "NVIDIA NIM",
+                _ => "Ollama Cloud",
+            })
+            .show_ui(ui, |ui| {
+                provider_changed |= ui
+                    .selectable_value(
+                        &mut self.cloud_provider,
+                        "ollama_cloud".into(),
+                        "Ollama Cloud",
+                    )
+                    .changed();
+                provider_changed |= ui
+                    .selectable_value(&mut self.cloud_provider, "nvidia_nim".into(), "NVIDIA NIM")
+                    .changed();
+            });
+        if provider_changed {
+            self.cloud_api_key.clear();
+            self.cloud_action_error = None;
+            self.cloud_action_notice = None;
+            self.cloud_remove_confirm = false;
+        }
+
+        let provider = self
+            .data
+            .as_ref()
+            .and_then(|status| status["providers"].as_array())
+            .and_then(|providers| {
+                providers
+                    .iter()
+                    .find(|provider| provider["id"].as_str() == Some(&self.cloud_provider))
+            })
+            .cloned();
+        let configured = provider
+            .as_ref()
+            .and_then(|provider| provider["configured"].as_bool())
+            .unwrap_or(false);
+        match provider
+            .as_ref()
+            .and_then(|provider| provider["configured"].as_bool())
+        {
+            Some(true) => {
+                ui.colored_label(egui::Color32::LIGHT_GREEN, "Chiave configurata");
+            }
+            Some(false) => {
+                ui.colored_label(egui::Color32::YELLOW, "Chiave non configurata");
+            }
+            None => {
+                ui.horizontal(|ui| {
+                    ui.add(egui::Spinner::new());
+                    ui.label("Caricamento configurazione…");
+                });
+            }
+        }
+
+        if let Some(routing) = provider
+            .as_ref()
+            .and_then(|provider| provider["routing"].as_object())
+        {
+            ui.label("Modelli instradati dal Core:");
+            for (route, model) in routing {
+                if let Some(model) = model.as_str() {
+                    ui.small(format!("{route}: {model}"));
+                }
+            }
+        }
+        ui.add_space(8.0);
+        ui.label("La chiave non viene salvata in questa app né scritta nei log.");
+        ui.add(
+            egui::TextEdit::singleline(&mut self.cloud_api_key)
+                .password(true)
+                .desired_width(ui.available_width())
+                .hint_text("Incolla la API key"),
+        );
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    !self.cloud_action_busy && !self.cloud_api_key.is_empty(),
+                    egui::Button::new("Salva API key"),
+                )
+                .clicked()
+            {
+                self.configure_cloud(ctx, false);
+            }
+
+            if configured {
+                if self.cloud_remove_confirm {
+                    if ui
+                        .add_enabled(
+                            !self.cloud_action_busy,
+                            egui::Button::new("Conferma rimozione"),
+                        )
+                        .clicked()
+                    {
+                        self.configure_cloud(ctx, true);
+                    }
+                    if ui.button("Annulla").clicked() {
+                        self.cloud_remove_confirm = false;
+                    }
+                } else if ui.button("Rimuovi chiave").clicked() {
+                    self.cloud_remove_confirm = true;
+                }
+            }
+        });
+
+        if self.cloud_action_busy {
+            ui.horizontal(|ui| {
+                ui.add(egui::Spinner::new());
+                ui.label("Aggiornamento configurazione…");
+            });
+        }
+        if let Some(error) = &self.cloud_action_error {
+            ui.colored_label(egui::Color32::LIGHT_RED, error);
+        }
+        if let Some(notice) = &self.cloud_action_notice {
+            ui.colored_label(egui::Color32::LIGHT_GREEN, notice);
+        }
+        ui.add_space(8.0);
+        ui.small("Il salvataggio non prova la chiave. Per verificarla invia un messaggio in Chat: il testo sarà elaborato dal provider selezionato e può comportare costi.");
     }
 
     fn show_device_invite(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -923,6 +1127,12 @@ impl eframe::App for JarvisApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.receive_events(&ctx);
+        if self.current != "models" {
+            self.cloud_api_key.clear();
+            self.cloud_action_error = None;
+            self.cloud_action_notice = None;
+            self.cloud_remove_confirm = false;
+        }
         self.focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
         if self.client.is_none() {
             if self.error.as_deref() == Some("remote-pairing") {
@@ -977,8 +1187,19 @@ impl eframe::App for JarvisApp {
             .resizable(false)
             .exact_size(if compact { 58.0 } else { 190.0 })
             .show(ui, |ui| {
-                ui.add_space(12.0);
-                self.navigation(ui, compact, &ctx);
+                let footer_height = 34.0;
+                let navigation_height = (ui.available_height() - footer_height).max(0.0);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(ui.available_width(), navigation_height),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.add_space(12.0);
+                        egui::ScrollArea::vertical()
+                            .id_salt("navigation-list")
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| self.navigation(ui, compact, &ctx));
+                    },
+                );
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
                     ui.separator();
                     ui.label(if self.remote {
@@ -1027,6 +1248,7 @@ fn endpoint(page: &str) -> &'static str {
         "security" => "/api/security",
         "audit" => "/api/audit",
         "system" => "/api/setup",
+        "models" => "/api/cloud",
         _ => "/api/health",
     }
 }
@@ -1202,6 +1424,14 @@ mod tests {
         for (id, _, _) in NAV {
             assert!(!endpoint(id).is_empty(), "missing endpoint for {id}");
         }
+    }
+
+    #[test]
+    fn cloud_provider_settings_use_the_owner_cloud_endpoint() {
+        assert_eq!(endpoint("models"), "/api/cloud");
+        assert!(NAV
+            .iter()
+            .any(|(id, _, owner_only)| *id == "models" && *owner_only));
     }
 
     #[test]
