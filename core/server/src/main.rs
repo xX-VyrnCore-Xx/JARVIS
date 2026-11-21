@@ -219,9 +219,13 @@ async fn main() {
         }
     };
     // Dispositivi associati (RF-11): host pubblicati da un proxy fidato verso 127.0.0.1, es. `tailscale serve`.
-    let remote_hosts: Vec<String> = std::env::var("JARVIS_ALLOWED_HOSTS")
-        .unwrap_or_default()
-        .split(',')
+    let configured_hosts = std::env::var("JARVIS_ALLOWED_HOSTS")
+        .ok()
+        .unwrap_or_else(|| {
+            std::fs::read_to_string(data_dir.join("remote-hosts.txt")).unwrap_or_default()
+        });
+    let mut remote_hosts: Vec<String> = configured_hosts
+        .split([',', '\n'])
         .map(|h| h.trim().to_ascii_lowercase())
         .filter(|h| !h.is_empty())
         .filter(|h| {
@@ -232,6 +236,8 @@ async fn main() {
             ok
         })
         .collect();
+    remote_hosts.sort_unstable();
+    remote_hosts.dedup();
     if !remote_hosts.is_empty() {
         println!(
             "  Dispositivi : accesso associato da {}",

@@ -36,7 +36,6 @@ fn test_core(data: &std::path::Path) -> Jarvis {
         data_dir: data.to_path_buf(),
         python: std::env::var("JARVIS_PYTHON").unwrap_or_else(|_| "python3".into()),
         ai_dir: root.join("ai"),
-        ai_backend: Some("offline".into()),
         delegation_timeout_ms: 30_000,
         voice_engine: Some("fake".into()),
         worker_env: vec![],
@@ -572,9 +571,9 @@ fn cloud_context_requires_opt_in_and_stays_with_the_provider() {
     turn(&mut core, "Quarto", "quarto esito");
     let bounded = ask(&core, true);
     let history = &bounded.targets[0].history;
-    assert_eq!(history.len(), 3);
-    assert_eq!(history[0].user, "E il Core?");
-    assert!(history[1].assistant.chars().count() <= 1300);
+    assert_eq!(history.len(), 4);
+    assert_eq!(history[0].user, "Parliamo di JARVIS");
+    assert_eq!(history[2].assistant, long);
 
     core.chat("che ore sono").unwrap();
     assert!(ask(&core, true)
@@ -794,7 +793,6 @@ async fn conversation_and_tasks_persist_across_restart() {
         data_dir: e.data.clone(),
         python: "python3".into(),
         ai_dir: root.join("ai"),
-        ai_backend: Some("offline".into()),
         delegation_timeout_ms: 30_000,
         voice_engine: Some("fake".into()),
         worker_env: vec![],

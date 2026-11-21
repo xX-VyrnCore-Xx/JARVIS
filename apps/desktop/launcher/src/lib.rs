@@ -43,7 +43,7 @@ pub struct LaunchConfig {
     pub core_bin: PathBuf,
     pub data_dir: PathBuf,
     pub python: String,
-    /// Variabili aggiuntive per il Core (es. `JARVIS_AI_BACKEND`).
+    /// Variabili aggiuntive per il Core.
     pub env: Vec<(String, String)>,
     pub startup_timeout: Duration,
 }
@@ -146,13 +146,14 @@ impl Drop for RunningCore {
     }
 }
 
-fn healthy(port: u16) -> bool {
+fn healthy(port: u16, token: &str) -> bool {
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(2))
         .build();
     // Host deve essere uno di quelli ammessi dal Core (difesa dal DNS rebinding).
     agent
-        .get(&format!("http://127.0.0.1:{port}/api/health"))
+        .get(&format!("http://127.0.0.1:{port}/api/tools"))
+        .set("X-Jarvis-Token", token)
         .call()
         .map(|r| r.status() == 200)
         .unwrap_or(false)
@@ -193,7 +194,13 @@ pub fn launch(cfg: &LaunchConfig) -> Result<RunningCore, LaunchError> {
     let err = out
         .try_clone()
         .map_err(|e| LaunchError::Io(e.to_string()))?;
-    let port = free_port().map_err(|e| LaunchError::Io(e.to_string()))?;
+    let host_mode = cfg.data_dir.join("remote-hosts.txt").is_file()
+        || std::env::var("JARVIS_ALLOWED_HOSTS").is_ok_and(|value| !value.trim().is_empty());
+    let port = if host_mode {
+        8765
+    } else {
+        free_port().map_err(|e| LaunchError::Io(e.to_string()))?
+    };
     let token = session_token();
     let mut cmd = Command::new(&cfg.core_bin);
     // L'app desktop è un programma grafico: su Windows il Core (programma da console) non deve aprire
@@ -238,7 +245,7 @@ pub fn launch(cfg: &LaunchConfig) -> Result<RunningCore, LaunchError> {
                 log,
             });
         }
-        if healthy(port) {
+        if healthy(port, &core.token) {
             return Ok(core);
         }
         std::thread::sleep(Duration::from_millis(150));

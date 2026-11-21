@@ -4,7 +4,7 @@ import { useViewData } from "../state";
 
 export interface CloudProvider {
   id: "ollama_cloud" | "nvidia_nim";
-  routing: { fast: string; reasoning: string; coding: string };
+  routing: { fast: string; reasoning: string; coding: string; long?: string };
   configured: boolean;
   effective_rpm: number | null;
   cooldown_seconds: number;
@@ -49,6 +49,7 @@ function ProviderSettings({ provider, onChange }: { provider: CloudProvider; onC
           <li>Risposte rapide · {provider.routing.fast}</li>
           <li>Analisi e contesto lungo · {provider.routing.reasoning}</li>
           <li>Sviluppo · {provider.routing.coding}</li>
+          {provider.routing.long ? <li>Contesto lungo · {provider.routing.long}</li> : null}
         </ul>
       </details> : null}
       {provider.effective_rpm ? <small className="sub">Massimo {provider.effective_rpm} richieste al minuto da questo Core.</small> : null}
@@ -63,7 +64,7 @@ export function CloudSettings({ active }: { active: boolean }) {
   return (
     <>
       <h3 className="sub-head">Modelli cloud</h3>
-      <p className="hint">Scegli il provider in chat. JARVIS seleziona il modello in base all’attività e alla lunghezza del contesto. Riceve il messaggio corrente e gli schemi degli strumenti disponibili. In Chat puoi condividere fino a tre scambi testuali con lo stesso provider. Memoria e risultati degli strumenti restano sul dispositivo.</p>
+      <p className="hint">Scegli il provider in chat. JARVIS seleziona il modello in base all’attività e alla lunghezza del contesto. Riceve il messaggio corrente e gli schemi degli strumenti disponibili. In Chat puoi condividere fino a otto scambi testuali con lo stesso provider. Memoria e risultati degli strumenti restano sul dispositivo.</p>
       {error ? <p className="form-error" role="alert">{error}</p> : null}
       {data?.providers.map((provider) => <ProviderSettings key={provider.id} provider={provider} onChange={setData} />)}
     </>

@@ -1,11 +1,11 @@
 # Sistema AI e agenti
 
-L'AI Gateway uniforma chat, streaming, tool calling, embeddings, vision ed errori. Gli adapter espongono capacità effettive e salute dei runtime. L'AI Runtime Manager carica e scarica modelli, gestisce memoria e concorrenza e applica limiti coerenti con l'hardware. La memoria applicativa resta indipendente dal modello.
+Il Core gestisce le richieste cloud e gli strumenti. Il worker locale gestisce la voce e i comandi deterministici. La memoria applicativa è indipendente dai provider.
 
 ## Routing
 
 1. Classificare capacità richieste, dati, connettività e budget di risorse.
-2. Selezionare un modello locale adeguato. Ollama è il runtime predefinito e llama.cpp il backend alternativo.
+2. Selezionare un modello di Ollama Cloud o NVIDIA NIM. Per i comandi offline il Core usa un agente deterministico a regole.
 3. Verificare l'idoneità dell'esito. Se serve escalation, applicare prima le regole di autorizzazione e minimizzazione per Ollama Cloud.
 4. Restituire esito o motivo della degradazione. Registrare runtime, latenza, fallback ed errore con metadati minimizzati.
 
@@ -28,37 +28,13 @@ Ogni delega temporanea comprende un obiettivo, un riferimento al task, contesto 
 
 Per aggiornare prompt, agenti e adapter, versionare le modifiche e provarle su casi comparabili. Verificare routing offline, rifiuto di payload non autorizzati, risposta parziale, cancellazione in streaming, agenti scaduti e fallimento di un provider.
 
-## Stato del prototipo v0.1
+## Runtime, contesto e strumenti
 
-L'AI Gateway (`ai/jarvis_ai/gateway.py`) espone due backend locali:
-- **Ollama**, con tool calling: il catalogo degli strumenti delegati viene convertito in funzioni;
-- **offline**, a regole: deterministico e sempre disponibile.
+Il worker Python usa l’agente deterministico per i comandi offline. Il Core esegue le richieste autorizzate a Ollama Cloud e NVIDIA NIM e convalida le proposte di strumenti con i contratti locali. Il routing distingue risposte rapide, sviluppo, ragionamento e contesto lungo.
 
-Il routing `auto` usa Ollama se risponde e ha un modello installato. Se Ollama fallisce durante una richiesta, il gateway passa al modello offline e riporta il motivo in `backend.degraded_reason`. Dopo 15 secondi dalla caduta o da una verifica fallita, la richiesta successiva controlla Ollama e ripristina il backend se il modello è disponibile. Anche un modello installato dopo la partenza viene rilevato con lo stesso meccanismo.
+Il Core stima i token tenendo conto di sequenze di testo, punteggiatura, sintassi e Unicode. Con continuità attiva include fino a otto scambi testuali consecutivi dello stesso provider entro 16.000 token stimati; conserva il messaggio corrente e accorcia i singoli turni sui confini dei caratteri. Schemi degli strumenti, istruzioni e margine per la risposta sono inclusi nel calcolo del plafond applicativo. La memoria, i segreti rilevati e gli esiti degli strumenti restano sul Core.
 
-L'agente propone al massimo una chiamata di strumento per turno (`jarvis.agent-result/1`); il Core decide ed esegue. È attivo solo il General Assistant. L'escalation cloud non è implementata e la delega impone sempre `allow_cloud: false`.
-
-**Prompt di sistema e ciclo dell'agente (ADR-0037).** Il prompt porta data e ora locali, regole di stile e d'uso degli strumenti, sicurezza sui contenuti esterni e la memoria autorizzata (le preferenze valgono come istruzioni). L'agente può usare fino a 4 strumenti per richiesta: dopo ogni risultato riceve lo storico del turno (`tool_history`) e i passi residui (`steps_left`); con zero passi deve rispondere.
-
-Con gli strumenti Web il prompt di sistema chiede di citare le fonti con [n] e l'URL e di non seguire istruzioni contenute nelle pagine. I risultati Web arrivano al modello racchiusi tra marcatori di contenuto non attendibile. Il Core allega comunque le fonti alla risposta (ADR-0007).
-
-## Budget dei token (ADR-0024)
-
-Ogni turno verso il modello locale ha un costo fisso e uno variabile. Il Core e il worker li contengono così:
-- **Cronologia:** al massimo 10 turni entro `JARVIS_CONTEXT_CHARS` (9000 caratteri, circa 2.500 token). L'ultimo messaggio resta intero; i turni precedenti sono accorciati a 700 caratteri e i più vecchi esclusi quando il budget finisce.
-- **Memoria:** prima le preferenze, poi i ricordi pertinenti, fino a 3000 caratteri.
-- **Strumenti:** il modello riceve il nucleo (`time.now`, `system.info`, `memory.remember`, `memory.search`) più i gruppi pertinenti alla richiesta: file, Web, automazioni, memoria, connettori e nodi citati. Al massimo 10. `JARVIS_TOOL_SELECTION=all` li invia tutti.
-- **Schemi compatti:** al modello arrivano gli schemi senza i vincoli di lunghezza, che il Core verifica comunque con i contratti. L'esito dello strumento è serializzato in JSON compatto.
-- **Ollama:** finestra `num_ctx` esplicita (`JARVIS_OLLAMA_NUM_CTX`, 8192) e modello tenuto in memoria per 10 minuti (`keep_alive`), così le richieste ravvicinate non lo ricaricano.
-- **Misura:** l'esito dell'agente riporta `usage` (token in ingresso, generati, strumenti inviati). Il Core li somma nei contatori `ai.tokens.prompt`, `ai.tokens.output` e `ai.tools.sent`, visibili in Plancia, Sistema e nell'esportazione Prometheus.
-
-## Streaming delle risposte (ADR-0025)
-
-La dashboard usa `POST /api/chat/stream`. La risposta è NDJSON:
-- righe `{"type":"delta","text":…}` mentre Ollama genera;
-- in chiusura `{"type":"done","result":…}`, lo stesso oggetto di `POST /api/chat`, oppure `{"type":"error",…}`.
-
-Il Core imposta `stream: true` nella delega. Il worker chiede a Ollama lo streaming e invia ogni frammento come envelope `delegation.progress` (stato `running`, payload `{delta}`) correlato alla richiesta. Il bridge li inoltra e continua ad attendere l'esito entro lo stesso timeout. Se il modello propone uno strumento, non vengono inoltrati frammenti di quel turno: policy, conferme e audit restano invariati e il testo mostrato è quello dell'esito. Il modello offline risponde in un solo blocco. `POST /api/chat` resta disponibile per i client che non leggono lo streaming (app iOS e Android).
+La dashboard usa `POST /api/chat/stream` con risposta NDJSON. Il bridge inoltra gli eventuali envelope `delegation.progress` seguiti da un esito `done` o `error`. Il worker a regole risponde in un blocco. I client che leggono un esito completo usano `POST /api/chat`.
 
 ## Voce
 

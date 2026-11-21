@@ -7,11 +7,24 @@ struct DeviceSession: Codable {
 }
 
 struct ChatMessage: Decodable, Identifiable {
-    let id = UUID()
+    let id: String
     let role: String
     let content: String
 
-    private enum CodingKeys: String, CodingKey { case role, content }
+    init(role: String, content: String) {
+        self.id = UUID().uuidString
+        self.role = role
+        self.content = content
+    }
+
+    private enum CodingKeys: String, CodingKey { case seq, role, content }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try values.decodeIfPresent(Int64.self, forKey: .seq).map(String.init) ?? UUID().uuidString
+        self.role = try values.decode(String.self, forKey: .role)
+        self.content = try values.decode(String.self, forKey: .content)
+    }
 }
 
 struct TaskSummary: Decodable, Identifiable {

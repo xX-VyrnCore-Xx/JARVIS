@@ -59,6 +59,29 @@ fn bundled_config(resources: &std::path::Path, data_dir: &std::path::Path) -> Op
     })
 }
 
+fn remote_core(data_dir: &std::path::Path) -> Result<Option<url::Url>, String> {
+    let configured = match std::env::var("JARVIS_REMOTE_URL") {
+        Ok(value) => value,
+        Err(_) => match std::fs::read_to_string(data_dir.join("remote-core-url.txt")) {
+            Ok(value) => value,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error.to_string()),
+        },
+    };
+    let url = url::Url::parse(configured.trim()).map_err(|_| "Indirizzo del Core non valido")?;
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || url.path() != "/"
+    {
+        return Err("Usa l’origine HTTPS del Core, senza percorso né credenziali".into());
+    }
+    Ok(Some(url))
+}
+
 fn local_page(url: &url::Url) -> bool {
     matches!(url.scheme(), "tauri") || url.host_str() == Some("tauri.localhost")
 }
@@ -103,12 +126,22 @@ fn main() {
                 Some(dir) => PathBuf::from(dir),
                 None => app.path().app_data_dir()?,
             };
+            let remote_origin = remote_core(&data_dir)?;
+            let initial = remote_origin.as_ref().map_or_else(
+                || WebviewUrl::App("index.html".into()),
+                |origin| {
+                    let mut page = origin.clone();
+                    page.query_pairs_mut().append_pair("app", "desktop");
+                    WebviewUrl::External(page)
+                },
+            );
+            let allowed_remote = remote_origin.clone();
             let core_port = std::sync::Arc::new(Mutex::new(None::<u16>));
             let allowed = core_port.clone();
             let opener = app.handle().clone();
             let opener_new = app.handle().clone();
             let window =
-                WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+                WebviewWindowBuilder::new(app, "main", initial)
                     .title("JARVIS")
                     .inner_size(1200.0, 820.0)
                     .min_inner_size(380.0, 520.0)
@@ -120,7 +153,11 @@ fn main() {
                             matches!(url.host_str(), Some("localhost") | Some("127.0.0.1"))
                                 && url.port() == core
                                 && core.is_some();
-                        if local_page(url) || to_core {
+                        if let Some(origin) = &allowed_remote {
+                            if url.origin() == origin.origin() {
+                                return true;
+                            }
+                        } else if local_page(url) || to_core {
                             return true;
                         }
                         if matches!(url.scheme(), "http" | "https") {
@@ -157,6 +194,9 @@ fn main() {
                 }
             });
 
+            if remote_origin.is_some() {
+                return Ok(());
+            }
             let handle = app.handle().clone();
             let bundled = app
                 .path()

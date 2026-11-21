@@ -41,8 +41,12 @@ struct JarvisView: View {
             }
         }
         .task { await model.restore() }
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .active, let session = model.session { Task { await model.reload(session) } }
+        .task(id: scenePhase == .active ? model.session?.token : nil) {
+            guard scenePhase == .active, let session = model.session else { return }
+            while !Task.isCancelled {
+                await model.reload(session, background: true)
+                do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            }
         }
     }
 
@@ -241,8 +245,17 @@ final class JarvisModel: ObservableObject {
         }
     }
 
-    func reload(_ session: DeviceSession) async {
-        await run { try await refresh(session) }
+    func reload(_ session: DeviceSession, background: Bool = false) async {
+        if background {
+            guard !busy, self.session?.token == session.token else { return }
+            let revision = sessionRevision
+            do { try await refresh(session, revision: revision) }
+            catch let error as CoreError {
+                if case .revoked = error, self.session?.token == session.token { try? disconnect() }
+            } catch { /* La prossima sincronizzazione riprova. */ }
+        } else {
+            await run { try await refresh(session) }
+        }
     }
 
     func markAllRead(_ session: DeviceSession) async {
@@ -256,12 +269,16 @@ final class JarvisModel: ObservableObject {
         await run { try disconnect() }
     }
 
-    private func refresh(_ session: DeviceSession) async throws {
+    private var sessionRevision = 0
+
+    private func refresh(_ session: DeviceSession, revision: Int? = nil) async throws {
         async let history = client.history(session)
         async let pending = client.pending(session)
         async let recent = client.tasks(session)
         async let inbox = client.notices(session)
         let (loadedMessages, loadedActions, loadedTasks, loadedNotices) = try await (history, pending, recent, inbox)
+        if let revision, revision != sessionRevision || self.session?.token != session.token { return }
+        try Task.checkCancellation()
         messages = loadedMessages
         actions = loadedActions.sorted { $0.expiresAt < $1.expiresAt }
         tasks = loadedTasks
@@ -287,6 +304,7 @@ final class JarvisModel: ObservableObject {
 
     private func run(_ operation: () async throws -> Void) async {
         guard !busy else { return }
+        sessionRevision += 1
         busy = true
         error = nil
         defer { busy = false }

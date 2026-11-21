@@ -22,77 +22,6 @@ use crate::store::{Store, StoreResult};
 
 pub const KINDS: [&str; 3] = ["semantic", "procedural", "episodic"];
 
-/// Embedding da un modello (ADR-0028): riconosce i sinonimi che il vettore locale non vede.
-pub trait Embedder: Send + Sync {
-    /// Nome del modello, salvato con ogni vettore: cambiare modello rende i vecchi vettori da ricalcolare.
-    fn model(&self) -> &str;
-    /// `None` se il servizio non risponde: la memoria continua con l'indice locale.
-    fn embed(&self, text: &str) -> Option<Vec<f32>>;
-}
-
-/// Embedding con Ollama (`POST /api/embed`), con pausa di 60 secondi dopo un errore per non rallentare la chat.
-pub struct OllamaEmbedder {
-    url: String,
-    model: String,
-    down_until: std::sync::Mutex<Option<std::time::Instant>>,
-}
-
-impl OllamaEmbedder {
-    pub fn new(url: &str, model: &str) -> Self {
-        Self {
-            url: url.trim_end_matches('/').to_string(),
-            model: model.to_string(),
-            down_until: std::sync::Mutex::new(None),
-        }
-    }
-}
-
-impl Embedder for OllamaEmbedder {
-    fn model(&self) -> &str {
-        &self.model
-    }
-
-    fn embed(&self, text: &str) -> Option<Vec<f32>> {
-        let mut down = self.down_until.lock().unwrap_or_else(|e| e.into_inner());
-        if down.is_some_and(|t| std::time::Instant::now() < t) {
-            return None;
-        }
-        let agent = ureq::AgentBuilder::new()
-            .timeout(std::time::Duration::from_secs(8))
-            .redirects(0)
-            .build();
-        let result = agent
-            .post(&format!("{}/api/embed", self.url))
-            .set("Content-Type", "application/json")
-            .send_string(
-                &json!({"model": self.model, "input": text.chars().take(2000).collect::<String>()})
-                    .to_string(),
-            )
-            .ok()
-            .and_then(|r| r.into_string().ok())
-            .and_then(|b| serde_json::from_str::<Value>(&b).ok())
-            .and_then(|v| {
-                v["embeddings"][0].as_array().map(|a| {
-                    a.iter()
-                        .filter_map(|x| x.as_f64().map(|f| f as f32))
-                        .collect::<Vec<f32>>()
-                })
-            })
-            .filter(|v| !v.is_empty());
-        *down = if result.is_some() {
-            None
-        } else {
-            Some(std::time::Instant::now() + std::time::Duration::from_secs(60))
-        };
-        result.map(|mut v| {
-            let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-            if norm > 0.0 {
-                v.iter_mut().for_each(|x| *x /= norm);
-            }
-            v
-        })
-    }
-}
 pub const DIM: usize = 256;
 /// Punteggio minimo perché un elemento sia considerato pertinente.
 pub const MIN_SCORE: f32 = 0.12;
@@ -299,7 +228,7 @@ impl Store {
             "CREATE INDEX IF NOT EXISTS memory_by_kind ON memory (kind, created_at);
              CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5 (id UNINDEXED, text, tokenize = 'unicode61 remove_diacritics 2');
              CREATE TABLE IF NOT EXISTS memory_vectors (id TEXT PRIMARY KEY, vec BLOB NOT NULL);
-             CREATE TABLE IF NOT EXISTS memory_embeddings (id TEXT PRIMARY KEY, model TEXT NOT NULL, vec BLOB NOT NULL);
+             DROP TABLE IF EXISTS memory_embeddings;
              CREATE TABLE IF NOT EXISTS memory_edges (memory_id TEXT NOT NULL, subject TEXT NOT NULL,
                  relation TEXT NOT NULL, object TEXT NOT NULL);
              CREATE INDEX IF NOT EXISTS memory_edges_by_memory ON memory_edges (memory_id);",
@@ -326,14 +255,6 @@ impl Store {
             "INSERT INTO memory_vectors (id, vec) VALUES (?1, ?2)",
             params![id, to_blob(&embed(text))],
         )?;
-        if let Some(e) = &self.embedder {
-            if let Some(v) = e.embed(text) {
-                self.conn.execute(
-                    "INSERT INTO memory_embeddings (id, model, vec) VALUES (?1, ?2, ?3)",
-                    params![id, e.model(), to_blob(&v)],
-                )?;
-            }
-        }
         if kind == "semantic" {
             for (s, r, o) in extract_triples(text) {
                 self.conn.execute(
@@ -351,16 +272,15 @@ impl Store {
         self.conn
             .execute("DELETE FROM memory_vectors WHERE id = ?1", [id])?;
         self.conn
-            .execute("DELETE FROM memory_embeddings WHERE id = ?1", [id])?;
-        self.conn
             .execute("DELETE FROM memory_edges WHERE memory_id = ?1", [id])?;
         Ok(())
     }
 
     /// Ricostruisce tutti gli indici derivati dalla sola tabella `memory`. Restituisce il numero di elementi.
     pub fn memory_reindex(&self) -> StoreResult<usize> {
-        self.conn.execute_batch(
-            "DELETE FROM memory_fts; DELETE FROM memory_vectors; DELETE FROM memory_edges; DELETE FROM memory_embeddings;",
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute_batch(
+            "DELETE FROM memory_fts; DELETE FROM memory_vectors; DELETE FROM memory_edges;",
         )?;
         let rows: Vec<(String, String, String)> = {
             let mut stmt = self.conn.prepare("SELECT id, text, kind FROM memory")?;
@@ -370,31 +290,8 @@ impl Store {
         for (id, text, kind) in &rows {
             self.memory_index(id, text, kind)?;
         }
+        tx.commit()?;
         Ok(rows.len())
-    }
-
-    /// Calcola gli embedding mancanti per il modello attivo; si ferma al primo errore del servizio.
-    pub fn memory_embed_missing(&self) -> StoreResult<usize> {
-        let Some(e) = self.embedder.clone() else {
-            return Ok(0);
-        };
-        let rows: Vec<(String, String)> = {
-            let mut stmt = self.conn.prepare(
-                "SELECT id, text FROM memory WHERE id NOT IN (SELECT id FROM memory_embeddings WHERE model = ?1)",
-            )?;
-            let rows = stmt.query_map([e.model()], |r| Ok((r.get(0)?, r.get(1)?)))?;
-            rows.collect::<StoreResult<_>>()?
-        };
-        let mut done = 0;
-        for (id, text) in rows {
-            let Some(v) = e.embed(&text) else { break };
-            self.conn.execute(
-                "INSERT OR REPLACE INTO memory_embeddings (id, model, vec) VALUES (?1, ?2, ?3)",
-                params![id, e.model(), to_blob(&v)],
-            )?;
-            done += 1;
-        }
-        Ok(done)
     }
 
     /// Elimina gli elementi scaduti con i loro derivati; restituisce quanti.
@@ -537,86 +434,102 @@ impl Store {
     }
 
     /// Ricerca ibrida: similarità del vettore locale (60%) e posizione BM25 nell'indice testuale (40%).
-    /// Con un modello di embedding (ADR-0028) il punteggio diventa 30% locale, 25% BM25 e fino a 60% dal
-    /// modello, che riconosce i sinonimi.
+    /// Combina similarità locale, corrispondenze testuali e termini equivalenti.
     pub fn memory_search(
         &self,
         query: &str,
         kind: Option<&str>,
         limit: usize,
     ) -> StoreResult<Vec<Value>> {
+        let normalized = normalize(query);
+        let words: Vec<_> = normalized
+            .split_whitespace()
+            .filter(|word| word.chars().count() > 1 && !STOPWORDS.contains(word))
+            .take(24)
+            .collect();
+        if words.is_empty() || limit == 0 {
+            return Ok(Vec::new());
+        }
+        let equivalents = [
+            &["auto", "automobile", "macchina", "vettura"][..],
+            &["riunione", "meeting"][..],
+            &["cartella", "directory"][..],
+            &["promemoria", "reminder"][..],
+        ];
+        let expanded: HashSet<_> = words
+            .iter()
+            .copied()
+            .chain(
+                equivalents
+                    .iter()
+                    .filter(|group| words.iter().any(|word| group.contains(word)))
+                    .flat_map(|group| group.iter().copied()),
+            )
+            .collect();
+        let mut search: Vec<_> = expanded.iter().map(|word| format!(r#""{word}""#)).collect();
+        search.sort_unstable();
+        let fts = search.join(" OR ");
         let q = embed(query);
-        let semantic: Option<(String, Vec<f32>)> = self
-            .embedder
-            .as_ref()
-            .and_then(|e| e.embed(query).map(|v| (e.model().to_string(), v)));
-        let (local_w, text_w) = if semantic.is_some() {
-            (0.3, 0.25)
-        } else {
-            (0.6, 0.4)
-        };
-        let mut scores: BTreeMap<String, f32> = BTreeMap::new();
+        let now = chrono::Utc::now().to_rfc3339();
+        let mut scores = BTreeMap::new();
         {
             let mut stmt = self.conn.prepare(
-                "SELECT v.id, v.vec FROM memory_vectors v JOIN memory m ON m.id = v.id
-                 WHERE (?1 IS NULL OR m.kind = ?1)",
+                "SELECT m.id, m.text, v.vec FROM memory m JOIN memory_vectors v ON v.id = m.id
+                 WHERE (?1 IS NULL OR m.kind = ?1) AND (m.expires_at IS NULL OR m.expires_at > ?2)",
             )?;
-            let rows = stmt.query_map([kind], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))
+            let rows = stmt.query_map(params![kind, now], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Vec<u8>>(2)?,
+                ))
             })?;
             for row in rows {
-                let (id, blob) = row?;
-                scores.insert(id, local_w * cosine(&q, &from_blob(&blob)).max(0.0));
+                let (id, text, blob) = row?;
+                let text = normalize(&text);
+                let terms: HashSet<_> = text.split_whitespace().collect();
+                let coverage = words.iter().filter(|word| terms.contains(**word)).count() as f32
+                    / words.len() as f32;
+                let phrase = words.len() > 1
+                    && text
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .windows(words.len())
+                        .any(|part| part == words);
+                scores.insert(
+                    id,
+                    0.5 * cosine(&q, &from_blob(&blob)).max(0.0)
+                        + 0.3 * coverage
+                        + if phrase { 0.2 } else { 0.0 },
+                );
             }
         }
-        if let Some((model, qv)) = &semantic {
-            let mut stmt = self.conn.prepare(
-                "SELECT e.id, e.vec FROM memory_embeddings e JOIN memory m ON m.id = e.id
-                 WHERE e.model = ?1 AND (?2 IS NULL OR m.kind = ?2)",
-            )?;
-            let rows = stmt.query_map(params![model, kind], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))
-            })?;
-            for row in rows {
-                let (id, blob) = row?;
-                let v = from_blob(&blob);
-                if v.len() == qv.len() {
-                    // I modelli danno similarità alte anche fra testi lontani: conta solo la parte sopra 0,4.
-                    let sim = ((cosine(qv, &v) - 0.4) / 0.6).clamp(0.0, 1.0);
-                    *scores.entry(id).or_default() += 0.6 * sim;
-                }
+        let mut stmt = self.conn.prepare(
+            "SELECT memory_fts.id FROM memory_fts JOIN memory m ON m.id = memory_fts.id
+             WHERE memory_fts MATCH ?1 AND (?2 IS NULL OR m.kind = ?2)
+             AND (m.expires_at IS NULL OR m.expires_at > ?3)
+             ORDER BY bm25(memory_fts), m.updated_at DESC, m.id LIMIT 80",
+        )?;
+        let rows = stmt.query_map(params![fts, kind, now], |r| r.get::<_, String>(0))?;
+        for (rank, id) in rows.enumerate() {
+            if let Some(score) = scores.get_mut(&id?) {
+                *score += 0.3 / (1.0 + rank as f32 * 0.08);
             }
         }
-        let fts_terms: Vec<String> = normalize(query)
-            .split_whitespace()
-            .filter(|w| w.chars().count() > 1 && !STOPWORDS.contains(w))
-            .map(|w| format!("\"{}\"*", w.chars().take(6).collect::<String>()))
-            .collect();
-        if !fts_terms.is_empty() {
-            let mut stmt = self.conn.prepare(
-                "SELECT id FROM memory_fts WHERE memory_fts MATCH ?1 ORDER BY bm25(memory_fts) LIMIT 50",
-            )?;
-            let rows = stmt.query_map([fts_terms.join(" OR ")], |r| r.get::<_, String>(0))?;
-            for (rank, id) in rows.enumerate() {
-                if let Some(s) = scores.get_mut(&id?) {
-                    *s += text_w / (1.0 + rank as f32 * 0.25);
-                }
-            }
-        }
-        let mut ranked: Vec<(String, f32)> = scores
+        let mut ranked: Vec<_> = scores
             .into_iter()
-            .filter(|(_, s)| *s >= MIN_SCORE)
+            .filter(|(_, score)| *score >= MIN_SCORE)
             .collect();
         ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
         let sql = format!("SELECT {} FROM memory WHERE id = ?1", Self::COLUMNS);
-        let mut out = vec![];
+        let mut out = Vec::new();
         for (id, score) in ranked.into_iter().take(limit) {
             if let Some(mut item) = self
                 .conn
                 .query_row(&sql, [&id], Self::memory_row)
                 .optional()?
             {
-                item["score"] = json!((score * 1000.0).round() / 1000.0);
+                item["score"] = json!((score.min(1.0) * 1000.0).round() / 1000.0);
                 out.push(item);
             }
         }
@@ -717,134 +630,22 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Embedder finto: «auto», «macchina» e «vettura» hanno lo stesso significato.
-    struct Synonyms;
-    impl Embedder for Synonyms {
-        fn model(&self) -> &str {
-            "finto"
-        }
-        fn embed(&self, text: &str) -> Option<Vec<f32>> {
-            let t = normalize(text);
-            let car = ["auto", "macchina", "vettura"]
-                .iter()
-                .any(|w| t.split_whitespace().any(|x| x.starts_with(w)));
-            let food = ["pizza", "pasta"].iter().any(|w| t.contains(w));
-            let v = vec![
-                if car { 1.0 } else { 0.0 },
-                if food { 1.0 } else { 0.0 },
-                0.1,
-            ];
-            let n = v.iter().map(|x: &f32| x * x).sum::<f32>().sqrt();
-            Some(v.into_iter().map(|x| x / n).collect())
-        }
-    }
-
     #[test]
-    fn model_embeddings_find_synonyms_and_are_rebuilt() {
-        let dir =
-            std::env::temp_dir().join(format!("jarvis-mem-syn-{}", uuid::Uuid::new_v4().simple()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let mut store = Store::open(&dir.join("jarvis.sqlite3")).unwrap();
+    fn search_prioritizes_phrases_and_finds_equivalent_words() {
+        let store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        let at = "2026-01-01T00:00:00Z";
+        store.memory_add("a", "la vettura è in garage", at).unwrap();
         store
-            .memory_add(
-                "m1",
-                "ho comprato una macchina rossa",
-                "2026-01-01T00:00:00Z",
-            )
+            .memory_add("b", "sala riunioni secondo piano", at)
             .unwrap();
         store
-            .memory_add(
-                "m2",
-                "la mia pizza preferita è la margherita",
-                "2026-01-01T00:00:01Z",
-            )
+            .memory_add("c", "secondo incontro al piano terra", at)
             .unwrap();
-        assert!(
-            store
-                .memory_search("parcheggio dell'auto", None, 5)
-                .unwrap()
-                .iter()
-                .all(|i| i["id"] != "m1"),
-            "senza modello il sinonimo non si trova"
-        );
-        // Attivando il modello si calcolano gli embedding degli elementi già presenti.
+        assert_eq!(store.memory_search("auto", None, 5).unwrap()[0]["id"], "a");
         assert_eq!(
-            store
-                .set_embedder(Some(std::sync::Arc::new(Synonyms)))
-                .unwrap(),
-            2
+            store.memory_search("secondo piano", None, 5).unwrap()[0]["id"],
+            "b"
         );
-        let found = store
-            .memory_search("parcheggio dell'auto", None, 5)
-            .unwrap();
-        assert_eq!(found[0]["id"], "m1", "{found:?}");
-        assert!(found.iter().all(|i| i["id"] != "m2"));
-        // Correzione e cancellazione aggiornano anche gli embedding.
-        store
-            .memory_update("m1", "ho venduto la vettura", "2026-01-02T00:00:00Z")
-            .unwrap();
-        assert_eq!(store.memory_search("auto", None, 5).unwrap()[0]["id"], "m1");
-        store.memory_delete("m1").unwrap();
-        let n: i64 = store
-            .conn
-            .query_row("SELECT COUNT(*) FROM memory_embeddings", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(n, 1);
-        assert_eq!(store.memory_reindex().unwrap(), 1);
-        let n: i64 = store
-            .conn
-            .query_row("SELECT COUNT(*) FROM memory_embeddings", [], |r| r.get(0))
-            .unwrap();
-        assert_eq!(n, 1, "ricostruiti dalla tabella sorgente");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn ollama_embedder_reads_api_and_pauses_after_errors() {
-        use std::io::{BufRead, BufReader, Read, Write};
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
-        std::thread::spawn(move || {
-            for (i, stream) in listener.incoming().enumerate() {
-                let mut stream = stream.unwrap();
-                let mut r = BufReader::new(stream.try_clone().unwrap());
-                let mut len = 0usize;
-                loop {
-                    let mut l = String::new();
-                    r.read_line(&mut l).unwrap();
-                    if l == "\r\n" || l.is_empty() {
-                        break;
-                    }
-                    if let Some(v) = l.to_ascii_lowercase().strip_prefix("content-length:") {
-                        len = v.trim().parse().unwrap();
-                    }
-                }
-                let mut b = vec![0u8; len];
-                r.read_exact(&mut b).unwrap();
-                let req: Value = serde_json::from_slice(&b).unwrap();
-                assert_eq!(req["model"], "nomic-embed-text");
-                let (status, body) = if i == 0 {
-                    ("200 OK", json!({"embeddings": [[3.0, 4.0]]}).to_string())
-                } else {
-                    ("500 X", "{}".into())
-                };
-                let _ = write!(
-                    stream,
-                    "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                    body.len()
-                );
-            }
-        });
-        let e = OllamaEmbedder::new(&url, "nomic-embed-text");
-        assert_eq!(
-            e.embed("ciao").unwrap(),
-            vec![0.6, 0.8],
-            "vettore normalizzato"
-        );
-        assert!(e.embed("ciao").is_none(), "errore del servizio");
-        assert!(
-            e.embed("ciao").is_none(),
-            "pausa dopo l'errore senza nuove richieste"
-        );
+        assert!(store.memory_search("il e", None, 5).unwrap().is_empty());
     }
 }

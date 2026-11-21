@@ -7,8 +7,6 @@ use serde_json::{json, Value};
 
 pub struct Store {
     pub(crate) conn: Connection,
-    /// Modello di embedding facoltativo per la memoria (ADR-0028).
-    pub(crate) embedder: Option<std::sync::Arc<dyn crate::memory::Embedder>>,
 }
 
 pub type StoreResult<T> = Result<T, rusqlite::Error>;
@@ -79,10 +77,7 @@ impl Store {
         {
             conn.execute_batch("ALTER TABLE messages ADD COLUMN cloud_provider TEXT;")?;
         }
-        let store = Self {
-            conn,
-            embedder: None,
-        };
+        let store = Self { conn };
         store.memory_migrate()?;
         crate::skills::migrate(&store)?;
         store
@@ -239,15 +234,6 @@ impl Store {
             > 0)
     }
 
-    /// Attiva gli embedding e calcola quelli mancanti (elementi salvati prima o con un altro modello).
-    pub fn set_embedder(
-        &mut self,
-        e: Option<std::sync::Arc<dyn crate::memory::Embedder>>,
-    ) -> StoreResult<usize> {
-        self.embedder = e;
-        self.memory_embed_missing()
-    }
-
     pub fn task_put(&self, doc: &Value, at: &str) -> StoreResult<()> {
         self.conn.execute(
             "INSERT INTO tasks (task_id, doc, updated_at) VALUES (?1, ?2, ?3)
@@ -293,11 +279,11 @@ impl Store {
     /// Ultimi `limit` messaggi in ordine cronologico.
     pub fn messages_recent(&self, limit: u32) -> StoreResult<Vec<Value>> {
         let mut stmt = self.conn.prepare(
-            "SELECT role, content, task_id, at, sources FROM (SELECT * FROM messages ORDER BY seq DESC LIMIT ?1) ORDER BY seq",
+            "SELECT role, content, task_id, at, sources, seq FROM (SELECT * FROM messages ORDER BY seq DESC LIMIT ?1) ORDER BY seq",
         )?;
         let rows = stmt.query_map([limit], |r| {
             Ok(
-                json!({"role": r.get::<_, String>(0)?, "content": r.get::<_, String>(1)?,
+                json!({"seq": r.get::<_, i64>(5)?, "role": r.get::<_, String>(0)?, "content": r.get::<_, String>(1)?,
                       "task_id": r.get::<_, Option<String>>(2)?, "at": r.get::<_, String>(3)?,
                       "sources": r.get::<_, Option<String>>(4)?.and_then(|s| serde_json::from_str::<Value>(&s).ok()).unwrap_or(Value::Array(vec![]))}),
             )
@@ -325,7 +311,7 @@ impl Store {
         let mut stmt = self.conn.prepare(
             "SELECT user.content, answer.content, answer.cloud_provider
              FROM (SELECT seq, task_id, content FROM messages WHERE role = 'user'
-                   ORDER BY seq DESC LIMIT 3) AS user
+                   ORDER BY seq DESC LIMIT 8) AS user
              LEFT JOIN messages AS answer ON answer.task_id = user.task_id
                  AND answer.role = 'assistant' AND answer.cloud_provider IS NOT NULL
              ORDER BY user.seq DESC",

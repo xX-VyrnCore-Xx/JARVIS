@@ -30,7 +30,7 @@ Verificare ripetizione della stessa operazione, crash durante la sincronizzazion
   - `memory_fts`: indice testuale FTS5 (BM25), senza accenti;
   - `memory_vectors`: vettore locale da 256 dimensioni (radici delle parole e trigrammi con hashing). La ricerca semantica resta offline e deterministica, senza modelli di embedding;
   - `memory_edges`: knowledge graph di triple (soggetto, relazione, oggetto) estratte dai fatti in italiano.
-- **Sinonimi (ADR-0028):** con un modello di embedding di Ollama (`nomic-embed-text` o `mxbai-embed-large`, scelto nella configurazione guidata o con `JARVIS_EMBED_MODEL`) ogni elemento ha anche un vettore del modello in `memory_embeddings`, salvato con il nome del modello. La ricerca combina 30% vettore locale, 25% BM25 e fino al 60% di similarità del modello: «auto» trova «macchina». Senza Ollama, o se non risponde, si usa la ricerca locale; gli embedding mancanti si calcolano quando il servizio torna.
+- **Sinonimi:** la ricerca confronta i termini originali e un insieme di equivalenze gestito localmente, per esempio «auto», «macchina» e «vettura».
 - **Recupero:** ricerca ibrida (60% similarità del vettore, 40% posizione BM25) con soglia minima. L'agente riceve tutte le preferenze, i fatti (tutti fino a 30, oltre solo i pertinenti) e gli episodi pertinenti alla richiesta. Lo strumento `memory.search` e i comandi «cosa sai di …» e «cerca nella memoria …» la usano dalla chat.
 - **Correzione e cancellazione:** `PATCH` e `DELETE /api/memory/{id}`, con evento di audit, aggiornano subito indice, vettore e grafo. La cancellazione tramite agente richiede conferma (RF-08). I dispositivi associati non accedono alla memoria.
 - **Contesto dell'agente:** gli ultimi 10 turni della conversazione e la memoria selezionata come sopra.
@@ -48,3 +48,9 @@ Una cancellazione eseguita in JARVIS non modifica i backup già creati: per rend
 
 
 **Database e deduplicazione (ADR-0037).** SQLite in WAL con `synchronous=NORMAL`, `busy_timeout` di 5 secondi e versione dello schema in `user_version`; manutenzione ogni 6 ore e diagnostica in `GET /api/database`. `memory.remember` non duplica un fatto già presente (confronto sul testo normalizzato).
+
+### Uso da più app con un Core sul Mac
+
+L’app desktop host usa la porta stabile di loopback 8765 con `remote-hosts.txt` o `JARVIS_ALLOWED_HOSTS`. Il proxy HTTPS privato espone solo il nome configurato. Browser, iOS, Android e finestre desktop in modalità client leggono e aggiornano lo stesso database del Core. Chat e conferme si aggiornano dal Core; le app mobili aggiornano anche le proprie viste di attività e notifiche. L’accesso rispetta i permessi dell’associazione ed è revocabile dal Mac. Le viste conservano i dati già caricati durante un’interruzione; le nuove operazioni richiedono una connessione al Core.
+
+La memoria usa FTS5, similarità con vettori calcolati sul Core e un insieme circoscritto di equivalenze linguistiche. La ricerca privilegia frasi esatte ed esclude i ricordi scaduti prima di applicare il limite. Gli embedding derivati dal precedente runtime vengono rimossi durante la migrazione. I ricordi originali sono conservati.

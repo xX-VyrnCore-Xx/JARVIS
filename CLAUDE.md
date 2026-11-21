@@ -37,7 +37,7 @@ python3 -m unittest discover -s tests/contracts -v && python3 -m unittest discov
 cd core && cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked
 ```
 
-Prototipo avviabile con `./jarvis.sh` (porta 8765). Test E2E dell'interfaccia, con il Core avviato come nella CI (`JARVIS_AI_BACKEND=offline`, `JARVIS_VOICE_ENGINE=fake`, `JARVIS_FAKE_STT_TEXT="che ore sono"`, fornitore Web locale; vedi `.github/workflows/contracts.yml`):
+Prototipo avviabile con `./jarvis.sh` (porta 8765). Test E2E dell'interfaccia, con il Core avviato come nella CI (`JARVIS_VOICE_ENGINE=fake`, `JARVIS_FAKE_STT_TEXT="che ore sono"`, fornitore Web locale; vedi `.github/workflows/contracts.yml`):
 
 ```bash
 JARVIS_URL=http://localhost:8765 node tests/e2e/ui_smoke.cjs

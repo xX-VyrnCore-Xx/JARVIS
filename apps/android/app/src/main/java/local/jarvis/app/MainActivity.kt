@@ -40,6 +40,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import local.jarvis.client.ChatMessage
@@ -133,7 +135,12 @@ private fun ColumnScope.TasksScreen(session: DeviceSession, onRevoked: () -> Uni
             .onSuccess { tasks.clear(); tasks.addAll(it); status = if (it.isEmpty()) "Nessuna attività." else null }
             .onFailure { if (it is CoreException.Revoked) onRevoked() else status = it.message }
     }
-    LaunchedEffect(session) { refresh() }
+    LaunchedEffect(session) {
+        while (isActive) {
+            refresh()
+            delay(5_000)
+        }
+    }
     TextButton(onClick = { scope.launch { refresh() } }, modifier = Modifier.padding(horizontal = 8.dp)) { Text("Aggiorna") }
     status?.let { Text(it, modifier = Modifier.padding(horizontal = 16.dp)) }
     LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -159,7 +166,12 @@ private fun ColumnScope.NoticesScreen(session: DeviceSession, onRevoked: () -> U
             .onSuccess { notices = it; status = if (it.items.isEmpty()) "Nessuna notifica." else null }
             .onFailure { if (it is CoreException.Revoked) onRevoked() else status = it.message }
     }
-    LaunchedEffect(session) { refresh() }
+    LaunchedEffect(session) {
+        while (isActive) {
+            refresh()
+            delay(5_000)
+        }
+    }
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
         Text("Non lette: ${notices?.unread ?: 0}", modifier = Modifier.padding(8.dp))
         Row {
@@ -205,14 +217,22 @@ private fun ColumnScope.ChatScreen(session: DeviceSession, onRevoked: () -> Unit
     suspend fun refresh() {
         val result = withContext(Dispatchers.IO) { runCatching { client.history(session) to client.pending(session) } }
         result.onSuccess { (history, actions) ->
-            messages.clear(); messages.addAll(history)
-            pending.clear(); pending.addAll(actions)
+            val stickToEnd = messages.isEmpty() || !list.canScrollForward
+            if (messages != history) {
+                messages.clear(); messages.addAll(history)
+                if (stickToEnd && messages.isNotEmpty()) list.scrollToItem(messages.size - 1)
+            }
+            if (pending != actions) { pending.clear(); pending.addAll(actions) }
             status = null
-            if (messages.isNotEmpty()) list.scrollToItem(messages.size - 1)
         }.onFailure(::handle)
     }
 
-    LaunchedEffect(session) { refresh() }
+    LaunchedEffect(session) {
+        while (isActive) {
+            if (!busy) refresh()
+            delay(4_000)
+        }
+    }
 
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
         Text("JARVIS", style = MaterialTheme.typography.titleLarge)

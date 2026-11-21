@@ -14,10 +14,7 @@ fn home() -> PathBuf {
 
 fn config() -> LaunchConfig {
     let data = std::env::temp_dir().join(format!("jarvis-launcher-{}", std::process::id()));
-    let mut cfg = LaunchConfig::discover(&home(), &data)
-        .expect("binario del Core (cargo build -p jarvis-core)");
-    cfg.env.push(("JARVIS_AI_BACKEND".into(), "offline".into()));
-    cfg
+    LaunchConfig::discover(&home(), &data).expect("binario del Core (cargo build -p jarvis-core)")
 }
 
 #[test]
