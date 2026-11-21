@@ -8,7 +8,7 @@ on:
   push:
     tags: ["v*"]
   pull_request:
-    paths: ["scripts/fetch_python.py", ".github/workflows/release.yml", "scripts/sign_macos_release.sh", "apps/desktop/**", "core/server/src/main.rs", "core/server/src/rollback.rs"]
+    paths: ["ai/**", "scripts/fetch_python.py", ".github/workflows/release.yml", "scripts/sign_macos_release.sh", "apps/desktop/**", "core/server/src/main.rs", "core/server/src/rollback.rs"]
   workflow_call:
     inputs:
       tag:
@@ -238,6 +238,10 @@ jobs:
       ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      JARVIS_FIREBASE_API_KEY: ${{ vars.JARVIS_FIREBASE_API_KEY }}
+      JARVIS_FIREBASE_PROJECT_ID: ${{ vars.JARVIS_FIREBASE_PROJECT_ID }}
+      JARVIS_FIREBASE_APP_ID: ${{ vars.JARVIS_FIREBASE_APP_ID }}
+      JARVIS_FIREBASE_SENDER_ID: ${{ vars.JARVIS_FIREBASE_SENDER_ID }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -273,7 +277,17 @@ jobs:
             echo "ORG_GRADLE_PROJECT_jarvisReleaseKeyPassword=$ANDROID_KEY_PASSWORD"
           } >> "$GITHUB_ENV"
       - name: Compila l'APK firmato e verifica l'identità di firma
+        shell: bash
         run: |
+          configured=0
+          [ -n "$JARVIS_FIREBASE_API_KEY" ] && configured=$((configured + 1))
+          [ -n "$JARVIS_FIREBASE_PROJECT_ID" ] && configured=$((configured + 1))
+          [ -n "$JARVIS_FIREBASE_APP_ID" ] && configured=$((configured + 1))
+          [ -n "$JARVIS_FIREBASE_SENDER_ID" ] && configured=$((configured + 1))
+          if [ "$configured" -ne 0 ] && [ "$configured" -ne 4 ]; then
+            echo "::error::Configura tutte e quattro le variabili Firebase Android oppure lasciale vuote."
+            exit 1
+          fi
           gradle -p apps/android --no-daemon :core-client:test :app:assembleRelease
           apk=apps/android/app/build/outputs/apk/release/app-release.apk
           test -s "$apk"

@@ -82,13 +82,13 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "22"
-      # Dashboard React (ADR-0023): il bundle incluso nel Core deve corrispondere ai sorgenti di apps/web.
+      # Dashboard React (ADR-0023): i bundle inclusi nel Core devono corrispondere ai sorgenti di apps/web.
       - name: Dashboard (tipi e bundle)
         working-directory: apps/web
         run: |
           npm ci --no-audit --no-fund
           npm run build
-          git diff --exit-code -- ../../core/server/static/app.js ../../core/server/static/app.css || { echo "::error::bundle non aggiornato: esegui npm run build in apps/web e fai il commit"; exit 1; }
+          git diff --exit-code -- ../../core/server/static/app.js ../../core/server/static/app.css ../../core/server/static/fcm-sw.js || { echo "::error::bundle non aggiornato: esegui npm run build in apps/web e fai il commit"; exit 1; }
       - name: Compila il Core
         working-directory: core
         run: cargo build --release --locked -p jarvis-core

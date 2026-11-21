@@ -12,16 +12,18 @@ Scarica il pacchetto dalla pagina [Releases](https://github.com/xX-VyrnCore-Xx/J
 |---|---|---|
 | macOS Apple Silicon | `JARVIS_<versione>_aarch64.dmg` | Apri il DMG e trascina JARVIS in **Applicazioni**. |
 | Windows x64 | `JARVIS_<versione>_x64-setup.exe` | Avvia il setup per l’utente corrente. |
+| Android | `JARVIS_<versione>_android-release.apk` | Installa l'APK release firmato (non usare APK di debug). |
 
-Core e Python sono inclusi. Al primo avvio puoi installare il riconoscimento vocale, la voce italiana Paola e l’attivazione «Ehi Jarvis». Per configurare le chiavi cloud, apri **Sistema → Modelli cloud**.
+Core e Python sono inclusi negli installer desktop. Al primo avvio puoi installare il riconoscimento vocale, la voce italiana Paola e l’attivazione «Ehi Jarvis». Per configurare le chiavi cloud, apri **Sistema → Modelli cloud**. L'APK Android è allegato alla stessa release; per abilitare le notifiche push configura [Firebase](docs/FIREBASE_SETUP.md).
 La pagina Releases conserva una sola versione alla volta: al rilascio successivo le release e i tag precedenti vengono rimossi.
 
 ### Verifica un installer
 
-Ogni release automatica verifica l’installazione di entrambi i pacchetti. L’attestazione GitHub collega i file alla build e le firme Sigstore consentono una verifica indipendente. Usa la versione del pacchetto che hai scaricato.
+Ogni release automatica verifica gli installer desktop e la firma dell'APK Android. L’attestazione GitHub collega i file alla build e le firme Sigstore consentono una verifica indipendente. Usa la versione del pacchetto che hai scaricato.
 
 ```bash
 gh attestation verify "./JARVIS_<versione>_aarch64.dmg" --repo xX-VyrnCore-Xx/JARVIS
+gh attestation verify "./JARVIS_<versione>_android-release.apk" --repo xX-VyrnCore-Xx/JARVIS
 ```
 
 Per verificare direttamente il file con Cosign, scarica anche il suo bundle Sigstore. Per Windows usa il nome dell’EXE nella variabile.
@@ -40,7 +42,7 @@ La firma che il sistema operativo riconosce dipende dalle credenziali di pubblic
 | Core | Rust, Axum, Tokio, Serde |
 | Worker locale | Python 3, JSON Lines su stdin/stdout, JSON Schema 2020-12 |
 | Desktop e Web | Tauri 2, React 19, TypeScript, Vite, PWA |
-| Mobile | Kotlin e Jetpack Compose su Android; PWA installabile su browser compatibili |
+| Mobile | Kotlin e Jetpack Compose su Android |
 | Dati e memoria | SQLite con rusqlite, FTS5/BM25, vettori lessicali locali e grafo delle conoscenze |
 | Inferenza | Ollama Cloud e NVIDIA NIM, routing per attività e budget, limiter NIM a 35 RPM |
 | Voce | faster-whisper, Piper, openWakeWord e XTTS v2 facoltativo |
@@ -79,4 +81,4 @@ cd JARVIS
 
 Su Windows usa `jarvis.cmd` o `.\jarvis.ps1`. Le istruzioni aprono il Core su `http://localhost:8765`. Usa `jarvis.sh doctor` o `jarvis.cmd doctor` per verificare l’ambiente. `./jarvis.sh desktop` apre la finestra Tauri, che su Linux richiede WebKitGTK 4.1, GTK 3 e librsvg. Per ricompilare il frontend usa `npm ci` e `npm run build` in `apps/web`.
 
-[Sviluppo e CI](docs/DEVELOPMENT.md) · [Architettura](docs/ARCHITECTURE.md) · [Roadmap e checkpoint](docs/ROADMAP.md)
+[Sviluppo e CI](docs/DEVELOPMENT.md) · [Secrets GitHub Actions](docs/GITHUB_ACTIONS_SECRETS.md) · [Firebase](docs/FIREBASE_SETUP.md) · [Architettura](docs/ARCHITECTURE.md) · [Roadmap e checkpoint](docs/ROADMAP.md)

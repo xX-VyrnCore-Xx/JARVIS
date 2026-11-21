@@ -44,6 +44,12 @@ Il checkpoint è la sezione di ripresa versionata con Git. Ogni voce va aggiorna
 
 **Ripresa release/CI su `da814e2` (2026-11-21).** ADR-0065. La retention ora si applica anche alle pubblicazioni automatiche, elimina prerelease e tag precedenti e conserva la versione SemVer massima, così build terminate fuori ordine non rimuovono una versione successiva. `release-after-ci.yml` pubblica solo dopo CI verde per push su `main`. Aggiunti test sintetici per ordinamento SemVer, prerelease e comandi di cleanup. Il 2026-11-21 la pulizia remota ha ridotto le release da quattro a una, mantenendo `v1.13.193` e rimuovendo le altre release e i loro tag; `gh release list` conferma un solo elemento. Test locali: 14 contratti e 31 test AI superati (uno saltato per `openwakeword` assente); fmt, Clippy e test Rust completi superati (un test Docker ignorato); YAML dei workflow analizzato e diff pulito. Actionlint non è installato localmente; la validazione GitHub resta da eseguire dopo la pubblicazione delle modifiche. Le modifiche di codice e documentazione sono nel checkout locale, non sul branch condiviso.
 
+**Ripresa da `b02c7d3` (2026-11-21), branch `codex/native-desktop-mobile-release`.** Fase 6 — validazione e release. Per la PR iniziale il proprietario ha scelto: ritiro iOS, correzioni CI e Android/Firebase; la migrazione della UI Web/Tauri a Rust/egui e la rimozione Web/PWA sono una seconda PR. Corrette la validazione della firma Gradle, i tipi Vite e la dipendenza Windows `colorama` con hash; il workflow di release ora esegue i controlli desktop anche quando cambia `ai/**`. Android sospende il polling fuori dal foreground, migliora la chat e usa FCM data-only ad alta priorità (TTL 24 ore), mostrando notifiche solo con consenso e permesso OS. Aggiunta la route Core `/fcm-sw.js`, il controllo statico del bundle e le guide [FIREBASE_SETUP.md](FIREBASE_SETUP.md) e [GITHUB_ACTIONS_SECRETS.md](GITHUB_ACTIONS_SECRETS.md). Rimosso il progetto Xcode residuo; il codice iOS era già assente alla revisione di partenza.
+
+**Evidenze:** 14 test contratti e 31 test AI superati (uno saltato per `openwakeword` assente); build dashboard/type-check incluse entrambi i service worker; `:core-client:test` Gradle riuscito; `:app:validateReleaseSigning` con keystore temporaneo riuscito nella verifica precedente. CI di riferimento: run `44932874213` aveva Android ed E2E falliti, mentre i job desktop Windows/macOS erano verdi; run release `44932028653` aveva Windows fallito e macOS verde. Il checkout è ancora senza commit/PR. Non verificati localmente: test Rust/E2E (toolchain Rust assente) e build completa APK (Android SDK assente). Push reale richiede configurazione Firebase del proprietario e un dispositivo.
+
+**Prossimi passi:** completare test Rust/E2E e build multipiattaforma in CI, correggere gli esiti Windows/macOS, creare la PR e unirla solo a CI verde. Dopo il merge, aprire la PR2 egui con parità funzionale, sostituire packaging Tauri/WebView e rimuovere `apps/web` e gli asset Web senza rompere le API Android.
+
 Il checkpoint precedente è riportato qui sotto per riferimento.
 
 | Campo | Stato al 2026-11-18 (diciottesima ripresa) |
@@ -63,10 +69,10 @@ La chat web condivisa dal desktop e dalla PWA integra un avatar astratto 3D con 
 
 **Fasi 6–7 — Verifica e rilascio.** `node --test tests/ui/audio_offline.test.cjs` copre audio e recupero della navigazione. `test_packaging.py` verifica struttura, permessi, impronte SHA-256 e riproducibilità dei tre archivi usando un binario sintetico. Resta da verificare il flusso E2E completo con il Core avviato.
 
-### Prossime verifiche iOS e Ollama
+### Verifiche storiche: iOS e Ollama
 
 - **Fase 4.** Il gateway espone il passaggio a offline anche nello stato del Core. La prima richiesta successiva al periodo di attesa verifica la disponibilità di Ollama e ripristina il modello senza riavviare JARVIS.
-- **Fasi 5–6.** Il progetto Xcode in `apps/ios` aggiunge associazione HTTPS, cronologia, chat e conferme con permessi. Il client di rete è verificato con risposte sintetiche. La build senza firma per simulatore è riuscita. La checklist P8a copre la prova con Core e iPhone/iPad. Restano aperti Android, le funzioni native iOS oltre chat e conferme e la prova sul dispositivo.
+- **Client iOS:** realizzato nelle revisioni storiche e rimosso dal checkout su richiesta del proprietario il 2026-11-21. Non è più un client supportato né un obiettivo di prova; il codice Xcode residuo è stato eliminato.
 
 ### Registro delle riprese
 

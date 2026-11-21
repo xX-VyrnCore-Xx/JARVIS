@@ -29,6 +29,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Tab
@@ -72,6 +73,8 @@ import local.jarvis.client.TaskSummary
 
 /** Client Android di JARVIS (ADR-0018, ADR-0032): associazione, chat, conferme, attività e notifiche. */
 class MainActivity : ComponentActivity() {
+    private val appInForeground = mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val store = SessionStore(applicationContext)
@@ -84,12 +87,22 @@ class MainActivity : ComponentActivity() {
                         if (current == null) {
                             PairingScreen { paired -> store.save(paired); session = paired }
                         } else {
-                            DeviceScreen(current) { store.clear(); session = null }
+                            DeviceScreen(current, appInForeground.value) { store.clear(); session = null }
                         }
                     }
                 }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        appInForeground.value = true
+    }
+
+    override fun onStop() {
+        appInForeground.value = false
+        super.onStop()
     }
 }
 
@@ -136,7 +149,7 @@ private fun PairingScreen(onPaired: (DeviceSession) -> Unit) {
 
 /** Schede del dispositivo: chat, attività e notifiche (le rotte permesse dal permesso `chat`). */
 @Composable
-private fun ColumnScope.DeviceScreen(session: DeviceSession, onRevoked: () -> Unit) {
+private fun ColumnScope.DeviceScreen(session: DeviceSession, appInForeground: Boolean, onRevoked: () -> Unit) {
     var tab by remember { mutableStateOf(0) }
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
@@ -162,9 +175,9 @@ private fun ColumnScope.DeviceScreen(session: DeviceSession, onRevoked: () -> Un
     ) { selected ->
         Column(Modifier.fillMaxSize()) {
             when (selected) {
-                0 -> ChatScreen(session, onRevoked)
-                1 -> TasksScreen(session, onRevoked)
-                else -> NoticesScreen(session, onRevoked)
+                0 -> ChatScreen(session, appInForeground, onRevoked)
+                1 -> TasksScreen(session, appInForeground, onRevoked)
+                else -> NoticesScreen(session, appInForeground, onRevoked)
             }
         }
     }
@@ -176,7 +189,7 @@ private val STATE_LABEL = mapOf(
 )
 
 @Composable
-private fun ColumnScope.TasksScreen(session: DeviceSession, onRevoked: () -> Unit) {
+private fun ColumnScope.TasksScreen(session: DeviceSession, appInForeground: Boolean, onRevoked: () -> Unit) {
     val tasks = remember { mutableStateListOf<TaskSummary>() }
     var status by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
@@ -185,7 +198,8 @@ private fun ColumnScope.TasksScreen(session: DeviceSession, onRevoked: () -> Uni
             .onSuccess { tasks.clear(); tasks.addAll(it); status = if (it.isEmpty()) "Nessuna attività." else null }
             .onFailure { if (it is CoreException.Revoked) onRevoked() else status = it.message }
     }
-    LaunchedEffect(session) {
+    LaunchedEffect(session, appInForeground) {
+        if (!appInForeground) return@LaunchedEffect
         while (isActive) {
             refresh()
             delay(5_000)
@@ -207,7 +221,7 @@ private fun ColumnScope.TasksScreen(session: DeviceSession, onRevoked: () -> Uni
 }
 
 @Composable
-private fun ColumnScope.NoticesScreen(session: DeviceSession, onRevoked: () -> Unit) {
+private fun ColumnScope.NoticesScreen(session: DeviceSession, appInForeground: Boolean, onRevoked: () -> Unit) {
     var notices by remember { mutableStateOf<Notices?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
@@ -295,7 +309,8 @@ private fun ColumnScope.NoticesScreen(session: DeviceSession, onRevoked: () -> U
             .onSuccess { notices = it; status = if (it.items.isEmpty()) "Nessuna notifica." else null }
             .onFailure { if (it is CoreException.Revoked) onRevoked() else status = it.message }
     }
-    LaunchedEffect(session) {
+    LaunchedEffect(session, appInForeground) {
+        if (!appInForeground) return@LaunchedEffect
         if (pushEnabled && JarvisApplication.firebaseConfigured() &&
             (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
                 ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED)
@@ -352,7 +367,7 @@ private fun ColumnScope.NoticesScreen(session: DeviceSession, onRevoked: () -> U
 }
 
 @Composable
-private fun ColumnScope.ChatScreen(session: DeviceSession, onRevoked: () -> Unit) {
+private fun ColumnScope.ChatScreen(session: DeviceSession, appInForeground: Boolean, onRevoked: () -> Unit) {
     val messages = remember { mutableStateListOf<ChatMessage>() }
     val pending = remember { mutableStateListOf<PendingAction>() }
     var input by remember { mutableStateOf("") }
@@ -378,7 +393,8 @@ private fun ColumnScope.ChatScreen(session: DeviceSession, onRevoked: () -> Unit
         }.onFailure(::handle)
     }
 
-    LaunchedEffect(session) {
+    LaunchedEffect(session, appInForeground) {
+        if (!appInForeground) return@LaunchedEffect
         while (isActive) {
             if (!busy) refresh()
             delay(4_000)
@@ -416,8 +432,28 @@ private fun ColumnScope.ChatScreen(session: DeviceSession, onRevoked: () -> Unit
     }
     LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         items(messages) { m ->
-            Card(Modifier.fillMaxWidth()) {
-                Text((if (m.role == "user") "Tu: " else "JARVIS: ") + m.content, Modifier.padding(12.dp))
+            val fromUser = m.role == "user"
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = if (fromUser) Arrangement.End else Arrangement.Start,
+            ) {
+                Card(
+                    Modifier.fillMaxWidth(0.9f),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (fromUser) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.surfaceVariant,
+                    ),
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text(
+                            if (fromUser) "Tu" else "JARVIS",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(m.content, style = MaterialTheme.typography.bodyLarge)
+                    }
+                }
             }
         }
     }

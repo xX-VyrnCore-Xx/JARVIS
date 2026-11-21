@@ -63,17 +63,19 @@ android {
 
 val validateReleaseSigning = tasks.register("validateReleaseSigning") {
     doLast {
-        val required = mapOf(
-            "jarvisReleaseStoreFile" to releaseStoreFile,
-            "jarvisReleaseStorePassword" to releaseStorePassword,
-            "jarvisReleaseKeyAlias" to releaseKeyAlias,
-            "jarvisReleaseKeyPassword" to releaseKeyPassword,
+        val required: Map<String, String?> = mapOf(
+            "jarvisReleaseStoreFile" to providers.gradleProperty("jarvisReleaseStoreFile").orNull,
+            "jarvisReleaseStorePassword" to providers.gradleProperty("jarvisReleaseStorePassword").orNull,
+            "jarvisReleaseKeyAlias" to providers.gradleProperty("jarvisReleaseKeyAlias").orNull,
+            "jarvisReleaseKeyPassword" to providers.gradleProperty("jarvisReleaseKeyPassword").orNull,
         )
         val missing = required.filterValues { it.isNullOrBlank() }.keys
         check(missing.isEmpty()) {
             "APK release non firmabile: configura ${missing.joinToString()}."
         }
-        check(file(releaseStoreFile!!).isFile) { "Keystore Android non trovato." }
+        check(file(required.getValue("jarvisReleaseStoreFile")!!).isFile) {
+            "Keystore Android non trovato."
+        }
     }
 }
 

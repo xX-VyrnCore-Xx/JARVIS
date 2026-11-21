@@ -50,6 +50,7 @@ pip-compile --generate-hashes --output-file=ai/requirements-voice.txt ai/require
 ```
 
 Le installazioni di sviluppo, il setup guidato e le release usano `pip install --require-hashes`; ogni aggiornamento al lock va verificato sui pacchetti Windows e macOS in CI.
+Il lock include anche le dipendenze condizionali specifiche di Windows (per esempio `colorama` richiesta da `tqdm`); verificare il lock su Windows oltre che sul sistema che lo genera.
 
 Le GitHub Actions nei workflow sono fissate a commit SHA; la CLI Tauri ha una versione esatta. Aggiorna i riferimenti solo dopo aver verificato la release upstream e il commit corrispondente.
 
