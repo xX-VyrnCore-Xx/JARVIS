@@ -88,6 +88,12 @@ fn resource_uri(tool: &str, args: &Value) -> String {
     }
     match args["path"].as_str() {
         Some(p) if tool.starts_with("fs.") => format!("jarvis://file/workspace/{}", clean(p)),
+        _ if tool == crate::desktop::TOOL => {
+            format!(
+                "jarvis://desktop/{}",
+                clean(args["target"].as_str().unwrap_or_default())
+            )
+        }
         _ if tool == "shell.run" => "jarvis://terminal/workspace".to_string(),
         _ if matches!(tool, "web.fetch" | "web.browse" | "web.form") => {
             let host = args["url"]
@@ -171,6 +177,10 @@ fn expected_effect(tool: &str, args: &Value) -> String {
         "fs.delete" => format!(
             "Eliminare definitivamente «{}» dalla workspace di JARVIS (le cartelle solo se vuote).",
             args["path"].as_str().unwrap_or("?")
+        ),
+        crate::desktop::TOOL => format!(
+            "Aprire {} sul computer del proprietario.",
+            args["target"].as_str().and_then(crate::desktop::Target::parse).map_or("l’applicazione", crate::desktop::Target::label)
         ),
         "code.run_python" => format!(
             "Eseguire {} byte di Python in un container temporaneo, senza rete né accesso ai file del PC.",

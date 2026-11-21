@@ -205,6 +205,42 @@ async fn rejected_confirmation_cancels_without_effects() {
 }
 
 #[tokio::test]
+async fn desktop_request_stays_local_with_cloud_selected() {
+    let e = env();
+    let (status, pending) = e
+        .api(
+            "POST",
+            "/api/cloud/chat",
+            Some(json!({"provider":"nim", "message":"Apri la calcolatrice"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{pending}");
+    assert_eq!(pending["task"]["state"], "waiting_confirmation");
+    assert_eq!(pending["confirmation"]["tool"], "pc.open");
+    assert!(pending["backend"].is_null());
+    let id = pending["confirmation"]["confirmation_id"].as_str().unwrap();
+
+    let (status, done) = e
+        .api(
+            "POST",
+            &format!("/api/confirmations/{id}"),
+            Some(json!({"approve": false})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(done["task"]["state"], "cancelled");
+
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/workflows",
+            Some(json!({"name":"Avvio", "steps":[{"tool":"pc.open", "arguments":{"target":"calculator"}}]})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn path_traversal_is_denied_by_policy() {
     let e = env();
     for message in ["leggi ../../etc/passwd", "leggi /etc/passwd"] {

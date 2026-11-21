@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, chatStream, DEVICE_MODE, fmtTime, post, pref } from "../lib/api";
 import { voice } from "../lib/voice";
-import { Avatar, AVATAR_LABELS, useAvatarState } from "../components/Avatar";
+import { activityFromPrompt, activityFromResult } from "../lib/avatarActivity";
+import { Avatar, AvatarStatus, VoiceReplySwitch } from "../components/Avatar";
 import { CLOUD_LABELS } from "../components/CloudSettings";
 import type { CloudProvider } from "../components/CloudSettings";
 import { Icon } from "../components/Icon";
@@ -44,9 +45,16 @@ type Item = MsgItem | ConfirmItem;
 type NewItem = Omit<MsgItem, "id"> | Omit<ConfirmItem, "id">;
 
 const SUGGESTIONS = [
-  "ciao", "che ore sono", "info sistema", "scrivi note.txt: la mia prima nota", "leggi note.txt",
-  "ricorda che preferisco risposte brevi", "cosa ricordi", "ogni ora info sistema", "elenca automazioni",
-  "cerca intelligenza artificiale",
+  { label: "Stato del sistema", prompt: "info sistema", icon: "gauge" },
+  { label: "Le mie automazioni", prompt: "elenca automazioni", icon: "automations" },
+  { label: "Cerca su Wikipedia", prompt: "cerca ", icon: "search", draft: true },
+];
+
+const PC_ACTIONS = [
+  { label: "Cartella di JARVIS", prompt: "Apri la cartella di JARVIS", icon: "workspace" },
+  { label: "Calcolatrice", prompt: "Apri la calcolatrice", icon: "bolt" },
+  { label: "Impostazioni di sistema", prompt: "Apri le impostazioni di sistema", icon: "system" },
+  { label: "Monitor attività", prompt: "Apri monitoraggio attività", icon: "gauge" },
 ];
 
 /** Passkey del dispositivo associato (ADR-0042): con una passkey le approvazioni richiedono impronta, volto o PIN. */
@@ -148,7 +156,7 @@ function Sources({ sources }: { sources?: Source[] }) {
 
 export function Chat({ active }: { active: boolean }) {
   const app = useApp();
-  const { refreshStatus, pollNotifications, dismissToast, thinking, setThinking, sendRef, bumpActivity } = app;
+  const { refreshStatus, pollNotifications, dismissToast, thinking, setThinking, avatarActivity, setAvatarActivity, sendRef, bumpActivity } = app;
   const [items, setItems] = useState<Item[]>([]);
   const [pending, setPending] = useState(false);
   const sending = useRef(false);
@@ -161,7 +169,6 @@ export function Chat({ active }: { active: boolean }) {
   const box = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
   useVoice();
-  const avatarState = useAvatarState();
 
   const add = useCallback((item: NewItem) => {
     setItems((list) => [...list, { ...item, id: nextId.current++ } as Item]);
@@ -181,6 +188,8 @@ export function Chat({ active }: { active: boolean }) {
       const message = raw.trim();
       if (!message || sending.current) return;
       sending.current = true;
+      const initialActivity = activityFromPrompt(message);
+      setAvatarActivity(initialActivity);
       add({ kind: "msg", role: "user", text: message });
       setPending(true);
       setThinking(true);
@@ -201,6 +210,7 @@ export function Chat({ active }: { active: boolean }) {
       };
       try {
         const out = remote ? await post("/api/cloud/chat", { message, provider: remote, use_context: useContext }) : await chatStream(message, onDelta);
+        setAvatarActivity(activityFromResult(initialActivity, out.steps || [], out.task?.state === "failed" ? "error" : out.confirmation ? "attention" : undefined));
         const final = { kind: "msg" as const, role: "assistant" as const, text: out.reply || "(nessuna risposta)", steps: out.steps, sources: out.sources,
           error: out.task && out.task.state === "failed" };
         if (streamId != null) {
@@ -210,6 +220,7 @@ export function Chat({ active }: { active: boolean }) {
         if (out.confirmation) add({ kind: "confirm", c: out.confirmation });
         if (out.reply) void voice.speak(out.reply);
       } catch (e) {
+        setAvatarActivity({ ...initialActivity, outcome: "error" });
         if (streamId != null) {
           const id = streamId;
           setItems((list) => list.map((x) => (x.id === id && x.kind === "msg" ? { ...x, streaming: false } : x)));
@@ -224,7 +235,7 @@ export function Chat({ active }: { active: boolean }) {
         bumpActivity();
       }
     },
-    [add, say, setThinking, refreshStatus, pollNotifications, bumpActivity],
+    [add, say, setThinking, setAvatarActivity, refreshStatus, pollNotifications, bumpActivity],
   );
 
   sendRef.current = send;
@@ -259,8 +270,6 @@ export function Chat({ active }: { active: boolean }) {
       try {
         const { items: history } = await api("/api/conversation?limit=50");
         const loaded: Item[] = [];
-        if (!history.length)
-          loaded.push({ id: nextId.current++, kind: "msg", role: "assistant", text: "Ciao, sono JARVIS. Scrivimi qualcosa o prova uno dei suggerimenti qui sotto." });
         for (const m of history)
           loaded.push({ id: nextId.current++, kind: "msg", role: m.role === "user" ? "user" : "assistant", text: m.content, sources: m.sources });
         const conf = await api("/api/confirmations");
@@ -283,7 +292,8 @@ export function Chat({ active }: { active: boolean }) {
     try {
       const out = await decideConfirmation<any>(item.c.confirmation_id, approve);
       setItems((list) => list.map((x) => (x.id === item.id ? { ...item, decided: true, approved: approve } : x)));
-      say(out.reply, { steps: out.steps, sources: out.sources });
+      setAvatarActivity(activityFromResult(avatarActivity, [{ kind: "tool_call", tool: item.c.tool }], out.task?.state === "failed" ? "error" : undefined));
+      say(out.reply, { steps: out.steps, sources: out.sources, error: out.task?.state === "failed" });
     } catch (e) {
       setItems((list) => list.filter((x) => x.id !== item.id));
       say(`Errore: ${(e as Error).message}`, { error: true });
@@ -303,130 +313,157 @@ export function Chat({ active }: { active: boolean }) {
   };
 
   const available = voice.available;
-  const st = voice.status;
   return (
     <section className={`view${active ? " active" : ""}`} id="view-chat" aria-label="Chat">
       <div className="avatar-panel">
         <Avatar id="avatar" />
-        <span id="avatar-status" role="status">{AVATAR_LABELS[avatarState]}</span>
-      </div>
-      <div className="messages" id="messages" aria-live="polite" ref={box}>
-        {items.map((it) =>
-          it.kind === "msg" ? (
-            <div key={it.id} className={`msg ${it.role}${it.error ? " error" : ""}${it.streaming ? " streaming" : ""}`} aria-busy={it.streaming || undefined}
-              data-who={it.role === "user" ? "Tu" : "JARVIS"}>
-              {it.role === "user"
-                ? it.text.replace(/^connettore\s+([a-z][a-z0-9_]*)\s+([a-z][a-z0-9_]*)\s+\{.*\}$/is, "Usa il connettore $1 · $2")
-                : it.text}
-              <Sources sources={it.sources} />
-              <StepChips steps={it.steps} />
+        <div className="chat-identity">
+          <h1>Chat con JARVIS</h1>
+          <AvatarStatus id="avatar-status" />
+        </div>
+        {!DEVICE_MODE ? (
+          <details className="chat-pc" id="pc-controls">
+            <summary><Icon name="devices" /> Controlli PC</summary>
+            <div className="chat-pc-menu">
+              <small>Su macOS e Windows · ogni apertura richiede conferma</small>
+              {PC_ACTIONS.map((action) => (
+                <button key={action.prompt} type="button" disabled={thinking} onClick={(event) => {
+                  event.currentTarget.closest("details")?.removeAttribute("open");
+                  void send(action.prompt);
+                }}><Icon name={action.icon} /> {action.label}</button>
+              ))}
             </div>
-          ) : it.decided && it.approved !== undefined ? (
-            <div key={it.id} className="confirm">
-              <p className="small">{it.approved ? "✓ Confermato" : "✗ Rifiutato"}</p>
-            </div>
-          ) : (
-            <div key={it.id} className="confirm" role="group" aria-label="Conferma richiesta">
-              <h3>Conferma richiesta · {it.c.tool} · rischio {it.c.risk}</h3>
-              <p>{it.c.expected_effect}</p>
-              <p className="small">
-                Destinazione: {it.c.target} · scade alle {new Date(it.c.expires_at).toLocaleTimeString("it-IT")} · valida una sola volta
-              </p>
-              <div className="actions">
-                <button className="primary" disabled={it.decided} onClick={() => decide(it, true)}>Approva</button>
-                <button className="danger" disabled={it.decided} onClick={() => decide(it, false)}>Rifiuta</button>
-              </div>
-            </div>
-          ),
-        )}
-        {pending ? (
-          <div className="msg typing" aria-label="JARVIS sta elaborando">
-            <span className="dots" aria-hidden="true"><i></i><i></i><i></i></span> JARVIS sta elaborando…
-          </div>
+          </details>
         ) : null}
       </div>
-      <div className="suggestions" id="suggestions">
-        {SUGGESTIONS.map((s) => (
-          <button key={s} className="chip" onClick={() => void send(s)}>{s}</button>
-        ))}
-      </div>
-      <div className="voice-bar" id="voice-bar">
-        <label className="check">
-          <input
-            type="checkbox" id="voice-replies" checked={voice.replies} disabled={!(available && st?.tts)}
-            onChange={(e) => {
-              pref("jarvis.voice.replies", e.target.checked);
-              voice.setReplies(e.target.checked);
-            }}
-          />{" "}
-          Risposte vocali
-        </label>
-        <label className="check">
-          <input type="checkbox" id="voice-handsfree" checked={voice.handsFree} disabled={!available}
-            onChange={(e) => void voice.setHandsFree(e.target.checked)} />{" "}
-          Mani libere («Ehi Jarvis»)
-        </label>
-        <button type="button" className="ghost small" id="voice-stop" hidden={voice.state !== "speaking"} onClick={() => voice.stopSpeaking()}>
-          <Icon name="stop" size={14} /> Interrompi
-        </button>
-        <span className="mic-live" id="mic-live" hidden={!voice.micOpen} aria-live="polite">● Microfono attivo</span>
-        <PasskeySetup />
-      </div>
-      {cloudChoices.length || provider ? (
-        <div className="voice-bar cloud-selector">
-          <label>Instradamento chat
-            <select value={provider} disabled={thinking} onChange={(event) => {
-              const choice = event.target.value;
-              setProvider(choice === "auto" ? choice : cloudChoices.find((item) => item.id === choice)?.id || "");
-            }}>
-              <option value="">Comandi offline</option>
-              {cloudChoices.length > 1 || provider === "auto" ? <option value="auto">Cloud automatico</option> : null}
-              {provider && provider !== "auto" && !cloudChoices.some((item) => item.id === provider)
-                ? <option value={provider} disabled>{CLOUD_LABELS[provider]} · da configurare</option> : null}
-              {cloudChoices.map((item) => <option key={item.id} value={item.id}>{CLOUD_LABELS[item.id]} · {item.model}</option>)}
-            </select>
-          </label>
-          {provider ? (
-            <>
-              <label className="check" title="Condivide fino a tre scambi testuali consecutivi con lo stesso provider.">
-                <input type="checkbox" checked={useContext} disabled={thinking} onChange={(event) => setUseContext(event.target.checked)} />
-                Continua la conversazione
-              </label>
-              <small>{provider === "auto"
-                ? "Può inviare il messaggio a entrambi i provider. I turni precedenti tornano solo al provider che li ha gestiti."
-                : "Invia il messaggio digitato. Con la continuità attiva può includere fino a tre scambi testuali con questo provider."}</small>
-              <small>La dettatura viene inserita nella chat per essere verificata prima dell’invio al cloud.</small>
-            </>
+      <div className="messages" id="messages" aria-live="polite" ref={box}>
+        <div className="chat-timeline">
+          {items.map((it) =>
+            it.kind === "msg" ? (
+              <div key={it.id} className={`msg ${it.role}${it.error ? " error" : ""}${it.streaming ? " streaming" : ""}`} aria-busy={it.streaming || undefined}
+                data-who={it.role === "user" ? "Tu" : "JARVIS"}>
+                {it.role === "user"
+                  ? it.text.replace(/^connettore\s+([a-z][a-z0-9_]*)\s+([a-z][a-z0-9_]*)\s+\{.*\}$/is, "Usa il connettore $1 · $2")
+                  : it.text}
+                <Sources sources={it.sources} />
+                <StepChips steps={it.steps} />
+              </div>
+            ) : it.decided && it.approved !== undefined ? (
+              <div key={it.id} className="confirm">
+                <p className="small">{it.approved ? "✓ Confermato" : "✗ Rifiutato"}</p>
+              </div>
+            ) : (
+              <div key={it.id} className="confirm" role="group" aria-label="Conferma richiesta">
+                <h3>{it.c.tool === "pc.open" ? "Conferma apertura sul PC" : `Conferma richiesta · ${it.c.tool} · rischio ${it.c.risk}`}</h3>
+                <p>{it.c.expected_effect}</p>
+                <p className="small">
+                  Destinazione: {it.c.target} · scade alle {new Date(it.c.expires_at).toLocaleTimeString("it-IT")} · valida una sola volta
+                </p>
+                <div className="actions">
+                  <button className="primary" disabled={it.decided} onClick={() => decide(it, true)}>Approva</button>
+                  <button className="danger" disabled={it.decided} onClick={() => decide(it, false)}>Rifiuta</button>
+                </div>
+              </div>
+            ),
+          )}
+          {pending ? (
+            <div className="msg typing" aria-label="JARVIS sta elaborando">
+              <span className="dots" aria-hidden="true"><i></i><i></i><i></i></span> JARVIS sta elaborando…
+            </div>
+          ) : null}
+          {items.length === 0 ? (
+            <div className="chat-start">
+              <span className="chat-start-icon"><Icon name="chat" size={26} /></span>
+              <h2>Come posso aiutarti?</h2>
+              <p>Scrivi un messaggio o usa il microfono.</p>
+              {!DEVICE_MODE ? (
+                <div className="suggestions" id="suggestions">
+                  {SUGGESTIONS.map(({ label, prompt, icon, draft }) => (
+                    <button key={label} type="button" className="chip" onClick={() => {
+                      if (draft) {
+                        setText(prompt);
+                        input.current?.focus();
+                      } else {
+                        void send(prompt);
+                      }
+                    }}><Icon name={icon} size={16} /> {label}</button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           ) : null}
         </div>
-      ) : null}
-      <form className="composer" id="composer" onSubmit={submit}>
-        <button
-          type="button" className="mic" id="mic" aria-pressed={voice.state === "listening" && voice.pushing}
-          disabled={!available} aria-label="Parla a JARVIS"
-          title={available ? "Parla (clic per iniziare e per terminare)" : `Voce non disponibile: ${(st?.reasons || []).join("; ")}`}
-          onClick={() => void voice.togglePushToTalk()}
-        >
-          <Icon name="mic" size={20} />
-        </button>
-        <textarea
-          id="input" ref={input} rows={1} placeholder="Scrivi a JARVIS…" maxLength={8000} value={text}
-          title="Invio per inviare, Maiusc+Invio per andare a capo"
-          aria-label="Messaggio (Invio per inviare, Maiusc+Invio per andare a capo)"
-          onChange={(e) => {
-            setText(e.target.value);
-            e.target.style.height = "";
-            e.target.style.height = Math.min(e.target.scrollHeight, 200) + "px";
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              submit();
-            }
-          }}
-        />
-        <button type="submit" id="send" className="primary send" disabled={thinking}><Icon name="send" size={16} /> Invia</button>
-      </form>
+      </div>
+      <div className="chat-dock">
+        <div className="voice-bar" id="voice-bar">
+          <VoiceReplySwitch id="voice-replies" />
+          <label className="check">
+            <input type="checkbox" id="voice-handsfree" checked={voice.handsFree} disabled={!available}
+              onChange={(e) => void voice.setHandsFree(e.target.checked)} />{" "}
+            Mani libere («Ehi Jarvis»)
+          </label>
+          <button type="button" className="ghost small" id="voice-stop" hidden={voice.state !== "speaking"} onClick={() => voice.stopSpeaking()}>
+            <Icon name="stop" size={14} /> Interrompi
+          </button>
+          <span className="mic-live" id="mic-live" hidden={!voice.micOpen} aria-live="polite">● Microfono attivo</span>
+          <PasskeySetup />
+        </div>
+        {cloudChoices.length || provider ? (
+          <div className="voice-bar cloud-selector">
+            <label>Instradamento chat
+              <select value={provider} disabled={thinking} onChange={(event) => {
+                const choice = event.target.value;
+                setProvider(choice === "auto" ? choice : cloudChoices.find((item) => item.id === choice)?.id || "");
+              }}>
+                <option value="">Comandi offline</option>
+                {cloudChoices.length > 1 || provider === "auto" ? <option value="auto">Cloud automatico</option> : null}
+                {provider && provider !== "auto" && !cloudChoices.some((item) => item.id === provider)
+                  ? <option value={provider} disabled>{CLOUD_LABELS[provider]} · da configurare</option> : null}
+                {cloudChoices.map((item) => <option key={item.id} value={item.id}>{CLOUD_LABELS[item.id]} · {item.model}</option>)}
+              </select>
+            </label>
+            {provider ? (
+              <>
+                <label className="check" title="Condivide fino a tre scambi testuali consecutivi con lo stesso provider.">
+                  <input type="checkbox" checked={useContext} disabled={thinking} onChange={(event) => setUseContext(event.target.checked)} />
+                  Continua la conversazione
+                </label>
+                <small>{provider === "auto"
+                  ? "Può inviare il messaggio a entrambi i provider. I turni precedenti tornano solo al provider che li ha gestiti."
+                  : "Invia il messaggio digitato. Con la continuità attiva può includere fino a tre scambi testuali con questo provider."}</small>
+                <small>La dettatura viene inserita nella chat per essere verificata prima dell’invio al cloud.</small>
+              </>
+            ) : null}
+          </div>
+        ) : null}
+        <form className="composer" id="composer" onSubmit={submit}>
+          <button
+            type="button" className="mic" id="mic" aria-pressed={voice.state === "listening" && voice.pushing}
+            disabled={!available} aria-label="Parla a JARVIS"
+            title={available ? "Parla (clic per iniziare e per terminare)" : `Voce non disponibile: ${(voice.status?.reasons || []).join("; ")}`}
+            onClick={() => void voice.togglePushToTalk()}
+          >
+            <Icon name="mic" size={20} />
+          </button>
+          <textarea
+            id="input" ref={input} rows={1} placeholder="Scrivi a JARVIS…" maxLength={8000} value={text}
+            title="Invio per inviare, Maiusc+Invio per andare a capo"
+            aria-label="Messaggio (Invio per inviare, Maiusc+Invio per andare a capo)"
+            onChange={(e) => {
+              setText(e.target.value);
+              e.target.style.height = "";
+              e.target.style.height = Math.min(e.target.scrollHeight, 200) + "px";
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+          />
+          <button type="submit" id="send" className="primary send" disabled={thinking}><Icon name="send" size={16} /> Invia</button>
+        </form>
+      </div>
     </section>
   );
 }

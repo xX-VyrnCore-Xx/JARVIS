@@ -34,6 +34,8 @@ Il checkpoint è la sezione di ripresa versionata con Git. Ogni voce va aggiorna
 
 **JARVIS 1.13.1 da `7b79ceb` (2026-11-20).** ADR-0058. Il workflow di rilascio prepara e verifica due pacchetti, il `.dmg` Apple Silicon e il setup Windows x64.
 
+**Plancia, Chat e controlli PC su `993f50e` (2026-11-21).** Gli interventi sono nel checkout locale (ADR-0059 e ADR-0060). Ritratto maschile nel bundle, colori condivisi fra Plancia e Chat, Sidebar riducibile e comandi PC con conferma locale. Chromium ha superato 105 controlli, inclusi voce, conferme e finestra stretta. I test Core coprono conferma, instradamento locale con cloud selezionato e limiti per dispositivi associati e automazioni. L’apertura effettiva delle applicazioni richiede il collaudo su macOS e Windows.
+
 Il checkpoint precedente è riportato qui sotto per riferimento.
 
 | Campo | Stato al 2026-11-18 (diciottesima ripresa) |

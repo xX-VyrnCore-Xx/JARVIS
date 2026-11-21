@@ -624,10 +624,10 @@ async fn configure_cloud(State(state): State<Shared>, Json(body): Json<Value>) -
 }
 
 async fn cloud_chat(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
-    if let Some(message) = body["message"]
-        .as_str()
-        .filter(|m| crate::orchestrator::is_source_followup(m))
-    {
+    if let Some(message) = body["message"].as_str().filter(|m| {
+        crate::orchestrator::is_source_followup(m)
+            || crate::desktop::Target::from_request(m).is_some()
+    }) {
         let message = message.to_string();
         return match with_core(&state, move |j| j.chat(&message)).await {
             Ok(out) => Json(out.to_json()).into_response(),
@@ -657,7 +657,11 @@ async fn cloud_chat(State(state): State<Shared>, Json(body): Json<Value>) -> Res
     }
 }
 
-async fn chat(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+async fn chat(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Json(body): Json<Value>,
+) -> Response {
     let Some(message) = body["message"].as_str().map(str::to_string) else {
         return error(
             StatusCode::BAD_REQUEST,
@@ -665,6 +669,13 @@ async fn chat(State(state): State<Shared>, Json(body): Json<Value>) -> Response 
             "campo 'message' mancante",
         );
     };
+    if device.is_some() && crate::desktop::Target::from_request(&message).is_some() {
+        return error(
+            StatusCode::FORBIDDEN,
+            "owner_only",
+            "Azione disponibile dal computer del proprietario",
+        );
+    }
     match with_core(&state, move |j| j.chat(&message)).await {
         Ok(out) => Json(out.to_json()).into_response(),
         Err(e) => e.into_response(),
@@ -673,7 +684,11 @@ async fn chat(State(state): State<Shared>, Json(body): Json<Value>) -> Response 
 
 /// Chat in streaming (ADR-0025): risposta NDJSON con righe `{"type":"delta","text":…}` mentre il modello
 /// genera, poi `{"type":"done","result":…}` (lo stesso oggetto di `/api/chat`) oppure `{"type":"error",…}`.
-async fn chat_stream(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+async fn chat_stream(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Json(body): Json<Value>,
+) -> Response {
     let Some(message) = body["message"].as_str().map(str::to_string) else {
         return error(
             StatusCode::BAD_REQUEST,
@@ -681,6 +696,13 @@ async fn chat_stream(State(state): State<Shared>, Json(body): Json<Value>) -> Re
             "campo 'message' mancante",
         );
     };
+    if device.is_some() && crate::desktop::Target::from_request(&message).is_some() {
+        return error(
+            StatusCode::FORBIDDEN,
+            "owner_only",
+            "Azione disponibile dal computer del proprietario",
+        );
+    }
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let core = state.core.clone();
     let deltas = tx.clone();
@@ -830,8 +852,15 @@ async fn channel_test(State(state): State<Shared>, Path(id): Path<String>) -> Re
     }
 }
 
-async fn confirmations(State(state): State<Shared>) -> Json<Value> {
-    Json(json!({"items": with_core(&state, |j| j.pending_confirmations()).await}))
+async fn confirmations(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+) -> Json<Value> {
+    let mut items = with_core(&state, |j| j.pending_confirmations()).await;
+    if device.is_some() {
+        items.retain(|item| item["tool"] != crate::desktop::TOOL);
+    }
+    Json(json!({"items": items}))
 }
 
 async fn confirm(
@@ -848,6 +877,16 @@ async fn confirm(
             "campo 'approve' booleano mancante",
         );
     };
+    if device.is_some() {
+        let id = id.clone();
+        if with_core(&state, move |j| j.is_desktop_confirmation(&id)).await {
+            return error(
+                StatusCode::FORBIDDEN,
+                "owner_only",
+                "Conferma dal computer del proprietario",
+            );
+        }
+    }
     // Passkey (ADR-0042): da un dispositivo con passkey registrata, approvare richiede un'asserzione legata
     // a questa conferma. Rifiutare resta sempre possibile senza passkey.
     if let (true, Some(axum::Extension(DeviceCtx(device)))) = (approve, device) {

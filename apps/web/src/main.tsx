@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import "./styles/hud.css";
 import "./styles/desktop.css";
+import "./styles/jarvis.css";
 
 // Piattaforma: piccoli adattamenti per macOS e Windows (caratteri, raggi, barre di scorrimento) e per l'app
 // desktop, che apre la pagina con ?app=desktop.

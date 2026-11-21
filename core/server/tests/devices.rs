@@ -275,6 +275,43 @@ async fn confirm_scope_allows_confirmations() {
 }
 
 #[tokio::test]
+async fn paired_devices_cannot_request_or_confirm_desktop_actions() {
+    let app = app();
+    let command = json!({"message":"Apri la calcolatrice"});
+    let (token, _) = pair(&app, json!(["chat", "confirm"])).await;
+    let device = Some(("x-jarvis-device", token.as_str()));
+    for path in ["/api/chat", "/api/chat/stream"] {
+        let (status, _, _) = call(&app, "POST", path, REMOTE, device, Some(command.clone())).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+    }
+
+    let (status, pending, _) = call(
+        &app,
+        "POST",
+        "/api/chat",
+        &local(),
+        Some(("x-jarvis-token", "t")),
+        Some(command),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let id = pending["confirmation"]["confirmation_id"].as_str().unwrap();
+    let (status, list, _) = call(&app, "GET", "/api/confirmations", REMOTE, device, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(list["items"], json!([]));
+    let (status, _, _) = call(
+        &app,
+        "POST",
+        &format!("/api/confirmations/{id}"),
+        REMOTE,
+        device,
+        Some(json!({"approve":true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn pairing_codes_are_single_use_and_brute_force_is_stopped() {
     let app = app();
     let (_, code, _) = call(

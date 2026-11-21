@@ -51,7 +51,7 @@ function usePending() {
 }
 
 function Shell() {
-  const { view, show } = useApp();
+  const { view, show, reachable } = useApp();
   const setup = useRef<SetupHandle>(null);
   const owner = !DEVICE_MODE;
   const pending = usePending();
@@ -74,32 +74,42 @@ function Shell() {
       <TopBar />
       <div className={`layout${collapsed ? " nav-collapsed" : ""}`}>
         <nav className="nav" aria-label="Sezioni">
-          {groups.map((g) => (
-            <div className="nav-group" key={g}>
-              <div className="nav-group-title" aria-hidden="true">{g}</div>
-              {entries.filter((n) => n.group === g).map((n) => (
-                <button key={n.view} className={`nav-item${view === n.view ? " active" : ""}`} data-view={n.view} title={n.label} aria-current={view === n.view ? "page" : undefined} onClick={() => show(n.view)}>
-                  <Icon name={n.icon} className="glyph" />
-                  <span className="nav-label">{n.label}</span>
-                  {n.view === "chat" && pending ? <span className="nav-badge" aria-label={`${pending} conferme in attesa`}>{pending}</span> : null}
-                </button>
-              ))}
-            </div>
-          ))}
-          <button
-            className="nav-collapse" title={collapsed ? "Espandi il menu" : "Riduci il menu"} aria-label={collapsed ? "Espandi il menu" : "Riduci il menu"}
-            onClick={() => {
-              const next = !collapsed;
-              setCollapsed(next);
-              try {
-                localStorage.setItem("jarvis.nav.collapsed", next ? "1" : "0");
-              } catch {
-                /* niente */
-              }
-            }}
-          >
-            <Icon name={collapsed ? "expand" : "collapse"} />
-          </button>
+          <div className="nav-heading">Navigazione</div>
+          <div className="nav-sections">
+            {groups.map((g) => (
+              <div className="nav-group" key={g}>
+                <div className="nav-group-title" aria-hidden="true">{g}</div>
+                {entries.filter((n) => n.group === g).map((n) => (
+                  <button key={n.view} className={`nav-item${view === n.view ? " active" : ""}`} data-view={n.view} title={n.label} aria-label={n.label} aria-current={view === n.view ? "page" : undefined} onClick={() => show(n.view)}>
+                    <span className="nav-icon"><Icon name={n.icon} className="glyph" /></span>
+                    <span className="nav-label">{n.label}</span>
+                    {n.view === "chat" && pending ? <span className="nav-badge" aria-label={`${pending} conferme in attesa`}>{pending}</span> : null}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </div>
+          <div className="nav-footer">
+            <span className="nav-core" title={reachable ? "Core connesso" : "Core non raggiungibile"}>
+              <span className={`led ${reachable ? "ok" : "bad"}`} aria-hidden="true" />
+              <span className="nav-label">{reachable ? "Core connesso" : "Core non raggiungibile"}</span>
+            </span>
+            <button
+              aria-expanded={!collapsed}
+              className="nav-collapse" title={collapsed ? "Espandi il menu" : "Riduci il menu"} aria-label={collapsed ? "Espandi il menu" : "Riduci il menu"}
+              onClick={() => {
+                const next = !collapsed;
+                setCollapsed(next);
+                try {
+                  localStorage.setItem("jarvis.nav.collapsed", next ? "1" : "0");
+                } catch {
+                  /* niente */
+                }
+              }}
+            >
+              <Icon name={collapsed ? "expand" : "collapse"} />
+            </button>
+          </div>
         </nav>
         <main>
           {owner ? <Dashboard active={view === "dashboard"} /> : null}

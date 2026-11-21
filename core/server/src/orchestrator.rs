@@ -469,6 +469,7 @@ impl Jarvis {
             .iter()
             .filter(|t| {
                 in_scope(t.name())
+                    && t.name() != crate::desktop::TOOL
                     && !dynamic(t)
                     && (t.name() != "n8n.create" || self.n8n.enabled())
             })
@@ -552,7 +553,9 @@ impl Jarvis {
                 .filter_map(|v| v.as_str().map(str::to_string))
                 .collect()
         };
+        let explicit_desktop = crate::desktop::Target::from_request(&objective).is_some();
         move |tool: &str| match &temporary {
+            _ if tool == crate::desktop::TOOL => temporary.is_none() && explicit_desktop,
             Some(tools) => tools.iter().any(|t| t == tool),
             None => {
                 explicit.as_deref() == Some(tool)
@@ -1028,6 +1031,13 @@ impl Jarvis {
         task.transition("running", "Agente in esecuzione");
         self.save(&task)?;
 
+        if let Some(target) = crate::desktop::Target::from_request(message) {
+            let result = json!({"kind":"tool_call", "tool_call":{
+                "tool":crate::desktop::TOOL, "version":"1.0.0", "arguments":{"target":target.id()}
+            }});
+            return self.drive(task, json!({}), result, Outcome::default(), Vec::new());
+        }
+
         let inputs = self.inputs()?;
         let mut out = Outcome::default();
         let result = match self.call_agent(&task, &inputs) {
@@ -1462,6 +1472,24 @@ impl Jarvis {
         last: bool,
         out: &mut Outcome,
     ) -> Value {
+        if let Some(step) = history
+            .last()
+            .filter(|step| step["tool"] == crate::desktop::TOOL)
+        {
+            let output = &step["output"];
+            let text = match step["status"].as_str() {
+                Some("succeeded") => format!(
+                    "Ho richiesto di aprire {}.",
+                    output["label"].as_str().unwrap_or("questo strumento")
+                ),
+                Some("cancelled") => "Apertura annullata.".to_string(),
+                _ => output["message"]
+                    .as_str()
+                    .unwrap_or("Apertura non riuscita.")
+                    .to_string(),
+            };
+            return json!({"kind":"reply", "text":text});
+        }
         let last = last || inputs["cloud_backend"].is_object();
         if let Some(uncertain) = history
             .last()
@@ -1516,6 +1544,12 @@ impl Jarvis {
                 )})
             }
         }
+    }
+
+    pub(crate) fn is_desktop_confirmation(&self, id: &str) -> bool {
+        self.pending
+            .get(id)
+            .is_some_and(|pending| pending.tool == crate::desktop::TOOL)
     }
 
     pub fn confirm(&mut self, confirmation_id: &str, approve: bool) -> Result<Outcome, CoreError> {
@@ -1608,6 +1642,19 @@ impl Jarvis {
                 .push(json!({"kind": "confirmation", "approved": true}));
             task.transition("running", "Confermato dal proprietario");
             let (status, output) = self.run_tool(&task, &tool, &arguments, true, &mut out)?;
+            if tool == crate::desktop::TOOL && status == "failed" {
+                let message = output["message"]
+                    .as_str()
+                    .unwrap_or("Apertura non riuscita.");
+                task.fail(
+                    merge(
+                        &output,
+                        json!({"category":"unavailable", "retryable":false}),
+                    ),
+                    message,
+                );
+                return self.finish(task, out, message.to_string());
+            }
             history.push(step_record(&tool, &arguments, &digest, status, output));
             let last = history.len() >= MAX_STEPS;
             let result = self.next_step(&task, &inputs, &history, last, &mut out);
@@ -2150,6 +2197,18 @@ impl Jarvis {
                     .map_err(|e| tool_error("workflow.unavailable", e.to_string()))?;
                 Ok(json!({"id": short(&doc), "name": doc["name"]}))
             }
+            crate::desktop::TOOL if confirmed => {
+                let target =
+                    crate::desktop::Target::parse(arguments["target"].as_str().unwrap_or_default())
+                        .ok_or_else(|| {
+                            tool_error("pc.unavailable", "Destinazione desktop non disponibile")
+                        })?;
+                crate::desktop::open(target, &self.cfg.workspace())
+            }
+            crate::desktop::TOOL => Err(tool_error(
+                "pc.unavailable",
+                "È richiesta una conferma locale",
+            )),
             "code.run_python" if confirmed => {
                 crate::sandbox::run_python(arguments["source"].as_str().unwrap_or_default())
             }
@@ -2219,6 +2278,12 @@ impl Jarvis {
             if name.starts_with("workflow.") {
                 return Err(invalid(format!(
                     "passo {}: un'automazione non può gestire altre automazioni",
+                    i + 1
+                )));
+            }
+            if name == crate::desktop::TOOL {
+                return Err(invalid(format!(
+                    "passo {}: le azioni sul PC richiedono una richiesta diretta",
                     i + 1
                 )));
             }

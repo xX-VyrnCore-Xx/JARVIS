@@ -5,7 +5,9 @@
 import { useEffect, useState } from "react";
 import { api, fmtClock, fmtTime, fmtUptime } from "../lib/api";
 import { voice } from "../lib/voice";
-import { Avatar, AVATAR_LABELS, useAvatarState } from "../components/Avatar";
+import { activityFromPrompt, activityFromResult } from "../lib/avatarActivity";
+import type { AvatarActivity } from "../lib/avatarActivity";
+import { Avatar, AvatarConversation, AvatarStatus } from "../components/Avatar";
 import { useApp, useVoice } from "../state";
 import { decideConfirmation } from "../lib/passkey";
 import type { Notification } from "../state";
@@ -110,7 +112,6 @@ export function Dashboard({ active }: { active: boolean }) {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [command, setCommand] = useState("");
   useVoice();
-  const avatarState = useAvatarState();
 
   const load = async () => {
     const get = <T,>(p: string, fallback: T) => api<T>(p).catch(() => fallback);
@@ -143,7 +144,8 @@ export function Dashboard({ active }: { active: boolean }) {
   const decide = async (c: Confirmation, approve: boolean) => {
     dismissToast(`confirmation:${c.confirmation_id}`);
     try {
-      await decideConfirmation(c.confirmation_id, approve);
+      const result = await decideConfirmation(c.confirmation_id, approve);
+      app.setAvatarActivity(activityFromResult(app.avatarActivity, [{ kind: "tool_call", tool: c.tool }], result.task?.state === "failed" ? "error" : undefined));
     } catch (e) {
       alert((e as Error).message);
     }
@@ -176,6 +178,11 @@ export function Dashboard({ active }: { active: boolean }) {
   const devicesActive = (snap?.devices || []).filter((d) => !d.revoked_at && !d.slug).length;
   const nextRuns = (snap?.workflows || []).filter((w) => w.enabled).slice(0, 5);
 
+  const runningTask = snap?.tasks.find((task) => task.state === "running");
+  const backgroundActivity: AvatarActivity | undefined = runningTask && !app.thinking && voice.state === "idle"
+    ? runningTask.requester?.kind === "workflow" ? { category: "automation" } : activityFromPrompt(runningTask.objective || "")
+    : undefined;
+
   const today = new Date().toDateString();
   const todays = (snap?.tasks || []).filter((t) => new Date(t.created_at).toDateString() === today);
   const done = (snap?.tasks || []).filter((t) => t.state === "succeeded" || t.state === "failed");
@@ -193,25 +200,35 @@ export function Dashboard({ active }: { active: boolean }) {
       <div className="hud-grid">
         <section className="hud-hero" aria-label="Stato di JARVIS">
           <div className="hero-side">
-            <div className="hero-heading">
-              <h1>Plancia</h1>
-              <Clock />
+            <div className="hero-availability">
+              <span className={`led ${reachable ? "succeeded" : "failed"}`} aria-hidden="true" />
+              {reachable ? "Core in linea" : "Core non raggiungibile"}
             </div>
-            <div className="hero-readouts">
-              <div><span>AI</span><b className={backend?.name === "offline" ? "warn" : backend ? "ok" : "bad"}>{backend ? `${backend.name} · ${backend.model}` : "—"}</b></div>
-              <div><span>Voce</span><b className={vs?.available ? "ok" : "warn"}>{vs ? (vs.available ? `${vs.stt.name} · ${vs.tts ? vs.tts.name : "senza sintesi"}` : "non disponibile") : "—"}</b></div>
-              <div><span>Audit</span><b className={health?.audit?.chain_valid ? "ok" : "bad"}>{health?.audit ? `${health.audit.events} eventi ${health.audit.chain_valid ? "· integro" : "· alterato"}` : "—"}</b></div>
-              <div><span>Core</span><b>{health?.core ? `v${health.core.version}${snap?.metrics ? " · " + fmtUptime(snap.metrics.uptime_s) : ""}` : "—"}</b></div>
-            </div>
-            <form className="hud-command" id="dashboard-command" onSubmit={runCommand}>
-              <input aria-label="Comando a JARVIS" placeholder="Dai un comando a JARVIS…" value={command} onChange={(e) => setCommand(e.target.value)} maxLength={8000} />
-              <button className="primary" type="submit" disabled={app.thinking}>Esegui</button>
-            </form>
+            <h1>Ciao, sono <br />JARVIS.</h1>
+            <AvatarConversation />
           </div>
+
           <div className="hero-core">
-            <Avatar id="avatar-core" size="large" />
-            <div className="hero-state" role="status">{AVATAR_LABELS[avatarState]}</div>
+            <Avatar id="avatar-core" size="large" activity={backgroundActivity} />
+            <AvatarStatus activity={backgroundActivity} />
           </div>
+
+          <aside className="hero-telemetry" aria-label="Stato del sistema">
+            <Clock />
+            <h2><Icon name="system" size={17} /> Stato del sistema</h2>
+            <dl className="hero-readouts">
+              <div><dt>Inferenza locale</dt><dd className={backend ? "ok" : "warn"}>{backend ? (backend.name === "offline" ? "Comandi offline" : backend.name) : "—"}</dd></div>
+              <div><dt>Voce</dt><dd className={vs?.available ? "ok" : "warn"}>{vs ? (vs.available ? (vs.tts?.name || "Solo dettatura") : "Non disponibile") : "—"}</dd></div>
+              <div><dt>Audit</dt><dd className={health?.audit?.chain_valid ? "ok" : "bad"}>{health?.audit ? (health.audit.chain_valid ? "Integro" : "Alterato") : "—"}</dd></div>
+              <div><dt>Core</dt><dd>{health?.core ? `v${health.core.version}${snap?.metrics ? " · " + fmtUptime(snap.metrics.uptime_s) : ""}` : "—"}</dd></div>
+            </dl>
+          </aside>
+
+          <form className="hud-command" id="dashboard-command" onSubmit={runCommand}>
+            <span className="hud-command-icon"><Icon name="chat" size={21} /></span>
+            <input aria-label="Comando a JARVIS" placeholder="Chiedi qualcosa a JARVIS…" value={command} onChange={(e) => setCommand(e.target.value)} maxLength={8000} />
+            <button className="primary" type="submit" disabled={app.thinking}><Icon name="send" size={18} /> Invia</button>
+          </form>
         </section>
 
         <section className="kpi-row" aria-label="Indicatori">
