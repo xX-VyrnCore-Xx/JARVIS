@@ -81,3 +81,17 @@ sui propri dispositivi. Non viene eseguita la notarizzazione Apple.
 
 Le PR verificano build e installazione senza usare i certificati privati. Sigstore e le attestazioni
 di provenienza continuano a usare OIDC GitHub.
+
+### Aggiornamenti da repository private
+
+Il Core controlla le release di JARVIS ogni ora e notifica la nuova versione; download e installazione
+restano manuali. Per una repository pubblica non serve configurazione. Prima di rendere privata la
+repository, crea un token GitHub **fine-grained** limitato a `xX-VyrnCore-Xx/JARVIS` con permesso
+repository **Contents: read** (i metadati in sola lettura sono impliciti), quindi inseriscilo in
+**Aggiornamenti** nell'app desktop. Il token è salvato cifrato nel secret store locale del Core e non
+nelle GitHub Actions: la stessa configurazione funziona anche mentre la repository è pubblica.
+
+Puoi rimuovere o sostituire il token dalla stessa schermata. Tienilo a scadenza breve e ruotalo
+prima della scadenza. La release privata si apre nel browser e richiede un account GitHub autorizzato.
+Verifica sempre la provenienza e la firma dell'installer; Android richiede conferma del sistema per
+installare l'APK.

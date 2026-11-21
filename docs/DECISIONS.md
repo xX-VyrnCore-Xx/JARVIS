@@ -880,18 +880,20 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 ### ADR-0034 — Controllo aggiornamenti con canali Stable e Beta
 
 - **Data:** 2026-11-18 · **Stato:** accettato · **Fonte:** richiesta del proprietario; lacuna «canali Stable/Beta» in ACCEPTANCE.md.
-- **Contesto:** il proprietario non sapeva quando usciva una nuova versione; l'installazione automatica non è possibile senza installer firmati con certificati commerciali.
+- **Contesto:** il proprietario non sapeva quando usciva una nuova versione; l'installazione automatica non è affidabile su tutti i sistemi (Android richiede conferma di sistema).
 - **Decisione:**
-  - modulo `updates.rs`; impostazioni in `<dati>/updates.json`, **spente per impostazione** perché il controllo contatta GitHub;
-  - con il controllo attivo, al massimo una richiesta al giorno all'elenco delle release (`JARVIS_UPDATE_URL`, predefinito il repository di JARVIS), fatta fuori dal blocco del Core, senza dati del proprietario e con timeout di 10 secondi;
+  - modulo `updates.rs`; impostazioni in `<dati>/updates.json`, controllo automatico attivo per impostazione e disattivabile dall'interfaccia;
+  - ogni ora il Core interroga l'elenco release (`JARVIS_UPDATE_URL`, predefinito `xX-VyrnCore-Xx/JARVIS`), fuori dal blocco principale e senza dati del proprietario; timeout 10 secondi;
+  - una repository pubblica non richiede credenziali; per una repository privata il proprietario configura un token fine-grained GitHub con permesso **Contents: read**, conservato cifrato nel secret store locale del Core. Non viene restituito dall'API, scritto nei log o inviato ai client;
+  - quando è configurato un token, l'endpoint viene validato come HTTPS `api.github.com/repos/{owner}/{repo}/releases` e i redirect sono disabilitati per non inoltrare la credenziale;
   - Stable considera solo le release stabili, Beta anche le prerelease; il confronto segue le versioni semantiche;
   - una versione più recente diventa una notifica `system` deduplicata per versione, con il collegamento alla release; nessuna installazione automatica;
-  - API `GET/POST /api/updates` (configurazione con audit) e `POST /api/updates/check` (controllo manuale); pannello «Aggiornamenti» nella sezione Sistema. Il collegamento delle notifiche ammette ora anche le viste Sistema, Dispositivi e Plancia (aggiunta compatibile al contratto).
+  - API `GET/POST /api/updates` (configurazione con audit, secret escluso dallo stato) e `POST /api/updates/check` (controllo manuale); sezione «Aggiornamenti» nell'app desktop proprietario.
 - **Conseguenze:**
-  - con il repository privato l'elenco non è leggibile senza credenziali: il controllo riporta l'errore e non notifica nulla;
-  - l'aggiornamento resta manuale: si scarica la release, si verifica la firma (ADR-0020) e si installa.
-- **Evidenza:** unitari in `updates.rs` (versioni, canali, impostazioni, cadenza giornaliera, errori); `update_check_notifies_once_per_version` in `tests/api.rs`; E2E: spento per impostazione, controllo manuale verso un elenco sintetico con versione disponibile.
-- **Documenti interessati:** ACCEPTANCE.md, README.md, ROADMAP.md, contratto `notification`.
+  - la notifica è condivisa tramite il Core; la release privata si apre nel browser con l'accesso GitHub dell'utente;
+  - il download e l'installazione restano manuali: l'utente verifica la firma (ADR-0020) e Android richiede conferma di sistema.
+- **Evidenza:** test unitari su versioni/canali/attivazione e cadenza oraria; test API per stato, memorizzazione/rimozione e mancata restituzione del token; test sintetico per `Authorization: Bearer`.
+- **Documenti interessati:** ACCEPTANCE.md, README.md, ROADMAP.md, `GITHUB_ACTIONS_SECRETS.md`, contratto `notification`.
 
 ### ADR-0035 — Rifinitura grafica della dashboard per macOS e Windows
 

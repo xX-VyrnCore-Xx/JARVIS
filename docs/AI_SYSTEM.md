@@ -36,7 +36,7 @@ Il Core stima i token tenendo conto di sequenze di testo, punteggiatura, sintass
 
 ## Configurazione dei provider
 
-Il Core espone `GET /api/cloud` per lo stato e `POST /api/cloud` per configurare o rimuovere un provider. La richiesta proprietario può includere `provider` (`ollama_cloud` o `nvidia_nim`), `key` e `model`, oppure `remove_key: true`. Le chiavi sono conservate nel secret store del Core; il modello selezionato è salvato nei dati locali. La UI egui non ha ancora il modulo guidato: usa un client API locale autenticato e non inserire credenziali in log o nel repository.
+Il Core espone `GET /api/cloud` per lo stato e `POST /api/cloud` per configurare o rimuovere un provider. La richiesta proprietario può includere `provider` (`ollama_cloud` o `nvidia_nim`), `key` e `model`, oppure `remove_key: true`. Le chiavi sono conservate nel secret store del Core; il modello selezionato è salvato nei dati locali. La sezione desktop **Modelli AI**, disponibile solo sul Core locale, configura e rimuove le chiavi usando queste API e non le mostra dopo il salvataggio. Il salvataggio non verifica la chiave: per provarla, inviare un messaggio in Chat; il contenuto viene elaborato dal provider selezionato e può comportare costi.
 
 Il client desktop nativo usa `POST /api/chat/stream` con risposta NDJSON. Il bridge inoltra gli eventuali envelope `delegation.progress` seguiti da un esito `done` o `error`. Il worker a regole risponde in un blocco. I client che leggono un esito completo usano `POST /api/chat`.
 

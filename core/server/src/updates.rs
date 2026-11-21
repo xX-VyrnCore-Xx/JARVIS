@@ -1,9 +1,8 @@
 //! Controllo aggiornamenti con i canali Stable e Beta (ADR-0034).
 //!
-//! - Facoltativo e spento per impostazione, perché contatta GitHub: lo attiva il proprietario dalla sezione
-//!   Sistema.
-//! - Al massimo una volta al giorno, più il controllo manuale. La richiesta va fuori dal blocco del Core e non
-//!   invia dati del proprietario: chiede solo l'elenco delle release pubbliche.
+//! - Il controllo periodico è attivo per impostazione e si può disattivare dalla sezione Aggiornamenti.
+//! - Controlla ogni ora, più il controllo manuale. La richiesta va fuori dal blocco del Core e non invia
+//!   dati del proprietario; per repository privati usa un token opzionale custodito cifrato dal Core.
 //! - Stable considera solo le release stabili; Beta include anche le prerelease (`v1.3.0-rc.1`).
 //! - Una versione più recente diventa una notifica `system` deduplicata per versione, con il collegamento alla
 //!   release. Nessuna installazione automatica: la release si scarica e si verifica a mano (ADR-0020).
@@ -16,7 +15,7 @@ use serde_json::{json, Value};
 pub const DEFAULT_URL: &str =
     "https://api.github.com/repos/xX-VyrnCore-Xx/JARVIS/releases?per_page=20";
 pub const CHANNELS: [&str; 2] = ["stable", "beta"];
-const EVERY: chrono::Duration = chrono::Duration::hours(24);
+const EVERY: chrono::Duration = chrono::Duration::hours(1);
 
 /// Versione semantica minima: numeri principali e un eventuale suffisso di prerelease.
 fn parse(v: &str) -> Option<(u64, u64, u64, Option<String>)> {
@@ -86,7 +85,7 @@ impl Updates {
             .filter(Value::is_object)
             .unwrap_or_else(|| json!({}));
         if !s["enabled"].is_boolean() {
-            s["enabled"] = false.into();
+            s["enabled"] = true.into();
         }
         if !s["channel"].as_str().is_some_and(|c| CHANNELS.contains(&c)) {
             s["channel"] = "stable".into();
@@ -121,7 +120,17 @@ impl Updates {
         Ok(self.state())
     }
 
-    /// Vero se il controllo automatico è attivo e l'ultimo è più vecchio di un giorno.
+    pub fn reset_check(&self) -> Result<(), String> {
+        let mut state = self.state();
+        if let Some(object) = state.as_object_mut() {
+            for key in ["checked_at", "error", "latest", "update_available"] {
+                object.remove(key);
+            }
+        }
+        self.save(&state)
+    }
+
+    /// Vero se il controllo automatico è attivo e l'ultimo è più vecchio di un'ora.
     pub fn due(&self, now: chrono::DateTime<chrono::Utc>) -> bool {
         let s = self.state();
         s["enabled"] == true
@@ -133,14 +142,26 @@ impl Updates {
 
     /// Scarica l'elenco delle release (da chiamare fuori dal blocco del Core).
     pub fn fetch(&self) -> Result<Vec<Value>, String> {
+        self.fetch_with_token(None)
+    }
+
+    /// Scarica le release; un token opzionale consente l'accesso a repository privati.
+    pub fn fetch_with_token(&self, token: Option<&str>) -> Result<Vec<Value>, String> {
+        if token.is_some() {
+            validate_private_endpoint(&self.url)?;
+        }
         let agent = ureq::AgentBuilder::new()
             .timeout(Duration::from_secs(10))
-            .redirects(2)
+            .redirects(0)
             .user_agent(concat!("JARVIS/", env!("CARGO_PKG_VERSION")))
             .build();
-        let body = agent
+        let mut request = agent
             .get(&self.url)
-            .set("Accept", "application/vnd.github+json")
+            .set("Accept", "application/vnd.github+json");
+        if let Some(token) = token {
+            request = request.set("Authorization", &format!("Bearer {token}"));
+        }
+        let body = request
             .call()
             .map_err(|e| match e {
                 ureq::Error::Status(code, _) => {
@@ -186,6 +207,40 @@ impl Updates {
     }
 }
 
+fn validate_private_endpoint(value: &str) -> Result<(), String> {
+    let url =
+        url::Url::parse(value).map_err(|_| "URL delle release GitHub non valido".to_string())?;
+    let host = url.host_str().unwrap_or_default();
+    let github_api = url.scheme() == "https" && host == "api.github.com";
+    #[cfg(test)]
+    let local_test_api = url.scheme() == "http"
+        && url.host().is_some_and(|host| {
+            matches!(host, url::Host::Ipv4(ip) if ip.is_loopback())
+                || matches!(host, url::Host::Ipv6(ip) if ip.is_loopback())
+        });
+    #[cfg(not(test))]
+    let local_test_api = false;
+    let is_release_endpoint = url.path_segments().is_some_and(|mut segments| {
+        matches!(segments.next(), Some("repos"))
+            && segments.next().is_some_and(|owner| !owner.is_empty())
+            && segments.next().is_some_and(|repo| !repo.is_empty())
+            && segments.next() == Some("releases")
+            && segments.next().is_none()
+    });
+    if (!github_api && !local_test_api)
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+        || !is_release_endpoint
+    {
+        return Err(
+            "il token GitHub viene inviato solo all'API HTTPS di GitHub per endpoint releases"
+                .into(),
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,9 +280,9 @@ mod tests {
                 u.state()["enabled"].as_bool(),
                 u.state()["channel"].as_str()
             ),
-            (Some(false), Some("stable"))
+            (Some(true), Some("stable"))
         );
-        assert!(!u.due(chrono::Utc::now()), "spento per impostazione");
+        assert!(u.due(chrono::Utc::now()), "controllo automatico attivo");
         assert!(u.configure(true, "nightly").is_err());
         u.configure(true, "beta").unwrap();
         assert!(u.due(chrono::Utc::now()));
@@ -238,10 +293,68 @@ mod tests {
             .unwrap();
         assert_eq!(newer.unwrap()["tag"], "v99.0.0");
         assert_eq!(state["update_available"], true);
-        assert!(!u.due(chrono::Utc::now()), "un controllo al giorno");
-        assert!(u.due(chrono::Utc::now() + chrono::Duration::hours(25)));
+        assert!(!u.due(chrono::Utc::now()), "un controllo all'ora");
+        assert!(u.due(chrono::Utc::now() + chrono::Duration::hours(2)));
         let (state, newer) = u.record(Err("servizio non raggiungibile".into())).unwrap();
         assert!(newer.is_none() && state["error"].is_string());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn private_repository_fetch_uses_a_bearer_token() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut byte = [0; 1];
+            while !request.ends_with(b"\r\n\r\n") {
+                stream.read_exact(&mut byte).unwrap();
+                request.push(byte[0]);
+            }
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n[]")
+                .unwrap();
+            String::from_utf8(request).unwrap()
+        });
+        let dir = std::env::temp_dir().join(format!(
+            "jarvis-upd-private-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut updates = Updates::new(&dir);
+        updates.url = format!("http://{address}/repos/owner/repo/releases");
+        validate_private_endpoint(&updates.url).unwrap();
+        assert!(updates
+            .fetch_with_token(Some("synthetic-private-token"))
+            .unwrap()
+            .is_empty());
+        let request = server.join().unwrap();
+        assert!(request
+            .to_ascii_lowercase()
+            .contains("authorization: bearer synthetic-private-token"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn private_repository_tokens_are_limited_to_github_release_endpoints() {
+        for endpoint in [
+            "http://api.github.com/repos/owner/repo/releases",
+            "https://example.test/repos/owner/repo/releases",
+            "https://api.github.com/user",
+            "https://user:password@api.github.com/repos/owner/repo/releases",
+        ] {
+            assert!(
+                validate_private_endpoint(endpoint).is_err(),
+                "rejected endpoint {endpoint}"
+            );
+        }
+        validate_private_endpoint(
+            "https://api.github.com/repos/xX-VyrnCore-Xx/JARVIS/releases?per_page=20",
+        )
+        .unwrap();
     }
 }

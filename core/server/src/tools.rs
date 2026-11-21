@@ -84,6 +84,48 @@ pub fn resolve(workspace: &Path, rel: &str, must_exist: bool) -> Result<PathBuf,
     Ok(joined)
 }
 
+/// Risolve senza attraversare collegamenti simbolici. Usato dalle mutazioni che
+/// rinominano o eliminano il percorso indicato dall'utente.
+pub fn resolve_nofollow(
+    workspace: &Path,
+    rel: &str,
+    must_exist: bool,
+) -> Result<PathBuf, ToolError> {
+    if !lexically_inside(rel) {
+        return Err(ToolError::new(
+            "fs.outside_workspace",
+            format!("percorso non ammesso: {rel}"),
+        ));
+    }
+    let root = workspace
+        .canonicalize()
+        .map_err(|e| ToolError::new("fs.unavailable", e.to_string()))?;
+    let mut candidate = root.clone();
+    for component in Path::new(rel).components() {
+        match component {
+            Component::Normal(name) => {
+                candidate.push(name);
+                if let Ok(meta) = fs::symlink_metadata(&candidate) {
+                    if meta.file_type().is_symlink() {
+                        return Err(ToolError::new(
+                            "fs.outside_workspace",
+                            format!("collegamento simbolico non ammesso: {rel}"),
+                        ));
+                    }
+                }
+            }
+            Component::CurDir => {}
+            _ => {
+                return Err(ToolError::new(
+                    "fs.outside_workspace",
+                    format!("percorso non ammesso: {rel}"),
+                ));
+            }
+        }
+    }
+    resolve(workspace, rel, must_exist)
+}
+
 pub struct Context<'a> {
     pub workspace: &'a Path,
     pub store: &'a Store,
@@ -349,11 +391,33 @@ pub fn process_list(args: &Value) -> Result<Value, ToolError> {
 
 /// Comandi distruttivi noti, negati dalla policy anche se il proprietario li confermerebbe.
 pub fn command_blocked(command: &str) -> bool {
-    let c = command
-        .to_lowercase()
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let c = command.to_lowercase();
+    let words: Vec<String> = c
+        .split(|ch: char| ch.is_whitespace() || matches!(ch, ';' | '|' | '&' | '(' | ')'))
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            w.trim_matches(|ch| matches!(ch, '"' | '\'' | '`'))
+                .to_string()
+        })
+        .collect();
+    for (i, word) in words.iter().enumerate() {
+        let executable = word.rsplit(['/', '\\']).next().unwrap_or(word);
+        if executable == "rm" {
+            let mut recursive = false;
+            let mut force = false;
+            for arg in words.iter().skip(i + 1) {
+                if arg.starts_with('-') {
+                    recursive |= arg.contains('r') || arg == "--recursive";
+                    force |= arg.contains('f') || arg == "--force";
+                } else {
+                    break;
+                }
+            }
+            if recursive && force {
+                return true;
+            }
+        }
+    }
     const BLOCKED: [&str; 14] = [
         "rm -rf /",
         "rm -fr /",
@@ -454,4 +518,17 @@ pub fn shell_run(workspace: &Path, command: &str) -> Result<Value, ToolError> {
         "stdout": stdout, "stderr": stderr, "truncated": cut_out || cut_err,
         "duration_ms": started.elapsed().as_millis() as u64, "cwd": "workspace",
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::command_blocked;
+
+    #[test]
+    fn recursive_remove_with_separator_or_long_flags_is_blocked() {
+        assert!(command_blocked("rm -rf -- /"));
+        assert!(command_blocked("/bin/rm --recursive --force /"));
+        assert!(command_blocked("rm \"-rf\" /"));
+        assert!(command_blocked("sudo rm -rf /tmp/x"));
+    }
 }

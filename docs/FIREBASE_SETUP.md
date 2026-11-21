@@ -43,7 +43,7 @@ In un secondo terminale, dalla stessa radice:
 
 ```bash
 export JARVIS_TOKEN="$(cat data/.google-oauth-token)"
-python3 scripts/configure_google_connectors.py client_secret_*.json
+python3 scripts/configure_google_connectors.py "$HOME/.jarvis/google/client_secret.json"
 ```
 
 Lo script accetta solo un Core HTTP su loopback, installa i manifest Gmail e Calendar, invia il
@@ -60,7 +60,7 @@ Dopo che entrambi i connettori risultano autorizzati, arresta il Core e rimuovi 
 il file client OAuth dal checkout:
 
 ```bash
-rm -- data/.google-oauth-token client_secret_*.json
+rm -- data/.google-oauth-token "$HOME/.jarvis/google/client_secret.json"
 ```
 
 La chiave privata OAuth non va committata né registrata nelle GitHub Actions. Se i connettori sono

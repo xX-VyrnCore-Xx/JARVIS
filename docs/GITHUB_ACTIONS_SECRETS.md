@@ -92,3 +92,7 @@ separatamente dal Core, mai come secret di build o nel repository.
 La firma Sigstore e le attestazioni GitHub usano OIDC e non richiedono chiavi persistenti. Non
 configurare `APPLE_CERTIFICATE`, chiavi di notarizzazione, Azure Artifact Signing o credenziali
 OAuth di Google nelle Actions.
+
+Il token GitHub per leggere le release quando il repository è privato **non** è un secret Actions:
+configuralo dalla sezione **Aggiornamenti** dell'app desktop. Il Core lo conserva nel proprio secret
+store cifrato; per una repository pubblica lascia il campo vuoto.

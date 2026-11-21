@@ -651,14 +651,62 @@ async fn oauth_loopback_callback(
     oauth_callback(State(state), Query(q)).await
 }
 
-async fn updates_get(State(state): State<Shared>) -> Json<Value> {
-    Json(with_core(&state, |j| j.updates_state()).await)
+async fn updates_get(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.updates_state()).await)
 }
 
 async fn updates_set(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
-    let enabled = body["enabled"].as_bool().unwrap_or(false);
-    let channel = body["channel"].as_str().unwrap_or("stable").to_string();
-    reply(with_core(&state, move |j| j.updates_configure(enabled, &channel)).await)
+    let Some(enabled) = body["enabled"].as_bool() else {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "campo 'enabled' booleano mancante",
+        );
+    };
+    let channel = match body.get("channel") {
+        Some(Value::String(channel)) => channel.clone(),
+        Some(_) => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "bad_request",
+                "campo 'channel' non valido",
+            )
+        }
+        None => "stable".into(),
+    };
+    let github_token = match body.get("github_token") {
+        Some(Value::String(token)) => Some(token.clone()),
+        Some(_) => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "bad_request",
+                "campo 'github_token' non valido",
+            )
+        }
+        None => None,
+    };
+    let remove_github_token = match body.get("remove_github_token") {
+        Some(Value::Bool(remove)) => *remove,
+        Some(_) => {
+            return error(
+                StatusCode::BAD_REQUEST,
+                "bad_request",
+                "campo 'remove_github_token' non valido",
+            )
+        }
+        None => false,
+    };
+    reply(
+        with_core(&state, move |j| {
+            j.updates_configure(
+                enabled,
+                &channel,
+                github_token.as_deref(),
+                remove_github_token,
+            )
+        })
+        .await,
+    )
 }
 
 /// Controllo manuale: la richiesta a GitHub avviene fuori dal blocco del Core.
@@ -668,10 +716,14 @@ async fn updates_check(State(state): State<Shared>) -> Response {
 }
 
 async fn fetch_releases(state: &Shared) -> Result<Vec<Value>, String> {
-    let dir = with_core(state, |j| j.data_dir()).await;
-    tokio::task::spawn_blocking(move || crate::updates::Updates::new(&dir).fetch())
+    let (dir, token) = with_core(state, |j| j.updates_fetch_config())
         .await
-        .unwrap_or_else(|_| Err("controllo interrotto".into()))
+        .map_err(|error| format!("configurazione aggiornamenti non disponibile: {error:?}"))?;
+    tokio::task::spawn_blocking(move || {
+        crate::updates::Updates::new(&dir).fetch_with_token(token.as_deref())
+    })
+    .await
+    .unwrap_or_else(|_| Err("controllo interrotto".into()))
 }
 
 async fn channels_list(State(state): State<Shared>) -> Response {
@@ -1768,7 +1820,7 @@ pub fn spawn_scheduler(state: Shared, tick: std::time::Duration) -> tokio::task:
                     }
                 }
             }
-            // Aggiornamenti (ADR-0034): una volta al giorno, solo se attivato, con la rete fuori dal blocco.
+            // Aggiornamenti (ADR-0034): al massimo ogni ora, con la rete fuori dal blocco.
             if with_core(&state, |j| j.updates_due()).await {
                 let fetched = fetch_releases(&state).await;
                 if let Err(e) = with_core(&state, move |j| j.updates_record(fetched)).await {
