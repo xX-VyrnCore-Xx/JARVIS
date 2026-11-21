@@ -96,16 +96,12 @@ async fn pair(app: &Router, scopes: Value) -> (String, String) {
 }
 
 #[tokio::test]
-async fn remote_page_has_no_session_token_and_unknown_hosts_are_refused() {
+async fn web_pages_are_removed_and_unknown_hosts_are_refused() {
     let app = app();
-    let (status, _, html) = call(&app, "GET", "/", REMOTE, None, None).await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(
-        html.contains(r#"name="jarvis-token" content="""#),
-        "token di sessione non esposto da remoto"
-    );
-    let (_, _, html) = call(&app, "GET", "/", &local(), None, None).await;
-    assert!(html.contains(r#"name="jarvis-token" content="t""#));
+    let (status, _, _) = call(&app, "GET", "/", REMOTE, None, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _, _) = call(&app, "GET", "/", &local(), None, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
     let (status, _, _) = call(&app, "GET", "/", "attaccante.example", None, None).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     // Il token di sessione non vale da remoto: serve un dispositivo associato.
@@ -129,9 +125,38 @@ async fn remote_page_has_no_session_token_and_unknown_hosts_are_refused() {
     ] {
         assert_eq!(
             call(&app, "GET", path, REMOTE, None, None).await.0,
-            StatusCode::OK,
+            StatusCode::NOT_FOUND,
             "{path}"
         );
+    }
+}
+
+#[tokio::test]
+async fn retired_client_platforms_are_not_exposed_in_device_records() {
+    let app = app();
+    for platform in ["ios", "web"] {
+        let (_, invite, _) = call(
+            &app,
+            "POST",
+            "/api/devices/pairing",
+            &local(),
+            Some(("x-jarvis-token", "t")),
+            Some(json!({"scopes": ["chat"]})),
+        )
+        .await;
+        let code = invite["code"].as_str().unwrap();
+        let code = format!("{}-{}", &code[..4], &code[4..]).to_lowercase();
+        let (status, paired, _) = call(
+            &app,
+            "POST",
+            "/api/devices/pair",
+            REMOTE,
+            None,
+            Some(json!({"code": code, "name": "Client legacy", "platform": platform})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{paired}");
+        assert_eq!(paired["device"]["platform"], "other");
     }
 }
 

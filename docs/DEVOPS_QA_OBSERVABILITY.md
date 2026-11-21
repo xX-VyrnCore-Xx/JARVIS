@@ -10,7 +10,7 @@ Il Core Linux combina servizi systemd e componenti Docker. Il progetto prevede i
 |---|---|
 | Unitario | Policy, routing, transizioni, conflitti e funzioni dei moduli |
 | Contratti e integrazione | Compatibilità API/eventi, Rust–Python, database, provider e sincronizzazione |
-| E2E | Chat, piano, azione autorizzata, voce, Web, workflow e client previsti |
+| E2E | API del Core, autenticazione, pairing remoto, chat streaming e client previsti |
 | Multipiattaforma | Installazione, permessi OS, aggiornamento e compatibilità |
 | Prestazioni | Latenze, risorse, carichi agentici, qualità offline e SLO |
 | Sicurezza e privacy | Accesso minimo, isolamento, injection, revoca, egress e retention |
@@ -27,10 +27,11 @@ Per l'accettazione finale raccogliere la matrice requisiti–test con esiti, la 
 
 ## Stato della CI (prototipo v0.1)
 
-Il workflow `.github/workflows/contracts.yml` esegue tre job:
+Il workflow `.github/workflows/contracts.yml` esegue i test contrattuali e AI, le build del Core e del desktop nativo su Linux/macOS/Windows, il client Android e l'avvio reale del Core sui tre sistemi:
 - **Python:** contratti e AI Gateway;
 - **Rust:** fmt, clippy e test, compresi quelli d'integrazione sull'API con il worker reale;
-- **E2E:** Core in modalità offline più Chromium (`tests/e2e/ui_smoke.cjs`), con gli screenshot pubblicati come artefatto.
+- **E2E API:** Core offline e `tests/e2e/api_smoke.cjs`, senza browser o frontend Web. Il test copre 404 delle vecchie pagine, token, endpoint protetti, pairing, permessi del dispositivo e chat NDJSON.
+- **Desktop:** fmt, clippy, build e test di egui su Linux, macOS e Windows.
 
 Il proprietario ha autorizzato il merge automatico con CI verde ([DEVELOPMENT.md](DEVELOPMENT.md#integrazione-delle-modifiche)).
 
@@ -57,7 +58,7 @@ Il job CI `avvio` esegue i lanciatori reali (`jarvis.sh` su Linux e macOS, `jarv
 
 ## Osservabilità e robustezza (Fase 4, ADR-0011)
 
-**Metriche:** `GET /api/metrics` riporta conteggio, errori e latenze p50, p95 e max per endpoint, strumento, delega, task e automazione, più i contatori del worker. La sezione «Sistema» dell'interfaccia le mostra in tabella.
+**Metriche:** `GET /api/metrics` riporta conteggio, errori e latenze p50, p95 e max per endpoint, strumento, delega, task e automazione, più i contatori del worker. La vista «Sistema» del client desktop nativo le può interrogare, ma non ha ancora una presentazione tipizzata completa.
 
 **Storico ed esportazione:** un'istantanea ogni 5 minuti e all'arresto ordinato, conservata 7 giorni in SQLite. `GET /api/metrics/history?hours=24` restituisce lo storico; `GET /api/metrics/export` lo scarica in JSON (`jarvis-metrics/1`) e `?format=prometheus` nel formato testuale di Prometheus. Le richieste vogliono l'header `X-Jarvis-Token`, il token stampato nella pagina dell'interfaccia: per uno scraper Prometheus locale va configurato come header della richiesta. Esempio:
 
@@ -92,7 +93,7 @@ Gli obiettivi sono volutamente larghi per i runner CI: servono a rilevare regres
 ## Release e rollback (ADR-0015)
 
 - `python scripts/package.py --binary core/target/release/jarvis --target linux-x86_64 --out dist` crea l'archivio e il file `.sha256`.
-- `.github/workflows/release.yml` costruisce e prova gli archivi sui 3 sistemi; con un tag `vX.Y.Z` prepara una bozza di release.
+- `.github/workflows/release.yml` costruisce e prova i pacchetti desktop Windows/macOS e APK Android; le release sono autofirmate con certificati privati, attestate da GitHub e pubblicate dopo CI verde.
 - All'avvio di una versione diversa il Core copia i dati in `<dati>-rollback/`; `./jarvis.sh rollback` ripristina l'ultima copia.
 - Checklist di accettazione e criteri di rilascio: [ACCEPTANCE.md](ACCEPTANCE.md).
 

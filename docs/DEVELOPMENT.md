@@ -9,11 +9,10 @@ Il repository GitHub privato e il mirror locale conservano codice, documenti e c
 ├── core/              Core Linux e componenti Rust (workspace Cargo)
 │   ├── contracts/     crate jarvis-contracts: validazione dei contratti v1
 │   ├── bridge/        crate jarvis-bridge: prototipo Core–worker Python
-│   └── server/        crate jarvis-core: binario `jarvis`, API locale e interfaccia Web
+│   └── server/        crate jarvis-core: binario `jarvis` e API locale
 ├── ai/                runtime agenti e adapter Python (jarvis_ai)
 ├── apps/
-│   ├── desktop/       launcher/ (crate jarvis-launcher) e src-tauri/ (app Tauri)
-│   ├── web/           dashboard React e TypeScript (bundle in core/server/static)
+│   ├── desktop/       launcher/ (crate jarvis-launcher) e src-tauri/ (app nativa egui)
 │   └── mobile/        client successivi
 ├── contracts/         schemi, API ed eventi versionati; catalog/tools: descrittori degli strumenti
 ├── integrations/      plugin, connettori e SDK
@@ -31,15 +30,17 @@ Il repository GitHub privato e il mirror locale conservano codice, documenti e c
 4. Eseguire le verifiche già previste dal repository e aggiungere la copertura necessaria al cambiamento. Nei flussi dati provare almeno compatibilità, recovery e ripetizione quando rilevanti.
 5. Registrare esiti reali, limiti, decisioni e prossimo passo in ROADMAP.md. Se cambia una scelta architetturale, aggiornare DECISIONS.md e la specifica associata.
 
-## Dashboard (apps/web, ADR-0023)
+## Client desktop nativo
 
-La dashboard è in React e TypeScript. Il bundle generato (`core/server/static/app.js` e `app.css`) è versionato, così il Core si compila senza Node. Dopo una modifica in `apps/web/src`:
+L'interfaccia è un'app Rust/egui in `apps/desktop/src-tauri`; il Core espone solo API e non serve pagine, bundle o service worker Web. Il client desktop richiede Rust 1.95 o successivo. Su Linux installa le librerie grafiche prima della build:
 
 ```bash
-cd apps/web && npm ci && npm run build
+sudo apt install libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxkbcommon-dev libgl1-mesa-dev libdbus-1-dev
+cd apps/desktop/src-tauri
+cargo fmt --check && cargo clippy --locked -- -D warnings && cargo test --locked
 ```
 
-La CI ricostruisce il bundle e fallisce se differisce da quello versionato. Gli ID e le classi usati da `tests/e2e/ui_smoke.cjs` fanno parte del contratto dell'interfaccia.
+Il test trasversale `tests/e2e/api_smoke.cjs` verifica il Core HTTP, l'autenticazione, il pairing e lo streaming senza browser. `contracts.yml` compila e testa il client nativo su Linux, macOS e Windows.
 
 ## Dipendenze della voce
 
@@ -52,7 +53,7 @@ pip-compile --generate-hashes --output-file=ai/requirements-voice.txt ai/require
 Le installazioni di sviluppo, il setup guidato e le release usano `pip install --require-hashes`; ogni aggiornamento al lock va verificato sui pacchetti Windows e macOS in CI.
 Il lock include anche le dipendenze condizionali specifiche di Windows (per esempio `colorama` richiesta da `tqdm`); verificare il lock su Windows oltre che sul sistema che lo genera.
 
-Le GitHub Actions nei workflow sono fissate a commit SHA; la CLI Tauri ha una versione esatta. Aggiorna i riferimenti solo dopo aver verificato la release upstream e il commit corrispondente.
+Le GitHub Actions nei workflow sono fissate a commit SHA. Aggiorna i riferimenti solo dopo aver verificato la release upstream e il commit corrispondente.
 
 ## Ripresa da remoto con Claude Code
 
@@ -72,11 +73,11 @@ Dopo la pubblicazione, `scripts/prune_releases.py` conserva la release con la ve
 
 ### Firma degli installer
 
-La release automatica da `main` attesta e firma con Sigstore il DMG, il setup EXE e `SHA256SUMS`. Le firme sono bundle separati e vengono verificate prima della pubblicazione.
+Le release firmano DMG e app macOS e setup Windows con un certificato autofirmato privato, senza
+acquisti o account commerciali. Il proprietario deve configurare i certificati e i secret elencati
+in [GITHUB_ACTIONS_SECRETS.md](./GITHUB_ACTIONS_SECRETS.md); se mancano, la pubblicazione fallisce
+in modo esplicito. La CI verifica la firma, ma l'utente deve considerare attendibile il certificato
+sui propri dispositivi. Non viene eseguita la notarizzazione Apple.
 
-Per aggiungere le firme native, configura GitHub Actions e imposta la variabile `JARVIS_NATIVE_SIGNING=true` dopo aver predisposto entrambi i sistemi.
-
-- **Apple.** Serve un certificato **Developer ID Application**. Aggiungi il P12 codificato Base64 a `APPLE_CERTIFICATE` e la password a `APPLE_CERTIFICATE_PASSWORD`. Imposta la variabile `APPLE_SIGNING_IDENTITY` con il nome esatto del certificato. Aggiungi ai secret `APPLE_API_KEY` (ID chiave di App Store Connect), `APPLE_API_ISSUER` (issuer ID) e `JARVIS_APPLE_API_KEY_BASE64` (contenuto del file P8 codificato Base64). Tauri firma l’app e il DMG. La CI verifica le firme e allega i ticket ottenuti dalla notarizzazione.
-- **Windows.** Serve un profilo pubblico Azure Artifact Signing. Configura la federazione GitHub OIDC per il solo subject `repo:xX-VyrnCore-Xx/JARVIS:ref:refs/heads/main` e assegna il ruolo **Artifact Signing Certificate Profile Signer** al profilo. Imposta le variabili `AZURE_SIGNING_CLIENT_ID`, `AZURE_SIGNING_TENANT_ID`, `AZURE_SIGNING_ENDPOINT`, `AZURE_SIGNING_ACCOUNT` e `AZURE_SIGNING_PROFILE`. La CI verifica Authenticode e la marca temporale prima della prova d’installazione.
-
-Le PR compilano i pacchetti con la configurazione di test. Se abiliti la firma nativa per la pubblicazione automatica, un errore di firma impedisce la pubblicazione.
+Le PR verificano build e installazione senza usare i certificati privati. Sigstore e le attestazioni
+di provenienza continuano a usare OIDC GitHub.

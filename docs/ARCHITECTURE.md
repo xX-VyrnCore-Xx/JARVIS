@@ -4,7 +4,7 @@ Il Core Linux è il coordinatore principale. I nodi autorizzati dichiarano capac
 
 ```mermaid
 flowchart LR
-    C[Desktop / Web / Mobile] --> G[API Gateway]
+    C[Desktop / Android] --> G[API Gateway]
     G --> R[Core Runtime]
     R --> O[Orchestrator]
     O --> A[Multi-Agent Runtime]
@@ -26,7 +26,7 @@ flowchart LR
 | Computer Use Engine | Operazioni OS, file, terminale e interfacce di un nodo |
 | Web Agent Engine | Ricerca, navigazione, interazione e verifica fonti |
 | Voice Engine | STT, TTS e parola di attivazione locali nel worker; acquisizione e riproduzione nell'interfaccia | `ai/jarvis_ai/voice.py`, `core/server/src/api.rs` (`/api/voice/*`) |
-| Client desktop | Guscio Tauri che avvia e supervisiona il Core e ne mostra l'interfaccia | `apps/desktop` |
+| Client desktop | App egui che avvia e supervisiona il Core, o si associa a un Core remoto | `apps/desktop` |
 | Automation Engine | Trigger, esecuzioni durevoli, monitoraggio e recupero |
 | Integration Engine | API, connettori, plugin, SDK e webhook |
 | Security Engine | Identità, decisioni di policy, rischio e audit |
@@ -43,7 +43,7 @@ La disposizione proposta dei moduli nel repository è descritta in [DEVELOPMENT.
 
 | Modulo previsto | Implementazione attuale | Codice |
 |---|---|---|
-| API Gateway e client Web | API HTTP locale e interfaccia Web | `core/server/src/api.rs`, `core/server/static/` |
+| API Gateway e client nativi | API HTTP locale per app desktop e Android | `core/server/src/api.rs`, `apps/desktop`, `apps/android` |
 | Core Runtime e Orchestrator | Task `jarvis.task/1`, delega, ripresa dopo conferma, una richiesta alla volta | `core/server/src/orchestrator.rs` |
 | Multi-Agent Runtime | Un agente (General Assistant) in un worker Python supervisionato e riavviato se termina | `core/bridge`, `ai/jarvis_ai/worker.py` |
 | AI Gateway | Ollama locale e modello offline, con degradazione dichiarata | `ai/jarvis_ai/gateway.py` |
@@ -55,4 +55,4 @@ La disposizione proposta dei moduli nel repository è descritta in [DEVELOPMENT.
 | Observability (parziale) | Notifiche correlate, monitor delle anomalie, metriche di latenza ed errori, log strutturati correlati | `observability.rs`, `orchestrator.rs`, `/api/metrics` |
 | Web Agent (parziale) | Ricerca (Wikipedia o SearXNG) e lettura di pagine con provenienza, difese SSRF e iniezione | `core/server/src/web.rs` |
 
-Non ancora implementati: navigazione interattiva con Playwright, Integration Engine, nodi distribuiti, sincronizzazione, metriche e trace.
+Il client Web/PWA non è distribuito; il Core serve solo API HTTP ai client nativi. La UI egui non ha ancora parità con tutte le schermate e le funzioni vocali precedenti. Non ancora implementati: navigazione interattiva con Playwright, Integration Engine, nodi distribuiti, sincronizzazione, metriche e trace.

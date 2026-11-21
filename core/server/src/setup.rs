@@ -1,4 +1,4 @@
-//! Configurazione guidata al primo avvio (ADR-0019): download della voce locale con avanzamento.
+//! API di configurazione iniziale della pipeline vocale (ADR-0019), con download locale e avanzamento.
 //!
 //! Gli installer non eseguono codice durante l'installazione (il `.dmg` di macOS non può farlo), quindi la
 //! scelta dei modelli avviene al primo avvio, con opzioni già selezionate. I pacchetti Python vanno in
@@ -28,7 +28,7 @@ pub struct Plan {
 }
 
 impl Plan {
-    /// Valida la scelta dell'interfaccia: solo valori dagli elenchi noti (niente argomenti arbitrari a pip).
+    /// Valida la richiesta: solo valori dagli elenchi noti (niente argomenti arbitrari a pip).
     pub fn from_json(body: &Value) -> Result<Self, String> {
         let pick = |key: &str, allowed: &[&str], default: &str| -> Result<String, String> {
             let v = body[key].as_str().unwrap_or(default);
@@ -45,7 +45,7 @@ impl Plan {
             .iter()
             .any(|key| !body[key].is_null() && body[key].as_str() != Some(""))
         {
-            return Err("i modelli AI si configurano in Sistema → Modelli cloud".into());
+            return Err("i modelli AI si configurano tramite POST /api/cloud".into());
         }
         Ok(Self {
             stt_model: pick("stt_model", &STT_MODELS, "small")?,

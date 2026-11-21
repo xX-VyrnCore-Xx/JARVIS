@@ -1,6 +1,6 @@
 name: release
 
-# Installer macOS (.dmg per Apple Silicon) e Windows (setup .exe), con Core,
+# App nativa egui per macOS (.dmg per Apple Silicon) e Windows (setup .exe), con Core,
 # runtime AI e Python autonomo inclusi. Ogni installer viene installato e il Core supera la prova di avvio.
 # Aggiunge l'APK Android release, firmato con il keystore persistente del proprietario.
 # Con un tag vX.Y.Z pubblica la release con installer e impronte (decisione del proprietario del 2026-11-17); i tag con suffisso, es. v1.0.0-rc.1, restano prerelease.
@@ -8,7 +8,7 @@ on:
   push:
     tags: ["v*"]
   pull_request:
-    paths: ["ai/**", "scripts/fetch_python.py", ".github/workflows/release.yml", "scripts/sign_macos_release.sh", "apps/desktop/**", "core/server/src/main.rs", "core/server/src/rollback.rs"]
+    paths: ["ai/**", "contracts/**", "core/**", "scripts/fetch_python.py", "scripts/package_macos_release.sh", "scripts/package_windows_release.ps1", "scripts/stamp_release.py", ".github/workflows/release.yml", "apps/desktop/**"]
   workflow_call:
     inputs:
       tag:
@@ -21,15 +21,13 @@ on:
         type: boolean
         default: false
     secrets:
-      APPLE_CERTIFICATE:
+      JARVIS_MACOS_SIGNING_P12_BASE64:
         required: false
-      APPLE_CERTIFICATE_PASSWORD:
+      JARVIS_MACOS_SIGNING_PASSWORD:
         required: false
-      APPLE_API_KEY:
+      JARVIS_WINDOWS_SIGNING_PFX_BASE64:
         required: false
-      APPLE_API_ISSUER:
-        required: false
-      JARVIS_APPLE_API_KEY_BASE64:
+      JARVIS_WINDOWS_SIGNING_PASSWORD:
         required: false
       ANDROID_KEYSTORE_BASE64:
         required: false
@@ -72,14 +70,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { os: macos-latest, target: macos-aarch64, bundles: "dmg" }
-          - { os: windows-latest, target: windows-x86_64, bundles: "nsis" }
+          - { os: macos-latest, target: macos-aarch64 }
+          - { os: windows-latest, target: windows-x86_64 }
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     env:
       PYTHONDONTWRITEBYTECODE: "1"
       GITHUB_TOKEN: ${{ github.token }}
-      NATIVE_SIGNING: ${{ inputs.automatico && vars.JARVIS_NATIVE_SIGNING == 'true' }}
+      NATIVE_SIGNING: ${{ inputs.automatico || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.tag != '') }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -87,97 +85,127 @@ jobs:
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.13"
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
-        with:
-          node-version: "22"
       - name: Imposta la versione automatica degli installer
         if: inputs.automatico
         env:
           TAG: ${{ inputs.tag }}
         run: python scripts/stamp_release.py "$TAG"
         shell: bash
-      - name: Core in modalità release, incluso come sidecar
+      - name: Core e risorse in modalità release
         shell: bash
         run: |
           (cd core && cargo build --release --locked -p jarvis-core)
-          triple=$(rustc -vV | sed -n 's/host: //p')
           ext=""; [ "$RUNNER_OS" = "Windows" ] && ext=".exe"
-          mkdir -p apps/desktop/src-tauri/binaries
-          cp "core/target/release/jarvis$ext" "apps/desktop/src-tauri/binaries/jarvis-core-$triple$ext"
-          echo "TRIPLE=$triple" >> "$GITHUB_ENV"
+          resources=apps/desktop/src-tauri/resources
+          mkdir -p "$resources/ai" "$resources/contracts"
+          cp "core/target/release/jarvis$ext" "$resources/jarvis-core$ext"
+          cp -R ai/jarvis_ai "$resources/ai/"
+          cp ai/requirements-voice.txt "$resources/ai/requirements-voice.txt"
+          cp -R contracts/. "$resources/contracts/"
+          cp apps/desktop/src-tauri/icons/icon.ico "$resources/icon.ico"
       - name: Python autonomo con le dipendenze del runtime AI
         shell: bash
         run: |
-          python scripts/fetch_python.py --triple "$TRIPLE" --dest apps/desktop/src-tauri/python
-          if [ "$RUNNER_OS" = "Windows" ]; then py=apps/desktop/src-tauri/python/python.exe; else py=apps/desktop/src-tauri/python/bin/python3; fi
+          triple=$(rustc -vV | sed -n 's/host: //p')
+          python scripts/fetch_python.py --triple "$triple" --dest apps/desktop/src-tauri/resources/python
+          if [ "$RUNNER_OS" = "Windows" ]; then py=apps/desktop/src-tauri/resources/python/python.exe; else py=apps/desktop/src-tauri/resources/python/bin/python3; fi
           "$py" -m pip install --disable-pip-version-check -q -r tests/contracts/requirements.txt
-          python scripts/fetch_python.py --triple "$TRIPLE" --dest apps/desktop/src-tauri/python --trim
+          python scripts/fetch_python.py --triple "$triple" --dest apps/desktop/src-tauri/resources/python --trim
           "$py" -c "import jsonschema, sys; print('Python incluso', sys.version.split()[0])"
-          du -sh apps/desktop/src-tauri/python apps/desktop/src-tauri/binaries || true
-          find apps/desktop/src-tauri/python -type l | head -5 | grep . && { echo "collegamenti simbolici residui"; exit 1; } || true
-      - name: La voce si installa con il Python incluso (come fa la configurazione guidata)
+          du -sh apps/desktop/src-tauri/resources
+          find apps/desktop/src-tauri/resources/python -type l | head -5 | grep . && { echo "collegamenti simbolici residui"; exit 1; } || true
+      - name: Verifica le dipendenze vocali con il Python incluso
         shell: bash
         run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then py=apps/desktop/src-tauri/python/python.exe; else py=apps/desktop/src-tauri/python/bin/python3; fi
+          if [ "$RUNNER_OS" = "Windows" ]; then py=apps/desktop/src-tauri/resources/python/python.exe; else py=apps/desktop/src-tauri/resources/python/bin/python3; fi
           "$py" -m pip install --disable-pip-version-check --require-hashes -q --target "$RUNNER_TEMP/voce" -r ai/requirements-voice.txt
           PYTHONPATH="$RUNNER_TEMP/voce" "$py" -c "import faster_whisper, piper, openwakeword, onnxruntime; print('pacchetti della voce importati')"
-      - name: CLI Tauri
-        run: npm install --global --no-audit --no-fund @tauri-apps/cli@2.12.6
-      - name: Programmi di installazione (Tauri)
-        if: runner.os != 'macOS' || env.NATIVE_SIGNING != 'true'
-        working-directory: apps/desktop/src-tauri
+      - name: Compila la GUI nativa
         shell: bash
-        # CLI installato in modo esplicito: con npx il modulo nativo opzionale a volte non viene scaricato
-        # (MODULE_NOT_FOUND su Windows). Il pacchetto nativo dipende dal sistema e npm lo sceglie da solo.
         run: |
-          if [ "$RUNNER_OS" = "macOS" ]; then
-            # Con CI=true Tauri salta l'impaginazione del .dmg (sfondo, posizione delle icone, ADR-0036): la si
-            # chiede esplicitamente e, se Finder non risponde sul runner, si ripiega sul .dmg senza impaginazione.
-            CI=false tauri build --config tauri.bundle.conf.json --bundles ${{ matrix.bundles }} || {
-              echo "::warning::impaginazione del .dmg non riuscita, nuovo tentativo senza"
-              tauri build --config tauri.bundle.conf.json --bundles ${{ matrix.bundles }}
-            }
-          else
-            tauri build --config tauri.bundle.conf.json --bundles ${{ matrix.bundles }}
-          fi
-      - name: Firma Developer ID e notarizzazione del DMG
-        if: runner.os == 'macOS' && env.NATIVE_SIGNING == 'true'
-        working-directory: apps/desktop/src-tauri
-        shell: bash
+          cargo build --release --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Firma gli eseguibili Windows con il certificato privato
+        if: runner.os == 'Windows' && env.NATIVE_SIGNING == 'true'
+        shell: pwsh
         env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          JARVIS_APPLE_API_KEY_BASE64: ${{ secrets.JARVIS_APPLE_API_KEY_BASE64 }}
-        run: bash ../../../scripts/sign_macos_release.sh
-      - name: Autenticazione Azure per Authenticode
+          JARVIS_WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.JARVIS_WINDOWS_SIGNING_PFX_BASE64 }}
+          JARVIS_WINDOWS_SIGNING_PASSWORD: ${{ secrets.JARVIS_WINDOWS_SIGNING_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:JARVIS_WINDOWS_SIGNING_PFX_BASE64) -or
+              [string]::IsNullOrWhiteSpace($env:JARVIS_WINDOWS_SIGNING_PASSWORD)) {
+            throw "Configura il certificato PFX autofirmato Windows e la relativa password nei Secrets."
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP 'jarvis-signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:JARVIS_WINDOWS_SIGNING_PFX_BASE64))
+          Remove-Item Env:JARVIS_WINDOWS_SIGNING_PFX_BASE64
+          $password = ConvertTo-SecureString $env:JARVIS_WINDOWS_SIGNING_PASSWORD -AsPlainText -Force
+          $certificate = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          $publicCert = Join-Path $env:RUNNER_TEMP 'jarvis-signing.cer'
+          Export-Certificate -Cert $certificate -FilePath $publicCert | Out-Null
+          Import-Certificate -FilePath $publicCert -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
+          $signtool = Get-ChildItem "$env:ProgramFiles(x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1
+          if (-not $signtool) { throw "signtool.exe non trovato nel Windows SDK." }
+          $executables = @((Resolve-Path apps/desktop/src-tauri/target/release/jarvis-desktop.exe).Path)
+          $executables += Get-ChildItem apps/desktop/src-tauri/resources -Filter *.exe -Recurse |
+            ForEach-Object { $_.FullName }
+          foreach ($executable in $executables) {
+            & $signtool.FullName sign /fd SHA256 /sha1 $certificate.Thumbprint $executable
+            if ($LASTEXITCODE -ne 0) { throw "Firma non riuscita: $executable" }
+            & $signtool.FullName verify /pa $executable
+            if ($LASTEXITCODE -ne 0) { throw "Verifica firma non riuscita: $executable" }
+          }
+          Remove-Item Env:JARVIS_WINDOWS_SIGNING_PASSWORD
+          Remove-Item -LiteralPath $pfx -Force
+          "JARVIS_SIGNING_THUMBPRINT=$($certificate.Thumbprint)" >> $env:GITHUB_ENV
+      - name: Crea e firma app macOS e DMG
+        if: runner.os == 'macOS'
+        env:
+          NATIVE_SIGNING: ${{ env.NATIVE_SIGNING }}
+          JARVIS_MACOS_SIGNING_P12_BASE64: ${{ secrets.JARVIS_MACOS_SIGNING_P12_BASE64 }}
+          JARVIS_MACOS_SIGNING_PASSWORD: ${{ secrets.JARVIS_MACOS_SIGNING_PASSWORD }}
+          JARVIS_MACOS_SIGNING_IDENTITY: ${{ vars.JARVIS_MACOS_SIGNING_IDENTITY }}
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' apps/desktop/src-tauri/Cargo.toml | head -1)
+          bash scripts/package_macos_release.sh "$version"
+      - name: Installa NSIS
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install nsis --yes --no-progress
+          $env:PATH = "$env:PATH;${env:ProgramFiles(x86)}\NSIS"
+          if (-not (Get-Command makensis.exe -ErrorAction SilentlyContinue)) {
+            throw "makensis.exe non è disponibile dopo l'installazione di NSIS"
+          }
+      - name: Crea setup Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:PATH;${env:ProgramFiles(x86)}\NSIS"
+          ./scripts/package_windows_release.ps1
+      - name: Firma privata del setup Windows
         if: runner.os == 'Windows' && env.NATIVE_SIGNING == 'true'
-        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6
-        with:
-          client-id: ${{ vars.AZURE_SIGNING_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_SIGNING_TENANT_ID }}
-          allow-no-subscriptions: true
-      - name: Firma e marca temporale del setup Windows
-        if: runner.os == 'Windows' && env.NATIVE_SIGNING == 'true'
-        uses: azure/artifact-signing-action@b443cf8ea4124818d2ea9f043cba29fc3ec47b16
-        with:
-          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
-          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
-          files-folder: ${{ github.workspace }}/apps/desktop/src-tauri/target/release/bundle/nsis
-          files-folder-filter: '*-setup.exe'
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe)[0].FullName
+          $signtool = Get-ChildItem "$env:ProgramFiles(x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
+            Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1
+          if (-not $signtool) { throw "signtool.exe non trovato nel Windows SDK." }
+          & $signtool.FullName sign /fd SHA256 /sha1 $env:JARVIS_SIGNING_THUMBPRINT $setup
+          if ($LASTEXITCODE -ne 0) { throw "Firma Authenticode autofirmata non riuscita." }
+          & $signtool.FullName verify /pa $setup
+          if ($LASTEXITCODE -ne 0) { throw "Verifica della firma Authenticode non riuscita." }
+          $signature = Get-AuthenticodeSignature -LiteralPath $setup
+          if ($signature.Status -ne 'Valid') { throw "Firma Authenticode non valida: $($signature.Status)" }
+          Remove-Item -LiteralPath "Cert:\CurrentUser\My\$env:JARVIS_SIGNING_THUMBPRINT" -Force
+          Remove-Item -LiteralPath "Cert:\CurrentUser\Root\$env:JARVIS_SIGNING_THUMBPRINT" -Force
+          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'jarvis-signing.cer') -Force
       - name: Installazione dal .dmg e avvio del Core installato (macOS)
         if: runner.os == 'macOS'
         shell: bash
         run: |
           dmg=$(ls apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg | head -1)
           hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg" "$dmg"
-          ls -la "$RUNNER_TEMP/dmg" "$RUNNER_TEMP/dmg/.background" 2>/dev/null || echo "::warning::.dmg senza sfondo"
           test -L "$RUNNER_TEMP/dmg/Applications" || { echo "manca il collegamento ad Applicazioni nel .dmg"; exit 1; }
           mkdir -p "$RUNNER_TEMP/Applications"
           cp -R "$RUNNER_TEMP/dmg/JARVIS.app" "$RUNNER_TEMP/Applications/"
@@ -185,12 +213,8 @@ jobs:
           app="$RUNNER_TEMP/Applications/JARVIS.app"
           codesign --verify --deep --strict --verbose=2 "$app"
           plutil -extract LSMinimumSystemVersion raw "$app/Contents/Info.plist"
-          if [ "$NATIVE_SIGNING" = "true" ]; then
-            xcrun stapler validate "$app"
-            spctl --assess --type execute --verbose=2 "$app"
-          fi
           res="$app/Contents/Resources"
-          test -x "$app/Contents/MacOS/jarvis-core" && test -x "$res/python/bin/python3"
+          test -x "$res/jarvis-core" && test -x "$res/python/bin/python3"
           JARVIS_HOME="$res" JARVIS_PYTHON="$res/python/bin/python3" JARVIS_DATA_DIR="$RUNNER_TEMP/dati" "$app/Contents/MacOS/jarvis-core" > core.log 2>&1 &
           python tests/smoke/start_smoke.py http://127.0.0.1:8765 120 || { cat core.log; exit 1; }
       - name: Installazione reale (setup EXE) e avvio del Core installato (Windows)
@@ -200,17 +224,18 @@ jobs:
           $setup = (Get-ChildItem apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe)[0].FullName
           if ($env:NATIVE_SIGNING -eq 'true') {
             $signature = Get-AuthenticodeSignature -LiteralPath $setup
-            if ($signature.Status -ne 'Valid' -or -not $signature.TimeStamperCertificate) {
-              throw "Firma Authenticode non valida o priva di marca temporale: $($signature.Status)"
+            if ($signature.Status -ne 'Valid') {
+              throw "Firma Authenticode non valida: $($signature.Status)"
             }
           }
           $root = Join-Path $env:RUNNER_TEMP 'JARVIS-installato'
           # Per NSIS /D deve essere l'ultimo argomento e va passato senza virgolette.
           $p = Start-Process -FilePath $setup -ArgumentList "/S /D=$root" -Wait -PassThru
           if ($p.ExitCode -ne 0) { throw "Installazione non riuscita: $($p.ExitCode)" }
-          $core = Get-Item "$root\jarvis-core.exe"
-          if (-not (Test-Path "$root\python\python.exe")) { throw "Python incluso assente in $root" }
-          $env:JARVIS_HOME = $root; $env:JARVIS_PYTHON = "$root\python\python.exe"; $env:JARVIS_DATA_DIR = "$env:RUNNER_TEMP\dati"
+          if (-not (Test-Path "$root\jarvis-desktop.exe")) { throw "GUI nativa non installata in $root" }
+          $core = Get-Item "$root\resources\jarvis-core.exe"
+          if (-not (Test-Path "$root\resources\python\python.exe")) { throw "Python incluso assente in $root" }
+          $env:JARVIS_HOME = "$root\resources"; $env:JARVIS_PYTHON = "$root\resources\python\python.exe"; $env:JARVIS_DATA_DIR = "$env:RUNNER_TEMP\dati"
           Start-Process -FilePath $core.FullName -RedirectStandardOutput core.log -RedirectStandardError core.err -NoNewWindow
           python tests/smoke/start_smoke.py http://127.0.0.1:8765 120
           if ($LASTEXITCODE -ne 0) { Get-Content core.log, core.err; exit 1 }
@@ -372,7 +397,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.name }}
           AUTOMATIC: ${{ inputs.automatico }}
-          NATIVE_SIGNING: ${{ inputs.automatico && vars.JARVIS_NATIVE_SIGNING == 'true' }}
+          NATIVE_SIGNING: ${{ inputs.automatico || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.tag != '') }}
           REPLACE: ${{ inputs.sostituisci && 'true' || 'false' }}
         run: |
           git config user.name "github-actions[bot]"
@@ -406,9 +431,9 @@ jobs:
           trap 'rm -f "$notes"' EXIT
           cp .github/release-notes.md "$notes"
           if [ "$NATIVE_SIGNING" = "true" ]; then
-            printf '\nFirma nativa verificata su entrambi i pacchetti: Developer ID con notarizzazione Apple e Authenticode con marca temporale.\n' >> "$notes"
+            printf '\nFirma nativa autofirmata verificata su macOS e Windows; per eseguire le app occorre considerare attendibile il certificato sul proprio dispositivo.\n' >> "$notes"
           else
-            printf '\nI pacchetti sono firmati con Sigstore e attestati da GitHub Actions. macOS usa una firma ad hoc per l’app.\n' >> "$notes"
+            printf '\nI pacchetti di prova sono firmati con Sigstore e attestati da GitHub Actions; le firme native autofirmate sono applicate solo alle release.\n' >> "$notes"
           fi
           release_notes="$(<"$notes")"
           gh release create "$TAG" dist/* --verify-tag --notes "$release_notes" --generate-notes --title "JARVIS $TAG" $extra --repo "$GITHUB_REPOSITORY" || {

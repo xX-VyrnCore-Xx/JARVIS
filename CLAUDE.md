@@ -37,19 +37,13 @@ python3 -m unittest discover -s tests/contracts -v && python3 -m unittest discov
 cd core && cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked
 ```
 
-Prototipo avviabile con `./jarvis.sh` (porta 8765). Test E2E dell'interfaccia, con il Core avviato come nella CI (`JARVIS_VOICE_ENGINE=fake`, `JARVIS_FAKE_STT_TEXT="che ore sono"`, fornitore Web locale; vedi `.github/workflows/contracts.yml`):
+Core avviabile con `./jarvis.sh` (porta 8765). Il test E2E API si esegue con il Core avviato come nella CI (vedi `.github/workflows/contracts.yml`):
 
 ```bash
-JARVIS_URL=http://localhost:8765 node tests/e2e/ui_smoke.cjs
+JARVIS_URL=http://127.0.0.1:8765 JARVIS_TOKEN=<token> node tests/e2e/api_smoke.cjs
 ```
 
-Dashboard React (`apps/web`, ADR-0023): dopo ogni modifica ai sorgenti rigenera il bundle versionato in `core/server/static`:
-
-```bash
-cd apps/web && npm ci && npm run build
-```
-
-App desktop: `./jarvis.sh desktop`. Build e controlli dell'app Tauri (su Linux servono le librerie WebKitGTK):
+App desktop egui: `./jarvis.sh desktop`. Build e controlli (su Linux servono le librerie X11/OpenGL elencate in `docs/DEVELOPMENT.md`):
 
 ```bash
 cd apps/desktop/src-tauri && cargo fmt --check && cargo clippy --locked -- -D warnings && cargo build --locked

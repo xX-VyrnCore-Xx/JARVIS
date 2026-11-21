@@ -54,7 +54,7 @@ fn counter(j: &Jarvis, name: &str) -> u64 {
 }
 
 fn assert_fault_then_recovery(fault: &str, expected_code: &str) {
-    let (mut j, _) = with_fault(fault, 1500);
+    let (mut j, _) = with_fault(fault, 5_000);
     let failed = j.chat("che ore sono").unwrap();
     assert_eq!(
         failed.task["state"], "failed",
@@ -75,7 +75,8 @@ fn assert_fault_then_recovery(fault: &str, expected_code: &str) {
     let ok = j.chat("che ore sono").unwrap();
     assert_eq!(
         ok.task["state"], "succeeded",
-        "{fault}: recupero dopo il guasto"
+        "{fault}: recupero dopo il guasto: {}",
+        ok.task
     );
     assert_eq!(
         counter(&j, "worker.spawned"),

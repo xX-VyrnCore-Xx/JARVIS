@@ -1227,9 +1227,30 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - Il client iOS non è più supportato: codice e progetto Xcode residui vengono rimossi; le note storiche restano solo come registro.
 - Android usa notifiche FCM data-only ad alta priorità, con scadenza di 24 ore. Il client mostra solo un avviso generico, verifica il consenso locale e il permesso OS, e sospende il polling di chat/attività/notifiche quando l'app non è in primo piano.
 - I quattro identificativi Firebase dell'app Android arrivano al build da variabili GitHub Actions; la credenziale service-account resta esclusivamente sul Core host, fuori dal repository e dai job di compilazione.
+- `google-services.json` è solo una fonte locale ignorata da Git da cui importare questi identificativi nelle Actions variables. Il client OAuth `client_secret_*.json` non è usato da FCM o dai workflow; può essere necessario per autorizzare separatamente Gmail/Google Calendar.
 - L'APK firmato `release` è pubblicato nella stessa release degli installer desktop; non viene pubblicato alcun APK `debug`.
-- **Evidenze:** test sintetico del payload FCM e della rotta `/fcm-sw.js`; workflow release con variabili Firebase opzionali ma complete o assenti. La prova reale su dispositivo richiede le credenziali Firebase del proprietario.
-- Il frontend Web resta durante la migrazione per non interrompere l'app Tauri e i client browser. In una PR successiva verrà sostituito da una UI desktop Rust/egui e rimosso insieme alla PWA.
+- **Evidenze:** test sintetici del payload FCM e dei permessi Android; workflow release con variabili Firebase opzionali ma complete o assenti. La prova reale su dispositivo richiede le credenziali Firebase del proprietario.
+- Il frontend Web è stato rimosso con ADR-0067; FCM Android usa il client nativo e non richiede un service worker.
+
+### ADR-0067 — App desktop egui e ritiro dell'interfaccia Web
+
+- **Data** 2026-11-21 · **Stato** implementato nel checkout, verifiche CI in corso · **Fonte** scelta esplicita del proprietario per la seconda PR.
+- **Contesto:** rimuovere completamente il client Web/PWA e sostituire Tauri/WebView mantenendo i pacchetti macOS DMG e Windows setup EXE, il Core API e l'app Android.
+- **Decisione:** il desktop usa Rust/egui con client HTTP autenticato e pairing HTTPS. Il Core continua a esporre API per i client nativi, ma non serve HTML, bundle, manifest o service worker. Le route API di pairing restano attive; i record device espongono solo `android`, `desktop` o `other`, e `/`, `/pair` e gli asset Web restituiscono 404.
+- Il client aggiorna notifiche ogni cinque secondi mentre è attivo e usa le notifiche native di Linux, macOS e Windows quando non è in primo piano. Android conserva FCM data-only ad alta priorità secondo consenso e permesso OS.
+- La CI sostituisce Chromium/Playwright con un test API offline (`tests/e2e/api_smoke.cjs`) e compila/testa il client desktop su Linux, macOS e Windows. Il workflow release produce DMG egui e installer NSIS. Il fixture E2E del token rispetta la validazione del Core (almeno 32 caratteri alfanumerici). I pacchetti pubblicati sono firmati con un certificato autofirmato privato su macOS e Windows, senza firma commerciale o notarizzazione.
+- **Conseguenze:** la UI desktop non ha ancora parità con la dashboard rimossa: controlli vocali, moduli guidati completi per connettori/configurazione, viste tipizzate per alcuni pannelli e comportamento tray restano da implementare nei client nativi. La cronologia testuale della conversazione viene ripristinata all'apertura della chat. Queste lacune non autorizzano a reintrodurre il client Web.
+- **Evidenze locali:** `cargo fmt --check`, Clippy e `cargo test --locked` del Core superati (un test Docker ignorato); test launcher 4/4; test `:core-client:test` Gradle superati; `tests/e2e/api_smoke.cjs` 15/15; `tests/smoke/start_smoke.py` 6/6 senza route Web; test Python e contratti superati (un test voce ignorato perché `openwakeword` non è installato). La prima CI ha individuato che il test di avvio leggeva ancora il token dalla pagina `/`; corretto per usare il token fixture passato dall'ambiente. Esito della CI aggiornata ancora atteso.
+- **Configurazione proprietario:** i certificati autofirmati restano da creare e registrare nei Secrets Actions; Firebase è validato localmente ma l'integrazione non può leggere/scrivere GitHub Actions variables con il token della sessione (HTTP 403). Nessun file di configurazione Google è tracciato da Git.
+- **Documenti interessati:** README.md, ROADMAP.md, DEVELOPMENT.md, TECH_STACK.md, INTERFACE_AND_DEVICES.md, REQUIREMENTS.md e DEVOPS_QA_OBSERVABILITY.md.
+
+### ADR-0068 — Firma nativa autofirmata per uso personale
+
+- **Data** 2026-11-21 · **Stato** adottata, da verificare nei runner GitHub · **Fonte** richiesta del proprietario.
+- **Decisione:** le release desktop sono firmate con una chiave autofirmata generata e custodita dal proprietario, senza certificati commerciali Apple/Azure né notarizzazione. Il P12/PFX e le password vengono configurati nei GitHub Actions Secrets; l'impronta SHA-1 macOS è una Actions Variable. Le PR non ricevono né richiedono le chiavi. Le attestazioni OIDC/Sigstore restano attive.
+- Il proprietario deve installare il certificato pubblico solo sui propri dispositivi per rendere attendibili i programmi. La firma autofirmata identifica il publisher e rileva alterazioni, ma non dà automaticamente reputazione SmartScreen/Gatekeeper e non equivale alla notarizzazione.
+- **Conseguenze:** la pubblicazione automatica si blocca in modo esplicito finché i quattro secrets desktop e la variable macOS non sono configurati. I secrets Android per firmare l'APK restano separati. Questa scelta sostituisce per le release future la firma ad hoc/macOS e il percorso commerciale opzionale descritti da ADR-0020.
+- **Documenti interessati:** DEVELOPMENT.md, GITHUB_ACTIONS_SECRETS.md, SECURITY_AND_PRIVACY.md, DEVOPS_QA_OBSERVABILITY.md e workflow `release.yml` / `release-after-ci.yml`.
 
 ### Decisione operativa — Merge automatico con CI verde
 

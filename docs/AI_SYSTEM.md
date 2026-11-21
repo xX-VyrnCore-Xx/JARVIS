@@ -34,7 +34,11 @@ Il worker Python usa l’agente deterministico per i comandi offline. Il Core es
 
 Il Core stima i token tenendo conto di sequenze di testo, punteggiatura, sintassi e Unicode. Con continuità attiva include fino a otto scambi testuali consecutivi dello stesso provider entro 16.000 token stimati; conserva il messaggio corrente e accorcia i singoli turni sui confini dei caratteri. Schemi degli strumenti, istruzioni e margine per la risposta sono inclusi nel calcolo del plafond applicativo. La memoria, i segreti rilevati e gli esiti degli strumenti restano sul Core.
 
-La dashboard usa `POST /api/chat/stream` con risposta NDJSON. Il bridge inoltra gli eventuali envelope `delegation.progress` seguiti da un esito `done` o `error`. Il worker a regole risponde in un blocco. I client che leggono un esito completo usano `POST /api/chat`.
+## Configurazione dei provider
+
+Il Core espone `GET /api/cloud` per lo stato e `POST /api/cloud` per configurare o rimuovere un provider. La richiesta proprietario può includere `provider` (`ollama_cloud` o `nvidia_nim`), `key` e `model`, oppure `remove_key: true`. Le chiavi sono conservate nel secret store del Core; il modello selezionato è salvato nei dati locali. La UI egui non ha ancora il modulo guidato: usa un client API locale autenticato e non inserire credenziali in log o nel repository.
+
+Il client desktop nativo usa `POST /api/chat/stream` con risposta NDJSON. Il bridge inoltra gli eventuali envelope `delegation.progress` seguiti da un esito `done` o `error`. Il worker a regole risponde in un blocco. I client che leggono un esito completo usano `POST /api/chat`.
 
 ## Voce
 

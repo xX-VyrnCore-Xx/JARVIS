@@ -1,6 +1,6 @@
 # JARVIS
 
-JARVIS è un assistente personale per un singolo proprietario. Il Core coordina chat, voce, strumenti, memoria e automazioni. Puoi tenere il Core sempre attivo sul Mac e usare lo stesso archivio da browser, iPhone, Android e altri computer associati.
+JARVIS è un assistente personale per un singolo proprietario. Il Core coordina chat, strumenti, memoria e automazioni. Puoi tenere il Core sempre attivo sul Mac e usare lo stesso archivio dall'app desktop nativa, da Android e dagli altri computer associati.
 
 L’inferenza usa **Ollama Cloud** o **NVIDIA NIM**. I comandi offline, la voce e la ricerca nella memoria funzionano sul Core. Le operazioni sensibili passano da policy, conferma e audit.
 
@@ -14,7 +14,7 @@ Scarica il pacchetto dalla pagina [Releases](https://github.com/xX-VyrnCore-Xx/J
 | Windows x64 | `JARVIS_<versione>_x64-setup.exe` | Avvia il setup per l’utente corrente. |
 | Android | `JARVIS_<versione>_android-release.apk` | Installa l'APK release firmato (non usare APK di debug). |
 
-Core e Python sono inclusi negli installer desktop. Al primo avvio puoi installare il riconoscimento vocale, la voce italiana Paola e l’attivazione «Ehi Jarvis». Per configurare le chiavi cloud, apri **Sistema → Modelli cloud**. L'APK Android è allegato alla stessa release; per abilitare le notifiche push configura [Firebase](docs/FIREBASE_SETUP.md).
+Core e Python sono inclusi negli installer desktop. Il runtime vocale è disponibile nel Core, ma i controlli microfono, sintesi vocale e wake word non sono ancora esposti nella nuova app desktop nativa. L'APK Android è allegato alla stessa release; per abilitare le notifiche push configura [Firebase](docs/FIREBASE_SETUP.md).
 La pagina Releases conserva una sola versione alla volta: al rilascio successivo le release e i tag precedenti vengono rimossi.
 
 ### Verifica un installer
@@ -41,13 +41,13 @@ La firma che il sistema operativo riconosce dipende dalle credenziali di pubblic
 |---|---|
 | Core | Rust, Axum, Tokio, Serde |
 | Worker locale | Python 3, JSON Lines su stdin/stdout, JSON Schema 2020-12 |
-| Desktop e Web | Tauri 2, React 19, TypeScript, Vite, PWA |
+| Desktop | Rust, egui/eframe; API HTTP del Core |
 | Mobile | Kotlin e Jetpack Compose su Android |
 | Dati e memoria | SQLite con rusqlite, FTS5/BM25, vettori lessicali locali e grafo delle conoscenze |
 | Inferenza | Ollama Cloud e NVIDIA NIM, routing per attività e budget, limiter NIM a 35 RPM |
 | Voce | faster-whisper, Piper, openWakeWord e XTTS v2 facoltativo |
 | Automazioni e sandbox | Scheduler Tokio, n8n e Python in container Docker isolati |
-| Sicurezza e distribuzione | rustls, WebAuthn, portachiavi di sistema, GitHub Actions, Playwright e Sigstore |
+| Sicurezza e distribuzione | rustls, WebAuthn, portachiavi di sistema, GitHub Actions, test API e Sigstore |
 
 [Stack e confini dei componenti](docs/TECH_STACK.md)
 
@@ -57,21 +57,20 @@ La firma che il sistema operativo riconosce dipende dalle credenziali di pubblic
 2. Scrivi il nome host del proxy in `remote-hosts.txt` nella cartella dati del Mac host, oppure imposta `JARVIS_ALLOWED_HOSTS`. Riavvia JARVIS per usare la porta stabile.
 3. Apri **Dispositivi**, genera un invito monouso e usa il codice o il QR da un client autorizzato. Il Mac resta l’host. Le app associate vedono chat, conferme, attività e notifiche secondo i permessi assegnati.
 
-Per un secondo desktop, imposta `JARVIS_REMOTE_URL` o salva l’origine HTTPS in `remote-core-url.txt` nella sua cartella dati. L'app Android e la PWA si associano con l'origine HTTPS e il codice. [Interfacce e dispositivi](docs/INTERFACE_AND_DEVICES.md)
+Per un secondo desktop, imposta `JARVIS_REMOTE_URL` o salva l'origine HTTPS in `remote-core-url.txt` nella sua cartella dati. L'app desktop e quella Android si associano con l'origine HTTPS e il codice. [Interfacce e dispositivi](docs/INTERFACE_AND_DEVICES.md)
 
 ## Usa JARVIS
 
-- **Chat e voce.** Premi il microfono per dettare, abilita le risposte vocali o usa «Ehi Jarvis». Con un provider cloud attivo puoi correggere la dettatura prima dell’invio. La voce è elaborata sul Core.
-- **Modelli cloud.** JARVIS sceglie il modello per richieste rapide, analisi, sviluppo o contesti lunghi. L’opzione **Continua la conversazione** include fino a otto scambi testuali dello stesso provider, entro un budget stimato. In modalità **Cloud automatico** entrambi i provider configurati possono ricevere la richiesta in caso di ripiego.
-- **Strumenti e connettori.** Prova «info sistema», «calcola 18 × 7» o «cerca intelligenza artificiale». In **Connettori** installi servizi dal catalogo o configuri un’API dal modulo guidato. Il Core verifica le proposte e le scritture esterne richiedono conferma.
-- **Memoria.** «Ricorda che …» registra fatti e preferenze. La ricerca è locale e combina corrispondenze, sinonimi comuni e similarità. Da **Memoria** puoi correggere o eliminare un elemento.
-- **Automazioni e sicurezza.** In **Automazioni** puoi pianificare comandi e attivare n8n se Docker è in esecuzione sul Core. In **Sicurezza** trovi posture, accessi e audit. In **Sistema** puoi creare e verificare backup cifrati e controllare gli aggiornamenti.
+- **Chat.** Invia richieste al Core e consulta la cronologia della conversazione. Le azioni sensibili restano soggette a policy e conferma.
+- **Modelli cloud e voce.** Il Core instrada le richieste ai provider configurati e include il runtime vocale. La configurazione guidata dei provider e i controlli vocali non sono ancora disponibili nell'interfaccia desktop nativa.
+- **Dispositivi e notifiche.** Associa client Android o desktop tramite invito monouso. Le notifiche push Android richiedono Firebase; il Core continua a conservarle anche quando un client non è connesso.
+- **Altre sezioni.** La navigazione nativa include attività, automazioni, memoria, competenze, workspace, connettori, dispositivi, sicurezza, audit e sistema. Alcune viste sono ancora generiche e non sostituiscono i moduli guidati della precedente interfaccia Web.
 
 [Strumenti e automazioni](docs/AUTONOMY_AND_TOOLS.md) · [Memoria e sincronizzazione](docs/MEMORY_DATA_SYNC.md) · [Sicurezza e privacy](docs/SECURITY_AND_PRIVACY.md)
 
 ## Avvia dai sorgenti
 
-Servono Git, Rust e Python 3.10 o successivo. La CI e gli installer usano Python 3.13.
+Servono Git, Rust 1.95 o successivo e Python 3.10 o successivo. La CI e gli installer usano Python 3.13.
 
 ```bash
 git clone https://github.com/xX-VyrnCore-Xx/JARVIS.git
@@ -79,6 +78,6 @@ cd JARVIS
 ./jarvis.sh
 ```
 
-Su Windows usa `jarvis.cmd` o `.\jarvis.ps1`. Le istruzioni aprono il Core su `http://localhost:8765`. Usa `jarvis.sh doctor` o `jarvis.cmd doctor` per verificare l’ambiente. `./jarvis.sh desktop` apre la finestra Tauri, che su Linux richiede WebKitGTK 4.1, GTK 3 e librsvg. Per ricompilare il frontend usa `npm ci` e `npm run build` in `apps/web`.
+Su Windows usa `jarvis.cmd` o `.\jarvis.ps1`. `./jarvis.sh` avvia il Core API; `./jarvis.sh desktop` apre l'app nativa egui e avvia il Core in automatico. Su Linux servono le librerie X11, XCursor, XRandR, Xi, XKBCommon, OpenGL e DBus indicate in [Sviluppo e CI](docs/DEVELOPMENT.md).
 
 [Sviluppo e CI](docs/DEVELOPMENT.md) · [Secrets GitHub Actions](docs/GITHUB_ACTIONS_SECRETS.md) · [Firebase](docs/FIREBASE_SETUP.md) · [Architettura](docs/ARCHITECTURE.md) · [Roadmap e checkpoint](docs/ROADMAP.md)

@@ -3554,7 +3554,7 @@ impl Jarvis {
             .filter(|c| !c.is_control())
             .take(80)
             .collect();
-        let platform = if matches!(platform, "android" | "ios" | "desktop" | "web") {
+        let platform = if matches!(platform, "android" | "desktop") {
             platform
         } else {
             "other"

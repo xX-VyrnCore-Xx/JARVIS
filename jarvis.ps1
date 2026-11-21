@@ -1,8 +1,8 @@
 # Avvio di JARVIS su Windows (PowerShell). Equivalente di jarvis.sh.
 # Il file resta solo ASCII: Windows PowerShell 5.1 legge gli script senza BOM come ANSI (cp1252).
 #
-# Uso: .\jarvis.ps1               interfaccia nel browser su http://localhost:8765
-#      .\jarvis.ps1 desktop       app desktop (Tauri)
+# Uso: .\jarvis.ps1               avvia il Core API su http://localhost:8765
+#      .\jarvis.ps1 desktop       app desktop egui
 #      .\jarvis.ps1 voice-setup   motori vocali locali e modelli (una volta)
 #      .\jarvis.ps1 doctor        controlla i prerequisiti
 #      .\jarvis.ps1 backup        backup cifrato dei dati
@@ -90,7 +90,7 @@ if ($Command -eq "voice-setup") {
     $stt = if ($env:JARVIS_STT_MODEL) { $env:JARVIS_STT_MODEL } else { "small" }
     & $VenvPython -c "import sys; from faster_whisper import WhisperModel; WhisperModel(sys.argv[1], device='cpu', compute_type='int8', download_root=sys.argv[2])" $stt $Models
     & $VenvPython -m piper.download_voices $VoiceName --download-dir (Join-Path $Models "piper")
-    Ok "Voce pronta. Avvia .\jarvis.ps1"
+    Ok "Runtime vocale pronto nel Core; i controlli microfono non sono ancora disponibili nel client egui."
     exit 0
 }
 if (Test-Path $Models) {
@@ -100,7 +100,7 @@ if (Test-Path $Models) {
 }
 
 if ($Command -eq "desktop") {
-    if ($Prebuilt) { Fail "La release non include l'app desktop: usa .\jarvis.ps1 (interfaccia nel browser) oppure i sorgenti" }
+    if ($Prebuilt) { Fail "Per la release usa l'app JARVIS installata; per avviare il desktop dai sorgenti" }
     Push-Location (Join-Path $Root "apps\desktop\src-tauri")
     try { cargo build --release --locked; if ($LASTEXITCODE -ne 0) { Fail "Compilazione dell'app desktop non riuscita" } } finally { Pop-Location }
     & (Join-Path $Root "apps\desktop\src-tauri\target\release\jarvis-desktop.exe")
@@ -111,13 +111,5 @@ if ($Command -eq "backup") { & $CoreExe backup; exit $LASTEXITCODE }
 if ($Command -eq "restore") { & $CoreExe restore $Target; exit $LASTEXITCODE }
 if ($Command -eq "node") { & $CoreExe node $Target @Rest; exit $LASTEXITCODE }
 if ($Command -eq "rollback") { if ($Target) { & $CoreExe rollback $Target } else { & $CoreExe rollback }; exit $LASTEXITCODE }
-if ($env:JARVIS_NO_BROWSER -ne "1") {
-    Start-Job -ArgumentList $Port -ScriptBlock {
-        param($p)
-        for ($i = 0; $i -lt 60; $i++) {
-            try { Invoke-WebRequest -UseBasicParsing -TimeoutSec 1 "http://127.0.0.1:$p/api/health" | Out-Null; Start-Process "http://localhost:$p/"; break } catch { Start-Sleep 1 }
-        }
-    } | Out-Null
-}
 & $CoreExe
 exit $LASTEXITCODE

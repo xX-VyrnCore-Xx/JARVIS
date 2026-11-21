@@ -9,14 +9,22 @@ privato dell'evento.
 1. Crea un progetto Firebase dedicato o seleziona quello JARVIS.
 2. Nella console Firebase registra un'app Android con package name `local.jarvis.app`.
 3. Abilita la Firebase Cloud Messaging API nel progetto Google Cloud collegato.
-4. Copia questi identificativi della configurazione Android dell'app:
+4. Il file locale `google-services.json` può essere passato a
+   `python3 scripts/configure_firebase_actions.py google-services.json`: lo script valida il
+   package e inserisce questi quattro identificativi nelle Actions variables senza stamparli:
    - Web API key → `JARVIS_FIREBASE_API_KEY`
    - Project ID → `JARVIS_FIREBASE_PROJECT_ID`
    - App ID Android → `JARVIS_FIREBASE_APP_ID`
    - Cloud Messaging Sender ID → `JARVIS_FIREBASE_SENDER_ID`
-5. In GitHub, apri **Settings → Secrets and variables → Actions → Variables** e aggiungi tutti e
-   quattro i valori con gli stessi nomi. Sono identificativi/configurazione client usati dall'SDK,
-   non credenziali server. Non riutilizzare qui la chiave privata del service account.
+   In alternativa, in GitHub apri **Settings → Secrets and variables → Actions → Variables** e
+   aggiungi tutti e quattro i valori con gli stessi nomi. Sono identificativi/configurazione client
+   usati dall'SDK, non credenziali server. Non riutilizzare qui la chiave privata del service account.
+
+Il file `google-services.json` non è necessario dopo aver configurato le Actions variables; resta
+ignorato da Git e può essere eliminato dal checkout. Il file OAuth `client_secret_*.json` non è una
+credenziale FCM e non va caricato nelle Actions. Può però servire per autorizzare i connettori
+separati Gmail/Google Calendar: in tal caso configura l'ID client nel connettore e conserva il
+client secret nell'archivio cifrato del Core, dopo il consenso esplicito agli scope richiesti.
 
 La build Android legge gli stessi valori da variabili d'ambiente o proprietà Gradle con prefisso
 `jarvisFirebase` (per esempio `JARVIS_FIREBASE_PROJECT_ID` o

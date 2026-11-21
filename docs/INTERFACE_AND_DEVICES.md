@@ -2,96 +2,40 @@
 
 | Superficie | Funzioni |
 |---|---|
-| Desktop Windows, macOS e Linux | Chat, voce, dashboard, notifiche, integrazioni OS e gestione risorse locali |
-| Web | Dashboard centralizzata, chat, task, memoria, automazioni, dispositivi, monitoraggio e impostazioni |
-| Mobile Android | Interazione e controllo sul dispositivo associato |
-| Avatar | Identità visiva e vocale evolutiva, animazione e sincronizzazione labiale |
-| Voce | Wake word, riconoscimento lingua, STT/TTS in streaming, full-duplex e interruzione |
+| Desktop Windows, macOS e Linux | App nativa Rust/egui, chat streaming, dati del Core e notifiche OS |
+| Mobile Android | App Jetpack Compose, associazione, chat, attività e notifiche push |
+| Core | API HTTP autenticate; non distribuisce pagine o bundle Web |
 
-La GUI è il punto di avvio principale. I flussi chat, task e notifiche condividono lo stato tramite API. La dashboard mostra attività, esecutore, condizioni offline, errori e operazioni in attesa di conferma. La voce rende visibili ascolto, elaborazione e riproduzione. Se un motore vocale manca o non è disponibile offline, l'utente può usare le capacità testuali disponibili.
+Il client iOS e l'interfaccia Web/PWA sono stati ritirati. L'associazione e la gestione dei permessi continuano a usare le API Core: non è disponibile una pagina di pairing nel browser.
 
-## Ciclo di vita di un nodo
+## App desktop nativa
 
-Registrare l'identità e dichiarare piattaforma, connettività, risorse e servizi autorizzati. Assegnare lavoro in base a capacità e policy. Visualizzare stato di connessione e sincronizzazione distinguendo attività in esecuzione, accodate e sospese. Alla riconnessione riconciliare progressi e dati come descritto in [MEMORY_DATA_SYNC.md](MEMORY_DATA_SYNC.md). Revocare identità e accessi quando il nodo viene rimosso.
+`./jarvis.sh desktop` compila e avvia l'app egui dai sorgenti; gli installer includono GUI, Core, Python e runtime AI. Il client può avviare il Core locale oppure associarsi a un Core remoto HTTPS con invito monouso. Le credenziali remote vengono conservate nella cartella dati dell'utente con permessi restrittivi.
 
-Verificare per piattaforma enrollment, revoca, segnalazione dei limiti OS, ripresa della connessione, gestione dei permessi locali, interruzione vocale e stato coerente fra client.
+La finestra usa una barra superiore e una navigazione laterale fisse; lo scorrimento è confinato al contenuto centrale. A larghezze strette la navigazione si compatta, mentre chat e barra di composizione restano visibili. Le sezioni disponibili sono Plancia, Chat, Attività, Automazioni, Memoria, Competenze, Workspace, Connettori, Dispositivi, Sicurezza, Audit e Sistema.
 
-## Stato del prototipo v0.1
+La chat usa `/api/chat/stream` (NDJSON), mostra le risposte progressivamente e presenta le conferme per approvazione o rifiuto. Il client aggiorna le notifiche ogni cinque secondi anche quando la finestra non è in primo piano e invia le nuove notifiche alle API OS supportate da Linux, macOS e Windows. Gli errori di aggiornamento sono mostrati nell'interfaccia. Il Core continua a generare e conservare notifiche anche senza client connesso.
 
-**Dashboard (ADR-0023):** l'interfaccia è un'applicazione React e TypeScript (`apps/web`) con tema HUD olografico: scuro per impostazione, chiaro con il pulsante ◐. La vista iniziale **Plancia** riunisce:
+La Plancia riassume lo stato di Core, AI, conferme, notifiche, automazioni e audit. Le viste Attività, Automazioni, Memoria, Competenze, Workspace, Connettori, Dispositivi, Sicurezza, Audit e Sistema leggono le rispettive API. Sono già disponibili cronologia chat, correzione/eliminazione della memoria, esecuzione e attivazione delle automazioni, inviti e revoca dei dispositivi, e creazione di backup. La UI usa ancora una vista JSON generica per varie risposte: non equivale alla parità funzionale con la precedente dashboard.
 
-**Rifinitura macOS e Windows (ADR-0035):** icone vettoriali, barra laterale a gruppi riducibile con il conteggio delle conferme, palette comandi (⌘K su macOS, Ctrl+K su Windows e Linux), riga di indicatori in Plancia, etichette e indicatore di scrittura in chat, notifiche con barra del tempo. La radice riceve `platform-mac` o `platform-win` per caratteri di sistema (SF, Segoe UI Variable), raggi e barre di scorrimento; l'app desktop apre la dashboard con `?app=desktop` in una finestra scura e mostra una schermata d'avvio animata.
+## App Android e notifiche
 
-**Icona e installatori (ADR-0036, ADR-0064):** icona a reattore generata da `scripts/make_brand_assets.py`, con corona semplificata per la leggibilità nella tray; `.dmg` con sfondo e istruzioni; setup Windows in italiano con immagini dedicate; su macOS barra del titolo trasparente e rimozione della quarantena del pacchetto dopo il primo avvio autorizzato.
+`apps/android` contiene il client Jetpack Compose con pairing HTTPS, cronologia, chat, attività e notifiche. La sessione usa Android Keystore; il client rifiuta i reindirizzamenti. Quando l'app è in background, il Core invia notifiche FCM data-only ad alta priorità se il proprietario ha configurato Firebase e l'utente ha abilitato notifiche e permesso OS. Il polling di chat e attività si sospende quando l'app non è in primo piano. Il testo delle notifiche resta generico per ridurre l'esposizione dei dati.
 
+Configura Firebase seguendo [FIREBASE_SETUP.md](FIREBASE_SETUP.md). Il workflow allega l'APK release firmato (mai debug) alla stessa release degli installer desktop; la verifica reale delle push richiede un progetto Firebase e un dispositivo autorizzati.
 
-- il nucleo animato di JARVIS, che segue gli stati pronto, elaborazione, ascolto, trascrizione e risposta vocale;
-- ora, stato di AI, voce, audit e Core, e un comando rapido che apre la chat;
-- le operazioni in attesa di conferma, approvabili o rifiutabili dalla plancia;
-- le attività recenti con stato ed esecutore (Core locale, nodo, automazione, dispositivo);
-- condizioni e nodi: Core, nodi esecutori in linea o no, modalità offline dell'AI, voce o Web non disponibili;
-- prestazioni (p95 della chat, richieste, errori e storico), errori e avvisi recenti;
-- memoria (fatti, preferenze, episodi, relazioni e grafo), automazioni attive e dispositivi.
+## Associazione e sicurezza
 
-Sul dispositivo associato la plancia non compare: si apre la chat.
+1. Esporre il Core solo tramite un proxy HTTPS privato e fidato, ad esempio `tailscale serve 8765`.
+2. Configurare `JARVIS_ALLOWED_HOSTS=<nome-host>` e riavviare il Core.
+3. Dalla sezione Dispositivi del client desktop locale generare un invito monouso; inserirlo nel client desktop remoto o Android. Il codice scade dopo dieci minuti e può essere annullato.
 
-L'interfaccia Web è servita dal Core su `http://localhost:8765` e comprende:
-- chat con le risposte del modello locale che compaiono parola per parola (ADR-0025) e i passaggi di ogni risposta (agente, strumento, policy, esito);
-- schede di conferma con effetto atteso, destinazione e scadenza;
-- sezioni Attività, Automazioni, Memoria, Workspace e Audit. Nella sezione Automazioni si crea un'automazione da un modulo generato dal catalogo e la si può eseguire subito, sospendere, riattivare, eliminare o consultarne la cronologia;
-- stato del backend AI e dell'integrità dell'audit nell'intestazione.
+Le conferme e le altre operazioni restano limitate agli scope assegnati. I dispositivi associati non possono gestire inviti, audit, backup o connettori. La revoca ha effetto immediato. I nodi esecutori continuano a usare `./jarvis.sh node <indirizzo> <codice>` e richieste in uscita.
 
-**Accesso OAuth ai connettori (ADR-0027):** un connettore con `auth.type = "oauth2"` mostra «Accedi». La pagina di consenso del servizio si apre nel browser di sistema; al ritorno JARVIS salva i token cifrati e li rinnova da solo. Nel servizio va registrato il redirect `http://localhost:8765/api/connectors/oauth/callback`.
+## Funzioni da completare
 
-**Notifiche sul telefono (ADR-0026):** dalla sezione Dispositivi si aggiunge un canale **ntfy** (app push gratuita, server `ntfy.sh` o il tuo) oppure **Telegram** (bot creato con @BotFather). Per ogni canale si scelgono la gravità minima (predefinita: avvisi e conferme) e se includere il testo. Senza consenso escono solo titolo e categoria. Con `JARVIS_PUBLIC_URL=https://…` il messaggio contiene il collegamento a JARVIS. Il pulsante «Prova» invia un messaggio di verifica. Le conferme si danno solo da JARVIS.
+- La UI desktop nativa non ha ancora microfono/STT/TTS, wake word, schermate guidate per i connettori e la configurazione cloud, né viste tipizzate complete per sicurezza, audit e sistema.
+- La finestra desktop non offre ancora il comportamento tray/nascondi della precedente app Tauri.
+- Restano da verificare la consegna FCM su hardware reale e l'aspetto/permessi delle notifiche OS sui runner e sistemi desktop supportati.
 
-La campanella nell'intestazione mostra le notifiche non lette. Il pannello elenca categoria, ora e task correlato, e un clic porta alla vista collegata. Le nuove notifiche compaiono come toast e, se autorizzate, come notifiche del browser quando la pagina non è in primo piano.
-
-**App desktop (ADR-0009, ADR-0063):** `./jarvis.sh desktop` apre JARVIS in una finestra Tauri per Windows, macOS e Linux. L'app avvia il Core in automatico, tiene i dati nella cartella dell'applicazione dell'utente e apre i link esterni nel browser di sistema. Chiudere la finestra la nasconde; **Esci da JARVIS** nel menu dell'icona di stato termina invece l'app e chiede al Core di arrestarsi ordinatamente, così il worker AI viene chiuso prima del processo. Se il Core non risponde entro otto secondi, il launcher ne forza la terminazione. La Plancia desktop usa superfici dedicate nei temi chiaro e scuro, tipografia di sistema e animazioni compatibili con la preferenza di movimento ridotto (ADR-0051). La schermata d’avvio riprende i colori dell’app e mostra lo stato del Core. Nell’app, intestazione e barra di composizione rimangono ai bordi della finestra durante lo scorrimento dei pannelli.
-
-La sezione **Sistema** mostra lo stato di Core, AI, voce, Web, audit e worker, e la tabella delle latenze (p50, p95, max, errori) per endpoint, strumento e delega.
-
-Si adatta al tema chiaro e scuro e allo schermo dello smartphone (verificata a 390 px).
-
-**Telefono e altri dispositivi (ADR-0014):**
-1. Pubblica JARVIS nella tua rete privata con un proxy HTTPS fidato, per esempio `tailscale serve 8765`.
-2. Avvia JARVIS con `JARVIS_ALLOWED_HOSTS=<nome-host>`.
-3. In **Dispositivi**, genera un invito e scansiona il QR dal browser del telefono, oppure copia il collegamento. Conferma il nome nella pagina di associazione. Puoi ancora digitare manualmente il codice, anche nei client nativi. Il codice è monouso, scade dopo dieci minuti e può essere annullato dal Core.
-
-L'interfaccia si installa come app («Aggiungi a schermata Home»). Dal dispositivo sono disponibili chat, attività, notifiche, voce e, se concesso, le conferme. La revoca è immediata. Se il Core o il proxy è irraggiungibile durante la navigazione, la PWA mostra una pagina con «Riprova». Al ritorno della connessione una scheda già aperta aggiorna stato e notifiche. Il service worker evita di salvare pagine, risposte o credenziali.
-
-La Plancia e la Chat mostrano il ritratto maschile di JARVIS. Il pulsante **Parla con JARVIS** avvia il microfono dalla Plancia e permette di inviare la registrazione o interrompere una risposta. Il colore segue la categoria dell’attività, con un’etichetta leggibile e indicazioni specifiche per conferme ed errori. Gli stati vocali indicano ascolto, trascrizione e riproduzione. L’indicatore di voce segue l’intensità dell’audio locale e rispetta la preferenza per il movimento ridotto.
-
-**Controlli PC.** Su macOS e Windows, dalla Chat locale il proprietario può aprire la cartella di JARVIS, la Calcolatrice, le impostazioni di sistema e il monitor delle attività. Può scegliere il comando dal menu **Controlli PC** oppure dire o scrivere «Apri la calcolatrice». Ogni richiesta viene eseguita dopo la conferma del proprietario, anche quando nella Chat è selezionato un provider cloud. I dispositivi associati e le automazioni non possono avviare queste azioni.
-
-**Client Android (ADR-0018):** `apps/android` contiene l'app Jetpack Compose con associazione, cronologia, chat, attività e notifiche secondo i permessi. Accetta solo HTTPS, rifiuta i reindirizzamenti e conserva la sessione cifrata con l'Android Keystore. Le notifiche FCM ad alta priorità continuano a essere consegnate quando l'app è in background; il polling delle viste si sospende quando l'app non è in primo piano. Il workflow di release produce un APK `release` firmato (mai l'APK di debug) insieme agli installer desktop. Configura Firebase seguendo [FIREBASE_SETUP.md](FIREBASE_SETUP.md).
-
-**Nodi esecutori (ADR-0017):** un altro computer associato con un codice «Nodo esecutore» esegue gli strumenti che dichiara (informazioni di sistema, ora, file della propria workspace) quando il Core glieli assegna. Usa `./jarvis.sh node <indirizzo> <codice>` e richieste in uscita, senza aprire porte. Nella sezione Dispositivi compaiono stato in linea, strumenti e comando da usare in chat.
-
-**Configurazione guidata (ADR-0019):** al primo avvio una finestra propone voce e modello AI con le scelte consigliate già selezionate. Mostra la dimensione del download e l'avanzamento, e si riapre dalla sezione Sistema.
-
-**Programmi di installazione (ADR-0016):** la release contiene l'app desktop pronta da installare. Windows `.msi` e setup `.exe`, macOS `.dmg`, Linux `.deb` e `.AppImage`. Core, runtime AI e Python sono inclusi.
-
-Con «nodo auto <strumento>» il Core sceglie da solo il nodo più libero fra quelli in linea (ADR-0031).
-
-L'app Android ha tre schede: Chat, Attività e Notifiche (ADR-0032).
-
-Restano da sviluppare: voce nativa Android e collaudo delle notifiche push con le credenziali Firebase del proprietario.
-
-## Voce (RF-09, ADR-0010)
-
-- **Push-to-talk:** il pulsante 🎤 avvia e chiude la registrazione e diventa rosso finché il microfono ascolta.
-- **Stato visibile:** l'intestazione mostra lo stato della voce (pronta, in ascolto, trascrizione, risposta vocale, non disponibile con il motivo).
-- **Risposte vocali** (opzionali): l'utente le interrompe con «Interrompi», con Esc o premendo il microfono.
-- **Mani libere** (opzionale): mostra «● Microfono attivo» per tutto il tempo in cui il microfono è aperto. Si attiva con «Ehi Jarvis» e si interrompe parlando sopra la risposta.
-
-Le conferme restano un clic.
-
-
-**Nodi con mTLS (ADR-0041).** Avvia il Core con `JARVIS_NODE_TLS_ADDR=0.0.0.0:8766` (o l'indirizzo della rete privata), poi associa il nodo come sempre: riceve la porta e l'impronta del Core e da lì usa solo la connessione TLS reciproca. `JARVIS_NODE_TLS_URL` sul nodo sostituisce l'indirizzo se il Core è raggiungibile con un altro nome.
-
-
-**Passkey sul telefono (ADR-0042).** Dalla chat del dispositivo associato: «Proteggi le approvazioni con una passkey». Dopo, «Approva» chiede impronta, volto o PIN. Serve HTTPS (es. `tailscale serve`). Il proprietario elimina una passkey con `DELETE /api/passkeys/{id}` dal computer del Core.
-
-
-**App desktop nativa (ADR-0044).** Icona nella barra dei menu o nell'area di notifica, menu di macOS in italiano, ⌘⇧J / Ctrl+Maiusc+J per richiamare JARVIS, finestra che si nasconde alla chiusura, notifiche del sistema, posizione ricordata.
+Queste lacune non riattivano né richiedono il client Web o iOS; vanno completate nei rispettivi client nativi mantenendo policy, scope, conferme e audit del Core.
