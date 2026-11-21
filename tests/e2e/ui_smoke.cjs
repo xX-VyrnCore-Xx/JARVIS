@@ -14,6 +14,12 @@ const http = require("http");
 const WEB_PORT = Number(process.env.JARVIS_E2E_WEB_PORT || 8799);
 const pushed = [];
 const webServer = http.createServer((req, res) => {
+  if (req.url === "/startup/index.html" || req.url === "/startup/loading.js") {
+    const file = req.url.endsWith(".html") ? "index.html" : "loading.js";
+    const source = require("path").resolve(__dirname, "../../apps/desktop/dist", file);
+    res.writeHead(200, { "Content-Type": file.endsWith(".html") ? "text/html; charset=utf-8" : "text/javascript; charset=utf-8" });
+    return require("fs").createReadStream(source).pipe(res);
+  }
   if (req.url.startsWith("/w/api.php")) {
     res.writeHead(200, { "Content-Type": "application/json" });
     return res.end(JSON.stringify({ query: { search: [{ title: "Rust (linguaggio)", snippet: "linguaggio di <b>programmazione</b>" }] } }));
@@ -526,6 +532,46 @@ function check(cond, msg) {
   await desktop.setViewportSize({ width: 390, height: 720 });
   check(await desktop.locator("html").evaluate((el) => el.scrollWidth <= el.clientWidth), "plancia desktop adattata alla finestra stretta");
   if (shots) await desktop.screenshot({ path: `${shots}/jarvis-desktop-chiaro.png` });
+
+  async function checkScrollBoundaries(target, scroller, bottom, label) {
+    const measure = () => target.evaluate((selector) => {
+      const top = document.querySelector(".topbar").getBoundingClientRect();
+      const end = document.querySelector(selector).getBoundingClientRect().bottom;
+      return { top: top.top, headerBottom: top.bottom, end, height: innerHeight, documentScroll: scrollY };
+    }, bottom);
+    const panel = target.locator(scroller);
+    await panel.evaluate((element) => { element.scrollTop = 0; });
+    const start = await measure();
+    await panel.hover();
+    await target.mouse.wheel(0, -1800);
+    await target.waitForTimeout(100);
+    const upper = await measure();
+    await target.mouse.wheel(0, 10000);
+    await target.waitForFunction((selector) => {
+      const el = document.querySelector(selector);
+      return el.scrollTop > 0 && el.scrollHeight - el.clientHeight - el.scrollTop <= 1;
+    }, scroller);
+    await target.mouse.wheel(0, 1800);
+    await target.waitForTimeout(100);
+    const lower = await measure();
+    const joined = (state) => Math.abs(state.top) < 1 && Math.abs(state.end - state.height) < 1
+      && Math.abs(state.headerBottom - start.headerBottom) < 1 && state.documentScroll === 0;
+    check(joined(start) && joined(upper) && joined(lower), label);
+  }
+
+  await checkScrollBoundaries(desktop, "#view-dashboard", "main", "plancia a finestra stretta: bordi aderenti a entrambi i limiti dello scroll");
+  await desktop.setViewportSize({ width: 1200, height: 650 });
+  await desktop.click('[data-view="chat"]');
+  await desktop.waitForSelector("#view-chat.active .msg.assistant");
+  await checkScrollBoundaries(desktop, "#messages", ".chat-composer-bar", "chat desktop: intestazione e compositore fermi durante lo scroll");
+
+  const startup = await browser.newPage({ reducedMotion: "reduce", viewport: { width: 390, height: 520 } });
+  await startup.goto(`http://127.0.0.1:${WEB_PORT}/startup/index.html`);
+  await startup.getByRole("status").waitFor();
+  check(await startup.locator(".reactor .arc").evaluate((element) => getComputedStyle(element).animationName === "none"), "avvio desktop: rispetta il movimento ridotto");
+  await startup.evaluate(() => window.showError("Errore di avvio sintetico"));
+  check(await startup.getByRole("alert").innerText() === "Errore di avvio sintetico", "avvio desktop: mostra l’errore al posto dell’indicatore");
+  await startup.close();
 
   check(errors.length === 0, "nessun errore JavaScript o CSP in console" + (errors.length ? ": " + errors.join(" | ") : ""));
   await browser.close();

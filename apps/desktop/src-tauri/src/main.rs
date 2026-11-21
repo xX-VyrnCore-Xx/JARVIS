@@ -113,7 +113,7 @@ fn main() {
                     .inner_size(1200.0, 820.0)
                     .min_inner_size(380.0, 520.0)
                     .theme(Some(tauri::Theme::Dark))
-                    .background_color(tauri::webview::Color(5, 10, 20, 255))
+                    .background_color(tauri::webview::Color(10, 17, 28, 255))
                     .on_navigation(move |url| {
                         let core = *allowed.lock().unwrap_or_else(|e| e.into_inner());
                         let to_core =
@@ -188,8 +188,9 @@ fn main() {
                     }
                     Err(e) => {
                         let message = serde_json::to_string(&e.to_string()).unwrap_or_default();
-                        let _ =
-                            window.eval(format!("window.showError && window.showError({message})"));
+                        let _ = window.eval(format!(
+                            "window.jarvisStartupError = {message}; window.showError?.(window.jarvisStartupError);"
+                        ));
                     }
                 }
             });

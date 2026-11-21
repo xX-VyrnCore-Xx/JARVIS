@@ -9,6 +9,7 @@ import "./styles/jarvis.css";
 {
   const ua = navigator.userAgent;
   const root = document.documentElement;
+  root.classList.add("jarvis-shell");
   root.classList.add(/Mac|iPhone|iPad/.test(ua) ? "platform-mac" : /Windows/.test(ua) ? "platform-win" : "platform-other");
   let desktop = new URLSearchParams(location.search).get("app") === "desktop";
   try {
