@@ -28,12 +28,14 @@ class PushMessagingService : FirebaseMessagingService() {
     }
 
     override fun onMessageReceived(message: RemoteMessage) {
+        val store = SessionStore(applicationContext)
+        if (!store.pushEnabled() || !NotificationManagerCompat.from(this).areNotificationsEnabled()) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
         ) return
 
         val title = message.notification?.title ?: message.data["title"] ?: "JARVIS"
-        val body = message.notification?.body ?: "Nuova notifica"
+        val body = message.notification?.body ?: message.data["body"] ?: "Apri JARVIS per i dettagli."
         val launch = packageManager.getLaunchIntentForPackage(packageName) ?: return
         val pending = PendingIntent.getActivity(
             this,

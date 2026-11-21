@@ -23,6 +23,7 @@ const APP_CSS: &str = include_str!("../static/app.css");
 const VOICE_WORKLET: &str = include_str!("../static/voice-worklet.js");
 const MANIFEST: &str = include_str!("../static/manifest.webmanifest");
 const SERVICE_WORKER: &str = include_str!("../static/sw.js");
+const FCM_WORKER: &str = include_str!("../static/fcm-sw.js");
 const ICON: &str = include_str!("../static/icon.svg");
 const PAIR_HTML: &str = include_str!("../static/pair.html");
 const PAIR_JS: &str = include_str!("../static/pair.js");
@@ -467,6 +468,15 @@ pub fn router(state: Shared) -> Router {
                 (
                     [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
                     SERVICE_WORKER,
+                )
+            }),
+        )
+        .route(
+            "/fcm-sw.js",
+            get(|| async {
+                (
+                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+                    FCM_WORKER,
                 )
             }),
         )

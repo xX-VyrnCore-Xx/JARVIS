@@ -1221,6 +1221,16 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Conseguenze:** la pagina Releases conserva un solo elemento e i tag delle release eliminate non sono più disponibili. Per recuperare una versione precedente si usa il rollback locale (ADR-0015) o si crea una nuova release. Il 2026-11-21 la cleanup è stata applicata anche alle release esistenti: è rimasta `v1.13.193`; le precedenti release e i relativi tag sono stati rimossi.
 - **Evidenza:** test unitari SemVer, prerelease, retention e comandi di rimozione in `tests/contracts/test_release_cleanup.py`.
 
+### ADR-0066 — Client iOS ritirato e push Android in background
+
+- **Data** 2026-11-21 · **Stato** implementato in parte · **Fonte** richiesta del proprietario.
+- Il client iOS non è più supportato: codice e progetto Xcode residui vengono rimossi; le note storiche restano solo come registro.
+- Android usa notifiche FCM data-only ad alta priorità, con scadenza di 24 ore. Il client mostra solo un avviso generico, verifica il consenso locale e il permesso OS, e sospende il polling di chat/attività/notifiche quando l'app non è in primo piano.
+- I quattro identificativi Firebase dell'app Android arrivano al build da variabili GitHub Actions; la credenziale service-account resta esclusivamente sul Core host, fuori dal repository e dai job di compilazione.
+- L'APK firmato `release` è pubblicato nella stessa release degli installer desktop; non viene pubblicato alcun APK `debug`.
+- **Evidenze:** test sintetico del payload FCM e della rotta `/fcm-sw.js`; workflow release con variabili Firebase opzionali ma complete o assenti. La prova reale su dispositivo richiede le credenziali Firebase del proprietario.
+- Il frontend Web resta durante la migrazione per non interrompere l'app Tauri e i client browser. In una PR successiva verrà sostituito da una UI desktop Rust/egui e rimosso insieme alla PWA.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).

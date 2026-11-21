@@ -122,6 +122,7 @@ async fn remote_page_has_no_session_token_and_unknown_hosts_are_refused() {
     for path in [
         "/manifest.webmanifest",
         "/sw.js",
+        "/fcm-sw.js",
         "/icon.svg",
         "/pair",
         "/pair.js",

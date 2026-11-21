@@ -419,11 +419,13 @@ fn message_payload(token: &str, notification: &Value) -> Value {
     json!({
         "message": {
             "token": token,
-            "notification": {
-                "title": "JARVIS",
-                "body": "Apri JARVIS per i dettagli."
+            "android": {
+                "priority": "HIGH",
+                "ttl": "86400s"
             },
             "data": {
+                "title": "JARVIS",
+                "body": "Apri JARVIS per i dettagli.",
                 "notification_id": notification["notification_id"].as_str().unwrap_or_default(),
                 "category": notification["category"].as_str().unwrap_or("system"),
                 "severity": notification["severity"].as_str().unwrap_or("info")
@@ -582,11 +584,13 @@ mod tests {
         });
         let payload = message_payload("fcm:token_123456789012345", &source);
         let serialized = payload.to_string();
-        assert_eq!(payload["message"]["notification"]["title"], "JARVIS");
+        assert_eq!(payload["message"]["android"]["priority"], "HIGH");
+        assert_eq!(payload["message"]["data"]["title"], "JARVIS");
         assert_eq!(
-            payload["message"]["notification"]["body"],
+            payload["message"]["data"]["body"],
             "Apri JARVIS per i dettagli."
         );
+        assert!(payload["message"].get("notification").is_none());
         assert_eq!(
             payload["message"]["data"]["notification_id"],
             "notification-1"
