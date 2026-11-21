@@ -22,7 +22,9 @@ privato dell'evento.
 
 Il file `google-services.json` non è necessario dopo aver configurato le Actions variables; resta
 ignorato da Git e può essere eliminato dal checkout. Il file OAuth `client_secret_*.json` non è una
-credenziale FCM e non va caricato nelle Actions.
+credenziale FCM e non va caricato nelle Actions. Può però servire per autorizzare i connettori
+separati Gmail/Google Calendar: in tal caso configura l'ID client nel connettore e conserva il
+client secret nell'archivio cifrato del Core, dopo il consenso esplicito agli scope richiesti.
 
 La build Android legge gli stessi valori da variabili d'ambiente o proprietà Gradle con prefisso
 `jarvisFirebase` (per esempio `JARVIS_FIREBASE_PROJECT_ID` o

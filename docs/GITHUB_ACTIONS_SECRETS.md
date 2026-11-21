@@ -84,7 +84,8 @@ serve più e puoi eliminarlo dal checkout. Una configurazione parziale viene rif
 La credenziale JSON del service account **non** va in GitHub Actions: resta sul computer che ospita
 il Core, con accesso limitato al suo utente e `JARVIS_FCM_SERVICE_ACCOUNT_FILE` impostata al runtime;
 vedi [FIREBASE_SETUP.md](./FIREBASE_SETUP.md). Il file `client_secret_*.json` OAuth non è usato
-dall'app Android, da FCM o dai workflow.
+dall'app Android, da FCM o dai workflow. Può servire per Gmail/Google Calendar OAuth e va gestito
+separatamente dal Core, mai come secret di build o nel repository.
 
 ## Nessun altro secret per le Actions
 

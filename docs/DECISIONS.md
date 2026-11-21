@@ -1227,7 +1227,7 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - Il client iOS non è più supportato: codice e progetto Xcode residui vengono rimossi; le note storiche restano solo come registro.
 - Android usa notifiche FCM data-only ad alta priorità, con scadenza di 24 ore. Il client mostra solo un avviso generico, verifica il consenso locale e il permesso OS, e sospende il polling di chat/attività/notifiche quando l'app non è in primo piano.
 - I quattro identificativi Firebase dell'app Android arrivano al build da variabili GitHub Actions; la credenziale service-account resta esclusivamente sul Core host, fuori dal repository e dai job di compilazione.
-- `google-services.json` è solo una fonte locale ignorata da Git da cui importare questi identificativi nelle Actions variables; il client OAuth `client_secret_*.json` non è usato da FCM o dai workflow.
+- `google-services.json` è solo una fonte locale ignorata da Git da cui importare questi identificativi nelle Actions variables. Il client OAuth `client_secret_*.json` non è usato da FCM o dai workflow; può essere necessario per autorizzare separatamente Gmail/Google Calendar.
 - L'APK firmato `release` è pubblicato nella stessa release degli installer desktop; non viene pubblicato alcun APK `debug`.
 - **Evidenze:** test sintetici del payload FCM e dei permessi Android; workflow release con variabili Firebase opzionali ma complete o assenti. La prova reale su dispositivo richiede le credenziali Firebase del proprietario.
 - Il frontend Web è stato rimosso con ADR-0067; FCM Android usa il client nativo e non richiede un service worker.
