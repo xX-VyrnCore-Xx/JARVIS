@@ -1,4 +1,4 @@
-## Novità in JARVIS 1.13.1
+## Pacchetti desktop di JARVIS
 
 La distribuzione desktop include un `.dmg` per Mac Apple Silicon e un setup `.exe` per Windows x64. Entrambi gli installer vengono installati e provati dalla CI.
 
