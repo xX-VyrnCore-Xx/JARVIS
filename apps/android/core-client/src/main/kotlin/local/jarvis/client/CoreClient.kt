@@ -60,7 +60,7 @@ object UrlConnectionTransport : Transport {
     }
 }
 
-/** Client del Core per il telefono: stesse regole del client iOS (ADR-0018). */
+/** Client Android del Core: pairing HTTPS, scope limitati e revoca immediata. */
 class CoreClient(private val transport: Transport = UrlConnectionTransport) {
 
     companion object {

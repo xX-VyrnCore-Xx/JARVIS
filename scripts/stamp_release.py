@@ -1,6 +1,5 @@
 """Stamp a verified source checkout with the version used by both installers."""
 import argparse
-import json
 from pathlib import Path
 import re
 
@@ -36,12 +35,6 @@ def stamp(root, tag):
     android_gradle = root / "apps/android/app/build.gradle.kts"
     replace_once(android_gradle, r"(^\s*versionCode = )[\d_]+", rf"\g<1>{android_version_code}")
     replace_once(android_gradle, r'(^\s*versionName = )"[^"]+"', rf'\g<1>"{version}"')
-
-    config = root / "apps/desktop/src-tauri/tauri.conf.json"
-    document = json.loads(config.read_text(encoding="utf-8"))
-    document["version"] = version
-    config.write_text(json.dumps(document, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

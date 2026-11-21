@@ -28,9 +28,7 @@
     "platform": {
       "enum": [
         "android",
-        "ios",
         "desktop",
-        "web",
         "other"
       ]
     },

@@ -711,74 +711,27 @@ async fn invalid_input_is_rejected() {
 }
 
 #[tokio::test]
-async fn index_embeds_session_token_and_csp() {
+async fn web_pages_and_pwa_assets_are_not_served() {
     let e = env();
-    let req = Request::builder()
-        .uri("/")
-        .header("host", format!("localhost:{PORT}"))
-        .body(Body::empty())
-        .unwrap();
-    let res = e.app.clone().oneshot(req).await.unwrap();
-    assert!(res.headers()["content-security-policy"]
-        .to_str()
-        .unwrap()
-        .contains("script-src 'self'"));
-    let html =
-        String::from_utf8(res.into_body().collect().await.unwrap().to_bytes().to_vec()).unwrap();
-    assert!(html.contains(TOKEN));
-}
-
-#[tokio::test]
-async fn bundle_is_gzipped_and_revalidated_with_etag() {
-    use std::io::Read;
-    let e = env();
-    let get = |enc: Option<&str>, etag: Option<&str>| {
-        let mut b = Request::builder()
-            .uri("/app.js")
-            .header("host", format!("localhost:{PORT}"));
-        if let Some(v) = enc {
-            b = b.header("accept-encoding", v);
-        }
-        if let Some(v) = etag {
-            b = b.header("if-none-match", v);
-        }
-        b.body(Body::empty()).unwrap()
-    };
-    let plain = e.app.clone().oneshot(get(None, None)).await.unwrap();
-    assert!(plain.headers().get("content-encoding").is_none());
-    let etag = plain.headers()["etag"].to_str().unwrap().to_string();
-    let plain = plain.into_body().collect().await.unwrap().to_bytes();
-
-    let gz = e
-        .app
-        .clone()
-        .oneshot(get(Some("br, gzip"), None))
-        .await
-        .unwrap();
-    assert_eq!(gz.headers()["content-encoding"], "gzip");
-    assert_eq!(gz.headers()["vary"], "Accept-Encoding");
-    let packed = gz.into_body().collect().await.unwrap().to_bytes();
-    assert!(packed.len() * 2 < plain.len(), "compressione efficace");
-    let mut unpacked = Vec::new();
-    flate2::read::GzDecoder::new(&packed[..])
-        .read_to_end(&mut unpacked)
-        .unwrap();
-    assert_eq!(unpacked, plain);
-
-    let cached = e
-        .app
-        .clone()
-        .oneshot(get(Some("gzip"), Some(&etag)))
-        .await
-        .unwrap();
-    assert_eq!(cached.status(), StatusCode::NOT_MODIFIED);
-    assert!(cached
-        .into_body()
-        .collect()
-        .await
-        .unwrap()
-        .to_bytes()
-        .is_empty());
+    for path in [
+        "/",
+        "/app.js",
+        "/app.css",
+        "/manifest.webmanifest",
+        "/sw.js",
+        "/fcm-sw.js",
+        "/pair",
+        "/pair.js",
+        "/voice-worklet.js",
+    ] {
+        let req = Request::builder()
+            .uri(path)
+            .header("host", format!("localhost:{PORT}"))
+            .body(Body::empty())
+            .unwrap();
+        let response = e.app.clone().oneshot(req).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+    }
 }
 
 #[tokio::test]

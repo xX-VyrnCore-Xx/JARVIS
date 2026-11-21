@@ -1228,8 +1228,19 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - Android usa notifiche FCM data-only ad alta priorità, con scadenza di 24 ore. Il client mostra solo un avviso generico, verifica il consenso locale e il permesso OS, e sospende il polling di chat/attività/notifiche quando l'app non è in primo piano.
 - I quattro identificativi Firebase dell'app Android arrivano al build da variabili GitHub Actions; la credenziale service-account resta esclusivamente sul Core host, fuori dal repository e dai job di compilazione.
 - L'APK firmato `release` è pubblicato nella stessa release degli installer desktop; non viene pubblicato alcun APK `debug`.
-- **Evidenze:** test sintetico del payload FCM e della rotta `/fcm-sw.js`; workflow release con variabili Firebase opzionali ma complete o assenti. La prova reale su dispositivo richiede le credenziali Firebase del proprietario.
-- Il frontend Web resta durante la migrazione per non interrompere l'app Tauri e i client browser. In una PR successiva verrà sostituito da una UI desktop Rust/egui e rimosso insieme alla PWA.
+- **Evidenze:** test sintetici del payload FCM e dei permessi Android; workflow release con variabili Firebase opzionali ma complete o assenti. La prova reale su dispositivo richiede le credenziali Firebase del proprietario.
+- Il frontend Web è stato rimosso con ADR-0067; FCM Android usa il client nativo e non richiede un service worker.
+
+### ADR-0067 — App desktop egui e ritiro dell'interfaccia Web
+
+- **Data** 2026-11-21 · **Stato** implementato nel checkout, verifiche CI in corso · **Fonte** scelta esplicita del proprietario per la seconda PR.
+- **Contesto:** rimuovere completamente il client Web/PWA e sostituire Tauri/WebView mantenendo i pacchetti macOS DMG e Windows setup EXE, il Core API e l'app Android.
+- **Decisione:** il desktop usa Rust/egui con client HTTP autenticato e pairing HTTPS. Il Core continua a esporre API per i client nativi, ma non serve HTML, bundle, manifest o service worker. Le route API di pairing restano attive; i record device espongono solo `android`, `desktop` o `other`, e `/`, `/pair` e gli asset Web restituiscono 404.
+- Il client aggiorna notifiche ogni cinque secondi mentre è attivo e usa le notifiche native di Linux, macOS e Windows quando non è in primo piano. Android conserva FCM data-only ad alta priorità secondo consenso e permesso OS.
+- La CI sostituisce Chromium/Playwright con un test API offline (`tests/e2e/api_smoke.cjs`) e compila/testa il client desktop su Linux, macOS e Windows. Il workflow release produce DMG egui e installer NSIS. Il fixture E2E del token rispetta la validazione del Core (almeno 32 caratteri alfanumerici).
+- **Conseguenze:** la UI desktop non ha ancora parità con la dashboard rimossa: controlli vocali, moduli guidati completi per connettori/configurazione, viste tipizzate per alcuni pannelli e comportamento tray restano da implementare nei client nativi. La cronologia testuale della conversazione viene ripristinata all'apertura della chat. Queste lacune non autorizzano a reintrodurre il client Web.
+- **Evidenze locali:** `cargo fmt --check`, Clippy e `cargo test --locked` del Core superati (un test Docker ignorato); test launcher 4/4; test `:core-client:test` Gradle superati; `tests/e2e/api_smoke.cjs` 15/15; test Python e contratti superati (un test voce ignorato perché `openwakeword` non è installato). Verifiche CI Windows/macOS ancora in attesa della PR.
+- **Documenti interessati:** README.md, ROADMAP.md, DEVELOPMENT.md, TECH_STACK.md, INTERFACE_AND_DEVICES.md, REQUIREMENTS.md e DEVOPS_QA_OBSERVABILITY.md.
 
 ### Decisione operativa — Merge automatico con CI verde
 

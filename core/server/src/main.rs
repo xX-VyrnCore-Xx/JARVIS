@@ -264,7 +264,7 @@ async fn main() {
     };
     let backend = &health["ai"]["gateway"]["backend"];
     println!("JARVIS v{} pronto", env!("CARGO_PKG_VERSION"));
-    println!("  Interfaccia : http://localhost:{port}/");
+    println!("  API locale  : http://localhost:{port}/api/health");
     println!("  Dati        : {}", data_dir.display());
     println!(
         "  AI          : {} ({}){}",

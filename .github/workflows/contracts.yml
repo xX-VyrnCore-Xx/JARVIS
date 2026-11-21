@@ -75,7 +75,7 @@ jobs:
       - run: cargo test --locked
 
   e2e:
-    name: e2e (interfaccia)
+    name: e2e (API native e dispositivi)
     runs-on: ubuntu-latest
     needs: [validate, rust]
     steps:
@@ -87,40 +87,17 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
           node-version: "22"
-      # Dashboard React (ADR-0023): i bundle inclusi nel Core devono corrispondere ai sorgenti di apps/web.
-      - name: Dashboard (tipi e bundle)
-        working-directory: apps/web
-        run: |
-          npm ci --no-audit --no-fund
-          npm run build
-          git diff --exit-code -- ../../core/server/static/app.js ../../core/server/static/app.css ../../core/server/static/fcm-sw.js || { echo "::error::bundle non aggiornato: esegui npm run build in apps/web e fai il commit"; exit 1; }
       - name: Compila il Core
         working-directory: core
         run: cargo build --release --locked -p jarvis-core
-      - run: node --test tests/ui/audio_offline.test.cjs
-      - run: npm install --no-save --no-package-lock playwright@1.63.0
-      # Le dipendenze di sistema arrivano dai server Ubuntu, a volte irraggiungibili: al massimo 3 tentativi.
-      - run: |
-          for i in 1 2 3; do
-            npx playwright install --with-deps chromium && exit 0
-            echo "::warning::installazione di Chromium non riuscita (tentativo $i), nuovo tentativo"; sleep 30
-            sudo apt-get update || true
-          done
-          exit 1
       - name: Avvia JARVIS in modalità offline
         run: |
-          JARVIS_PYTHON=python JARVIS_DATA_DIR="$RUNNER_TEMP/jarvis" JARVIS_PORT=8765 \
-          JARVIS_WEB_ALLOW_PRIVATE=1 JARVIS_WIKIPEDIA_URL=http://127.0.0.1:8799 JARVIS_WEB_DENY=vietato.localhost JARVIS_ALLOWED_HOSTS=jarvis.test,jarvis.localhost \
-          JARVIS_VOICE_ENGINE=fake JARVIS_FAKE_STT_TEXT="che ore sono" JARVIS_SETUP_FAKE=1 JARVIS_UPDATE_URL=http://127.0.0.1:8799/releases \
+          JARVIS_PYTHON=python JARVIS_DATA_DIR="$RUNNER_TEMP/jarvis" JARVIS_PORT=8765 JARVIS_TOKEN=jarvise2eownertoken0000000000000000 \
+          JARVIS_ALLOWED_HOSTS=jarvis.test JARVIS_VOICE_ENGINE=fake JARVIS_SETUP_FAKE=1 \
             core/target/release/jarvis > "$RUNNER_TEMP/jarvis.log" 2>&1 &
           for i in $(seq 1 30); do curl -sf http://localhost:8765/api/health && exit 0; sleep 1; done
           cat "$RUNNER_TEMP/jarvis.log"; exit 1
-      - run: mkdir -p screenshots && JARVIS_URL=http://localhost:8765 node tests/e2e/ui_smoke.cjs screenshots
-      - if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: e2e-screenshots
-          path: screenshots/
+      - run: JARVIS_URL=http://127.0.0.1:8765 JARVIS_TOKEN=jarvise2eownertoken0000000000000000 node tests/e2e/api_smoke.cjs
 
   desktop:
     name: desktop (${{ matrix.os }})
@@ -134,21 +111,17 @@ jobs:
         working-directory: apps/desktop/src-tauri
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Librerie WebKitGTK (Linux)
+      - name: Librerie grafiche egui (Linux)
         if: runner.os == 'Linux'
         working-directory: .
-        # Il mirror Ubuntu dei runner a volte serve un indice più nuovo dei pacchetti (404): nuovo tentativo con
-        # indice aggiornato, al massimo 3 volte.
         run: |
-          for i in 1 2 3; do
-            sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev && exit 0
-            echo "::warning::installazione dei pacchetti non riuscita (tentativo $i), nuovo tentativo"; sleep 30
-          done
-          exit 1
+          sudo apt-get update
+          sudo apt-get install -y libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxkbcommon-dev libgl1-mesa-dev libdbus-1-dev
       - run: rustup component add rustfmt clippy
       - run: cargo fmt --check
       - run: cargo clippy --locked -- -D warnings
       - run: cargo build --locked
+      - run: cargo test --locked
 
 
   audit:
@@ -169,10 +142,6 @@ jobs:
           python -m pip install --quiet pip-audit
           pip-audit -r tests/contracts/requirements.txt
           pip-audit -r ai/requirements-voice.txt
-      - name: Vulnerabilità note nelle dipendenze della dashboard (npm)
-        working-directory: apps/web
-        # Solo le dipendenze incluse nel bundle (React): gli strumenti di build non vengono distribuiti.
-        run: npm audit --omit=dev --audit-level=moderate
 
   avvio:
     name: avvio reale (${{ matrix.os }})
@@ -182,7 +151,6 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     env:
-      JARVIS_NO_BROWSER: "1"
       # Portachiavi del sistema su macOS e Windows, file 0600 su Linux (ADR-0021).
       JARVIS_EXPECT_SECRETS_STORE: ${{ matrix.os == 'ubuntu-latest' && 'file' || 'keychain' }}
     steps:

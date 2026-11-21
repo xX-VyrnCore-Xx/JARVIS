@@ -1,27 +1,21 @@
 [package]
 name = "jarvis-desktop"
 version = "1.13.1"
-description = "JARVIS desktop (Tauri): avvia il Core locale e ne mostra l'interfaccia"
+description = "JARVIS desktop nativo (egui)"
 edition = "2021"
-rust-version = "1.82"
+rust-version = "1.95"
 license = "LicenseRef-Proprietary"
 publish = false
 
-# Workspace separato: le dipendenze Tauri non appesantiscono la build del Core.
+# Workspace separato: le dipendenze grafiche non appesantiscono la build del Core.
 [workspace]
-
-[build-dependencies]
-tauri-build = { version = "2", features = [] }
 
 [dependencies]
 jarvis-launcher = { path = "../launcher" }
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "x11"] }
 serde_json = "1"
-tauri = { version = "2", features = ["tray-icon"] }
-tauri-plugin-opener = "2"
-# Esperienza nativa (ADR-0044): istanza singola, posizione della finestra, scorciatoia globale, notifiche.
-tauri-plugin-single-instance = "2"
-tauri-plugin-window-state = "2"
-tauri-plugin-global-shortcut = "2"
-tauri-plugin-notification = "2"
 ureq = { version = "2", features = ["json"] }
 url = "2"
+
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
+notify-rust = "4.19"

@@ -7,7 +7,7 @@ import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Verifiche del client con un trasporto sintetico (stessi casi del client iOS). */
+/** Verifiche del client con un trasporto sintetico. */
 class CoreClientTest {
     private val token = "a".repeat(64)
 

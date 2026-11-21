@@ -28,20 +28,13 @@ fn launches_core_on_free_port_and_stops_it() {
         .into_string()
         .unwrap();
     assert!(health.contains("\"status\":\"up\""), "{health}");
-    // L'interfaccia è servita dal Core con il token di sessione.
+    // Il Core non espone più una pagina Web: il client nativo usa solo le API.
     let page = ureq::get(&core.url)
         .set("Host", &format!("localhost:{}", core.port))
-        .call()
-        .unwrap()
-        .into_string()
-        .unwrap();
-    assert!(page.contains("jarvis-token"));
-    // Il token generato dal launcher è quello del Core: l'app lo usa per le notifiche native (ADR-0044).
+        .call();
+    assert!(matches!(page, Err(ureq::Error::Status(404, _))), "{page:?}");
+    // Il token generato dal launcher autentica le richieste API del client desktop.
     assert_eq!(core.token.len(), 32);
-    assert!(
-        page.contains(&core.token),
-        "la pagina usa il token del launcher"
-    );
     let chat = ureq::post(&format!("http://127.0.0.1:{}/api/chat", core.port))
         .set("Host", &format!("localhost:{}", core.port))
         .set("X-Jarvis-Token", &core.token)

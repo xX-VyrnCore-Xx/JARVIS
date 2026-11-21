@@ -495,7 +495,7 @@ Prova con:
 • "cerca intelligenza artificiale" · "apri https://it.wikipedia.org/wiki/Rust"
 • "connettore <id> <operazione> chiave=valore" (connettori installati nella sezione Connettori)
 • "nodo <nome> system.info" · "nodo <nome> fs.list path=." (nodi esecutori associati nella sezione Dispositivi)
-Per la conversazione libera configura un modello in Sistema → Modelli cloud."""
+Per la conversazione libera configura un provider cloud tramite l'API /api/cloud del Core."""
 
 
 class OfflineBackend:

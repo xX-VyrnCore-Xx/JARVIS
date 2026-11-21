@@ -1,9 +1,8 @@
-//! API HTTP locale e interfaccia Web.
+//! API HTTP locale per i client desktop e mobili.
 //!
 //! Difese del prototipo: ascolto solo su loopback; controllo dell'header `Host`
 //! contro il DNS rebinding; token di sessione casuale richiesto da ogni `/api/*`
-//! (eccetto `/api/health`) e consegnato solo nella pagina servita dal Core, che
-//! un sito di terze parti non può leggere (nessun CORS); CSP restrittiva.
+//! (eccetto `/api/health`) e nessun CORS.
 
 use std::sync::{Arc, Mutex};
 
@@ -16,85 +15,6 @@ use axum::{Json, Router};
 use serde_json::{json, Value};
 
 use crate::orchestrator::{CoreError, Jarvis};
-
-const INDEX: &str = include_str!("../static/index.html");
-const APP_JS: &str = include_str!("../static/app.js");
-const APP_CSS: &str = include_str!("../static/app.css");
-const VOICE_WORKLET: &str = include_str!("../static/voice-worklet.js");
-const MANIFEST: &str = include_str!("../static/manifest.webmanifest");
-const SERVICE_WORKER: &str = include_str!("../static/sw.js");
-const FCM_WORKER: &str = include_str!("../static/fcm-sw.js");
-const ICON: &str = include_str!("../static/icon.svg");
-const PAIR_HTML: &str = include_str!("../static/pair.html");
-const PAIR_JS: &str = include_str!("../static/pair.js");
-const BOOT_JS: &str = include_str!("../static/boot.js");
-
-/// Asset statico servito con ETag (revalida con 304) e, se il client la accetta, compressione gzip calcolata
-/// una sola volta: il bundle passa da ~320 KB a ~100 KB per telefoni e tablet in rete locale.
-struct Asset {
-    body: &'static str,
-    ctype: &'static str,
-    prepared: std::sync::LazyLock<(String, Vec<u8>)>,
-}
-
-fn prepare(body: &str) -> (String, Vec<u8>) {
-    use std::io::Write;
-    let digest = ring::digest::digest(&ring::digest::SHA256, body.as_bytes());
-    let etag = format!(
-        "\"{}\"",
-        digest.as_ref()[..8]
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>()
-    );
-    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
-    let _ = gz.write_all(body.as_bytes());
-    (etag, gz.finish().unwrap_or_default())
-}
-
-static JS_ASSET: Asset = Asset {
-    body: APP_JS,
-    ctype: "text/javascript; charset=utf-8",
-    prepared: std::sync::LazyLock::new(|| prepare(APP_JS)),
-};
-static CSS_ASSET: Asset = Asset {
-    body: APP_CSS,
-    ctype: "text/css; charset=utf-8",
-    prepared: std::sync::LazyLock::new(|| prepare(APP_CSS)),
-};
-
-fn asset(headers: &axum::http::HeaderMap, a: &'static Asset) -> Response {
-    let (etag, gz) = &*a.prepared;
-    let common = [
-        (header::ETAG, etag.as_str()),
-        (header::CACHE_CONTROL, "no-cache"),
-        (header::VARY, "Accept-Encoding"),
-    ];
-    let matches = headers
-        .get(header::IF_NONE_MATCH)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.split(',').any(|t| t.trim() == etag));
-    if matches {
-        return (StatusCode::NOT_MODIFIED, common).into_response();
-    }
-    let gzip = headers
-        .get(header::ACCEPT_ENCODING)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.split(',').any(|e| e.trim().starts_with("gzip")));
-    if gzip && !gz.is_empty() {
-        (
-            common,
-            [
-                (header::CONTENT_TYPE, a.ctype),
-                (header::CONTENT_ENCODING, "gzip"),
-            ],
-            gz.clone(),
-        )
-            .into_response()
-    } else {
-        (common, [(header::CONTENT_TYPE, a.ctype)], a.body).into_response()
-    }
-}
 
 pub struct AppState {
     pub core: Arc<Mutex<Jarvis>>,
@@ -373,24 +293,6 @@ fn device_route_allowed(method: &str, route: &str, scopes: &[&str]) -> bool {
 
 pub fn router(state: Shared) -> Router {
     Router::new()
-        .route("/", get(index))
-        .route(
-            "/app.js",
-            get(|h: axum::http::HeaderMap| async move { asset(&h, &JS_ASSET) }),
-        )
-        .route(
-            "/app.css",
-            get(|h: axum::http::HeaderMap| async move { asset(&h, &CSS_ASSET) }),
-        )
-        .route(
-            "/voice-worklet.js",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    VOICE_WORKLET,
-                )
-            }),
-        )
         .route("/api/health", get(health))
         .route("/api/chat", post(chat))
         .route("/api/security", get(security_status))
@@ -453,64 +355,6 @@ pub fn router(state: Shared) -> Router {
         .route("/api/nodes/next", get(node_next))
         .route("/api/nodes/result/{id}", post(node_result))
         .route("/api/devices/{id}/revoke", post(revoke_device))
-        .route(
-            "/manifest.webmanifest",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "application/manifest+json")],
-                    MANIFEST,
-                )
-            }),
-        )
-        .route(
-            "/sw.js",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    SERVICE_WORKER,
-                )
-            }),
-        )
-        .route(
-            "/fcm-sw.js",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    FCM_WORKER,
-                )
-            }),
-        )
-        .route(
-            "/pair",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-                    PAIR_HTML,
-                )
-            }),
-        )
-        .route(
-            "/boot.js",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    BOOT_JS,
-                )
-            }),
-        )
-        .route(
-            "/pair.js",
-            get(|| async {
-                (
-                    [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-                    PAIR_JS,
-                )
-            }),
-        )
-        .route(
-            "/icon.svg",
-            get(|| async { ([(header::CONTENT_TYPE, "image/svg+xml")], ICON) }),
-        )
         .route("/api/connectors", get(connectors).post(install_connector))
         .route("/api/skills", get(skills_list).post(skill_create))
         .route(
@@ -543,19 +387,6 @@ pub fn router(state: Shared) -> Router {
         .route("/api/workflows/{id}/runs", get(workflow_runs))
         .layer(middleware::from_fn_with_state(state.clone(), guard))
         .with_state(state)
-}
-
-async fn index(State(state): State<Shared>, headers: axum::http::HeaderMap) -> Response {
-    // Il token di sessione va solo al browser del computer del Core; un dispositivo remoto si associa.
-    let host = headers
-        .get(header::HOST)
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or_default();
-    let local = ["127.0.0.1", "localhost", "[::1]"]
-        .iter()
-        .any(|h| host == format!("{h}:{}", state.port));
-    let html = INDEX.replace("{{JARVIS_TOKEN}}", if local { &state.token } else { "" });
-    ([(header::CONTENT_TYPE, "text/html; charset=utf-8")], html).into_response()
 }
 
 async fn health(State(state): State<Shared>) -> Json<Value> {
