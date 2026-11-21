@@ -9,7 +9,10 @@ const staticSource = (name) => readFileSync(join(__dirname, "../../core/server/s
 test("la PWA ripropone la navigazione dopo un guasto, preservando le risposte di accesso", async () => {
   const listeners = {};
   const context = vm.createContext({
-    self: { addEventListener: (event, listener) => { listeners[event] = listener; } },
+    self: {
+      addEventListener: (event, listener) => { listeners[event] = listener; },
+      importScripts: (path) => assert.equal(path, "/fcm-sw.js"),
+    },
     Response,
   });
   vm.runInContext(staticSource("sw.js"), context);
