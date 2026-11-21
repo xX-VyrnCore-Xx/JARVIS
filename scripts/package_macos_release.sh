@@ -18,7 +18,6 @@ sed "s/@VERSION@/$version/g" apps/desktop/installer/macos/Info.plist \
 if [[ "${NATIVE_SIGNING:-false}" == "true" ]]; then
   : "${JARVIS_MACOS_SIGNING_P12_BASE64:?Configurare il certificato autofirmato macOS}"
   : "${JARVIS_MACOS_SIGNING_PASSWORD:?Configurare la password del certificato macOS}"
-  : "${JARVIS_MACOS_SIGNING_IDENTITY:?Configurare l’impronta SHA-1 del certificato}"
 
   umask 077
   signing_dir=$(mktemp -d)
@@ -36,7 +35,21 @@ if [[ "${NATIVE_SIGNING:-false}" == "true" ]]; then
   security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain"
   security list-keychains -d user -s "$keychain"
 
-  codesign --force --deep --sign "$JARVIS_MACOS_SIGNING_IDENTITY" "$app"
+  signing_identity=$(security find-identity -v -p codesigning "$keychain" |
+    awk '/"JARVIS Private Code Signing"/ { print $2 }')
+  if [[ ! "$signing_identity" =~ ^[[:xdigit:]]{40}$ ]]; then
+    echo "Il certificato autofirmato JARVIS non contiene un'identità Code Signing valida." >&2
+    exit 1
+  fi
+  if [[ -n "${JARVIS_MACOS_SIGNING_IDENTITY:-}" ]]; then
+    configured_identity=$(printf '%s' "$JARVIS_MACOS_SIGNING_IDENTITY" | tr -d ':' | tr '[:lower:]' '[:upper:]')
+    if [[ "$configured_identity" != "$signing_identity" ]]; then
+      echo "JARVIS_MACOS_SIGNING_IDENTITY non corrisponde al certificato configurato." >&2
+      exit 1
+    fi
+  fi
+
+  codesign --force --deep --sign "$signing_identity" "$app"
   codesign --verify --deep --strict --verbose=2 "$app"
   codesign -dv --verbose=4 "$app" 2>&1 | grep -F "Authority=JARVIS Private Code Signing"
 else
@@ -51,7 +64,7 @@ dmg="$bundle/dmg/JARVIS_${version}_aarch64.dmg"
 hdiutil create -volname JARVIS -srcfolder "$stage" -ov -format UDZO "$dmg"
 
 if [[ "${NATIVE_SIGNING:-false}" == "true" ]]; then
-  codesign --force --sign "$JARVIS_MACOS_SIGNING_IDENTITY" "$dmg"
+  codesign --force --sign "$signing_identity" "$dmg"
   codesign --verify --strict "$dmg"
   codesign -dv --verbose=4 "$dmg" 2>&1 | grep -F "Authority=JARVIS Private Code Signing"
 fi
