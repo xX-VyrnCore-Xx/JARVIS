@@ -49,7 +49,7 @@ Da eseguire sul proprio computer con una release o con i sorgenti. Annotare esit
 | # | Prova | Come | Atteso |
 |---|---|---|---|
 | P1 | Primo avvio desktop | `./jarvis.sh desktop` (Windows: `jarvis.cmd desktop`) o app installata | La finestra nativa si apre e avvia il Core; chat, conferme e memoria funzionano |
-| P2 | Modello locale | Installa Ollama, `ollama pull qwen2.5:3b`, riavvia | L'intestazione mostra Ollama; la conversazione è libera; spegnendo Ollama JARVIS passa a offline e lo dichiara; riavviando Ollama, dopo almeno 15 secondi dall'ultimo guasto la richiesta successiva torna a usare il modello |
+| P2 | Inferenza cloud | Configura un provider in un ambiente di test e invia una richiesta sintetica | La risposta indica il provider e il modello usato |
 | P3 | File | «scrivi prova.txt: ciao», approva, «leggi prova.txt» | Conferma richiesta; file in `data/workspace` |
 | P4 | Web reale | «cerca Rust linguaggio», poi «apri <link>» | Fonti con link, ora e SHA-256 |
 | P5 | Automazioni e notifiche | «tra 2 minuti che ore sono» | Esecuzione all'ora prevista e notifica nella campanella |
@@ -61,7 +61,7 @@ Da eseguire sul proprio computer con una release o con i sorgenti. Annotare esit
 | P10 | Connettore | Sospesa finché non è completata la UI nativa guidata | Le API del Core restano disponibili; la schermata desktop è ancora generica |
 | P11 | Prestazioni | `python tests/perf/latency.py http://127.0.0.1:8765 30` con Ollama attivo | p95 entro `tests/perf/slo.json` per le serie senza modello; registrare quelle con il modello |
 | P12 | Sicurezza | Dal telefono prova sezioni del proprietario; apri l'indirizzo da un host non ammesso | Accesso negato; host rifiutato |
-| P13 | Nodo esecutore | Su un secondo computer con Tailscale: codice «Nodo esecutore» dalla sezione Dispositivi, `./jarvis.sh node https://<core>.ts.net <codice>`, poi in chat «nodo <nome> system.info» e «nodo <nome> fs.write path=prova.txt content=ciao»; infine revoca | Informazioni del secondo computer; scrittura solo dopo conferma e nella workspace del nodo; dopo la revoca il nodo si ferma e i suoi strumenti spariscono |
+| P13 | Nodo esecutore | Su un secondo computer con Tailscale: codice «Nodo esecutore» dalla sezione Dispositivi, `./jarvis.sh node https://core.example.invalid <codice>`, poi in chat «nodo <nome> system.info» e «nodo <nome> fs.write path=prova.txt content=ciao»; infine revoca | Informazioni del secondo computer; scrittura solo dopo conferma e nella workspace del nodo; dopo la revoca il nodo si ferma e i suoi strumenti spariscono |
 | P14 | Processi e terminale | «quali processi usano più memoria?», poi «terminale: ls» e approva; prova «terminale: sudo ls» | Elenco dei processi senza conferma; il comando chiede conferma e mostra l'output; `sudo` viene negato |
 | P15 | Navigazione Web | Con Chrome o Edge installato: «naviga https://it.wikipedia.org e clicca Storia», poi «compila modulo <pagina con un modulo di prova>: campo=valore» e approva | Testo della pagina seguita con fonte; il modulo chiede conferma, mostra i campi e viene inviato solo dopo l'approvazione |
 | P16 | Gmail e Calendar | Sospesa fino al completamento della UI nativa guidata e alla configurazione del provider | Le API e il catalogo esistono; non verificato il flusso OAuth dal client nativo |
