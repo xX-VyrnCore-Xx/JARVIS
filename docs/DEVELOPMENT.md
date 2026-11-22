@@ -73,14 +73,10 @@ Dopo la pubblicazione, `scripts/prune_releases.py` conserva la release con la ve
 
 ### Firma degli installer
 
-Le release firmano DMG e app macOS e setup Windows con un certificato autofirmato privato, senza
-acquisti o account commerciali. Il proprietario deve configurare i certificati e i secret elencati
-in [GITHUB_ACTIONS_SECRETS.md](./GITHUB_ACTIONS_SECRETS.md); se mancano, la pubblicazione fallisce
-in modo esplicito. La CI verifica la firma, ma l'utente deve considerare attendibile il certificato
-sui propri dispositivi. Non viene eseguita la notarizzazione Apple.
-
-Le PR verificano build e installazione senza usare i certificati privati. Sigstore e le attestazioni
-di provenienza continuano a usare OIDC GitHub.
+Le release non applicano firme native ai DMG macOS né ai setup Windows. Il proprietario non deve
+configurare certificati, password o account commerciali Apple/Azure per questi pacchetti.
+Sigstore e le attestazioni di provenienza continuano a verificare gli artefatti tramite OIDC GitHub.
+L'APK Android resta firmato separatamente con il keystore Android persistente.
 
 ### Aggiornamenti da repository private
 

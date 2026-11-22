@@ -1246,12 +1246,11 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Configurazione proprietario:** i certificati autofirmati restano da creare e registrare nei Secrets Actions; Firebase è validato localmente ma l'integrazione non può leggere/scrivere GitHub Actions variables con il token della sessione (HTTP 403). Nessun file di configurazione Google è tracciato da Git.
 - **Documenti interessati:** README.md, ROADMAP.md, DEVELOPMENT.md, TECH_STACK.md, INTERFACE_AND_DEVICES.md, REQUIREMENTS.md e DEVOPS_QA_OBSERVABILITY.md.
 
-### ADR-0068 — Firma nativa autofirmata per uso personale
+### ADR-0068 — Installer desktop pubblicati senza firma nativa
 
-- **Data** 2026-11-21 · **Stato** adottata, da verificare nei runner GitHub · **Fonte** richiesta del proprietario.
-- **Decisione:** le release desktop sono firmate con una chiave autofirmata generata e custodita dal proprietario, senza certificati commerciali Apple/Azure né notarizzazione. Il P12/PFX e le password vengono configurati nei GitHub Actions Secrets; l'impronta SHA-1 macOS è una Actions Variable. Le PR non ricevono né richiedono le chiavi. Le attestazioni OIDC/Sigstore restano attive.
-- Il proprietario deve installare il certificato pubblico solo sui propri dispositivi per rendere attendibili i programmi. La firma autofirmata identifica il publisher e rileva alterazioni, ma non dà automaticamente reputazione SmartScreen/Gatekeeper e non equivale alla notarizzazione.
-- **Conseguenze:** la pubblicazione automatica si blocca in modo esplicito finché i quattro secrets desktop e la variable macOS non sono configurati. I secrets Android per firmare l'APK restano separati. Questa scelta sostituisce per le release future la firma ad hoc/macOS e il percorso commerciale opzionale descritti da ADR-0020.
+- **Data** 2026-11-22 · **Stato** adottata · **Fonte** richiesta del proprietario: firma desktop saltata senza operazioni manuali; niente licenze Apple/Azure.
+- **Decisione:** DMG macOS e setup Windows non sono firmati nativamente né richiedono certificati o Secrets. Le attestazioni OIDC/Sigstore restano obbligatorie e verificano gli artefatti pubblicati. L'APK Android continua a usare il keystore persistente separato.
+- **Conseguenze:** macOS può richiedere l'autorizzazione manuale al primo avvio e Windows può mostrare avvisi SmartScreen. Le release non possono essere bloccate da certificati desktop assenti o non corrispondenti. Nessun certificato commerciale o notarizzazione viene acquistato.
 - **Documenti interessati:** DEVELOPMENT.md, GITHUB_ACTIONS_SECRETS.md, SECURITY_AND_PRIVACY.md, DEVOPS_QA_OBSERVABILITY.md e workflow `release.yml` / `release-after-ci.yml`.
 
 ### ADR-0069 — Credenziali OAuth Google locali per Gmail e Calendar

@@ -15,56 +15,9 @@ cp "$desktop/icons/icon.icns" "$resources/icon.icns"
 sed "s/@VERSION@/$version/g" apps/desktop/installer/macos/Info.plist \
   > "$contents/Info.plist"
 
-if [[ "${NATIVE_SIGNING:-false}" == "true" ]]; then
-  : "${JARVIS_MACOS_SIGNING_P12_BASE64:?Configurare il certificato autofirmato macOS}"
-  : "${JARVIS_MACOS_SIGNING_PASSWORD:?Configurare la password del certificato macOS}"
-
-  umask 077
-  signing_dir=$(mktemp -d)
-  keychain="$signing_dir/jarvis.keychain-db"
-  trap 'security delete-keychain "$keychain" >/dev/null 2>&1 || true; rm -rf -- "$signing_dir"' EXIT
-  security create-keychain -p "" "$keychain"
-  security set-keychain-settings -lut 21600 "$keychain"
-  security unlock-keychain -p "" "$keychain"
-
-  certificate="$signing_dir/certificate.p12"
-  printf '%s' "$JARVIS_MACOS_SIGNING_P12_BASE64" | base64 -D > "$certificate"
-  unset JARVIS_MACOS_SIGNING_P12_BASE64
-  security import "$certificate" -k "$keychain" -P "$JARVIS_MACOS_SIGNING_PASSWORD" -T /usr/bin/codesign
-  unset JARVIS_MACOS_SIGNING_PASSWORD
-  security set-key-partition-list -S apple-tool:,apple: -s -k "" "$keychain"
-  security list-keychains -d user -s "$keychain"
-
-  signing_identity=$(security find-identity -v -p codesigning "$keychain" |
-    awk '/"JARVIS Private Code Signing"/ { print $2 }')
-  if [[ ! "$signing_identity" =~ ^[[:xdigit:]]{40}$ ]]; then
-    echo "Il certificato autofirmato JARVIS non contiene un'identità Code Signing valida." >&2
-    exit 1
-  fi
-  if [[ -n "${JARVIS_MACOS_SIGNING_IDENTITY:-}" ]]; then
-    configured_identity=$(printf '%s' "$JARVIS_MACOS_SIGNING_IDENTITY" | tr -d ':' | tr '[:lower:]' '[:upper:]')
-    if [[ "$configured_identity" != "$signing_identity" ]]; then
-      echo "JARVIS_MACOS_SIGNING_IDENTITY non corrisponde al certificato configurato." >&2
-      exit 1
-    fi
-  fi
-
-  codesign --force --deep --sign "$signing_identity" "$app"
-  codesign --verify --deep --strict --verbose=2 "$app"
-  codesign -dv --verbose=4 "$app" 2>&1 | grep -F "Authority=JARVIS Private Code Signing"
-else
-  codesign --force --deep --sign - "$app"
-fi
-
 stage="$bundle/dmg/JARVIS"
 mkdir -p "$stage" "$bundle/dmg"
 cp -R "$app" "$stage/JARVIS.app"
 ln -s /Applications "$stage/Applications"
 dmg="$bundle/dmg/JARVIS_${version}_aarch64.dmg"
 hdiutil create -volname JARVIS -srcfolder "$stage" -ov -format UDZO "$dmg"
-
-if [[ "${NATIVE_SIGNING:-false}" == "true" ]]; then
-  codesign --force --sign "$signing_identity" "$dmg"
-  codesign --verify --strict "$dmg"
-  codesign -dv --verbose=4 "$dmg" 2>&1 | grep -F "Authority=JARVIS Private Code Signing"
-fi
