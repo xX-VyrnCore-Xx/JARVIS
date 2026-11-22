@@ -6,6 +6,10 @@ on:
   pull_request:
     paths: ["contracts/**", "tests/**", "core/**", "ai/**", "apps/**", "jarvis.sh", "jarvis.ps1", "jarvis.cmd", ".github/workflows/**", "scripts/**"]
 
+concurrency:
+  group: contracts-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
