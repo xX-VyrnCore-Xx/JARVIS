@@ -16,7 +16,6 @@ sed "s/@VERSION@/$version/g" apps/desktop/installer/macos/Info.plist \
   > "$contents/Info.plist"
 
 signing_identity=-
-signing_options=()
 if [[ "${JARVIS_REQUIRE_DESKTOP_SIGNATURE:-false}" == true ]]; then
   : "${JARVIS_MACOS_SIGNING_P12_BASE64:?Secret P12 macOS mancante}"
   umask 077
@@ -24,8 +23,13 @@ if [[ "${JARVIS_REQUIRE_DESKTOP_SIGNATURE:-false}" == true ]]; then
   keychain="$signing_dir/jarvis.keychain-db"
   certificate="$signing_dir/certificate.p12"
   trusted_leaf=""
+  old_keychains=()
+  while IFS= read -r path; do
+    old_keychains+=("$path")
+  done < <(security list-keychains -d user | sed -E 's/^ *"//; s/"$//')
   cleanup() {
     if [[ -n "$trusted_leaf" ]]; then sudo security remove-trusted-cert -d "$trusted_leaf" >/dev/null 2>&1 || true; fi
+    security list-keychains -d user -s ${old_keychains[@]+"${old_keychains[@]}"} >/dev/null 2>&1 || true
     security delete-keychain "$keychain" >/dev/null 2>&1 || true
     rm -rf -- "$signing_dir"
   }
@@ -88,12 +92,14 @@ if [[ "${JARVIS_REQUIRE_DESKTOP_SIGNATURE:-false}" == true ]]; then
   fi
   echo "Configurazione dell’accesso alla chiave per codesign."
   security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
-  signing_options=(--keychain "$keychain")
+  # Register the temporary keychain, as required for codesign to build the
+  # identity's trust chain on GitHub-hosted macOS runners.
+  security list-keychains -d user -s "$keychain" ${old_keychains[@]+"${old_keychains[@]}"}
   echo "Identità macOS configurata selezionata."
 fi
 
 echo "Firma e verifica dell’app macOS."
-codesign --force --deep --timestamp=none ${signing_options[@]+"${signing_options[@]}"} --sign "$signing_identity" "$app"
+codesign --force --deep --timestamp=none --sign "$signing_identity" "$app"
 codesign --verify --deep --strict --verbose=2 "$app"
 
 stage="$bundle/dmg/JARVIS"
@@ -104,6 +110,6 @@ dmg="$bundle/dmg/JARVIS_${version}_aarch64.dmg"
 echo "Creazione del DMG."
 hdiutil create -volname JARVIS -srcfolder "$stage" -ov -format UDZO "$dmg"
 if [[ "$signing_identity" != - ]]; then
-  codesign --force --timestamp=none ${signing_options[@]+"${signing_options[@]}"} --sign "$signing_identity" "$dmg"
+  codesign --force --timestamp=none --sign "$signing_identity" "$dmg"
   codesign --verify --strict "$dmg"
 fi
