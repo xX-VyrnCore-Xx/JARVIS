@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
@@ -28,6 +30,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.Canvas
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -52,8 +55,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -156,7 +169,7 @@ private fun PairingScreen(onPaired: (DeviceSession) -> Unit) {
 private fun ColumnScope.DeviceScreen(session: DeviceSession, appInForeground: Boolean, onRevoked: () -> Unit) {
     var tab by rememberSaveable { mutableStateOf(0) }
     var sending by remember { mutableStateOf(false) }
-    val tabs = listOf("Chat" to "◉", "Attività" to "≡", "Notifiche" to "◇", "Core" to "⌂")
+    val tabs = listOf("Plancia" to "⌂", "Chat" to "◉", "Attività" to "≡", "Notifiche" to "◇", "Core" to "◎")
     Text(
         tabs[tab].first,
         modifier = Modifier.padding(horizontal = 22.dp, vertical = 12.dp),
@@ -174,9 +187,16 @@ private fun ColumnScope.DeviceScreen(session: DeviceSession, appInForeground: Bo
     ) { selected ->
         Column(Modifier.fillMaxSize()) {
             when (selected) {
-                0 -> ChatScreen(session, appInForeground, onRevoked) { sending = it }
-                1 -> TasksScreen(session, appInForeground, onRevoked)
-                2 -> NoticesScreen(session, appInForeground, onRevoked)
+                0 -> HomeScreen(
+                    session = session,
+                    appInForeground = appInForeground,
+                    onRevoked = onRevoked,
+                    onOpenChat = { tab = 1 },
+                    onOpenTasks = { tab = 2 },
+                )
+                1 -> ChatScreen(session, appInForeground, onRevoked) { sending = it }
+                2 -> TasksScreen(session, appInForeground, onRevoked)
+                3 -> NoticesScreen(session, appInForeground, onRevoked)
                 else -> CoreScreen(session, onRevoked)
             }
         }
@@ -190,6 +210,260 @@ private fun ColumnScope.DeviceScreen(session: DeviceSession, appInForeground: Bo
                 enabled = !sending,
                 icon = { Text(symbol, style = MaterialTheme.typography.titleLarge) },
                 label = { Text(label) },
+            )
+        }
+    }
+}
+
+private data class HomeSnapshot(
+    val recentTask: TaskSummary?,
+    val recentTaskCount: Int,
+    val unreadCount: Int,
+)
+
+@Composable
+private fun ColumnScope.HomeScreen(
+    session: DeviceSession,
+    appInForeground: Boolean,
+    onRevoked: () -> Unit,
+    onOpenChat: () -> Unit,
+    onOpenTasks: () -> Unit,
+) {
+    var snapshot by remember { mutableStateOf<HomeSnapshot?>(null) }
+    var status by remember { mutableStateOf<String?>(null) }
+    var loading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    suspend fun refresh() {
+        loading = true
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                val tasks = client.tasks(session)
+                val notices = client.notices(session)
+                HomeSnapshot(tasks.firstOrNull(), tasks.size, notices.unread)
+            }
+        }
+        result
+            .onSuccess {
+                snapshot = it
+                status = null
+            }
+            .onFailure {
+                if (it is CoreException.Revoked) onRevoked()
+                else status = it.message ?: "Impossibile aggiornare la plancia."
+            }
+        loading = false
+    }
+
+    LaunchedEffect(session, appInForeground) {
+        if (!appInForeground) return@LaunchedEffect
+        while (isActive) {
+            refresh()
+            delay(15_000)
+        }
+    }
+
+    Column(
+        Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Card(
+            Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+        ) {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                AvatarPortrait()
+                Text(
+                    "JARVIS",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                Text(
+                    "Il tuo assistente personale",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+                Surface(
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = MaterialTheme.shapes.small,
+                ) {
+                    Text(
+                        if (loading && snapshot == null) "Connessione al Core…"
+                        else if (status != null) "Connessione non verificata"
+                        else if (snapshot != null) "●  Core collegato"
+                        else "In attesa della connessione",
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
+            }
+        }
+
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Button(onClick = onOpenChat, modifier = Modifier.weight(1f)) {
+                Text("Parla con JARVIS")
+            }
+            OutlinedButton(onClick = onOpenTasks, modifier = Modifier.weight(1f)) {
+                Text("Attività")
+            }
+        }
+
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            HomeMetric(
+                label = "TASK RECENTI",
+                value = snapshot?.recentTaskCount?.toString() ?: "—",
+                modifier = Modifier.weight(1f),
+            )
+            HomeMetric(
+                label = "DA LEGGERE",
+                value = snapshot?.unreadCount?.toString() ?: "—",
+                modifier = Modifier.weight(1f),
+            )
+        }
+
+        Card(Modifier.fillMaxWidth()) {
+            Column(
+                Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("Ultima attività", style = MaterialTheme.typography.titleMedium)
+                    TextButton(
+                        enabled = !loading,
+                        onClick = { scope.launch { refresh() } },
+                    ) {
+                        Text(if (loading) "Aggiorno…" else "Aggiorna")
+                    }
+                }
+                val task = snapshot?.recentTask
+                if (task == null) {
+                    Text(
+                        if (snapshot == null) "Le attività appariranno qui quando il Core sarà raggiungibile."
+                        else "Nessuna attività recente.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    Text(task.objective, style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        "${STATE_LABEL[task.state] ?: task.state} · ${task.createdAt.take(16).replace('T', ' ')}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        status?.let {
+            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+private fun HomeMetric(label: String, value: String, modifier: Modifier = Modifier) {
+    Card(
+        modifier,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+    ) {
+        Column(
+            Modifier.fillMaxWidth().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+@Composable
+private fun AvatarPortrait() {
+    val transition = rememberInfiniteTransition(label = "jarvis-avatar")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(1900), repeatMode = RepeatMode.Reverse),
+        label = "avatar-breath",
+    )
+    val accent = MaterialTheme.colorScheme.primary
+    val face = MaterialTheme.colorScheme.onSurfaceVariant
+    Canvas(Modifier.fillMaxWidth().height(188.dp)) {
+        val center = Offset(size.width / 2f, size.height / 2f)
+        val unit = size.minDimension / 188.dp.toPx()
+        val pulse = phase * 3.dp.toPx()
+        drawCircle(
+            accent.copy(alpha = 0.10f + phase * 0.08f),
+            radius = size.minDimension * 0.43f + pulse,
+            center = center,
+            style = Stroke(width = 1.5.dp.toPx()),
+        )
+        drawCircle(
+            accent.copy(alpha = 0.32f),
+            radius = size.minDimension * 0.35f,
+            center = center,
+            style = Stroke(width = 1.dp.toPx()),
+        )
+        drawArc(
+            accent.copy(alpha = 0.78f),
+            startAngle = -90f + phase * 18f,
+            sweepAngle = 220f,
+            useCenter = false,
+            topLeft = Offset(center.x - size.minDimension * 0.39f, center.y - size.minDimension * 0.39f),
+            size = Size(size.minDimension * 0.78f, size.minDimension * 0.78f),
+            style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round),
+        )
+
+        val head = Path().apply {
+            moveTo(center.x, center.y - 42.dp.toPx())
+            cubicTo(center.x - 26.dp.toPx(), center.y - 42.dp.toPx(), center.x - 33.dp.toPx(), center.y - 22.dp.toPx(), center.x - 31.dp.toPx(), center.y + 2.dp.toPx())
+            cubicTo(center.x - 28.dp.toPx(), center.y + 27.dp.toPx(), center.x - 13.dp.toPx(), center.y + 35.dp.toPx(), center.x, center.y + 38.dp.toPx())
+            cubicTo(center.x + 13.dp.toPx(), center.y + 35.dp.toPx(), center.x + 28.dp.toPx(), center.y + 27.dp.toPx(), center.x + 31.dp.toPx(), center.y + 2.dp.toPx())
+            cubicTo(center.x + 33.dp.toPx(), center.y - 22.dp.toPx(), center.x + 26.dp.toPx(), center.y - 42.dp.toPx(), center.x, center.y - 42.dp.toPx())
+            close()
+        }
+        drawPath(head, Color(0xFF142D40))
+        drawPath(head, accent.copy(alpha = 0.9f), style = Stroke(width = 1.7.dp.toPx(), cap = StrokeCap.Round))
+
+        val shoulders = Path().apply {
+            moveTo(center.x - 55.dp.toPx(), center.y + 73.dp.toPx())
+            quadraticTo(center.x - 48.dp.toPx(), center.y + 37.dp.toPx(), center.x - 17.dp.toPx(), center.y + 31.dp.toPx())
+            lineTo(center.x, center.y + 40.dp.toPx())
+            lineTo(center.x + 17.dp.toPx(), center.y + 31.dp.toPx())
+            quadraticTo(center.x + 48.dp.toPx(), center.y + 37.dp.toPx(), center.x + 55.dp.toPx(), center.y + 73.dp.toPx())
+            close()
+        }
+        drawPath(shoulders, Color(0xFF10283A))
+        drawPath(shoulders, accent.copy(alpha = 0.70f), style = Stroke(width = 1.6.dp.toPx()))
+        drawLine(accent, Offset(center.x - 19.dp.toPx(), center.y - 7.dp.toPx()), Offset(center.x - 5.dp.toPx(), center.y - 7.dp.toPx()), 2.4.dp.toPx(), StrokeCap.Round)
+        drawLine(accent, Offset(center.x + 5.dp.toPx(), center.y - 7.dp.toPx()), Offset(center.x + 19.dp.toPx(), center.y - 7.dp.toPx()), 2.4.dp.toPx(), StrokeCap.Round)
+        drawLine(face, Offset(center.x, center.y - 1.dp.toPx()), Offset(center.x - 4.dp.toPx(), center.y + 12.dp.toPx()), 1.dp.toPx(), StrokeCap.Round)
+        drawLine(face, Offset(center.x - 10.dp.toPx(), center.y + 21.dp.toPx()), Offset(center.x + 10.dp.toPx(), center.y + 21.dp.toPx()), 1.dp.toPx(), StrokeCap.Round)
+
+        for (index in 0 until 11) {
+            val x = center.x - 25.dp.toPx() + index * 5.dp.toPx()
+            val height = (5f + ((index * 7 + phase * 5).toInt() % 9)) * unit
+            drawLine(
+                accent.copy(alpha = 0.45f + phase * 0.35f),
+                Offset(x, center.y + 63.dp.toPx() - height / 2),
+                Offset(x, center.y + 63.dp.toPx() + height / 2),
+                1.5.dp.toPx(),
+                StrokeCap.Round,
             )
         }
     }

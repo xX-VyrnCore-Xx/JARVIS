@@ -74,6 +74,7 @@ pub struct JarvisApp {
     current: String,
     data: Option<Value>,
     error: Option<String>,
+    reduce_motion: bool,
     loading: bool,
     last_load: Instant,
     chat_input: String,
@@ -141,6 +142,7 @@ impl JarvisApp {
             current: "dashboard".into(),
             data: None,
             error: None,
+            reduce_motion: false,
             loading: false,
             last_load: Instant::now() - Duration::from_secs(60),
             chat_input: String::new(),
@@ -392,6 +394,7 @@ impl JarvisApp {
                     if let Ok(setup) = client.get("/api/setup") {
                         data["first_run"] = setup["first_run"].clone();
                     }
+                    data["recent_tasks"] = client.get("/api/tasks?limit=4")?["items"].clone();
                 }
                 Ok(data)
             });
@@ -709,97 +712,7 @@ impl JarvisApp {
     fn show_data(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         match self.current.as_str() {
             "dashboard" => {
-                if let Some(error) = &self.error {
-                    ui.colored_label(egui::Color32::LIGHT_RED, error);
-                }
-                let core_status = self
-                    .data
-                    .as_ref()
-                    .and_then(|v| v["core"]["status"].as_str())
-                    .unwrap_or("—")
-                    .to_owned();
-                let ai_status = self
-                    .data
-                    .as_ref()
-                    .and_then(|v| v["ai"]["status"].as_str())
-                    .unwrap_or("—")
-                    .to_owned();
-                let confirmations = self
-                    .data
-                    .as_ref()
-                    .and_then(|v| v["pending_confirmations"].as_u64())
-                    .map(|n| n.to_string())
-                    .unwrap_or_else(|| "—".into());
-                let unread = self
-                    .data
-                    .as_ref()
-                    .and_then(|v| v["notifications_unread"].as_u64())
-                    .map(|n| n.to_string())
-                    .unwrap_or_else(|| "—".into());
-                let version = self
-                    .data
-                    .as_ref()
-                    .and_then(|v| v["core"]["version"].as_str())
-                    .unwrap_or("—")
-                    .to_owned();
-                let automations = self
-                    .data
-                    .as_ref()
-                    .and_then(|v| v["automations"].as_u64())
-                    .unwrap_or(0);
-                let audit_valid = self
-                    .data
-                    .as_ref()
-                    .and_then(|v| v["audit"]["chain_valid"].as_bool())
-                    .unwrap_or(false);
-                ui.horizontal_wrapped(|ui| {
-                    for (label, value) in [
-                        ("CORE", core_status.as_str()),
-                        ("AI", ai_status.as_str()),
-                        ("CONFERME", confirmations.as_str()),
-                        ("NOTIFICHE", unread.as_str()),
-                    ] {
-                        ui.group(|ui| {
-                            ui.small(egui::RichText::new(label).weak());
-                            ui.strong(value);
-                        });
-                    }
-                });
-                ui.separator();
-                ui.horizontal(|ui| {
-                    ui.heading("Panoramica");
-                    if ui.button("Apri chat").clicked() {
-                        self.current = "chat".into();
-                        self.data = None;
-                    }
-                });
-                ui.label(format!(
-                    "Versione {version} · {automations} automazioni attive · audit {}",
-                    if audit_valid {
-                        "verificato"
-                    } else {
-                        "da controllare"
-                    }
-                ));
-                if self.loading {
-                    ui.add(egui::Spinner::new());
-                }
-                ui.separator();
-                if self
-                    .data
-                    .as_ref()
-                    .is_some_and(|data| data["first_run"] == true)
-                    && ui.button("Apri configurazione iniziale").clicked()
-                {
-                    self.current = "system".into();
-                    self.data = None;
-                    self.refresh(ctx);
-                }
-                ui.heading("Notifiche");
-                self.show_notifications(ui);
-                if ui.button("Segna tutte come lette").clicked() {
-                    self.act(ctx, "/api/notifications/read-all".into(), None);
-                }
+                self.show_dashboard(ui, ctx);
             }
             "chat" => self.show_chat(ui, ctx),
             "models" => self.show_cloud_settings(ui, ctx),
@@ -839,6 +752,284 @@ impl JarvisApp {
             }
             _ => {}
         }
+    }
+
+    fn show_dashboard(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if let Some(error) = &self.error {
+            ui.colored_label(egui::Color32::LIGHT_RED, error);
+        }
+
+        let core_status = self
+            .data
+            .as_ref()
+            .and_then(|data| data["core"]["status"].as_str())
+            .unwrap_or("—")
+            .to_owned();
+        let ai_status = self
+            .data
+            .as_ref()
+            .and_then(|data| data["ai"]["status"].as_str())
+            .unwrap_or("—")
+            .to_owned();
+        let confirmations = self
+            .data
+            .as_ref()
+            .and_then(|data| data["pending_confirmations"].as_u64())
+            .map(|count| count.to_string())
+            .unwrap_or_else(|| "—".into());
+        let unread = self
+            .data
+            .as_ref()
+            .and_then(|data| data["notifications_unread"].as_u64())
+            .map(|count| count.to_string())
+            .unwrap_or_else(|| "—".into());
+        let version = self
+            .data
+            .as_ref()
+            .and_then(|data| data["core"]["version"].as_str())
+            .unwrap_or("—")
+            .to_owned();
+        let automations = self
+            .data
+            .as_ref()
+            .and_then(|data| data["automations"].as_u64())
+            .map(|count| count.to_string())
+            .unwrap_or_else(|| "—".into());
+        let audit_status = self
+            .data
+            .as_ref()
+            .and_then(|data| data["audit"]["chain_valid"].as_bool())
+            .map(|valid| if valid { "Verificato" } else { "Da controllare" })
+            .unwrap_or("—")
+            .to_owned();
+
+        egui::Frame::new()
+            .fill(SURFACE)
+            .stroke(egui::Stroke::new(
+                1.0,
+                egui::Color32::from_rgb(25, 100, 126),
+            ))
+            .corner_radius(18)
+            .inner_margin(16)
+            .show(ui, |ui| {
+                let width = ui.available_width();
+                if width < 570.0 {
+                    self.dashboard_intro(ui, ctx, &core_status, &ai_status, &confirmations);
+                    ui.add_space(8.0);
+                    ui.vertical_centered(|ui| show_avatar(ui, ctx, self.reduce_motion));
+                } else {
+                    let intro_width = width * 0.62;
+                    let avatar_width = (width - intro_width - 12.0).max(140.0);
+                    ui.horizontal_top(|ui| {
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(intro_width, 206.0),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                self.dashboard_intro(
+                                    ui,
+                                    ctx,
+                                    &core_status,
+                                    &ai_status,
+                                    &confirmations,
+                                );
+                            },
+                        );
+                        ui.separator();
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(avatar_width, 206.0),
+                            egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                            |ui| show_avatar(ui, ctx, self.reduce_motion),
+                        );
+                    });
+                }
+            });
+
+        ui.add_space(12.0);
+        ui.horizontal_wrapped(|ui| {
+            for (label, value, detail) in [
+                ("CORE", core_status.as_str(), version.as_str()),
+                ("AI", ai_status.as_str(), "Stato del servizio"),
+                ("CONFERME", confirmations.as_str(), "In attesa"),
+                ("NOTIFICHE", unread.as_str(), "Da leggere"),
+                ("AUTOMAZIONI", automations.as_str(), "Attive"),
+                ("AUDIT", audit_status.as_str(), "Catena locale"),
+            ] {
+                egui::Frame::new()
+                    .fill(RAISED)
+                    .corner_radius(12)
+                    .inner_margin(12)
+                    .show(ui, |ui| {
+                        ui.set_min_width(116.0);
+                        ui.small(egui::RichText::new(label).weak());
+                        ui.strong(value);
+                        ui.small(egui::RichText::new(detail).weak());
+                    });
+            }
+        });
+
+        ui.add_space(12.0);
+        egui::Frame::new()
+            .fill(SURFACE)
+            .corner_radius(16)
+            .inner_margin(14)
+            .show(ui, |ui| {
+                ui.heading("Accesso rapido");
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button("Nuova chat").clicked() {
+                        self.current = "chat".into();
+                    }
+                    if ui.button("Attività").clicked() {
+                        self.current = "tasks".into();
+                        self.data = None;
+                        self.refresh(ctx);
+                    }
+                    if ui.button("Sistema").clicked() {
+                        self.current = "system".into();
+                        self.data = None;
+                        self.refresh(ctx);
+                    }
+                });
+                if self
+                    .data
+                    .as_ref()
+                    .is_some_and(|data| data["first_run"] == true)
+                    && ui.button("Completa la configurazione iniziale").clicked()
+                {
+                    self.current = "system".into();
+                    self.data = None;
+                    self.refresh(ctx);
+                }
+            });
+
+        self.show_dashboard_tasks(ui, ctx);
+
+        ui.add_space(12.0);
+        egui::Frame::new()
+            .fill(SURFACE)
+            .corner_radius(16)
+            .inner_margin(14)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading("Notifiche recenti");
+                    if self.loading {
+                        ui.add(egui::Spinner::new());
+                    }
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            if ui.button("Segna tutte come lette").clicked() {
+                                self.act(ctx, "/api/notifications/read-all".into(), None);
+                            }
+                        },
+                    );
+                });
+                self.show_notifications(ui);
+            });
+    }
+
+    fn show_dashboard_tasks(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        egui::Frame::new()
+            .fill(SURFACE)
+            .corner_radius(16)
+            .inner_margin(14)
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.heading("Attività recenti");
+                    if ui.button("Mostra tutte").clicked() {
+                        self.current = "tasks".into();
+                        self.data = None;
+                        self.refresh(ctx);
+                    }
+                });
+                let tasks = self
+                    .data
+                    .as_ref()
+                    .and_then(|data| data["recent_tasks"].as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                if tasks.is_empty() {
+                    ui.label(if self.loading {
+                        "Caricamento delle attività…"
+                    } else {
+                        "Nessuna attività recente."
+                    });
+                }
+                for task in tasks {
+                    ui.horizontal(|ui| {
+                        let state = task["state"].as_str().unwrap_or("in attesa");
+                        let color = if state == "failed" {
+                            egui::Color32::LIGHT_RED
+                        } else {
+                            ACCENT
+                        };
+                        ui.label(egui::RichText::new("●").color(color));
+                        ui.vertical(|ui| {
+                            ui.label(
+                                task["objective"]
+                                    .as_str()
+                                    .unwrap_or("Attività senza titolo"),
+                            );
+                            ui.small(
+                                egui::RichText::new(format!(
+                                    "{} · {}",
+                                    state,
+                                    task["created_at"]
+                                        .as_str()
+                                        .unwrap_or("")
+                                        .chars()
+                                        .take(16)
+                                        .collect::<String>()
+                                ))
+                                .weak(),
+                            );
+                        });
+                    });
+                    ui.separator();
+                }
+            });
+    }
+
+    fn dashboard_intro(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        core_status: &str,
+        ai_status: &str,
+        confirmations: &str,
+    ) {
+        ui.label(
+            egui::RichText::new("IL TUO ASSISTENTE PERSONALE")
+                .small()
+                .strong()
+                .color(ACCENT),
+        );
+        ui.add_space(8.0);
+        ui.heading(egui::RichText::new("Bentornato.").size(30.0));
+        ui.label(
+            egui::RichText::new("Sono JARVIS. Tutto pronto per aiutarti?")
+                .size(16.0)
+                .color(egui::Color32::from_rgb(180, 203, 222)),
+        );
+        ui.add_space(12.0);
+        ui.horizontal_wrapped(|ui| {
+            status_pill(ui, "CORE", core_status);
+            status_pill(ui, "AI", ai_status);
+            if confirmations != "0" && confirmations != "—" {
+                status_pill(ui, "CONFERME", confirmations);
+            }
+        });
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("Apri la chat").clicked() {
+                self.current = "chat".into();
+            }
+            if ui.button("Controlla le attività").clicked() {
+                self.current = "tasks".into();
+                self.data = None;
+                self.refresh(ctx);
+            }
+            ui.checkbox(&mut self.reduce_motion, "Riduci animazioni");
+        });
     }
 
     fn show_setup(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -1716,6 +1907,148 @@ impl eframe::App for JarvisApp {
             self.error = Some("Il Core si è arrestato. Riavvia JARVIS per riconnetterti.".into());
         }
         ctx.request_repaint_after(Duration::from_millis(200));
+    }
+}
+
+fn status_pill(ui: &mut egui::Ui, label: &str, value: &str) {
+    egui::Frame::new()
+        .fill(RAISED)
+        .corner_radius(egui::CornerRadius::same(20))
+        .inner_margin(egui::Margin::symmetric(10, 5))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("●").color(ACCENT).small());
+                ui.label(egui::RichText::new(label).small().weak());
+                ui.label(egui::RichText::new(value).small().strong());
+            });
+        });
+}
+
+fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
+    let side = ui.available_width().min(236.0).max(132.0);
+    let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(side), egui::Sense::hover());
+    let painter = ui.painter_at(rect);
+    let center = rect.center();
+    let time = if reduce_motion {
+        0.0
+    } else {
+        ctx.input(|input| input.time)
+    };
+    let pulse = if reduce_motion {
+        0.0
+    } else {
+        ((time * 1.15).sin() * 0.5 + 0.5) as f32
+    };
+    let breath = pulse * 3.0;
+    let accent = egui::Color32::from_rgb(35, 198, 244);
+
+    painter.circle_filled(
+        center,
+        side * 0.47,
+        egui::Color32::from_rgb(8, 24, 39),
+    );
+    painter.circle_stroke(
+        center,
+        side * 0.43 + breath,
+        egui::Stroke::new(
+            1.4,
+            egui::Color32::from_rgba_unmultiplied(35, 198, 244, 75),
+        ),
+    );
+    painter.circle_stroke(
+        center,
+        side * 0.36 - breath * 0.35,
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(32, 83, 112)),
+    );
+
+    let ring_radius = side * 0.40;
+    let sweep = std::f32::consts::PI * 1.45;
+    let start = time as f32 * 0.28;
+    let arc = (0..=48)
+        .map(|index| {
+            let angle = start + sweep * index as f32 / 48.0;
+            center + egui::Vec2::new(angle.cos(), angle.sin()) * ring_radius
+        })
+        .collect();
+    painter.add(egui::Shape::line(
+        arc,
+        egui::Stroke::new(2.0, accent),
+    ));
+
+    let unit = side / 236.0;
+    let face_center = center + egui::vec2(0.0, -side * 0.035);
+    let shoulders = vec![
+        center + egui::vec2(-side * 0.25, side * 0.31),
+        center + egui::vec2(-side * 0.20, side * 0.19),
+        center + egui::vec2(-side * 0.10, side * 0.13),
+        center + egui::vec2(0.0, side * 0.18),
+        center + egui::vec2(side * 0.10, side * 0.13),
+        center + egui::vec2(side * 0.20, side * 0.19),
+        center + egui::vec2(side * 0.25, side * 0.31),
+    ];
+    painter.add(egui::Shape::convex_polygon(
+        shoulders,
+        egui::Color32::from_rgb(14, 44, 64),
+        egui::Stroke::new(1.5, egui::Color32::from_rgb(36, 149, 185)),
+    ));
+    painter.rect_filled(
+        egui::Rect::from_center_size(
+            center + egui::vec2(0.0, side * 0.13),
+            egui::vec2(side * 0.105, side * 0.20),
+        ),
+        egui::CornerRadius::same(8),
+        egui::Color32::from_rgb(18, 54, 72),
+    );
+
+    let head = vec![
+        face_center + egui::vec2(0.0, -side * 0.255),
+        face_center + egui::vec2(side * 0.135, -side * 0.205),
+        face_center + egui::vec2(side * 0.16, -side * 0.065),
+        face_center + egui::vec2(side * 0.12, side * 0.105),
+        face_center + egui::vec2(0.0, side * 0.175),
+        face_center + egui::vec2(-side * 0.12, side * 0.105),
+        face_center + egui::vec2(-side * 0.16, -side * 0.065),
+        face_center + egui::vec2(-side * 0.135, -side * 0.205),
+    ];
+    painter.add(egui::Shape::convex_polygon(
+        head,
+        egui::Color32::from_rgb(19, 43, 58),
+        egui::Stroke::new(1.8, egui::Color32::from_rgb(71, 194, 224)),
+    ));
+
+    let eye_y = face_center.y - side * 0.025;
+    for direction in [-1.0, 1.0] {
+        painter.line_segment(
+            [
+                egui::pos2(face_center.x + direction * side * 0.09, eye_y),
+                egui::pos2(face_center.x + direction * side * 0.035, eye_y),
+            ],
+            egui::Stroke::new(2.6 * unit, accent),
+        );
+    }
+    painter.line_segment(
+        [
+            egui::pos2(face_center.x, eye_y + side * 0.015),
+            egui::pos2(face_center.x - side * 0.018, eye_y + side * 0.07),
+        ],
+        egui::Stroke::new(1.2 * unit, egui::Color32::from_rgb(105, 179, 197)),
+    );
+    painter.line_segment(
+        [
+            egui::pos2(face_center.x - side * 0.045, eye_y + side * 0.105),
+            egui::pos2(face_center.x + side * 0.045, eye_y + side * 0.105),
+        ],
+        egui::Stroke::new(1.2 * unit, egui::Color32::from_rgb(105, 179, 197)),
+    );
+    painter.text(
+        center + egui::vec2(0.0, side * 0.275),
+        egui::Align2::CENTER_CENTER,
+        "JARVIS",
+        egui::FontId::proportional(14.0 * unit),
+        egui::Color32::from_rgb(210, 235, 246),
+    );
+    if !reduce_motion {
+        ctx.request_repaint_after(Duration::from_millis(50));
     }
 }
 

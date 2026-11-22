@@ -1279,6 +1279,17 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - Il client desktop usa il catalogo per installare connettori tramite un modulo. L’OAuth usa il browser e il setup voce usa le scelte e l’avanzamento del Core.
 - Il proprietario sceglie la chat cloud e se includere il contesto recente dello stesso provider. I comandi deterministici riconosciuti, come la validazione JSON, si risolvono nel Core. Le richieste di sicurezza difensiva propongono strumenti di sola lettura.
 
+### ADR-0073 — Plancia nativa con avatar animato
+
+- **Data** 2026-11-22 · **Stato** implementata nel checkout · **Fonte** richiesta del proprietario e immagine di riferimento.
+- **Contesto:** la Plancia egui era un riepilogo testuale, mentre Android si apriva sulla chat senza una home o un avatar. La UI Web precedente è stata ritirata con ADR-0067.
+- **Opzioni considerate:** ripristinare immagini/WebView oppure disegnare l'avatar nei client nativi. Si sceglie la seconda per evitare dipendenze remote, mantenere la compatibilità Windows/macOS/Android e conservare i confini nativi.
+- **Decisione:** la Plancia desktop usa una composizione a schede adattiva per Windows, macOS e Linux, con avatar vettoriale originale animato, accessi rapidi e riepiloghi provenienti dalle API del Core. Il controllo «Riduci animazioni» ferma il moto dell'avatar. Android aggiunge la Plancia come destinazione iniziale, con avatar Compose animato, accesso alla chat e attività recenti.
+- **Motivazione:** conteggi, stato e notifiche sono letti dal Core con le autorizzazioni già assegnate al dispositivo; non vengono inventate metriche hardware non disponibili. Intestazione e controlli di navigazione restano ancorati al viewport e il contenuto scorre nei pannelli interni. L'animazione Compose segue la scala di movimento del sistema.
+- **Conseguenze:** la parità visiva con il riferimento è adattata ai client nativi; non si reintroducono immagini remote o il client Web. Il collaudo grafico su Windows, macOS e dispositivi Android reali resta necessario.
+- **Evidenza:** `gradle -p apps/android -Pjarvis.coreOnly=true :core-client:test --no-daemon` e `git diff --check` superati. Il build dell'app Compose è sospeso perché nell'ambiente non è configurato l'Android SDK; Cargo e il collaudo visivo non sono disponibili.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md, `apps/desktop/src-tauri/src/app.rs`, `apps/android/app/src/main/java/local/jarvis/app/MainActivity.kt`.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.

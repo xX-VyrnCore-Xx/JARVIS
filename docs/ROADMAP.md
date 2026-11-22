@@ -69,6 +69,8 @@ Il checkpoint è la sezione di ripresa versionata con Git. Ogni voce va aggiorna
 
 **Strumenti e client nativi (2026-11-22).** Fase 6. Aggiunti il conteggio del testo e la validazione sintattica JSON (ADR-0070). La navigazione desktop rimane disponibile nelle finestre strette, con conversazione e compositore distinti. Android adotta la stessa palette scura, superfici dei messaggi e compositore ancorato. Lo smoke API verifica i nuovi strumenti. La resa su dispositivi fisici resta da verificare.
 
+**Plancia nativa con avatar animato (2026-11-22, base `d909d77` su `main`).** Fase 6, RF-10/RF-13, ADR-0073. La Plancia desktop ora presenta un avatar vettoriale originale con animazione lieve e controllo per ridurla, accessi rapidi e schede alimentate dai dati effettivi del Core. Android aggiunge una home con avatar animato, stato della connessione, conteggi di attività/notifiche e ultima attività; la navigazione inferiore resta fissa e il contenuto scorre internamente. Nessun dato hardware o attività fittizia viene mostrato. Verifiche locali: `git diff --check` e `gradle -p apps/android -Pjarvis.coreOnly=true :core-client:test --no-daemon` superati. Il build dell'app Compose non è eseguibile perché l'Android SDK non è configurato; i controlli desktop Rust e la verifica visiva su finestre larghe/strette e dispositivi reali restano sospesi perché Cargo e l'ambiente grafico/Android non sono disponibili. Nel checkout sono presenti anche le modifiche a `app.rs`, `MainActivity.kt` e alle specifiche; non sono state pubblicate su `main`.
+
 
 Il checkpoint precedente è riportato qui sotto per riferimento.
 
