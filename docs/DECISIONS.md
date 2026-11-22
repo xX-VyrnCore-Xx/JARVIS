@@ -1273,6 +1273,12 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - Le release riutilizzano i certificati P12/PFX configurati nei Secret e richiedono una firma valida prima della pubblicazione. macOS firma app e DMG dal portachiavi temporaneo di CI. Windows firma setup, GUI e Core con il certificato identificato nel PFX.
 - Le verifiche con i Secret configurati hanno installato entrambi i pacchetti e avviato il Core sui runner macOS Apple Silicon e Windows x64. Le attestazioni Sigstore e il keystore Android restano parte della pipeline.
 
+### ADR-0072 — Configurazione guidata e verifica delle risposte
+
+- Android legge messaggi e conferme in uno snapshot autenticato. Il client conserva la compatibilità con i Core che espongono le due rotte separate.
+- Il client desktop usa il catalogo per installare connettori tramite un modulo. L’OAuth usa il browser e il setup voce usa le scelte e l’avanzamento del Core.
+- Il proprietario sceglie la chat cloud e se includere il contesto recente dello stesso provider. I comandi deterministici riconosciuti, come la validazione JSON, si risolvono nel Core. Le richieste di sicurezza difensiva propongono strumenti di sola lettura.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.

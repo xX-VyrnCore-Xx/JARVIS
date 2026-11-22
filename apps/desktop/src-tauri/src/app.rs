@@ -44,6 +44,7 @@ enum Event {
     Loaded(String, Result<Value, String>),
     History(Result<Value, String>),
     ActionDone(Result<Value, String>),
+    ConnectorOAuth(Result<Value, String>),
     PairingCreated(Result<Value, String>),
     CloudConfigured(Result<Value, String>, bool),
     ChatDelta(String),
@@ -80,6 +81,8 @@ pub struct JarvisApp {
     history_loading: bool,
     streaming: String,
     chat_busy: bool,
+    chat_cloud: bool,
+    chat_cloud_context: bool,
     notifications: Vec<Value>,
     notifications_error: Option<String>,
     confirmations: Vec<Value>,
@@ -93,6 +96,11 @@ pub struct JarvisApp {
     pair_error: Option<String>,
     pending_delete: Option<(String, String)>,
     device_invite: Option<Value>,
+    setup_stt: String,
+    setup_tts: String,
+    connector_template: String,
+    connector_client_id: String,
+    connector_credential: String,
     invite_confirm: bool,
     invite_creating: bool,
     cloud_provider: String,
@@ -140,6 +148,8 @@ impl JarvisApp {
             history_loading: false,
             streaming: String::new(),
             chat_busy: false,
+            chat_cloud: false,
+            chat_cloud_context: false,
             notifications: Vec::new(),
             notifications_error: None,
             confirmations: Vec::new(),
@@ -153,6 +163,11 @@ impl JarvisApp {
             pair_error: None,
             pending_delete: None,
             device_invite: None,
+            setup_stt: "small".into(),
+            setup_tts: "it_IT-paola-medium".into(),
+            connector_template: String::new(),
+            connector_client_id: String::new(),
+            connector_credential: String::new(),
             invite_confirm: true,
             invite_creating: false,
             cloud_provider: "ollama_cloud".into(),
@@ -210,6 +225,17 @@ impl JarvisApp {
                 Event::History(Err(error)) => {
                     self.history_loading = false;
                     self.error = Some(error);
+                }
+                Event::ConnectorOAuth(result) => {
+                    self.loading = false;
+                    match result {
+                        Ok(data) => {
+                            if let Some(url) = data["authorize_url"].as_str() {
+                                ctx.open_url(egui::OpenUrl::new_tab(url));
+                            }
+                        }
+                        Err(error) => self.error = Some(error),
+                    }
                 }
                 Event::ActionDone(result) => {
                     self.loading = false;
@@ -273,7 +299,9 @@ impl JarvisApp {
                             });
                         }
                     }
-                    if let Some(confirmation) = result.get("confirmation") {
+                    if let Some(confirmation) =
+                        result.get("confirmation").filter(|value| value.is_object())
+                    {
                         self.confirmations.push(confirmation.clone());
                     }
                     self.streaming.clear();
@@ -357,7 +385,16 @@ impl JarvisApp {
         let tx = self.tx.clone();
         let path = endpoint(&page);
         std::thread::spawn(move || {
-            let result = client.get(path);
+            let result = client.get(path).and_then(|mut data| {
+                if page == "connectors" {
+                    data["catalog"] = client.get("/api/connectors/templates")?["templates"].clone();
+                } else if page == "dashboard" {
+                    if let Ok(setup) = client.get("/api/setup") {
+                        data["first_run"] = setup["first_run"].clone();
+                    }
+                }
+                Ok(data)
+            });
             let _ = tx.send(Event::Loaded(page, result));
         });
         ctx.request_repaint();
@@ -383,10 +420,21 @@ impl JarvisApp {
         self.chat_busy = true;
         self.streaming.clear();
         let tx = self.tx.clone();
+        let cloud = self.chat_cloud && !self.remote;
+        let use_context = self.chat_cloud_context;
         std::thread::spawn(move || {
-            let result = client.chat_stream(&message, |delta| {
-                let _ = tx.send(Event::ChatDelta(delta.to_string()));
-            });
+            let result = if cloud {
+                client.post(
+                    "/api/cloud/chat",
+                    Some(&json!({
+                        "provider": "auto", "message": message, "use_context": use_context,
+                    })),
+                )
+            } else {
+                client.chat_stream(&message, |delta| {
+                    let _ = tx.send(Event::ChatDelta(delta.to_string()));
+                })
+            };
             let _ = tx.send(Event::ChatFinished(result));
         });
     }
@@ -489,6 +537,7 @@ impl JarvisApp {
             .corner_radius(egui::CornerRadius::same(8));
             let width = if compact { 122.0 } else { ui.available_width() };
             if ui.add_sized([width, 38.0], button).clicked() {
+                self.connector_credential.clear();
                 self.current = id.into();
                 self.data = None;
                 self.refresh(ctx);
@@ -497,6 +546,18 @@ impl JarvisApp {
     }
 
     fn show_chat(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if !self.remote {
+            ui.add_enabled_ui(!self.chat_busy, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.selectable_value(&mut self.chat_cloud, false, "Assistente locale");
+                    ui.selectable_value(&mut self.chat_cloud, true, "AI cloud");
+                    if self.chat_cloud {
+                        ui.checkbox(&mut self.chat_cloud_context, "Includi turni cloud recenti")
+                            .on_hover_text("Condivide i turni precedenti dello stesso provider con la richiesta corrente.");
+                    }
+                });
+            });
+        }
         if let Some(error) = &self.error {
             ui.colored_label(egui::Color32::LIGHT_RED, error);
         }
@@ -724,6 +785,16 @@ impl JarvisApp {
                     ui.add(egui::Spinner::new());
                 }
                 ui.separator();
+                if self
+                    .data
+                    .as_ref()
+                    .is_some_and(|data| data["first_run"] == true)
+                    && ui.button("Apri configurazione iniziale").clicked()
+                {
+                    self.current = "system".into();
+                    self.data = None;
+                    self.refresh(ctx);
+                }
                 ui.heading("Notifiche");
                 self.show_notifications(ui);
                 if ui.button("Segna tutte come lette").clicked() {
@@ -733,8 +804,10 @@ impl JarvisApp {
             "chat" => self.show_chat(ui, ctx),
             "models" => self.show_cloud_settings(ui, ctx),
             "updates" => self.show_updates(ui, ctx),
-            "tasks" | "automations" | "memory" | "skills" | "workspace" | "connectors"
-            | "devices" | "security" | "audit" | "system" => {
+            "system" => self.show_setup(ui, ctx),
+            "connectors" => self.show_connectors(ui, ctx),
+            "tasks" | "automations" | "memory" | "skills" | "workspace" | "devices"
+            | "security" | "audit" => {
                 ui.horizontal(|ui| {
                     ui.heading(title(&self.current));
                     if ui.button("Aggiorna").clicked() {
@@ -761,13 +834,260 @@ impl JarvisApp {
                         self.show_item(ui, ctx, &item);
                     }
                 } else {
-                    if self.current == "system" && ui.button("Crea backup cifrato").clicked() {
-                        self.act(ctx, "/api/backup".into(), Some(json!({})));
-                    }
                     self.show_json(ui);
                 }
             }
             _ => {}
+        }
+    }
+
+    fn show_setup(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.heading("Configurazione di JARVIS");
+        ui.label("La chat è disponibile subito. Configura la voce locale quando ti serve.");
+        if let Some(error) = &self.error {
+            ui.colored_label(egui::Color32::LIGHT_RED, error);
+        }
+        let Some(data) = self.data.clone() else {
+            if self.loading {
+                ui.spinner();
+            }
+            if ui.button("Rileggi configurazione").clicked() {
+                self.refresh(ctx);
+            }
+            return;
+        };
+        let running = data["running"] == true;
+        if let Some(saved_steps) = data["saved"]["steps"].as_array() {
+            if saved_steps.iter().all(|step| step["status"] == "done") {
+                ui.label("Configurazione voce completata");
+            } else {
+                ui.label("Configurazione voce parziale. Puoi riprovare.");
+            }
+        }
+        ui.add_enabled_ui(!running && !self.loading, |ui| {
+            for (field, label, choice) in [
+                ("stt_models", "Riconoscimento vocale", &mut self.setup_stt),
+                ("tts_voices", "Voce", &mut self.setup_tts),
+            ] {
+                ui.small(label);
+                egui::ComboBox::from_id_salt(field)
+                    .selected_text(choice.as_str())
+                    .show_ui(ui, |ui| {
+                        if let Some(options) = data["choices"][field].as_array() {
+                            for option in options.iter().filter_map(Value::as_str) {
+                                ui.selectable_value(choice, option.into(), option);
+                            }
+                        }
+                    });
+            }
+            if let (Some(packages), Some(stt), Some(tts)) = (
+                data["sizes_mb"]["voice_packages"].as_u64(),
+                data["sizes_mb"]["stt"][&self.setup_stt].as_u64(),
+                data["sizes_mb"]["tts"].as_u64(),
+            ) {
+                ui.label(format!("Download stimato: {} MB", packages + stt + tts));
+            }
+            if ui.button("Configura voce locale").clicked() {
+                self.act(
+                    ctx,
+                    "/api/setup/start".into(),
+                    Some(json!({
+                        "stt_model": self.setup_stt, "tts_voice": self.setup_tts
+                    })),
+                );
+            }
+        });
+        if running {
+            ui.spinner();
+            if !self.loading && self.last_load.elapsed() >= Duration::from_secs(1) {
+                self.refresh(ctx);
+            }
+            ctx.request_repaint_after(Duration::from_secs(1));
+        }
+        if let Some(steps) = data["steps"]
+            .as_array()
+            .filter(|steps| !steps.is_empty())
+            .or_else(|| data["saved"]["steps"].as_array())
+        {
+            for step in steps {
+                ui.group(|ui| {
+                    ui.strong(
+                        step["label"]
+                            .as_str()
+                            .or_else(|| step["id"].as_str())
+                            .unwrap_or("Configurazione"),
+                    );
+                    ui.label(match step["status"].as_str() {
+                        Some("done") => "Completato",
+                        Some("running") => "In corso",
+                        Some("error" | "failed") => "Non riuscito",
+                        Some("skipped") => "Saltato",
+                        _ => "In attesa",
+                    });
+                    if let Some(progress) = step["progress"].as_f64() {
+                        ui.add(egui::ProgressBar::new((progress / 100.0) as f32).show_percentage());
+                    }
+                    if let Some(detail) =
+                        step["detail"].as_str().filter(|detail| !detail.is_empty())
+                    {
+                        ui.small(detail);
+                    }
+                });
+            }
+        }
+        ui.separator();
+        if ui.button("Configura provider AI").clicked() {
+            self.current = "models".into();
+            self.data = None;
+            self.refresh(ctx);
+        }
+        if ui.button("Crea backup cifrato").clicked() {
+            self.act(ctx, "/api/backup".into(), Some(json!({})));
+        }
+    }
+
+    fn show_connectors(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.heading("Connettori");
+        if let Some(error) = &self.error {
+            ui.colored_label(egui::Color32::LIGHT_RED, error);
+        }
+        if ui
+            .add_enabled(!self.loading, egui::Button::new("Aggiorna"))
+            .clicked()
+        {
+            self.refresh(ctx);
+        }
+        let Some(data) = self.data.clone() else {
+            return;
+        };
+        let installed = data["items"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        if let Some(catalog) = data["catalog"].as_array() {
+            egui::ComboBox::from_id_salt("connector-catalog")
+                .selected_text(
+                    catalog
+                        .iter()
+                        .find(|entry| entry["id"] == self.connector_template)
+                        .and_then(|entry| entry["name"].as_str())
+                        .unwrap_or("Scegli dal catalogo"),
+                )
+                .show_ui(ui, |ui| {
+                    for entry in catalog {
+                        if let (Some(id), Some(name)) =
+                            (entry["id"].as_str(), entry["name"].as_str())
+                        {
+                            if ui
+                                .selectable_value(&mut self.connector_template, id.into(), name)
+                                .clicked()
+                            {
+                                self.connector_client_id.clear();
+                                self.connector_credential.clear();
+                            }
+                        }
+                    }
+                });
+            if let Some(entry) = catalog
+                .iter()
+                .find(|entry| entry["id"] == self.connector_template)
+            {
+                ui.label(entry["description"].as_str().unwrap_or_default());
+                if let Some(instructions) = entry["setup"].as_str() {
+                    ui.small(instructions);
+                }
+                if !installed
+                    .iter()
+                    .any(|item| item["id"] == self.connector_template)
+                {
+                    let needs_id = entry["needs_client_id"] == true;
+                    if needs_id {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.connector_client_id)
+                                .hint_text("ID client OAuth"),
+                        );
+                    }
+                    if ui
+                        .add_enabled(
+                            !self.loading
+                                && (!needs_id || !self.connector_client_id.trim().is_empty()),
+                            egui::Button::new("Installa"),
+                        )
+                        .clicked()
+                    {
+                        self.act(
+                            ctx,
+                            format!("/api/connectors/templates/{}", self.connector_template),
+                            Some(json!({"client_id": self.connector_client_id.trim()})),
+                        );
+                    }
+                }
+            }
+        }
+        for item in installed {
+            ui.group(|ui| {
+                let id = item["id"].as_str().unwrap_or_default();
+                ui.strong(item["name"].as_str().unwrap_or(id));
+                ui.small(if item["authorized"] == true {
+                    "Autorizzato"
+                } else {
+                    "Da autorizzare"
+                });
+                if item["auth"] == "none" || id.is_empty() {
+                    return;
+                }
+                if self.connector_template != id {
+                    if ui.button("Configura accesso").clicked() {
+                        self.connector_template = id.into();
+                        self.connector_credential.clear();
+                    }
+                    return;
+                }
+                let oauth = item["auth"] == "oauth2";
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.connector_credential)
+                        .password(true)
+                        .hint_text(if oauth {
+                            "Client secret OAuth, se richiesto"
+                        } else {
+                            "Credenziale del servizio"
+                        }),
+                );
+                if ui
+                    .add_enabled(
+                        !self.loading && (oauth || !self.connector_credential.trim().is_empty()),
+                        egui::Button::new("Autorizza"),
+                    )
+                    .clicked()
+                {
+                    let credential = std::mem::take(&mut self.connector_credential);
+                    if oauth {
+                        if let Some(client) = self.client.clone() {
+                            let tx = self.tx.clone();
+                            let path = format!("/api/connectors/{id}/oauth/start");
+                            self.loading = true;
+                            std::thread::spawn(move || {
+                                let result =
+                                    client.post(&path, Some(&json!({"client_secret": credential})));
+                                let _ = tx.send(Event::ConnectorOAuth(result));
+                            });
+                        }
+                    } else {
+                        self.act(
+                            ctx,
+                            format!("/api/connectors/{id}/authorize"),
+                            Some(json!({"credential": credential})),
+                        );
+                    }
+                }
+                if item["authorized"] == true
+                    && ui
+                        .add_enabled(!self.loading, egui::Button::new("Revoca accesso"))
+                        .clicked()
+                {
+                    self.act(ctx, format!("/api/connectors/{id}/revoke"), Some(json!({})));
+                }
+            });
         }
     }
 
@@ -1028,6 +1348,7 @@ impl JarvisApp {
     fn show_device_invite(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.group(|ui| {
             ui.heading("Associa un dispositivo");
+            ui.label("Apri JARVIS sul telefono e inserisci l’indirizzo HTTPS del Core e il codice monouso.");
             ui.checkbox(
                 &mut self.invite_confirm,
                 "Consenti le conferme (oltre alla chat)",
@@ -1046,6 +1367,11 @@ impl JarvisApp {
                     "Codice: {}",
                     invite["code"].as_str().unwrap_or("—")
                 ));
+                if let Some(code) = invite["code"].as_str() {
+                    if ui.button("Copia codice").clicked() {
+                        ctx.copy_text(code.to_owned());
+                    }
+                }
                 ui.label(format!(
                     "Scade: {}",
                     invite["expires_at"].as_str().unwrap_or("—")

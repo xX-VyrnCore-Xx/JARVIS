@@ -65,6 +65,8 @@ Il checkpoint è la sezione di ripresa versionata con Git. Ogni voce va aggiorna
 
 **Release desktop con identità di firma persistenti (2026-11-22).** Le release con Windows x64 e macOS Apple Silicon usano i certificati configurati nei GitHub Actions Secret, come previsto dall’ADR-0071. La build con i Secret configurati ha firmato, installato e avviato entrambi i pacchetti sui runner GitHub. La CI annulla automaticamente le run superate da un nuovo commit sulla stessa PR. Le prove su computer fisici restano da completare.
 
+**Configurazione e client associati (2026-11-22).** Fase 6, ADR-0072. Android ha navigazione inferiore e una vista per verificare la sessione. Sul desktop il Core espone le fasi del setup, il catalogo dei connettori e la chat cloud con contesto facoltativo. Lo smoke API copre pairing, snapshot, installazione dal catalogo, setup simulato e validazione locale dalla chat cloud. Restano da collaudare un dispositivo Android fisico e le autorizzazioni dei singoli servizi OAuth.
+
 **Strumenti e client nativi (2026-11-22).** Fase 6. Aggiunti il conteggio del testo e la validazione sintattica JSON (ADR-0070). La navigazione desktop rimane disponibile nelle finestre strette, con conversazione e compositore distinti. Android adotta la stessa palette scura, superfici dei messaggi e compositore ancorato. Lo smoke API verifica i nuovi strumenti. La resa su dispositivi fisici resta da verificare.
 
 

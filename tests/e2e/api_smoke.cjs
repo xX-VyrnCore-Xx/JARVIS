@@ -81,6 +81,39 @@ function check(condition, message) {
   });
   check(device.status === 200 && Array.isArray(device.json?.items), "client associato accede alla conversazione via API");
 
+  const snapshot = await request("/api/chat/sync", { host: remoteHost, deviceToken: paired.json.token });
+  check(snapshot.status === 200 && Array.isArray(snapshot.json?.messages) && Array.isArray(snapshot.json?.confirmations),
+    "il dispositivo associato sincronizza chat e conferme con una sola richiesta");
+
+  const catalog = await request("/api/connectors/templates", { token: ownerToken });
+  const github = catalog.json?.templates?.find((template) => template.id === "github");
+  check(catalog.status === 200 && github?.needs_client_id === false, "catalogo connettori disponibile al desktop");
+  const installed = await request("/api/connectors/templates/github", { method: "POST", token: ownerToken, body: {} });
+  check(installed.status === 200 || installed.status === 201, "installazione guidata dal catalogo");
+  const connectors = await request("/api/connectors", { token: ownerToken });
+  check(connectors.json?.items?.some((connector) => connector.id === "github"), "connettore presente nell’elenco del Core");
+
+  const setup = await request("/api/setup", { token: ownerToken });
+  check(setup.status === 200 && setup.json?.choices?.stt_models?.includes("tiny"), "opzioni del setup disponibili");
+  const setupStart = await request("/api/setup/start", {
+    method: "POST", token: ownerToken, body: { stt_model: "tiny", tts_voice: "it_IT-paola-medium" },
+  });
+  check(setupStart.status === 200 || setupStart.status === 202, "setup vocale avviato dal Core");
+  let setupState;
+  for (let attempt = 0; attempt < 25; attempt++) {
+    setupState = (await request("/api/setup", { token: ownerToken })).json;
+    if (!setupState?.running) break;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  check(!setupState?.running && setupState?.saved?.plan?.stt_model === "tiny", "setup di prova completato con la scelta del client");
+
+  const localFact = await request("/api/cloud/chat", {
+    method: "POST", token: ownerToken, body: { provider: "auto", message: "valida il JSON: {}", use_context: true },
+  });
+  check(localFact.status === 200 && localFact.json?.steps?.some((step) =>
+    step.kind === "tool_result" && step.tool === "code.validate_json" && step.status === "succeeded"),
+    "la chat cloud delega al Core i controlli verificabili in locale senza chiavi API");
+
   const chat = await request("/api/chat/stream", {
     method: "POST",
     token: ownerToken,

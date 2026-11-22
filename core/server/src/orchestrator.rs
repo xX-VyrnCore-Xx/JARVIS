@@ -821,12 +821,12 @@ impl Jarvis {
                 let mut budget = CLOUD_CONVERSATION_TOKENS
                     .saturating_sub(crate::cloud::estimated_tokens(message));
                 let mut history = Vec::new();
-                for turn in recent
-                    .iter()
-                    .take_while(|turn| turn.cloud_provider.as_deref() == Some(provider.id()))
-                {
+                for turn in recent.iter().take_while(|turn| {
+                    turn.cloud_provider.as_deref() == Some(provider.id())
+                        || turn.assistant.is_none()
+                }) {
                     let Some(assistant) = turn.assistant.as_deref() else {
-                        break;
+                        continue;
                     };
                     if crate::cloud::contains_credentials(&turn.user)
                         || crate::cloud::contains_credentials(assistant)
@@ -856,9 +856,11 @@ impl Jarvis {
         targets.sort_by_key(|target| target.history.is_empty());
         let task = Task::new(message, json!({"kind": "owner", "id": "owner"}));
         let allows = self.task_scope(&task);
+        let defensive = crate::agents::route(message).filter(|agent| agent.name == "monitoring");
         let tools = crate::cloud::TOOLS
             .iter()
             .filter(|tool| allows(tool))
+            .filter(|tool| defensive.is_none_or(|agent| crate::agents::allows(agent, tool)))
             .filter_map(|tool| self.catalog.get(tool))
             .map(Function::from)
             .collect();
@@ -4660,6 +4662,23 @@ fn explicit_connector_tool(objective: &str) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// I comandi deterministici si risolvono nel Core anche se è stata scelta la chat cloud.
+pub(crate) fn is_local_fact_request(message: &str) -> bool {
+    let message = message.trim().to_lowercase();
+    matches!(
+        message.trim_end_matches(['?', '.', '!']),
+        "che ore sono" | "info sistema" | "postura di sicurezza" | "centro sicurezza"
+    ) || [
+        "conta le parole:",
+        "valida il json:",
+        "valida json:",
+        "verifica il json:",
+        "verifica json:",
+    ]
+    .iter()
+    .any(|prefix| message.starts_with(prefix))
 }
 
 pub(crate) fn is_source_followup(message: &str) -> bool {
