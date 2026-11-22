@@ -36,9 +36,27 @@ if [[ "${JARVIS_REQUIRE_DESKTOP_SIGNATURE:-false}" == true ]]; then
   security set-keychain-settings -lut 21600 "$keychain"
   security unlock-keychain -p "$keychain_password" "$keychain"
   printf '%s' "$JARVIS_MACOS_SIGNING_P12_BASE64" | tr -d '[:space:]' | base64 -D > "$certificate"
-  if ! security import "$certificate" -f pkcs12 -k "$keychain" -P "${JARVIS_MACOS_SIGNING_PASSWORD:-}" -T /usr/bin/codesign >/dev/null 2>&1; then
-    echo "::error::Importazione P12 macOS non riuscita. Verificare il contenitore e la password configurati."
-    exit 1
+  export JARVIS_MACOS_SIGNING_PASSWORD="${JARVIS_MACOS_SIGNING_PASSWORD:-}"
+  import_p12() {
+    security import "$1" -f pkcs12 -k "$keychain" -P "$JARVIS_MACOS_SIGNING_PASSWORD" -T /usr/bin/codesign >/dev/null 2>&1
+  }
+  if ! import_p12 "$certificate"; then
+    # Apple Security may reject the encryption scheme of a valid OpenSSL export.
+    # Rewrap the same identity via a pipe so the plaintext private key stays off disk.
+    normalized="$signing_dir/compatible.p12"
+    unpack_p12() {
+      if openssl pkcs12 -in "$certificate" -passin env:JARVIS_MACOS_SIGNING_PASSWORD -noout 2>/dev/null; then
+        openssl pkcs12 -in "$certificate" -passin env:JARVIS_MACOS_SIGNING_PASSWORD -nodes
+      else
+        openssl pkcs12 -legacy -in "$certificate" -passin env:JARVIS_MACOS_SIGNING_PASSWORD -nodes
+      fi
+    }
+    if ! (unpack_p12 | openssl pkcs12 -export -out "$normalized" \
+      -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 \
+      -passout env:JARVIS_MACOS_SIGNING_PASSWORD) 2>/dev/null || ! import_p12 "$normalized"; then
+      echo "::error::Importazione P12 macOS non riuscita anche dopo la normalizzazione. Verificare il contenitore e la password configurati."
+      exit 1
+    fi
   fi
   identity() {
     security find-identity -v -p codesigning "$keychain" | awk '$2 ~ /^[[:xdigit:]]+$/ && length($2) == 40 {print $2; exit}'
