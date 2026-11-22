@@ -931,6 +931,12 @@ private fun ColumnScope.NoticesScreen(
                         }
                         if (destination != null) {
                             TextButton(onClick = { onOpenLink(link) }) { Text(destination) }
+                        } else {
+                            Text(
+                                "Questa vista non è supportata nell'app Android.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                     Row(

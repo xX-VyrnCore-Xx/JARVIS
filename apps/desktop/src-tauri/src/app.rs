@@ -123,6 +123,7 @@ pub struct JarvisApp {
     connector_template: String,
     connector_client_id: String,
     connector_credential: String,
+    connector_oauth_notice: Option<String>,
     invite_confirm: bool,
     invite_creating: bool,
     cloud_provider: String,
@@ -226,6 +227,7 @@ impl JarvisApp {
             connector_template: String::new(),
             connector_client_id: String::new(),
             connector_credential: String::new(),
+            connector_oauth_notice: None,
             invite_confirm: true,
             invite_creating: false,
             cloud_provider: "ollama_cloud".into(),
@@ -306,11 +308,26 @@ impl JarvisApp {
                     self.loading = false;
                     match result {
                         Ok(data) => {
-                            if let Some(url) = data["authorize_url"].as_str() {
+                            if let Some(url) = data["authorize_url"]
+                                .as_str()
+                                .filter(|url| safe_oauth_authorize_url(url))
+                            {
                                 ctx.open_url(egui::OpenUrl::new_tab(url));
+                                self.error = None;
+                                self.connector_oauth_notice = Some(
+                                    "Completa l'autorizzazione nel browser, poi aggiorna i connettori per verificarne lo stato.".into(),
+                                );
+                            } else {
+                                self.connector_oauth_notice = None;
+                                self.error = Some(
+                                    "Il Core non ha restituito un URL OAuth HTTPS valido.".into(),
+                                );
                             }
                         }
-                        Err(error) => self.error = Some(error),
+                        Err(error) => {
+                            self.connector_oauth_notice = None;
+                            self.error = Some(error);
+                        }
                     }
                 }
                 Event::ActionDone(result) => {
@@ -1310,6 +1327,29 @@ impl JarvisApp {
                     let origin = summary["origin"].as_str().unwrap_or("");
                     let online = summary["online"] == true;
                     let removable = self.backends.iter().any(|backend| backend.origin == origin);
+                    let ai_status = if !online {
+                        "non verificabile"
+                    } else if summary["ai_online"] == true {
+                        "operativa"
+                    } else {
+                        "non disponibile"
+                    };
+                    let recent_tasks = if online {
+                        summary["recent_tasks"]
+                            .as_array()
+                            .map(|tasks| tasks.len().to_string())
+                            .unwrap_or_else(|| "—".into())
+                    } else {
+                        "—".into()
+                    };
+                    let unread = if online {
+                        summary["notifications_unread"]
+                            .as_u64()
+                            .map(|count| count.to_string())
+                            .unwrap_or_else(|| "—".into())
+                    } else {
+                        "—".into()
+                    };
                     egui::Frame::new()
                         .fill(RAISED)
                         .corner_radius(12)
@@ -1334,13 +1374,7 @@ impl JarvisApp {
                             ui.small(
                                 egui::RichText::new(format!(
                                     "AI {} · {} attività recenti · {} notifiche non lette",
-                                    if summary["ai_online"] == true {
-                                        "operativa"
-                                    } else {
-                                        "non disponibile"
-                                    },
-                                    summary["recent_tasks"].as_array().map_or(0, Vec::len),
-                                    summary["notifications_unread"].as_u64().unwrap_or(0),
+                                    ai_status, recent_tasks, unread,
                                 ))
                                 .weak(),
                             );
@@ -1713,6 +1747,9 @@ impl JarvisApp {
         if let Some(error) = &self.error {
             ui.colored_label(egui::Color32::LIGHT_RED, error);
         }
+        if let Some(notice) = &self.connector_oauth_notice {
+            ui.colored_label(POSITIVE, notice);
+        }
         if ui
             .add_enabled(!self.loading, egui::Button::new("Aggiorna"))
             .clicked()
@@ -1746,6 +1783,7 @@ impl JarvisApp {
                             {
                                 self.connector_client_id.clear();
                                 self.connector_credential.clear();
+                                self.connector_oauth_notice = None;
                             }
                         }
                     }
@@ -1802,6 +1840,7 @@ impl JarvisApp {
                     if ui.button("Configura accesso").clicked() {
                         self.connector_template = id.into();
                         self.connector_credential.clear();
+                        self.connector_oauth_notice = None;
                     }
                     return;
                 }
@@ -1822,9 +1861,11 @@ impl JarvisApp {
                     )
                     .clicked()
                 {
-                    let credential = std::mem::take(&mut self.connector_credential);
+                    self.error = None;
+                    self.connector_oauth_notice = None;
                     if oauth {
                         if let Some(client) = self.client.clone() {
+                            let credential = std::mem::take(&mut self.connector_credential);
                             let tx = self.tx.clone();
                             let path = format!("/api/connectors/{id}/oauth/start");
                             self.loading = true;
@@ -1833,8 +1874,11 @@ impl JarvisApp {
                                     client.post(&path, Some(&json!({"client_secret": credential})));
                                 let _ = tx.send(Event::ConnectorOAuth(result));
                             });
+                        } else {
+                            self.error = Some("Core non connesso.".into());
                         }
                     } else {
+                        let credential = std::mem::take(&mut self.connector_credential);
                         self.act(
                             ctx,
                             format!("/api/connectors/{id}/authorize"),
@@ -2800,11 +2844,11 @@ fn unavailable_backend_summary(name: &str, origin: &str, error: &str) -> Value {
         "origin": origin,
         "online": false,
         "ai_online": false,
-        "pending_confirmations": 0,
-        "notifications_unread": 0,
-        "automations": 0,
+        "pending_confirmations": null,
+        "notifications_unread": null,
+        "automations": null,
         "audit_valid": null,
-        "recent_tasks": [],
+        "recent_tasks": null,
         "error": error,
     })
 }
@@ -2828,16 +2872,21 @@ fn dashboard_backend_summary(
             })
         })
         .collect();
+    let recent_tasks = if online && error.is_none() {
+        Value::Array(tasks)
+    } else {
+        Value::Null
+    };
     json!({
         "name": name,
         "origin": origin,
         "online": online,
         "ai_online": online && health["ai"]["status"] == "up",
-        "pending_confirmations": health["pending_confirmations"].as_u64().unwrap_or(0),
-        "notifications_unread": health["notifications_unread"].as_u64().unwrap_or(0),
-        "automations": health["automations"].as_u64().unwrap_or(0),
+        "pending_confirmations": health["pending_confirmations"].as_u64().filter(|_| online),
+        "notifications_unread": health["notifications_unread"].as_u64().filter(|_| online),
+        "automations": health["automations"].as_u64().filter(|_| online),
         "audit_valid": health["audit"]["chain_valid"].as_bool(),
-        "recent_tasks": tasks,
+        "recent_tasks": recent_tasks,
         "error": error,
     })
 }
@@ -3440,6 +3489,15 @@ fn is_https_url(value: &str) -> bool {
     url::Url::parse(value).is_ok_and(|url| url.scheme() == "https" && url.host_str().is_some())
 }
 
+fn safe_oauth_authorize_url(value: &str) -> bool {
+    url::Url::parse(value).is_ok_and(|url| {
+        url.scheme() == "https"
+            && url.host_str().is_some()
+            && url.username().is_empty()
+            && url.password().is_none()
+    })
+}
+
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 fn show_notification(item: &Value) {
     let title = item["title"].as_str().unwrap_or("JARVIS");
@@ -3524,6 +3582,20 @@ mod tests {
     }
 
     #[test]
+    fn oauth_authorization_urls_require_https_and_no_embedded_credentials() {
+        assert!(safe_oauth_authorize_url(
+            "https://accounts.example/authorize?state=synthetic"
+        ));
+        assert!(!safe_oauth_authorize_url(
+            "http://accounts.example/authorize"
+        ));
+        assert!(!safe_oauth_authorize_url(
+            "https://user:pass@accounts.example/authorize"
+        ));
+        assert!(!safe_oauth_authorize_url("javascript:alert(1)"));
+    }
+
+    #[test]
     fn dashboard_aggregates_available_cores_and_keeps_offline_results_partial() {
         let mut data = json!({
             "core": {"status": "up"},
@@ -3551,11 +3623,11 @@ mod tests {
                     "origin": "https://offline.example",
                     "online": false,
                     "ai_online": false,
-                    "pending_confirmations": 0,
-                    "notifications_unread": 0,
-                    "automations": 0,
+                    "pending_confirmations": null,
+                    "notifications_unread": null,
+                    "automations": null,
                     "audit_valid": null,
-                    "recent_tasks": [],
+                    "recent_tasks": null,
                     "error": "Core non raggiungibile o non autorizzato."
                 }),
             ],
@@ -3592,6 +3664,48 @@ mod tests {
         assert!(summary["core"].is_null());
         assert!(summary["ai"].is_null());
         assert!(!summary.to_string().contains("private"));
+    }
+
+    #[test]
+    fn offline_backend_summary_does_not_report_unknown_counts_as_zero() {
+        let unavailable = unavailable_backend_summary(
+            "offline",
+            "https://offline.example",
+            "Core non raggiungibile.",
+        );
+        for field in [
+            "pending_confirmations",
+            "notifications_unread",
+            "automations",
+        ] {
+            assert!(unavailable[field].is_null(), "{field} should be unknown");
+        }
+        assert!(unavailable["recent_tasks"].is_null());
+
+        let health = json!({
+            "core": {"status": "down"},
+            "pending_confirmations": 0,
+            "notifications_unread": 0,
+            "automations": 0
+        });
+        let offline =
+            dashboard_backend_summary("offline", "https://offline.example", &health, vec![], None);
+        assert_eq!(offline["online"], false);
+        assert!(offline["pending_confirmations"].is_null());
+        assert!(offline["notifications_unread"].is_null());
+        assert!(offline["automations"].is_null());
+        assert!(offline["recent_tasks"].is_null());
+
+        let healthy = json!({"core": {"status": "up"}});
+        let tasks_error = dashboard_backend_summary(
+            "partial",
+            "https://partial.example",
+            &healthy,
+            vec![],
+            Some("Riepilogo attività non disponibile."),
+        );
+        assert_eq!(tasks_error["online"], true);
+        assert!(tasks_error["recent_tasks"].is_null());
     }
 
     #[test]

@@ -63,7 +63,7 @@ Gli artefatti sono verificabili con l’attestazione GitHub e le firme Sigstore;
 
 Per un secondo desktop, imposta `JARVIS_REMOTE_URL` o salva l'origine HTTPS in `remote-core-url.txt` nella sua cartella dati. L'app desktop e quella Android si associano con l'origine HTTPS e il codice. [Interfacce e dispositivi](docs/INTERFACE_AND_DEVICES.md)
 
-Nella Plancia desktop puoi associare altri Core con **Core collegati → Associa un altro Core**, usando per ciascuno un invito monouso generato nella sezione Dispositivi di quel Core. La Plancia aggrega stato, conteggi e attività recenti dei Core raggiungibili; un Core offline non blocca gli altri. Chat, viste dettagliate e azioni restano sul Core attivo e non vengono inoltrate ai Core aggiunti. Desktop e Android sullo stesso Core condividono la cronologia: i collegamenti nelle notifiche aprono la sezione pertinente, mentre **Prepara la ripresa in chat** trasferisce l'obiettivo di un'attività come bozza da controllare e inviare.
+Nella Plancia desktop puoi associare altri Core con **Core collegati → Associa un altro Core**, usando per ciascuno un invito monouso generato nella sezione Dispositivi di quel Core. La Plancia aggrega stato, conteggi e attività recenti dei Core raggiungibili; per un Core offline o un riepilogo non disponibile i dati ignoti sono indicati come tali, non come zeri. Chat, viste dettagliate e azioni restano sul Core attivo e non vengono inoltrate ai Core aggiunti. Desktop e Android sullo stesso Core condividono la cronologia: le notifiche offrono i collegamenti supportati dal client; le altre viste non disponibili su Android sono indicate senza reindirizzamenti impropri. **Prepara la ripresa in chat** trasferisce l'obiettivo di un'attività come bozza da controllare e inviare.
 
 ## Usa JARVIS
 
@@ -73,7 +73,7 @@ Nella Plancia desktop puoi associare altri Core con **Core collegati → Associa
 - **Dispositivi e notifiche.** Associa client Android o desktop tramite invito monouso. Le notifiche push Android richiedono Firebase; il Core continua a conservarle anche quando un client non è connesso.
 - **Memoria.** Cerca i ricordi dal client desktop usando gli indici locali del Core. La memoria non viene esposta ai dispositivi associati; le app mobile mostrano solo le funzioni consentite dal permesso `chat`.
 - **Aggiornamenti.** Il Core rileva le release GitHub ogni ora. Una repository pubblica non richiede un token; per una repository privata inserisci nella schermata **Aggiornamenti** un token fine-grained con sola lettura dei contenuti. Il token è custodito cifrato dal Core; le app notificano la release, ma installazione e aggiornamenti Android restano confermati manualmente.
-- **Altre sezioni.** La navigazione nativa include attività, automazioni, memoria, competenze, workspace, connettori, dispositivi, sicurezza, audit e sistema. Alcune viste sono ancora generiche e non includono tutti i flussi guidati.
+- **Altre sezioni.** La navigazione nativa include attività, automazioni, memoria, competenze, workspace, connettori, dispositivi, sicurezza, audit e sistema. Alcune viste sono ancora generiche e non includono tutti i flussi guidati. I connettori OAuth aprono nel browser solo URL HTTPS senza credenziali incorporate; completa l'autorizzazione e aggiorna la sezione per verificare lo stato.
 
 [Strumenti e automazioni](docs/AUTONOMY_AND_TOOLS.md) · [Memoria e sincronizzazione](docs/MEMORY_DATA_SYNC.md) · [Sicurezza e privacy](docs/SECURITY_AND_PRIVACY.md)
 

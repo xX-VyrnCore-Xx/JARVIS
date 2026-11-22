@@ -34,6 +34,12 @@ Il worker Python usa l’agente deterministico per i comandi offline. Il Core es
 
 Il Core stima i token tenendo conto di sequenze di testo, punteggiatura, sintassi e Unicode. Con continuità attiva include fino a otto scambi testuali consecutivi dello stesso provider entro 16.000 token stimati; conserva il messaggio corrente e accorcia i singoli turni sui confini dei caratteri. Schemi degli strumenti, istruzioni e margine per la risposta sono inclusi nel calcolo del plafond applicativo. La memoria, i segreti rilevati e gli esiti degli strumenti restano sul Core.
 
+## Identità, accuratezza e limiti
+
+JARVIS adotta una voce originale: calma, competente e cordiale, professionale e concisa, con ironia discreta solo quando appropriata. Risponde nella lingua dell'utente, distingue fatti da inferenze e stime e dichiara l'incertezza quando è rilevante. Per richieste composte procede con uno strumento per volta, controlla ogni esito e continua solo se necessario. Non dichiara azioni o verifiche non confermate e spiega quando mancano capacità, dati o collegamenti, proponendo un'alternativa concreta.
+
+Queste istruzioni orientano i modelli configurati; non modificano né addestrano i loro pesi. L'accuratezza va misurata su casi sintetici e riproducibili, separando qualità della risposta, correttezza degli strumenti e comportamento in assenza di evidenze.
+
 ## Configurazione dei provider
 
 Il Core espone `GET /api/cloud` per lo stato e `POST /api/cloud` per configurare o rimuovere un provider. La richiesta proprietario può includere `provider` (`ollama_cloud` o `nvidia_nim`), `key` e `model`, oppure `remove_key: true`. Le chiavi sono conservate nel secret store del Core; il modello selezionato è salvato nei dati locali. La sezione desktop **Modelli AI**, disponibile solo sul Core locale, configura e rimuove le chiavi usando queste API e non le mostra dopo il salvataggio. Il salvataggio non verifica la chiave: per provarla, inviare un messaggio in Chat; il contenuto viene elaborato dal provider selezionato e può comportare costi.

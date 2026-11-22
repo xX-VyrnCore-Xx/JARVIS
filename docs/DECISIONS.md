@@ -1392,6 +1392,35 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.
 - **Regola:** dettagliata in [DEVELOPMENT.md](DEVELOPMENT.md#integrazione-delle-modifiche).
 
+### ADR-0085 — Nuovo marchio applicativo generato da vettori
+
+- **Data:** 2026-11-22 · **Stato:** implementato nel checkout · **Fonte:** richiesta del proprietario di rifare l'icona da zero.
+- **Decisione:** sostituire il badge dettagliato con nome incorporato con un monogramma J luminoso, essenziale e riconoscibile alle dimensioni ridotte. `scripts/make_brand_assets.py` disegna il marchio proceduralmente e genera asset per macOS, Windows, Android e installer senza dipendere da immagini esterne; la precedente sorgente raster non è più usata.
+- **Conseguenze:** il nome JARVIS resta nel contesto dell'app/installer e non deve essere letto nell'icona stessa. Colore scuro e ciano restano coerenti con l'interfaccia; tutte le piattaforme riusano il medesimo segno.
+- **Evidenza:** rigenerazione degli asset in un'unica procedura; convalida dimensioni, alpha e ripetibilità prima della CI e del controllo visivo su dispositivi reali.
+- **Documenti interessati:** `scripts/make_brand_assets.py`, risorse desktop e Android, `INTERFACE_AND_DEVICES.md`, ROADMAP.md.
+
+### ADR-0086 — Voce JARVIS originale e risposte ancorate alle evidenze
+
+- **Data:** 2026-11-22 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario di migliorare personalità e accuratezza dell'assistente.
+- **Decisione:** adottare un tono calmo, competente, cordiale e conciso, con ironia discreta non imitativa. Il prompt richiede di distinguere fatti, inferenze e stime, rendere esplicita l'incertezza, verificare gli esiti degli strumenti e ammettere i limiti. Per richieste composte, gli strumenti si usano in sequenza, un passo per volta.
+- **Limiti:** l'aggiornamento istruisce i provider configurati; non effettua fine-tuning o addestramento dei pesi, non garantisce di soddisfare richieste prive di strumenti o autorizzazioni e non amplia policy, permessi o conferme.
+- **Evidenza:** test unitario del prompt di sistema; la qualità resta da misurare su una suite di valutazione sintetica e su provider reali, senza credenziali nel checkout.
+- **Documenti interessati:** `core/server/src/cloud.rs`, `AI_SYSTEM.md`, ROADMAP.md.
+
+### ADR-0087 — Collegamenti espliciti e dati affidabili fra client e Core
+
+- **Data:** 2026-11-22 · **Stato:** implementata nel checkout · **Fonte:** richiesta di migliorare i collegamenti desktop–Android, multi-Core e connettori esterni.
+- **Contesto:** Android riceve notifiche con destinazioni valide per il contratto ma non supportate dal client; i riepiloghi di Core offline o le richieste attività fallite presentavano risultati sconosciuti come zeri; l'avvio OAuth non segnalava risposte senza URL di autorizzazione.
+- **Decisione:**
+  - Android mantiene la navigazione diretta per Chat, Attività e Plancia. Per altre viste valide ma non supportate mostra un'indicazione esplicita, senza instradare verso una schermata diversa né ampliare i permessi.
+  - I contatori di Core non raggiungibili e il numero di attività recenti quando la richiesta fallisce sono trattati come sconosciuti e mostrati come «—». I dati disponibili dagli altri Core continuano a essere aggregati in sola lettura.
+  - Il desktop apre per OAuth solo URL HTTPS senza credenziali incorporate. Una risposta priva di URL sicuro diventa un errore visibile; dopo l'avvio viene indicato di completare l'autorizzazione e aggiornare lo stato. L'utente deve comunque premere Autorizza.
+- **Motivazione:** rendere esplicito quando un collegamento o un dato non è disponibile, senza inventare esiti e senza spostare chat, mutazioni o credenziali fra Core.
+- **Conseguenze:** le viste non supportate restano tali su Android; non si aggiungono scope, inoltro delle operazioni o autorizzazioni implicite. La prova della resa Android e del flusso OAuth reale resta dipendente da SDK/dispositivi e provider configurati.
+- **Evidenza:** test unitari desktop per URL OAuth e contatori offline; `cargo check`, Clippy e compilazione/link dei test per Windows superati. L'esecuzione desktop nativa su Linux non è supportata; build Android Compose e CI macOS restano da verificare.
+- **Documenti interessati:** `README.md`, `INTERFACE_AND_DEVICES.md`, ROADMAP.md, app desktop e Android.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

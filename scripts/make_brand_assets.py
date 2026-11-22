@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""Genera icone e grafiche degli installer di JARVIS (ADR-0036).
+"""Genera icone e grafiche degli installer di JARVIS (ADR-0036, ADR-0085).
 
 Uso: python3 scripts/make_brand_assets.py
-Richiede Pillow. Il badge sorgente è apps/desktop/src-tauri/icons/icon-source.png; i font sono di sistema
+Richiede Pillow. Il monogramma è disegnato qui e non dipende da immagini esterne; i font sono di sistema
 (Inter se presente, altrimenti DejaVu o il carattere predefinito di Pillow).
 """
 
 from __future__ import annotations
 
-from functools import lru_cache
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
@@ -17,7 +16,6 @@ ROOT = Path(__file__).resolve().parent.parent
 TAURI = ROOT / "apps" / "desktop" / "src-tauri"
 ICONS = TAURI / "icons"
 INST = TAURI / "installer"
-ICON_SOURCE = ICONS / "icon-source.png"
 ANDROID_ICONS = ROOT / "apps" / "android" / "app" / "src" / "main" / "res" / "drawable-nodpi"
 
 CYAN = (63, 208, 255)
@@ -46,25 +44,54 @@ def vgradient(w: int, h: int, top: tuple, bottom: tuple) -> Image.Image:
     return col.resize((w, h))
 
 
-@lru_cache(maxsize=1)
-def source_emblem() -> Image.Image:
-    """Carica il badge originale fornito dal proprietario e ritaglia solo il margine trasparente."""
-    with Image.open(ICON_SOURCE) as source:
-        frame = source.convert("RGBA")
-    bounds = frame.getchannel("A").point(lambda alpha: 255 if alpha > 16 else 0).getbbox()
-    if bounds is None:
-        raise ValueError(f"Nessun pixel opaco nell'icona sorgente: {ICON_SOURCE}")
-    return frame.crop(bounds)
-
-
 def brand_emblem(size: int) -> Image.Image:
-    source = source_emblem()
-    scale = min(size / source.width, size / source.height)
-    dimensions = (round(source.width * scale), round(source.height * scale))
-    source = source.resize(dimensions, Image.Resampling.LANCZOS)
-    emblem = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    emblem.alpha_composite(source, ((size - source.width) // 2, (size - source.height) // 2))
-    return emblem
+    scale = 4
+    side = size * scale
+
+    def point(x: float, y: float) -> tuple[int, int]:
+        return round(x * side), round(y * side)
+
+    def cubic(
+        start: tuple[float, float],
+        control1: tuple[float, float],
+        control2: tuple[float, float],
+        end: tuple[float, float],
+    ) -> list[tuple[int, int]]:
+        return [
+            point(
+                (1 - t) ** 3 * start[0]
+                + 3 * (1 - t) ** 2 * t * control1[0]
+                + 3 * (1 - t) * t**2 * control2[0]
+                + t**3 * end[0],
+                (1 - t) ** 3 * start[1]
+                + 3 * (1 - t) ** 2 * t * control1[1]
+                + 3 * (1 - t) * t**2 * control2[1]
+                + t**3 * end[1],
+            )
+            for t in (step / 32 for step in range(1, 33))
+        ]
+
+    path = [
+        point(0.27, 0.23),
+        point(0.73, 0.23),
+        point(0.73, 0.58),
+        *cubic((0.73, 0.58), (0.73, 0.77), (0.60, 0.81), (0.48, 0.81)),
+        *cubic((0.48, 0.81), (0.36, 0.81), (0.27, 0.75), (0.27, 0.62)),
+    ]
+
+    glow = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+    glow_width = round(side * 0.17)
+    ImageDraw.Draw(glow).line(path, fill=CYAN + (130,), width=glow_width, joint="curve")
+    emblem = glow.filter(ImageFilter.GaussianBlur(side * 0.035))
+    mark = Image.new("RGBA", (side, side), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(mark)
+    draw.line(path, fill=CYAN + (255,), width=round(side * 0.095), joint="curve")
+    draw.line(path, fill=(225, 251, 255, 220), width=round(side * 0.022), joint="curve")
+    for x, y in (path[0], path[-1]):
+        radius = round(side * 0.0475)
+        draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=CYAN + (255,))
+    emblem.alpha_composite(mark)
+    return emblem.resize((size, size), Image.Resampling.LANCZOS)
 
 
 def android_launcher_emblem(size: int = 432) -> Image.Image:
