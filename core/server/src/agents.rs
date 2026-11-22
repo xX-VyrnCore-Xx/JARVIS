@@ -16,9 +16,9 @@ const COMMON: [&str; 2] = ["time.now", "memory.search"];
 pub const SPECIALISTS: [Agent; 6] = [
     Agent {
         name: "monitoring",
-        role: "Sicurezza difensiva: controlla postura, audit e configurazioni locali. Spiega rischio, rilevamento, correzione e verifica, senza svolgere attacchi.",
-        keywords: &["cybersecurity", "postura di sicurezza", "centro sicurezza", "audit di sicurezza", "hardening", "controllo di sicurezza", "bonifica"],
-        tools: &["security.status", "system.info", "system.disks", "fs.read", "fs.list", "fs.search"],
+        role: "Sicurezza difensiva: controlla postura, audit e configurazioni locali. Riferisci le evidenze raccolte, la gravità e le verifiche mancanti. Per la bonifica indica priorità e verifica del ripristino.",
+        keywords: &["cybersecurity", "postura di sicurezza", "centro sicurezza", "audit di sicurezza", "hardening", "controllo di sicurezza", "bonifica", "risposta a incidenti", "incident response", "audit dei permessi", "postura it"],
+        tools: &["security.status", "system.info", "system.disks", "process.list", "fs.read", "fs.list", "fs.search"],
     },
     Agent {
         name: "research",
@@ -46,9 +46,9 @@ pub const SPECIALISTS: [Agent; 6] = [
     },
     Agent {
         name: "coding",
-        role: "Coding: leggi il codice prima di modificarlo, riproduci il problema con un test, limita la patch, verifica le regressioni, segnala i controlli mancanti e riporta un prossimo passo pertinente.",
-        keywords: &["codice", "script", "programma in", "python", "javascript", "compila", "git ", "npm ", "regressione", "code review", "refactoring", "test unitari"],
-        tools: &["fs.list", "fs.read", "fs.write", "fs.search", "fs.mkdir", "fs.move", "fs.delete", "shell.run", "math.calc", "code.check_python", "code.run_python", "agent.delegate"],
+        role: "Coding: leggi il codice prima di modificarlo, riproduci il problema con un test mirato, preserva i contratti, verifica errori e regressioni. Distingui i test eseguiti da quelli proposti.",
+        keywords: &["codice", "script", "programma in", "python", "javascript", "compila", "git ", "npm ", "regressione", "code review", "refactoring", "test unitari", "codice rust", "codice kotlin", "codice typescript", "debug", "valida il json", "valida json", "verifica il json", "verifica json"],
+        tools: &["fs.list", "fs.read", "fs.write", "fs.search", "fs.mkdir", "fs.move", "fs.delete", "shell.run", "math.calc", "code.check_python", "code.validate_json", "code.run_python", "agent.delegate"],
     },
 ];
 
@@ -68,6 +68,17 @@ pub fn route(message: &str) -> Option<&'static Agent> {
     let text = format!(" {} ", fold(message));
     if text.trim_start().starts_with("n8n ") {
         return SPECIALISTS.iter().find(|agent| agent.name == "automation");
+    }
+    if [
+        "valida json:",
+        "valida il json:",
+        "verifica json:",
+        "verifica il json:",
+    ]
+    .iter()
+    .any(|prefix| text.trim_start().starts_with(prefix))
+    {
+        return SPECIALISTS.iter().find(|agent| agent.name == "coding");
     }
     let security = &SPECIALISTS[0];
     if security.keywords.iter().any(|key| text.contains(key)) {

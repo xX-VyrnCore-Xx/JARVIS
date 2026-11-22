@@ -481,6 +481,7 @@ async fn configure_cloud(State(state): State<Shared>, Json(body): Json<Value>) -
 async fn cloud_chat(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
     if let Some(message) = body["message"].as_str().filter(|m| {
         crate::orchestrator::is_source_followup(m)
+            || crate::orchestrator::is_local_fact_request(m)
             || crate::desktop::Target::from_request(m).is_some()
     }) {
         let message = message.to_string();

@@ -11,10 +11,11 @@ import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
@@ -32,8 +33,9 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -48,6 +50,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -151,40 +154,86 @@ private fun PairingScreen(onPaired: (DeviceSession) -> Unit) {
 /** Schede del dispositivo: chat, attività e notifiche (le rotte permesse dal permesso `chat`). */
 @Composable
 private fun ColumnScope.DeviceScreen(session: DeviceSession, appInForeground: Boolean, onRevoked: () -> Unit) {
-    var tab by remember { mutableStateOf(0) }
-    Row(
-        Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Column {
-            Text("JARVIS", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-            Text("Dispositivo associato · HTTPS", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Text("●", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
-    }
-    TabRow(
-        selectedTabIndex = tab,
-        containerColor = MaterialTheme.colorScheme.surface,
-        contentColor = MaterialTheme.colorScheme.primary,
-    ) {
-        listOf("Chat", "Attività", "Notifiche").forEachIndexed { i, label ->
-            Tab(selected = tab == i, onClick = { tab = i }, text = { Text(label) })
-        }
-    }
+    var tab by rememberSaveable { mutableStateOf(0) }
+    var sending by remember { mutableStateOf(false) }
+    val tabs = listOf("Chat" to "◉", "Attività" to "≡", "Notifiche" to "◇", "Core" to "⌂")
+    Text(
+        tabs[tab].first,
+        modifier = Modifier.padding(horizontal = 22.dp, vertical = 12.dp),
+        style = MaterialTheme.typography.headlineLarge,
+        fontWeight = FontWeight.Bold,
+    )
     AnimatedContent(
         targetState = tab,
         modifier = Modifier.weight(1f).fillMaxWidth(),
-        transitionSpec = { fadeIn(tween(160)) + slideInVertically { it / 12 } togetherWith fadeOut(tween(100)) },
+        transitionSpec = {
+            val direction = if (targetState > initialState) 1 else -1
+            fadeIn(tween(200)) + slideInHorizontally(tween(200)) { direction * it / 12 } togetherWith fadeOut(tween(110))
+        },
         label = "mobile-tab",
     ) { selected ->
         Column(Modifier.fillMaxSize()) {
             when (selected) {
-                0 -> ChatScreen(session, appInForeground, onRevoked)
+                0 -> ChatScreen(session, appInForeground, onRevoked) { sending = it }
                 1 -> TasksScreen(session, appInForeground, onRevoked)
-                else -> NoticesScreen(session, appInForeground, onRevoked)
+                2 -> NoticesScreen(session, appInForeground, onRevoked)
+                else -> CoreScreen(session, onRevoked)
             }
         }
+    }
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+        tabs.forEachIndexed { index, (label, symbol) ->
+            NavigationBarItem(
+                selected = tab == index,
+                onClick = { tab = index },
+                enabled = !sending,
+                icon = { Text(symbol, style = MaterialTheme.typography.titleLarge) },
+                label = { Text(label) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun CoreScreen(session: DeviceSession, onRevoked: () -> Unit) {
+    var disconnect by rememberSaveable { mutableStateOf(false) }
+    var status by remember { mutableStateOf("Verifica in corso…") }
+    var checking by remember { mutableStateOf(true) }
+    val scope = rememberCoroutineScope()
+    suspend fun check() {
+        checking = true
+        val result = withContext(Dispatchers.IO) { runCatching { client.syncChat(session) } }
+        result.onSuccess { status = "Core raggiungibile · sessione attiva" }.onFailure {
+            if (it is CoreException.Revoked) onRevoked()
+            else status = it.message ?: "Core non raggiungibile"
+        }
+        checking = false
+    }
+    LaunchedEffect(session) { check() }
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Connessione HTTPS", style = MaterialTheme.typography.titleMedium)
+                Text(session.origin)
+                Text(status, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (session.canConfirm) "Accesso a chat e conferme" else "Accesso alla chat e alle attività")
+                TextButton(enabled = !checking, onClick = { scope.launch { check() } }) { Text("Verifica connessione") }
+            }
+        }
+        OutlinedButton(onClick = { disconnect = true }) { Text("Rimuovi sessione dal telefono") }
+    }
+    if (disconnect) {
+        AlertDialog(
+            onDismissRequest = { disconnect = false },
+            title = { Text("Rimuovere la sessione?") },
+            text = { Text("Per ricollegarti servirà un nuovo codice. Dal computer puoi revocare l’accesso al dispositivo.") },
+            confirmButton = { TextButton(onClick = onRevoked) { Text("Rimuovi") } },
+            dismissButton = { TextButton(onClick = { disconnect = false }) { Text("Annulla") } },
+        )
     }
 }
 
@@ -372,10 +421,10 @@ private fun ColumnScope.NoticesScreen(session: DeviceSession, appInForeground: B
 }
 
 @Composable
-private fun ColumnScope.ChatScreen(session: DeviceSession, appInForeground: Boolean, onRevoked: () -> Unit) {
+private fun ColumnScope.ChatScreen(session: DeviceSession, appInForeground: Boolean, onRevoked: () -> Unit, onSending: (Boolean) -> Unit) {
     val messages = remember { mutableStateListOf<ChatMessage>() }
     val pending = remember { mutableStateListOf<PendingAction>() }
-    var input by remember { mutableStateOf("") }
+    var input by rememberSaveable { mutableStateOf("") }
     var status by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
@@ -386,7 +435,7 @@ private fun ColumnScope.ChatScreen(session: DeviceSession, appInForeground: Bool
     }
 
     suspend fun refresh() {
-        val result = withContext(Dispatchers.IO) { runCatching { client.history(session) to client.pending(session) } }
+        val result = withContext(Dispatchers.IO) { runCatching { client.syncChat(session) } }
         result.onSuccess { (history, actions) ->
             val stickToEnd = messages.isEmpty() || !list.canScrollForward
             val historyChanged = messages != history
@@ -414,7 +463,7 @@ private fun ColumnScope.ChatScreen(session: DeviceSession, appInForeground: Bool
         TextButton(onClick = { scope.launch { refresh() } }) { Text("Aggiorna") }
     }
     status?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp)) }
-    LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp), state = list, contentPadding = PaddingValues(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         items(messages) { m ->
             val fromUser = m.role == "user"
             Row(
@@ -473,18 +522,26 @@ private fun ColumnScope.ChatScreen(session: DeviceSession, appInForeground: Bool
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            OutlinedTextField(input, { input = it }, placeholder = { Text("Scrivi a JARVIS…") }, modifier = Modifier.weight(1f))
+            OutlinedTextField(
+                input, { input = it }, enabled = !busy, maxLines = 4,
+                placeholder = { Text("Scrivi a JARVIS…") },
+                shape = MaterialTheme.shapes.large,
+                modifier = Modifier.weight(1f),
+            )
             Button(enabled = !busy && input.isNotBlank(), onClick = {
                 val text = input.trim()
-                input = ""
                 busy = true
-                messages.add(ChatMessage("user", text))
+                onSending(true)
                 scope.launch {
-                    withContext(Dispatchers.IO) { runCatching { client.send(text, session) } }.onFailure(::handle)
+                    val result = withContext(Dispatchers.IO) { runCatching { client.send(text, session) } }
+                    result.onSuccess {
+                        input = ""
+                        refresh()
+                    }.onFailure(::handle)
                     busy = false
-                    refresh()
+                    onSending(false)
                 }
-            }) { Text("Invia") }
+            }) { Text(if (busy) "Invio…" else "Invia") }
         }
     }
 }

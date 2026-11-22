@@ -312,8 +312,11 @@ impl Store {
             "SELECT user.content, answer.content, answer.cloud_provider
              FROM (SELECT seq, task_id, content FROM messages WHERE role = 'user'
                    ORDER BY seq DESC LIMIT 8) AS user
-             LEFT JOIN messages AS answer ON answer.task_id = user.task_id
-                 AND answer.role = 'assistant' AND answer.cloud_provider IS NOT NULL
+             LEFT JOIN messages AS answer ON answer.seq = (
+                 SELECT seq FROM messages
+                 WHERE task_id = user.task_id AND role = 'assistant'
+                 ORDER BY seq DESC LIMIT 1
+             )
              ORDER BY user.seq DESC",
         )?;
         let rows = stmt.query_map([], |r| {

@@ -98,6 +98,25 @@ class CoreClient(private val transport: Transport = UrlConnectionTransport) {
             PendingAction(it.optString("confirmation_id"), it.optString("target"), it.optString("expected_effect"), it.optString("expires_at"))
         }
 
+    /** Legge messaggi e conferme nello stesso snapshot del Core. */
+    fun syncChat(session: DeviceSession): Pair<List<ChatMessage>, List<PendingAction>> {
+        val snapshot = try {
+            request(session.origin, "/api/chat/sync", session.token)
+        } catch (error: CoreException.Rejected) {
+            if (error.status == 404) return history(session) to pending(session)
+            throw error
+        }
+        val messages = snapshot.optJSONArray("messages") ?: throw CoreException.InvalidResponse()
+        val confirmations = snapshot.optJSONArray("confirmations") ?: throw CoreException.InvalidResponse()
+        return (0 until messages.length()).map { index ->
+            val item = messages.getJSONObject(index)
+            ChatMessage(item.optString("role"), item.optString("content"))
+        } to (0 until confirmations.length()).map { index ->
+            val item = confirmations.getJSONObject(index)
+            PendingAction(item.optString("confirmation_id"), item.optString("target"), item.optString("expected_effect"), item.optString("expires_at"))
+        }
+    }
+
     /** Attività recenti con il loro stato (permesso `chat`). */
     fun tasks(session: DeviceSession): List<TaskSummary> =
         request(session.origin, "/api/tasks?limit=30", session.token).items().map {

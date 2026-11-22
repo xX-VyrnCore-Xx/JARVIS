@@ -10,28 +10,28 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
 private val JarvisDark = darkColorScheme(
-    primary = Color(0xFF78E0E7),
+    primary = Color(0xFF9CCAFF),
     onPrimary = Color(0xFF00232B),
-    primaryContainer = Color(0xFF163E4B),
+    primaryContainer = Color(0xFF233F65),
     onPrimaryContainer = Color(0xFFD4F7FF),
     secondary = Color(0xFFB7C9D0),
-    background = Color(0xFF09111A),
-    surface = Color(0xFF0F1B27),
-    surfaceVariant = Color(0xFF162635),
+    background = Color(0xFF111318),
+    surface = Color(0xFF191D25),
+    surfaceVariant = Color(0xFF222833),
     onSurface = Color(0xFFE4F0F3),
     onSurfaceVariant = Color(0xFFB0C0C6),
     outline = Color(0xFF53666F),
 )
 
 private val JarvisLight = lightColorScheme(
-    primary = Color(0xFF006779),
+    primary = Color(0xFF145DB2),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFC0F0FA),
-    onPrimaryContainer = Color(0xFF001F26),
+    primaryContainer = Color(0xFFD9E9FF),
+    onPrimaryContainer = Color(0xFF092649),
     secondary = Color(0xFF49616A),
-    background = Color(0xFFF4F8FA),
+    background = Color(0xFFF3F4F8),
     surface = Color(0xFFFFFFFF),
-    surfaceVariant = Color(0xFFE5EEF1),
+    surfaceVariant = Color(0xFFE9EDF4),
     onSurface = Color(0xFF131D22),
     onSurfaceVariant = Color(0xFF3F5057),
     outline = Color(0xFF73868D),
@@ -39,8 +39,8 @@ private val JarvisLight = lightColorScheme(
 
 private val JarvisShapes = Shapes(
     small = RoundedCornerShape(10.dp),
-    medium = RoundedCornerShape(14.dp),
-    large = RoundedCornerShape(20.dp),
+    medium = RoundedCornerShape(18.dp),
+    large = RoundedCornerShape(26.dp),
 )
 
 @Composable

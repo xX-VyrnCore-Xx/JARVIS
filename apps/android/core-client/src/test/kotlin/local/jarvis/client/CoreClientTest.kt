@@ -71,6 +71,19 @@ class CoreClientTest {
     }
 
     @Test
+    fun chatSyncUsesOneAuthenticatedSnapshotAndSupportsOlderCores() {
+        val session = DeviceSession("https://jarvis.example", token, listOf("chat"))
+        val snapshot = Recorder(listOf(HttpReply(200, """{"messages":[{"role":"user","content":"ciao"}],"confirmations":[]}""")))
+        assertEquals(listOf(ChatMessage("user", "ciao")) to emptyList<PendingAction>(), CoreClient(snapshot).syncChat(session))
+        assertEquals("https://jarvis.example/api/chat/sync", snapshot.calls.single().second)
+        assertEquals(token, snapshot.calls.single().third["X-Jarvis-Device"])
+
+        val old = Recorder(listOf(HttpReply(404, "{}"), HttpReply(200, """{"items":[]}"""), HttpReply(200, """{"items":[]}""")))
+        assertEquals(emptyList<ChatMessage>() to emptyList<PendingAction>(), CoreClient(old).syncChat(session))
+        assertEquals(3, old.calls.size)
+    }
+
+    @Test
     fun decisionUsesLowercaseIdAndRevocationIsReported() {
         val t = Recorder(listOf(HttpReply(200, """{"reply":null}"""), HttpReply(401, """{"error":{"message":"revocato"}}""")))
         val client = CoreClient(t)
