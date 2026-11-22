@@ -73,11 +73,10 @@ Dopo la pubblicazione, `scripts/prune_releases.py` conserva la release con la ve
 
 ### Firma degli installer
 
-Le release desktop provano prima i P12/PFX nei GitHub Actions Secrets. Se i Secret sono assenti o
-errati, il runner crea automaticamente un certificato autofirmato temporaneo e firma comunque.
-Non sono necessari account o licenze Apple/Azure né passaggi manuali. Sigstore e le attestazioni
-OIDC continuano a verificare gli artefatti. L'APK Android resta firmato separatamente con il
-keystore Android persistente.
+Le release desktop richiedono i P12/PFX configurati nei GitHub Actions Secret e verificano la firma
+prima di pubblicare. Il workflow macOS usa un portachiavi temporaneo e configura la fiducia per il
+certificato autofirmato solo sul runner GitHub ospitato. I pacchetti di prova delle pull request usano
+la firma ad hoc per macOS. Sigstore attesta la provenienza e l’APK Android usa il keystore persistente.
 
 ### Aggiornamenti da repository private
 

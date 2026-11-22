@@ -420,7 +420,6 @@ jobs:
           notes=$(mktemp)
           trap 'rm -f "$notes"' EXIT
           cp .github/release-notes.md "$notes"
-          printf '\nGli installer desktop sono firmati con i certificati dei Secrets quando disponibili; se i Secret mancano o non sono validi, il workflow genera e usa automaticamente un certificato temporaneo autofirmato. Gli artefatti sono attestati da GitHub Actions e verificabili con Sigstore.\n' >> "$notes"
           release_notes="$(<"$notes")"
           gh release create "$TAG" dist/* --verify-tag --notes "$release_notes" --generate-notes --title "JARVIS $TAG" $extra --repo "$GITHUB_REPOSITORY" || {
             echo "::error::creazione della release rifiutata; diagnosi:"
