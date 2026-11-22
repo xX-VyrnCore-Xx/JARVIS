@@ -2,12 +2,11 @@
 
 Apri **Settings → Secrets and variables → Actions** nel repository `xX-VyrnCore-Xx/JARVIS`.
 
-Le release desktop preferiscono i certificati nei Secrets:
-`JARVIS_MACOS_SIGNING_P12_BASE64` con `JARVIS_MACOS_SIGNING_PASSWORD`, e
-`JARVIS_WINDOWS_SIGNING_PFX_BASE64` con `JARVIS_WINDOWS_SIGNING_PASSWORD`.
-Se i Secret sono assenti o non validi, il workflow genera automaticamente un certificato
-autofirmato temporaneo sul runner. Non serve configurare account Apple/Azure né eseguire
-passaggi manuali. L'APK Android usa separatamente i quattro Secret Android.
+I workflow di pubblicazione usano i contenitori configurati nei Secret
+`JARVIS_MACOS_SIGNING_P12_BASE64` e `JARVIS_WINDOWS_SIGNING_PFX_BASE64`,
+con le rispettive password. Il runner verifica l’identità di firma e la chiave privata.
+Le build di pull request usano la firma ad hoc di test su macOS e compilano il setup
+Windows per le prove d’installazione. L’APK Android usa i propri Secret.
 
 ## Firma APK Android
 
