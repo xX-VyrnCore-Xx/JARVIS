@@ -1,6 +1,8 @@
 INSTALLAZIONE DI JARVIS
 
-1. Trascina JARVIS.app sull'icona Applicazioni.
+TRASCINA JARVIS.app SULL'ICONA APPLICATIONS
+
+1. Trascina JARVIS.app sull'icona Applications qui accanto.
 2. Attendi che la copia sia completata prima di espellere il disco immagine.
 3. Apri JARVIS dalla cartella Applicazioni. Al primo avvio macOS potrebbe chiedere conferma.
 

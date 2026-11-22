@@ -7,6 +7,18 @@ bundle="$desktop/target/release/bundle"
 app="$bundle/macos/JARVIS.app"
 contents="$app/Contents"
 resources="$contents/Resources"
+temporary_dir=$(mktemp -d "${RUNNER_TEMP:-/tmp}/jarvis-dmg.XXXXXX")
+temporary_dmg="$temporary_dir/JARVIS_${version}_layout.dmg"
+mountpoint="$temporary_dir/mount"
+
+cleanup_dmg_work() {
+  if hdiutil info | grep -Fq "$mountpoint"; then
+    hdiutil detach "$mountpoint" >/dev/null 2>&1 || true
+  fi
+  rm -f "$temporary_dmg"
+  rmdir "$mountpoint" "$temporary_dir" 2>/dev/null || true
+}
+trap cleanup_dmg_work EXIT
 
 mkdir -p "$contents/MacOS" "$resources"
 cp "$desktop/target/release/jarvis-desktop" "$contents/MacOS/jarvis-desktop"
@@ -30,6 +42,7 @@ if [[ "${JARVIS_REQUIRE_DESKTOP_SIGNATURE:-false}" == true ]]; then
     security list-keychains -d user -s ${old_keychains[@]+"${old_keychains[@]}"} >/dev/null 2>&1 || true
     security delete-keychain "$keychain" >/dev/null 2>&1 || true
     rm -rf -- "$signing_dir"
+    cleanup_dmg_work
   }
   trap cleanup EXIT
   keychain_password=$(openssl rand -hex 24)
@@ -105,11 +118,41 @@ cp -R "$app" "$stage/JARVIS.app"
 ln -s /Applications "$stage/Applications"
 cp apps/desktop/installer/macos/Installazione.txt "$stage/Installazione.txt"
 dmg="$bundle/dmg/JARVIS_${version}_aarch64.dmg"
-echo "Creazione del DMG."
-hdiutil create -volname JARVIS -srcfolder "$stage" -ov -format UDZO "$dmg"
+mkdir -p "$mountpoint"
+echo "Creazione del DMG modificabile per impostare la finestra di installazione."
+hdiutil create -volname JARVIS -srcfolder "$stage" -ov -format UDRW "$temporary_dmg"
+hdiutil attach -nobrowse -readwrite -mountpoint "$mountpoint" "$temporary_dmg"
+JARVIS_DMG_MOUNT="$mountpoint" osascript <<'APPLESCRIPT'
+on run
+  set dmgFolder to POSIX file (system attribute "JARVIS_DMG_MOUNT") as alias
+  tell application "Finder"
+    open dmgFolder
+    set dmgWindow to front window
+    set target of dmgWindow to dmgFolder
+    set current view of dmgWindow to icon view
+    set toolbar visible of dmgWindow to false
+    set statusbar visible of dmgWindow to false
+    set bounds of dmgWindow to {80, 100, 1040, 680}
+    set viewOptions to icon view options of dmgWindow
+    set arrangement of viewOptions to not arranged
+    set icon size of viewOptions to 128
+    set text size of viewOptions to 14
+    set position of item "JARVIS.app" of dmgWindow to {220, 245}
+    set position of item "Applications" of dmgWindow to {780, 245}
+    set position of item "Installazione.txt" of dmgWindow to {500, 425}
+    close dmgWindow
+    delay 2
+  end tell
+end run
+APPLESCRIPT
+hdiutil detach "$mountpoint"
+echo "Compressione del DMG con il layout Finder di installazione."
+hdiutil convert "$temporary_dmg" -ov -format UDZO -o "$dmg"
+rm "$temporary_dmg"
 if [[ "$signing_identity" != - ]]; then
   echo "Firma del DMG con il certificato configurato."
   codesign --force --timestamp=none --verbose=2 --sign "$signing_identity" "$dmg"
   echo "Verifica della firma del DMG."
   codesign --verify --strict --verbose=2 "$dmg"
+  trap cleanup EXIT
 fi

@@ -15,6 +15,9 @@ const SURFACE: egui::Color32 = egui::Color32::from_rgb(15, 27, 39);
 const RAISED: egui::Color32 = egui::Color32::from_rgb(22, 38, 53);
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(120, 224, 231);
 const SELECTED: egui::Color32 = egui::Color32::from_rgb(22, 62, 75);
+const POSITIVE: egui::Color32 = egui::Color32::from_rgb(105, 220, 174);
+const CAUTION: egui::Color32 = egui::Color32::from_rgb(245, 190, 96);
+const NEGATIVE: egui::Color32 = egui::Color32::from_rgb(255, 125, 135);
 
 const NAV: [(&str, &str, bool); 14] = [
     ("dashboard", "Plancia", true),
@@ -128,6 +131,7 @@ impl JarvisApp {
             ),
             egui::TextureOptions::LINEAR,
         );
+        cc.egui_ctx.set_theme(egui::Theme::Dark);
         let mut style = (*cc.egui_ctx.style_of(egui::Theme::Dark)).clone();
         style.visuals = egui::Visuals::dark();
         style.visuals.window_fill = SURFACE;
@@ -880,30 +884,24 @@ impl JarvisApp {
             .inner_margin(16)
             .show(ui, |ui| {
                 let width = ui.available_width();
+                ui.set_min_width(width);
                 if width < 570.0 {
-                    self.dashboard_intro(ui, ctx, &core_status, &ai_status, &confirmations);
+                    self.dashboard_intro(ui);
                     ui.add_space(8.0);
                     ui.vertical_centered(|ui| show_avatar(ui, ctx, self.reduce_motion));
                 } else {
+                    ui.set_height(240.0);
                     let intro_width = width * 0.62;
                     let avatar_width = (width - intro_width - 12.0).max(140.0);
                     ui.horizontal_top(|ui| {
                         ui.allocate_ui_with_layout(
-                            egui::vec2(intro_width, 206.0),
+                            egui::vec2(intro_width, 240.0),
                             egui::Layout::top_down(egui::Align::Min),
-                            |ui| {
-                                self.dashboard_intro(
-                                    ui,
-                                    ctx,
-                                    &core_status,
-                                    &ai_status,
-                                    &confirmations,
-                                );
-                            },
+                            |ui| self.dashboard_intro(ui),
                         );
                         ui.separator();
                         ui.allocate_ui_with_layout(
-                            egui::vec2(avatar_width, 206.0),
+                            egui::vec2(avatar_width, 240.0),
                             egui::Layout::centered_and_justified(egui::Direction::TopDown),
                             |ui| show_avatar(ui, ctx, self.reduce_motion),
                         );
@@ -911,46 +909,146 @@ impl JarvisApp {
                 }
             });
 
-        ui.add_space(12.0);
+        ui.add_space(16.0);
         ui.horizontal_wrapped(|ui| {
-            for (label, value, detail) in [
-                ("CORE", core_status.as_str(), version.as_str()),
-                ("AI", ai_status.as_str(), "Stato del servizio"),
-                ("CONFERME", confirmations.as_str(), "In attesa"),
-                ("NOTIFICHE", unread.as_str(), "Da leggere"),
-                ("AUTOMAZIONI", automations.as_str(), "Attive"),
-                ("AUDIT", audit_status.as_str(), "Catena locale"),
-            ] {
-                egui::Frame::new()
-                    .fill(RAISED)
-                    .corner_radius(12)
-                    .inner_margin(12)
-                    .show(ui, |ui| {
-                        ui.set_min_width(116.0);
-                        ui.small(egui::RichText::new(label).weak());
-                        ui.strong(value);
-                        ui.small(egui::RichText::new(detail).weak());
-                    });
-            }
+            ui.heading("Panoramica");
+            ui.label(
+                egui::RichText::new("Servizi, conferme e integrità del sistema")
+                    .small()
+                    .weak(),
+            );
         });
+        ui.add_space(8.0);
+        let audit_color = match audit_status.as_str() {
+            "Verificato" => POSITIVE,
+            "Da controllare" => NEGATIVE,
+            _ => ACCENT,
+        };
+        let metrics = [
+            (
+                "CORE",
+                core_status.as_str(),
+                version.as_str(),
+                service_color(&core_status),
+            ),
+            (
+                "INTELLIGENZA ARTIFICIALE",
+                ai_status.as_str(),
+                "Stato del servizio",
+                service_color(&ai_status),
+            ),
+            (
+                "CONFERME",
+                confirmations.as_str(),
+                "Operazioni in attesa",
+                if confirmations == "0" {
+                    POSITIVE
+                } else if confirmations == "—" {
+                    ACCENT
+                } else {
+                    CAUTION
+                },
+            ),
+            (
+                "NOTIFICHE",
+                unread.as_str(),
+                "Da leggere",
+                if unread == "0" {
+                    POSITIVE
+                } else if unread == "—" {
+                    ACCENT
+                } else {
+                    CAUTION
+                },
+            ),
+            ("AUTOMAZIONI", automations.as_str(), "Attive", ACCENT),
+            (
+                "INTEGRITÀ AUDIT",
+                audit_status.as_str(),
+                "Registro locale",
+                audit_color,
+            ),
+        ];
+        let metrics_width = ui.available_width();
+        let columns = if metrics_width >= 900.0 {
+            3
+        } else if metrics_width >= 560.0 {
+            2
+        } else {
+            1
+        };
+        let gap = 12.0;
+        let card_width = (metrics_width - gap * (columns - 1) as f32) / columns as f32;
+        for row in metrics.chunks(columns) {
+            ui.horizontal(|ui| {
+                for (label, value, detail, color) in row {
+                    egui::Frame::new()
+                        .fill(RAISED)
+                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(35, 57, 74)))
+                        .corner_radius(14)
+                        .inner_margin(12)
+                        .show(ui, |ui| {
+                            ui.set_width((card_width - 26.0).max(80.0));
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("●").color(*color).small());
+                                ui.label(egui::RichText::new(*label).small().strong().weak());
+                            });
+                            ui.add_space(4.0);
+                            ui.label(
+                                egui::RichText::new(*value)
+                                    .size(23.0)
+                                    .strong()
+                                    .color(*color),
+                            );
+                            ui.small(egui::RichText::new(*detail).weak());
+                        });
+                }
+            });
+            ui.add_space(gap);
+        }
 
         ui.add_space(12.0);
         egui::Frame::new()
             .fill(SURFACE)
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(29, 49, 65)))
             .corner_radius(16)
             .inner_margin(14)
             .show(ui, |ui| {
-                ui.heading("Accesso rapido");
+                ui.set_min_width(ui.available_width());
                 ui.horizontal_wrapped(|ui| {
-                    if ui.button("Nuova chat").clicked() {
+                    ui.heading("Azioni rapide");
+                    ui.label(
+                        egui::RichText::new("I controlli che usi più spesso")
+                            .small()
+                            .weak(),
+                    );
+                });
+                ui.add_space(8.0);
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new("Nuova chat").strong().color(ACCENT),
+                            )
+                            .fill(SELECTED)
+                            .min_size(egui::vec2(148.0, 44.0)),
+                        )
+                        .clicked()
+                    {
                         self.current = "chat".into();
                     }
-                    if ui.button("Attività").clicked() {
+                    if ui
+                        .add(egui::Button::new("Attività").min_size(egui::vec2(132.0, 44.0)))
+                        .clicked()
+                    {
                         self.current = "tasks".into();
                         self.data = None;
                         self.refresh(ctx);
                     }
-                    if ui.button("Sistema").clicked() {
+                    if ui
+                        .add(egui::Button::new("Sistema").min_size(egui::vec2(132.0, 44.0)))
+                        .clicked()
+                    {
                         self.current = "system".into();
                         self.data = None;
                         self.refresh(ctx);
@@ -960,7 +1058,12 @@ impl JarvisApp {
                     .data
                     .as_ref()
                     .is_some_and(|data| data["first_run"] == true)
-                    && ui.button("Completa la configurazione iniziale").clicked()
+                    && ui
+                        .add(
+                            egui::Button::new("Completa la configurazione iniziale")
+                                .min_size(egui::vec2(220.0, 44.0)),
+                        )
+                        .clicked()
                 {
                     self.current = "system".into();
                     self.data = None;
@@ -968,27 +1071,16 @@ impl JarvisApp {
                 }
             });
 
-        self.show_dashboard_tasks(ui, ctx);
-
-        ui.add_space(12.0);
-        egui::Frame::new()
-            .fill(SURFACE)
-            .corner_radius(16)
-            .inner_margin(14)
-            .show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.heading("Notifiche recenti");
-                    if self.loading {
-                        ui.add(egui::Spinner::new());
-                    }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("Segna tutte come lette").clicked() {
-                            self.act(ctx, "/api/notifications/read-all".into(), None);
-                        }
-                    });
-                });
-                self.show_notifications(ui);
+        if ui.available_width() >= 820.0 {
+            ui.columns(2, |columns| {
+                self.show_dashboard_tasks(&mut columns[0], ctx);
+                self.show_dashboard_notifications(&mut columns[1], ctx);
             });
+        } else {
+            self.show_dashboard_tasks(ui, ctx);
+            ui.add_space(12.0);
+            self.show_dashboard_notifications(ui, ctx);
+        }
     }
 
     fn show_dashboard_tasks(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -997,6 +1089,7 @@ impl JarvisApp {
             .corner_radius(16)
             .inner_margin(14)
             .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
                 ui.horizontal(|ui| {
                     ui.heading("Attività recenti");
                     if ui.button("Mostra tutte").clicked() {
@@ -1053,14 +1146,36 @@ impl JarvisApp {
             });
     }
 
-    fn dashboard_intro(
-        &mut self,
-        ui: &mut egui::Ui,
-        ctx: &egui::Context,
-        core_status: &str,
-        ai_status: &str,
-        confirmations: &str,
-    ) {
+    fn show_dashboard_notifications(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        egui::Frame::new()
+            .fill(SURFACE)
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(29, 49, 65)))
+            .corner_radius(16)
+            .inner_margin(14)
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.horizontal_wrapped(|ui| {
+                    ui.heading("Notifiche");
+                    if self.loading {
+                        ui.add(egui::Spinner::new());
+                    }
+                    let has_unread = self
+                        .notifications
+                        .iter()
+                        .any(|item| item["read_at"].is_null());
+                    if ui
+                        .add_enabled(has_unread, egui::Button::new("Segna tutte come lette"))
+                        .clicked()
+                    {
+                        self.act(ctx, "/api/notifications/read-all".into(), None);
+                    }
+                });
+                ui.add_space(4.0);
+                self.show_notifications(ui);
+            });
+    }
+
+    fn dashboard_intro(&mut self, ui: &mut egui::Ui) {
         ui.label(
             egui::RichText::new("IL TUO ASSISTENTE PERSONALE")
                 .small()
@@ -1075,22 +1190,17 @@ impl JarvisApp {
                 .color(egui::Color32::from_rgb(180, 203, 222)),
         );
         ui.add_space(12.0);
-        ui.horizontal_wrapped(|ui| {
-            status_pill(ui, "CORE", core_status);
-            status_pill(ui, "AI", ai_status);
-            if confirmations != "0" && confirmations != "—" {
-                status_pill(ui, "CONFERME", confirmations);
-            }
-        });
-        ui.add_space(8.0);
-        ui.horizontal_wrapped(|ui| {
-            if ui.button("Apri la chat").clicked() {
+        ui.add_space(14.0);
+        ui.horizontal(|ui| {
+            if ui
+                .add(
+                    egui::Button::new(egui::RichText::new("Apri la chat").strong().color(ACCENT))
+                        .fill(SELECTED)
+                        .min_size(egui::vec2(148.0, 42.0)),
+                )
+                .clicked()
+            {
                 self.current = "chat".into();
-            }
-            if ui.button("Controlla le attività").clicked() {
-                self.current = "tasks".into();
-                self.data = None;
-                self.refresh(ctx);
             }
             ui.checkbox(&mut self.reduce_motion, "Riduci animazioni");
         });
@@ -2128,18 +2238,13 @@ fn spawn_connection(tx: Sender<Event>) {
     });
 }
 
-fn status_pill(ui: &mut egui::Ui, label: &str, value: &str) {
-    egui::Frame::new()
-        .fill(RAISED)
-        .corner_radius(egui::CornerRadius::same(20))
-        .inner_margin(egui::Margin::symmetric(10, 5))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.label(egui::RichText::new("●").color(ACCENT).small());
-                ui.label(egui::RichText::new(label).small().weak());
-                ui.label(egui::RichText::new(value).small().strong());
-            });
-        });
+fn service_color(status: &str) -> egui::Color32 {
+    match status.to_ascii_lowercase().as_str() {
+        "up" | "active" | "ready" | "online" | "ok" | "healthy" | "configured" => POSITIVE,
+        "starting" | "degraded" | "unknown" => CAUTION,
+        "down" | "error" | "failed" | "offline" | "unavailable" | "stopped" => NEGATIVE,
+        _ => ACCENT,
+    }
 }
 
 fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {

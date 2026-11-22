@@ -1317,6 +1317,24 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** la CI su `c2152c8` ha rilevato che `notify_rust::Notification::urgency` è disponibile su Windows ma non con il backend macOS configurato; la chiamata è ora condizionata a Windows. Le run complete `45035881025` e `45036515337` sono verdi per macOS, Windows, Android, Core e test trasversali. Il cross-build Windows, Clippy, la suite Core e i test Python locali sono superati; il controllo Android locale resta sospeso per assenza dell'SDK.
 - **Documenti interessati:** `scripts/make_brand_assets.py`, risorse/app desktop e Android, ROADMAP.md.
 
+### ADR-0077 — Plancia desktop e finestra DMG macOS
+
+- **Data** 2026-11-22 · **Stato** implementata nel checkout; verifica visiva e CI macOS in attesa.
+- **Contesto:** il tema egui seguiva il tema chiaro del sistema mentre la Plancia configurava solo i colori scuri; il riquadro di benvenuto poteva espandersi fino all'altezza della finestra e le schede non occupavano l'area centrale. Nel DMG mancavano impostazioni persistenti per disporre gli elementi nella finestra Finder.
+- **Decisione:** forzare il tema scuro dell'app, estendere le schede principali alla larghezza disponibile e limitare l'altezza del riquadro iniziale desktop. Costruire il DMG in modalità modificabile, impostare in Finder la vista icone con JARVIS e Applications affiancati e le istruzioni visibili, quindi comprimere il volume. La CI macOS verifica la presenza del layout Finder insieme all'app, al collegamento Applications e alle istruzioni.
+- **Conseguenze:** il desktop mantiene la navigazione e lo scorrimento interno già previsti; non cambiano API, autorizzazioni o contenuti dei dati. La disposizione dipende da Finder/macOS e va collaudata sul runner e su un Mac reale.
+- **Evidenza locale:** `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check`, `bash -n scripts/package_macos_release.sh`, parsing YAML del workflow e `git diff --check` superati. Il cross-check Cargo macOS è bloccato dal compilatore C/SDK Apple assente nell'host Linux; il test visuale e la creazione effettiva del DMG sono sospesi al runner macOS.
+- **Documenti interessati:** `INTERFACE_AND_DEVICES.md`, ROADMAP.md, app desktop egui e workflow `release.yml`.
+
+### ADR-0078 — Gerarchia responsive della Plancia egui
+
+- **Data** 2026-11-22 · **Stato** implementata nel checkout; verifica grafica su macOS/Windows in attesa.
+- **Contesto:** la Plancia mostrava i sei stati come badge equivalenti e impilava attività e notifiche, senza una gerarchia visiva leggibile a colpo d'occhio.
+- **Decisione:** presentare gli stati in schede con valore e colore semantico, distribuendole in tre, due o una colonna in base alla larghezza. Evidenziare Nuova chat come azione primaria e affiancare attività/notifiche solo quando c'è spazio sufficiente; nelle finestre strette le schede restano impilate. Disabilitare «Segna tutte come lette» quando non ci sono notifiche non lette.
+- **Conseguenze:** i valori continuano a provenire dallo snapshot del Core; i colori non cambiano stati, permessi o azioni. La navigazione fissa e lo scorrimento interno non vengono modificati.
+- **Evidenza locale:** `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check`, suite contratti (14 test), parsing YAML, sintassi shell e `git diff --check` superati. Il build dell'app e la resa su macOS/Windows non sono verificabili nell'host Linux: il desktop rifiuta Linux e manca il toolchain Apple; il test `tests/e2e/ui_smoke.cjs` non è presente.
+- **Documenti interessati:** `INTERFACE_AND_DEVICES.md`, ROADMAP.md e `apps/desktop/src-tauri/src/app.rs`.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.
