@@ -366,13 +366,18 @@ jobs:
       # Firma senza chiavi da custodire (ADR-0020): attestazione di provenienza di GitHub per ogni installer e
       # firma Sigstore dell'elenco delle impronte, legate a questo workflow e a questo commit.
       - name: Attestazione di provenienza degli installer
+        id: provenance
+        continue-on-error: true
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
         with:
           create-storage-record: false
-          subject-path: |
-            dist/*.dmg
-            dist/*-setup.exe
-            dist/*_android-release.apk
+          subject-checksums: dist/SHA256SUMS
+      - name: Riprova l’attestazione dopo un errore del servizio
+        if: steps.provenance.outcome == 'failure'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          create-storage-record: false
+          subject-checksums: dist/SHA256SUMS
       - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532
       - name: Firma e verifica Sigstore dei pacchetti e delle impronte
         working-directory: dist
