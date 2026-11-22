@@ -40,6 +40,7 @@ if [[ "${JARVIS_REQUIRE_DESKTOP_SIGNATURE:-false}" == true ]]; then
   import_p12() {
     security import "$1" -f pkcs12 -k "$keychain" -P "$JARVIS_MACOS_SIGNING_PASSWORD" -T /usr/bin/codesign >/dev/null 2>&1
   }
+  echo "Importazione del P12 macOS nel portachiavi temporaneo."
   if ! import_p12 "$certificate"; then
     # Apple Security may reject the encryption scheme of a valid OpenSSL export.
     # Rewrap the same identity via a pipe so the plaintext private key stays off disk.
@@ -49,8 +50,8 @@ if [[ "${JARVIS_REQUIRE_DESKTOP_SIGNATURE:-false}" == true ]]; then
       read_options=(-legacy)
     fi
     public_chain="$signing_dir/chain.pem"
-    if ! openssl pkcs12 "${read_options[@]}" -in "$certificate" -passin env:JARVIS_MACOS_SIGNING_PASSWORD -nokeys -out "$public_chain" 2>/dev/null ||
-       ! (openssl pkcs12 "${read_options[@]}" -in "$certificate" -passin env:JARVIS_MACOS_SIGNING_PASSWORD -nocerts -nodes |
+    if ! openssl pkcs12 ${read_options[@]+"${read_options[@]}"} -in "$certificate" -passin env:JARVIS_MACOS_SIGNING_PASSWORD -nokeys -out "$public_chain" 2>/dev/null ||
+       ! (openssl pkcs12 ${read_options[@]+"${read_options[@]}"} -in "$certificate" -passin env:JARVIS_MACOS_SIGNING_PASSWORD -nocerts -nodes |
           openssl pkcs12 -export -in "$public_chain" -inkey /dev/stdin -out "$normalized" \
             -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 \
             -passout env:JARVIS_MACOS_SIGNING_PASSWORD) 2>/dev/null || ! import_p12 "$normalized"; then
@@ -75,7 +76,8 @@ if [[ "${JARVIS_REQUIRE_DESKTOP_SIGNATURE:-false}" == true ]]; then
     if [[ -s "$leaf" ]] &&
        [[ "$(openssl x509 -in "$leaf" -noout -subject -nameopt RFC2253 | sed 's/^subject= *//')" == "$(openssl x509 -in "$leaf" -noout -issuer -nameopt RFC2253 | sed 's/^issuer= *//')" ]] &&
        openssl verify -check_ss_sig -CAfile "$leaf" "$leaf" >/dev/null 2>&1; then
-      sudo security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain "$leaf"
+      echo "Configurazione della fiducia per il certificato autofirmato sul runner."
+      sudo -n security add-trusted-cert -d -r trustRoot -p codeSign -k /Library/Keychains/System.keychain "$leaf"
       trusted_leaf="$leaf"
       signing_identity=$(identity)
     fi
@@ -84,12 +86,14 @@ if [[ "${JARVIS_REQUIRE_DESKTOP_SIGNATURE:-false}" == true ]]; then
     echo "::error::Il P12 macOS configurato non contiene un’identità valida per la firma del codice."
     exit 1
   fi
+  echo "Configurazione dell’accesso alla chiave per codesign."
   security set-key-partition-list -S apple-tool:,apple: -s -k "$keychain_password" "$keychain" >/dev/null
   signing_options=(--keychain "$keychain")
   echo "Identità macOS configurata selezionata."
 fi
 
-codesign --force --deep --timestamp=none "${signing_options[@]}" --sign "$signing_identity" "$app"
+echo "Firma e verifica dell’app macOS."
+codesign --force --deep --timestamp=none ${signing_options[@]+"${signing_options[@]}"} --sign "$signing_identity" "$app"
 codesign --verify --deep --strict --verbose=2 "$app"
 
 stage="$bundle/dmg/JARVIS"
@@ -97,8 +101,9 @@ mkdir -p "$stage" "$bundle/dmg"
 cp -R "$app" "$stage/JARVIS.app"
 ln -s /Applications "$stage/Applications"
 dmg="$bundle/dmg/JARVIS_${version}_aarch64.dmg"
+echo "Creazione del DMG."
 hdiutil create -volname JARVIS -srcfolder "$stage" -ov -format UDZO "$dmg"
 if [[ "$signing_identity" != - ]]; then
-  codesign --force --timestamp=none "${signing_options[@]}" --sign "$signing_identity" "$dmg"
+  codesign --force --timestamp=none ${signing_options[@]+"${signing_options[@]}"} --sign "$signing_identity" "$dmg"
   codesign --verify --strict "$dmg"
 fi

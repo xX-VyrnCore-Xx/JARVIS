@@ -55,7 +55,7 @@ on:
 
 concurrency:
   group: release-${{ inputs.tag || github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: write
@@ -157,6 +157,7 @@ jobs:
           }
           "JARVIS_SIGNING_THUMBPRINT=$($certificate.Thumbprint)" >> $env:GITHUB_ENV
       - name: Crea app macOS e DMG
+        timeout-minutes: 15
         if: runner.os == 'macOS'
         env:
           JARVIS_REQUIRE_DESKTOP_SIGNATURE: ${{ github.event_name != 'pull_request' }}
