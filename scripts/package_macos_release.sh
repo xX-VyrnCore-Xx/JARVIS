@@ -44,16 +44,16 @@ if [[ "${JARVIS_REQUIRE_DESKTOP_SIGNATURE:-false}" == true ]]; then
     # Apple Security may reject the encryption scheme of a valid OpenSSL export.
     # Rewrap the same identity via a pipe so the plaintext private key stays off disk.
     normalized="$signing_dir/compatible.p12"
-    unpack_p12() {
-      if openssl pkcs12 -in "$certificate" -passin env:JARVIS_MACOS_SIGNING_PASSWORD -noout 2>/dev/null; then
-        openssl pkcs12 -in "$certificate" -passin env:JARVIS_MACOS_SIGNING_PASSWORD -nodes
-      else
-        openssl pkcs12 -legacy -in "$certificate" -passin env:JARVIS_MACOS_SIGNING_PASSWORD -nodes
-      fi
-    }
-    if ! (unpack_p12 | openssl pkcs12 -export -out "$normalized" \
-      -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 \
-      -passout env:JARVIS_MACOS_SIGNING_PASSWORD) 2>/dev/null || ! import_p12 "$normalized"; then
+    read_options=()
+    if ! openssl pkcs12 -in "$certificate" -passin env:JARVIS_MACOS_SIGNING_PASSWORD -noout >/dev/null 2>&1; then
+      read_options=(-legacy)
+    fi
+    public_chain="$signing_dir/chain.pem"
+    if ! openssl pkcs12 "${read_options[@]}" -in "$certificate" -passin env:JARVIS_MACOS_SIGNING_PASSWORD -nokeys -out "$public_chain" 2>/dev/null ||
+       ! (openssl pkcs12 "${read_options[@]}" -in "$certificate" -passin env:JARVIS_MACOS_SIGNING_PASSWORD -nocerts -nodes |
+          openssl pkcs12 -export -in "$public_chain" -inkey /dev/stdin -out "$normalized" \
+            -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1 \
+            -passout env:JARVIS_MACOS_SIGNING_PASSWORD) 2>/dev/null || ! import_p12 "$normalized"; then
       echo "::error::Importazione P12 macOS non riuscita anche dopo la normalizzazione. Verificare il contenitore e la password configurati."
       exit 1
     fi
