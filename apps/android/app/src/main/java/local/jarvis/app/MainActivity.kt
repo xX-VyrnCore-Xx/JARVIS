@@ -63,6 +63,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -88,6 +89,26 @@ import local.jarvis.client.Notices
 import local.jarvis.client.PendingAction
 import local.jarvis.client.TaskSummary
 
+private const val NOTIFICATIONS_TAB_INDEX = 3
+
+internal fun notificationCategoryLabel(category: String): String = when (category) {
+    "confirmation" -> "Conferma"
+    "integration" -> "Integrazione"
+    "reminder" -> "Promemoria"
+    "security" -> "Sicurezza"
+    "system" -> "Sistema"
+    "automation" -> "Automazione"
+    else -> category.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+}
+
+internal fun notificationSeverityLabel(severity: String): String = when (severity) {
+    "info" -> "Informazione"
+    "success" -> "Completata"
+    "warning" -> "Attenzione"
+    "error" -> "Errore"
+    else -> severity.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
+}
+
 /** Client Android di JARVIS (ADR-0018, ADR-0032): associazione, chat, conferme, attività e notifiche. */
 class MainActivity : ComponentActivity() {
     private val appInForeground = mutableStateOf(false)
@@ -104,7 +125,16 @@ class MainActivity : ComponentActivity() {
                         if (current == null) {
                             PairingScreen { paired -> store.save(paired); session = paired }
                         } else {
-                            DeviceScreen(current, appInForeground.value) { store.clear(); session = null }
+                            DeviceScreen(
+                                session = current,
+                                appInForeground = appInForeground.value,
+                                initialTab = if (intent?.getBooleanExtra(
+                                        PushMessagingService.OPEN_NOTIFICATIONS_EXTRA,
+                                        false,
+                                    ) == true
+                                ) NOTIFICATIONS_TAB_INDEX else 0,
+                                onRevoked = { store.clear(); session = null },
+                            )
                         }
                     }
                 }
@@ -166,8 +196,13 @@ private fun PairingScreen(onPaired: (DeviceSession) -> Unit) {
 
 /** Schede del dispositivo: chat, attività e notifiche (le rotte permesse dal permesso `chat`). */
 @Composable
-private fun ColumnScope.DeviceScreen(session: DeviceSession, appInForeground: Boolean, onRevoked: () -> Unit) {
-    var tab by rememberSaveable { mutableStateOf(0) }
+private fun ColumnScope.DeviceScreen(
+    session: DeviceSession,
+    appInForeground: Boolean,
+    initialTab: Int,
+    onRevoked: () -> Unit,
+) {
+    var tab by rememberSaveable { mutableStateOf(initialTab) }
     var sending by remember { mutableStateOf(false) }
     val tabs = listOf("Plancia" to "⌂", "Chat" to "◉", "Attività" to "≡", "Notifiche" to "◇", "Core" to "◎")
     Text(
@@ -408,6 +443,15 @@ private fun AvatarPortrait() {
         val unit = size.minDimension / 188.dp.toPx()
         val pulse = phase * 3.dp.toPx()
         drawCircle(
+            Brush.radialGradient(
+                colors = listOf(Color(0xFF173B52), Color(0xFF0B1C2A), Color.Transparent),
+                center = center,
+                radius = size.minDimension * 0.48f,
+            ),
+            radius = size.minDimension * 0.48f,
+            center = center,
+        )
+        drawCircle(
             accent.copy(alpha = 0.10f + phase * 0.08f),
             radius = size.minDimension * 0.43f + pulse,
             center = center,
@@ -428,6 +472,17 @@ private fun AvatarPortrait() {
             size = Size(size.minDimension * 0.78f, size.minDimension * 0.78f),
             style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round),
         )
+        for (index in 0 until 3) {
+            val angle = phase * 0.8f + index * (2 * Math.PI.toFloat() / 3)
+            drawCircle(
+                accent.copy(alpha = 0.7f),
+                radius = 2.dp.toPx(),
+                center = Offset(
+                    center.x + kotlin.math.cos(angle) * size.minDimension * 0.39f,
+                    center.y + kotlin.math.sin(angle) * size.minDimension * 0.39f,
+                ),
+            )
+        }
 
         val head = Path().apply {
             moveTo(center.x, center.y - 42.dp.toPx())
@@ -450,6 +505,46 @@ private fun AvatarPortrait() {
         }
         drawPath(shoulders, Color(0xFF10283A))
         drawPath(shoulders, accent.copy(alpha = 0.70f), style = Stroke(width = 1.6.dp.toPx()))
+        drawLine(
+            accent.copy(alpha = 0.45f),
+            Offset(center.x - 39.dp.toPx(), center.y + 52.dp.toPx()),
+            Offset(center.x - 19.dp.toPx(), center.y + 43.dp.toPx()),
+            1.dp.toPx(),
+        )
+        drawLine(
+            accent.copy(alpha = 0.45f),
+            Offset(center.x + 39.dp.toPx(), center.y + 52.dp.toPx()),
+            Offset(center.x + 19.dp.toPx(), center.y + 43.dp.toPx()),
+            1.dp.toPx(),
+        )
+        drawCircle(
+            Color(0xFF0A1B28),
+            radius = 9.dp.toPx(),
+            center = Offset(center.x, center.y + 49.dp.toPx()),
+        )
+        drawCircle(
+            accent.copy(alpha = 0.8f),
+            radius = 9.dp.toPx(),
+            center = Offset(center.x, center.y + 49.dp.toPx()),
+            style = Stroke(width = 1.dp.toPx()),
+        )
+        drawCircle(
+            accent.copy(alpha = 0.75f + phase * 0.2f),
+            radius = 3.dp.toPx() + pulse * 0.15f,
+            center = Offset(center.x, center.y + 49.dp.toPx()),
+        )
+        drawLine(
+            face.copy(alpha = 0.7f),
+            Offset(center.x - 11.dp.toPx(), center.y - 24.dp.toPx()),
+            Offset(center.x, center.y - 30.dp.toPx()),
+            1.dp.toPx(),
+        )
+        drawLine(
+            face.copy(alpha = 0.7f),
+            Offset(center.x, center.y - 30.dp.toPx()),
+            Offset(center.x + 11.dp.toPx(), center.y - 24.dp.toPx()),
+            1.dp.toPx(),
+        )
         drawLine(accent, Offset(center.x - 19.dp.toPx(), center.y - 7.dp.toPx()), Offset(center.x - 5.dp.toPx(), center.y - 7.dp.toPx()), 2.4.dp.toPx(), StrokeCap.Round)
         drawLine(accent, Offset(center.x + 5.dp.toPx(), center.y - 7.dp.toPx()), Offset(center.x + 19.dp.toPx(), center.y - 7.dp.toPx()), 2.4.dp.toPx(), StrokeCap.Round)
         drawLine(face, Offset(center.x, center.y - 1.dp.toPx()), Offset(center.x - 4.dp.toPx(), center.y + 12.dp.toPx()), 1.dp.toPx(), StrokeCap.Round)
@@ -460,8 +555,8 @@ private fun AvatarPortrait() {
             val height = (5f + ((index * 7 + phase * 5).toInt() % 9)) * unit
             drawLine(
                 accent.copy(alpha = 0.45f + phase * 0.35f),
-                Offset(x, center.y + 63.dp.toPx() - height / 2),
-                Offset(x, center.y + 63.dp.toPx() + height / 2),
+                Offset(x, center.y + 77.dp.toPx() - height / 2),
+                Offset(x, center.y + 77.dp.toPx() + height / 2),
                 1.5.dp.toPx(),
                 StrokeCap.Round,
             )
@@ -683,11 +778,72 @@ private fun ColumnScope.NoticesScreen(session: DeviceSession, appInForeground: B
     LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         items(notices?.items ?: emptyList()) { n ->
             Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp)) {
-                    Text((if (n.read) "" else "● ") + n.title, style = MaterialTheme.typography.titleSmall,
-                        color = when (n.severity) { "error" -> MaterialTheme.colorScheme.error; else -> MaterialTheme.colorScheme.onSurface })
-                    if (n.body.isNotEmpty()) Text(n.body, style = MaterialTheme.typography.bodySmall)
-                    Text(n.createdAt.take(16).replace('T', ' '), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Column(
+                    Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            n.title,
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = if (n.read) FontWeight.Normal else FontWeight.SemiBold,
+                            color = when (n.severity) {
+                                "error" -> MaterialTheme.colorScheme.error
+                                "warning" -> MaterialTheme.colorScheme.tertiary
+                                else -> MaterialTheme.colorScheme.onSurface
+                            },
+                            modifier = Modifier.weight(1f),
+                        )
+                        if (!n.read) {
+                            Surface(
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                shape = MaterialTheme.shapes.small,
+                            ) {
+                                Text(
+                                    "Nuova",
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        "${notificationCategoryLabel(n.category.ifBlank { "system" })} · ${notificationSeverityLabel(n.severity)}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (n.body.isNotEmpty()) Text(n.body, style = MaterialTheme.typography.bodyMedium)
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            n.createdAt.take(16).replace('T', ' '),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (!n.read) {
+                            TextButton(onClick = {
+                                scope.launch {
+                                    withContext(Dispatchers.IO) {
+                                        runCatching { client.markRead(n.id, session) }
+                                    }.onFailure {
+                                        if (it is CoreException.Revoked) onRevoked()
+                                        else status = it.message
+                                    }
+                                    refresh()
+                                }
+                            }) {
+                                Text("Segna come letta")
+                            }
+                        }
+                    }
                 }
             }
         }

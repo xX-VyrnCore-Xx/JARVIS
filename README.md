@@ -10,11 +10,12 @@ Scarica il pacchetto dalla pagina [Releases](https://github.com/xX-VyrnCore-Xx/J
 
 | Sistema | Pacchetto | Installazione |
 |---|---|---|
-| macOS Apple Silicon | `JARVIS_<versione>_aarch64.dmg` | Apri il DMG e trascina JARVIS in **Applicazioni**. |
-| Windows x64 | `JARVIS_<versione>_x64-setup.exe` | Avvia il setup per l’utente corrente. |
+| macOS Apple Silicon | `JARVIS_<versione>_aarch64.dmg` | Apri il DMG, trascina JARVIS in **Applicazioni**, attendi la copia e avvia l'app dalla cartella Applicazioni. |
+| Windows x64 | `JARVIS_<versione>_x64-setup.exe` | Avvia il wizard per l’utente corrente, scegli la cartella e avvia JARVIS facoltativamente al termine; crea collegamenti in Start e sul Desktop. |
 | Android | `JARVIS_<versione>_android-release.apk` | Installa l'APK release firmato (non usare APK di debug). |
 
 Core e Python sono inclusi negli installer desktop. Il runtime vocale è disponibile nel Core, ma i controlli microfono, sintesi vocale e wake word non sono ancora esposti nella nuova app desktop nativa. L'APK Android è allegato alla stessa release; per abilitare le notifiche push configura [Firebase](docs/FIREBASE_SETUP.md).
+Su macOS i dati restano nella cartella utente quando rimuovi l'app da Applicazioni. Su Windows la disinstallazione rimuove l'app e le scorciatoie, non i dati dell'utente.
 La pagina Releases conserva una sola versione alla volta: al rilascio successivo le release e i tag precedenti vengono rimossi.
 Il Core controlla ogni ora le nuove release e invia una notifica; download, verifica della firma e installazione restano manuali. Per un repository privato configura un token fine-grained in **Aggiornamenti** nell'app desktop.
 
@@ -58,7 +59,7 @@ Gli artefatti sono verificabili con l’attestazione GitHub e le firme Sigstore;
 
 1. Sul Mac, configura un proxy HTTPS privato verso `127.0.0.1:8765`, per esempio con `tailscale serve 8765`.
 2. Scrivi il nome host del proxy in `remote-hosts.txt` nella cartella dati del Mac host, oppure imposta `JARVIS_ALLOWED_HOSTS`. Riavvia JARVIS per usare la porta stabile.
-3. Apri **Dispositivi**, genera un invito monouso e usa il codice o il QR da un client autorizzato. Il Mac resta l’host. Le app associate vedono chat, conferme, attività e notifiche secondo i permessi assegnati.
+3. Apri **Dispositivi**, genera un invito monouso e inserisci il codice nel client autorizzato. Il Mac resta l’host. Le app associate vedono chat, conferme, attività e notifiche secondo i permessi assegnati.
 
 Per un secondo desktop, imposta `JARVIS_REMOTE_URL` o salva l'origine HTTPS in `remote-core-url.txt` nella sua cartella dati. L'app desktop e quella Android si associano con l'origine HTTPS e il codice. [Interfacce e dispositivi](docs/INTERFACE_AND_DEVICES.md)
 
@@ -67,6 +68,7 @@ Per un secondo desktop, imposta `JARVIS_REMOTE_URL` o salva l'origine HTTPS in `
 - **Chat.** Invia richieste al Core e consulta la cronologia della conversazione. Le azioni sensibili restano soggette a policy e conferma.
 - **Modelli cloud e voce.** La sezione Modelli AI dell'app desktop permette di configurare o rimuovere le chiavi per Ollama Cloud e NVIDIA NIM; il Core instrada le richieste al provider selezionato. Il runtime vocale è incluso nel Core, ma i controlli vocali non sono ancora disponibili nell'interfaccia desktop nativa.
 - **Dispositivi e notifiche.** Associa client Android o desktop tramite invito monouso. Le notifiche push Android richiedono Firebase; il Core continua a conservarle anche quando un client non è connesso.
+- **Memoria.** Cerca i ricordi dal client desktop usando gli indici locali del Core. La memoria non viene esposta ai dispositivi associati; le app mobile mostrano solo le funzioni consentite dal permesso `chat`.
 - **Aggiornamenti.** Il Core rileva le release GitHub ogni ora. Una repository pubblica non richiede un token; per una repository privata inserisci nella schermata **Aggiornamenti** un token fine-grained con sola lettura dei contenuti. Il token è custodito cifrato dal Core; le app notificano la release, ma installazione e aggiornamenti Android restano confermati manualmente.
 - **Altre sezioni.** La navigazione nativa include attività, automazioni, memoria, competenze, workspace, connettori, dispositivi, sicurezza, audit e sistema. Alcune viste sono ancora generiche e non includono tutti i flussi guidati.
 

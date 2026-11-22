@@ -79,6 +79,7 @@ pub struct JarvisApp {
     last_load: Instant,
     chat_input: String,
     chat: Vec<ChatMessage>,
+    memory_search: String,
     history_loading: bool,
     streaming: String,
     chat_busy: bool,
@@ -97,6 +98,7 @@ pub struct JarvisApp {
     pair_error: Option<String>,
     pending_delete: Option<(String, String)>,
     device_invite: Option<Value>,
+    pairing_url: String,
     setup_stt: String,
     setup_tts: String,
     connector_template: String,
@@ -147,6 +149,7 @@ impl JarvisApp {
             last_load: Instant::now() - Duration::from_secs(60),
             chat_input: String::new(),
             chat: Vec::new(),
+            memory_search: String::new(),
             history_loading: false,
             streaming: String::new(),
             chat_busy: false,
@@ -165,6 +168,7 @@ impl JarvisApp {
             pair_error: None,
             pending_delete: None,
             device_invite: None,
+            pairing_url: String::new(),
             setup_stt: "small".into(),
             setup_tts: "it_IT-paola-medium".into(),
             connector_template: String::new(),
@@ -329,13 +333,14 @@ impl JarvisApp {
                                 show_notification(item);
                             }
                         }
-                    } else {
-                        self.known_notifications
-                            .extend(items.iter().filter_map(|item| {
-                                item["notification_id"].as_str().map(str::to_owned)
-                            }));
                     }
                     self.notifications_primed = true;
+                    self.known_notifications = items
+                        .iter()
+                        .filter_map(|item| {
+                            item["notification_id"].as_str().map(str::to_owned)
+                        })
+                        .collect();
                     self.notifications = items;
                     ctx.request_repaint();
                 }
@@ -385,7 +390,11 @@ impl JarvisApp {
         self.last_load = Instant::now();
         let page = self.current.clone();
         let tx = self.tx.clone();
-        let path = endpoint(&page);
+        let path = if page == "memory" {
+            memory_endpoint(&self.memory_search)
+        } else {
+            endpoint(&page).to_owned()
+        };
         std::thread::spawn(move || {
             let result = client.get(path).and_then(|mut data| {
                 if page == "connectors" {
@@ -697,15 +706,57 @@ impl JarvisApp {
             .cloned()
             .collect::<Vec<_>>();
         for notification in notifications {
-            ui.group(|ui| {
-                ui.strong(notification["title"].as_str().unwrap_or("JARVIS"));
-                ui.label(notification["body"].as_str().unwrap_or(""));
-                ui.small(notification["created_at"].as_str().unwrap_or(""));
-                if notification["read_at"].is_null() && ui.button("Segna come letta").clicked() {
-                    let id = notification["notification_id"].as_str().unwrap_or_default();
-                    self.act(ui.ctx(), format!("/api/notifications/{id}/read"), None);
-                }
-            });
+            let severity = notification["severity"].as_str().unwrap_or("info");
+            let category = notification["category"].as_str().unwrap_or("system");
+            let unread = notification["read_at"].is_null();
+            let color = match severity {
+                "error" => egui::Color32::LIGHT_RED,
+                "warning" => egui::Color32::from_rgb(255, 197, 108),
+                "success" => egui::Color32::from_rgb(80, 220, 160),
+                _ => ACCENT,
+            };
+            egui::Frame::new()
+                .fill(if unread { SELECTED } else { RAISED })
+                .corner_radius(12)
+                .inner_margin(12)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(if unread { "●" } else { "○" }).color(color));
+                        ui.vertical(|ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.strong(
+                                    notification["title"].as_str().unwrap_or("JARVIS"),
+                                );
+                                ui.small(
+                                    egui::RichText::new(format!("{category} · {severity}"))
+                                        .color(color),
+                                );
+                            });
+                            if let Some(body) = notification["body"].as_str() {
+                                ui.label(body);
+                            }
+                            if let Some(created_at) = notification["created_at"].as_str() {
+                                ui.small(egui::RichText::new(created_at).weak());
+                            }
+                        });
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        if let Some(view) = notification["link"]["view"].as_str() {
+                            let allowed = NAV.iter().any(|(id, _, owner_only)| {
+                                *id == view && (!self.remote || !*owner_only)
+                            });
+                            if allowed && ui.button("Apri").clicked() {
+                                self.current = view.to_owned();
+                                self.data = None;
+                                self.refresh(ui.ctx());
+                            }
+                        }
+                        if unread && ui.button("Segna come letta").clicked() {
+                            let id = notification["notification_id"].as_str().unwrap_or_default();
+                            self.act(ui.ctx(), format!("/api/notifications/{id}/read"), None);
+                        }
+                    });
+                });
         }
     }
 
@@ -719,8 +770,9 @@ impl JarvisApp {
             "updates" => self.show_updates(ui, ctx),
             "system" => self.show_setup(ui, ctx),
             "connectors" => self.show_connectors(ui, ctx),
-            "tasks" | "automations" | "memory" | "skills" | "workspace" | "devices"
-            | "security" | "audit" => {
+            "memory" => self.show_memory(ui, ctx),
+            "tasks" | "automations" | "skills" | "workspace" | "devices" | "security"
+            | "audit" => {
                 ui.horizontal(|ui| {
                     ui.heading(title(&self.current));
                     if ui.button("Aggiorna").clicked() {
@@ -1030,6 +1082,67 @@ impl JarvisApp {
             }
             ui.checkbox(&mut self.reduce_motion, "Riduci animazioni");
         });
+    }
+
+    fn show_memory(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let mut search_clicked = false;
+        let mut show_all_clicked = false;
+        ui.horizontal_wrapped(|ui| {
+            ui.heading("Memoria");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.memory_search)
+                    .desired_width(240.0)
+                    .interactive(!self.loading)
+                    .hint_text("Cerca nei ricordi"),
+            );
+            if ui
+                .add_enabled(!self.loading, egui::Button::new("Cerca"))
+                .clicked()
+            {
+                search_clicked = true;
+            }
+            if ui
+                .add_enabled(
+                    !self.loading && !self.memory_search.is_empty(),
+                    egui::Button::new("Mostra tutti"),
+                )
+                .clicked()
+            {
+                show_all_clicked = true;
+            }
+            if self.loading {
+                ui.add(egui::Spinner::new());
+            }
+        });
+        if show_all_clicked {
+            self.memory_search.clear();
+        }
+        if search_clicked || show_all_clicked {
+            self.data = None;
+            self.refresh(ctx);
+        }
+        if let Some(error) = &self.error {
+            ui.colored_label(egui::Color32::LIGHT_RED, error);
+        }
+        let items = self
+            .data
+            .as_ref()
+            .and_then(|data| data["items"].as_array())
+            .cloned();
+        if let Some(items) = items {
+            if items.is_empty() {
+                ui.label(if self.memory_search.trim().is_empty() {
+                    "Nessun ricordo salvato."
+                } else {
+                    "Nessun ricordo corrisponde alla ricerca."
+                });
+            }
+            for item in items {
+                self.show_item(ui, ctx, &item);
+            }
+        } else if !self.loading {
+            ui.label("I ricordi restano sul Core; la ricerca usa gli indici locali.");
+        }
     }
 
     fn show_setup(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -1537,12 +1650,45 @@ impl JarvisApp {
     }
 
     fn show_device_invite(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let pairing_urls: Vec<String> = self
+            .data
+            .as_ref()
+            .and_then(|data| data["pairing_urls"].as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_owned)
+            .collect();
+        self.pairing_url = available_pairing_url(&self.pairing_url, &pairing_urls);
+        let mut pairing_url = self.pairing_url.clone();
+        let invite = self.device_invite.clone();
         ui.group(|ui| {
             ui.heading("Associa un dispositivo");
-            ui.label("Apri JARVIS sul telefono e inserisci l’indirizzo HTTPS del Core e il codice monouso.");
-            ui.checkbox(
-                &mut self.invite_confirm,
-                "Consenti le conferme (oltre alla chat)",
+            ui.label("1. Apri JARVIS sul dispositivo da associare.");
+            ui.label("2. Inserisci l’indirizzo HTTPS del Core e il codice monouso.");
+            if pairing_urls.len() > 1 {
+                egui::ComboBox::from_id_salt("pairing-host")
+                    .selected_text(pairing_url.as_str())
+                    .show_ui(ui, |ui| {
+                        for url in &pairing_urls {
+                            ui.selectable_value(&mut pairing_url, url.clone(), url.as_str());
+                        }
+                    });
+            }
+            if !pairing_url.is_empty() {
+                ui.label(format!("Indirizzo del Core: {pairing_url}"));
+            } else {
+                ui.colored_label(
+                    egui::Color32::from_rgb(255, 197, 108),
+                    "Configura prima un host HTTPS autorizzato nel Core per associare dispositivi remoti.",
+                );
+            }
+            ui.add_enabled(
+                !self.invite_creating && invite.is_none(),
+                egui::Checkbox::new(
+                    &mut self.invite_confirm,
+                    "Consenti le conferme (oltre alla chat)",
+                ),
             );
             if ui
                 .add_enabled(
@@ -1553,7 +1699,14 @@ impl JarvisApp {
             {
                 self.create_device_invite(ctx);
             }
-            if let Some(invite) = &self.device_invite {
+            if let Some(invite) = invite {
+                let allows_confirm = invite["scopes"]
+                    .as_array()
+                    .is_some_and(|scopes| {
+                        scopes
+                            .iter()
+                            .any(|scope| scope.as_str() == Some("confirm"))
+                    });
                 ui.label(format!(
                     "Codice: {}",
                     invite["code"].as_str().unwrap_or("—")
@@ -1561,6 +1714,18 @@ impl JarvisApp {
                 if let Some(code) = invite["code"].as_str() {
                     if ui.button("Copia codice").clicked() {
                         ctx.copy_text(code.to_owned());
+                    }
+                    if !pairing_url.is_empty() {
+                        if ui.button("Copia istruzioni di associazione").clicked() {
+                            ctx.copy_text(format!(
+                                "Indirizzo HTTPS del Core: {pairing_url}\nCodice monouso: {code}\nPermessi: {}",
+                                if allows_confirm {
+                                    "chat e conferme"
+                                } else {
+                                    "solo chat"
+                                }
+                            ));
+                        }
                     }
                 }
                 ui.label(format!(
@@ -1578,6 +1743,7 @@ impl JarvisApp {
                 }
             }
         });
+        self.pairing_url = pairing_url;
     }
 
     fn show_item(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, item: &Value) {
@@ -1960,7 +2126,23 @@ fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
         side * 0.36 - breath * 0.35,
         egui::Stroke::new(1.0, egui::Color32::from_rgb(32, 83, 112)),
     );
+    for angle in [
+        0.0_f32,
+        std::f32::consts::FRAC_PI_2,
+        std::f32::consts::PI,
+        std::f32::consts::PI * 1.5,
+    ] {
+        let direction = egui::Vec2::new(angle.cos(), angle.sin());
+        painter.line_segment(
+            [
+                center + direction * side * 0.405,
+                center + direction * side * 0.435,
+            ],
+            egui::Stroke::new(1.2, egui::Color32::from_rgb(61, 143, 171)),
+        );
+    }
 
+    let unit = side / 236.0;
     let ring_radius = side * 0.40;
     let sweep = std::f32::consts::PI * 1.45;
     let start = time as f32 * 0.28;
@@ -1974,8 +2156,12 @@ fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
         arc,
         egui::Stroke::new(2.0, accent),
     ));
+    for index in 0..3 {
+        let angle = start + time as f32 * 0.7 + index as f32 * std::f32::consts::TAU / 3.0;
+        let point = center + egui::Vec2::new(angle.cos(), angle.sin()) * ring_radius;
+        painter.circle_filled(point, 2.2 * unit, accent);
+    }
 
-    let unit = side / 236.0;
     let face_center = center + egui::vec2(0.0, -side * 0.035);
     let shoulders = vec![
         center + egui::vec2(-side * 0.25, side * 0.31),
@@ -2015,15 +2201,37 @@ fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
         egui::Color32::from_rgb(19, 43, 58),
         egui::Stroke::new(1.8, egui::Color32::from_rgb(71, 194, 224)),
     ));
+    painter.add(egui::Shape::line(
+        vec![
+            face_center + egui::vec2(-side * 0.075, -side * 0.175),
+            face_center + egui::vec2(0.0, -side * 0.205),
+            face_center + egui::vec2(side * 0.075, -side * 0.175),
+        ],
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(61, 122, 147)),
+    ));
 
     let eye_y = face_center.y - side * 0.025;
     for direction in [-1.0, 1.0] {
+        painter.circle_filled(
+            egui::pos2(face_center.x + direction * side * 0.064, eye_y),
+            side * 0.046,
+            egui::Color32::from_rgba_unmultiplied(25, 167, 213, 28),
+        );
         painter.line_segment(
             [
                 egui::pos2(face_center.x + direction * side * 0.09, eye_y),
                 egui::pos2(face_center.x + direction * side * 0.035, eye_y),
             ],
             egui::Stroke::new(2.6 * unit, accent),
+        );
+    }
+    for direction in [-1.0, 1.0] {
+        painter.line_segment(
+            [
+                egui::pos2(face_center.x + direction * side * 0.118, eye_y + side * 0.055),
+                egui::pos2(face_center.x + direction * side * 0.085, eye_y + side * 0.09),
+            ],
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(59, 129, 154)),
         );
     }
     painter.line_segment(
@@ -2040,15 +2248,32 @@ fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
         ],
         egui::Stroke::new(1.2 * unit, egui::Color32::from_rgb(105, 179, 197)),
     );
+    let chest = center + egui::vec2(0.0, side * 0.205);
+    painter.circle_filled(chest, side * 0.042, egui::Color32::from_rgb(7, 26, 40));
+    painter.circle_stroke(
+        chest,
+        side * 0.042,
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(49, 146, 174)),
+    );
+    painter.circle_filled(chest, side * (0.012 + pulse * 0.005), accent);
+    for direction in [-1.0, 1.0] {
+        painter.line_segment(
+            [
+                chest + egui::vec2(direction * side * 0.07, side * 0.01),
+                chest + egui::vec2(direction * side * 0.11, side * 0.04),
+            ],
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(66, 142, 165)),
+        );
+    }
     painter.text(
-        center + egui::vec2(0.0, side * 0.275),
+        center + egui::vec2(0.0, side * 0.385),
         egui::Align2::CENTER_CENTER,
         "JARVIS",
         egui::FontId::proportional(14.0 * unit),
         egui::Color32::from_rgb(210, 235, 246),
     );
     if !reduce_motion {
-        ctx.request_repaint_after(Duration::from_millis(50));
+        ctx.request_repaint_after(Duration::from_millis(80));
     }
 }
 
@@ -2068,6 +2293,23 @@ fn endpoint(page: &str) -> &'static str {
         "models" => "/api/cloud",
         "updates" => "/api/updates",
         _ => "/api/health",
+    }
+}
+
+fn memory_endpoint(query: &str) -> String {
+    let query = query.trim();
+    if query.is_empty() {
+        return endpoint("memory").to_owned();
+    }
+    let encoded = url::form_urlencoded::byte_serialize(query.as_bytes()).collect::<String>();
+    format!("{}?q={encoded}", endpoint("memory"))
+}
+
+fn available_pairing_url(current: &str, available: &[String]) -> String {
+    if available.iter().any(|url| url == current) {
+        current.to_owned()
+    } else {
+        available.first().cloned().unwrap_or_default()
     }
 }
 
@@ -2224,11 +2466,21 @@ fn is_https_url(value: &str) -> bool {
 fn show_notification(item: &Value) {
     let title = item["title"].as_str().unwrap_or("JARVIS");
     let body = item["body"].as_str().unwrap_or("");
-    if let Err(error) = notify_rust::Notification::new()
+    let category = item["category"].as_str().unwrap_or("system");
+    let severity = item["severity"].as_str().unwrap_or("info");
+    let body = if body.is_empty() {
+        format!("{} · {}", category, severity)
+    } else {
+        format!("{} · {}: {}", category, severity, body)
+    };
+    let mut notification = notify_rust::Notification::new();
+    notification
         .summary(title)
-        .body(body)
-        .show()
-    {
+        .body(&body);
+    if severity == "error" {
+        notification.urgency(notify_rust::Urgency::Critical);
+    }
+    if let Err(error) = notification.show() {
         eprintln!("Notifica desktop non visualizzata: {error}");
     }
 }
@@ -2254,6 +2506,33 @@ mod tests {
         assert!(NAV
             .iter()
             .any(|(id, _, owner_only)| *id == "updates" && *owner_only));
+    }
+
+    #[test]
+    fn memory_search_encodes_query_and_omits_blank_filters() {
+        assert_eq!(memory_endpoint(""), "/api/memory");
+        assert_eq!(memory_endpoint("  "), "/api/memory");
+        assert_eq!(
+            memory_endpoint("riunioni progetto/2026"),
+            "/api/memory?q=riunioni+progetto%2F2026"
+        );
+    }
+
+    #[test]
+    fn pairing_keeps_the_selected_host_or_falls_back_to_an_available_host() {
+        let hosts = vec![
+            "https://jarvis.example".to_owned(),
+            "https://backup.example".to_owned(),
+        ];
+        assert_eq!(
+            available_pairing_url("https://backup.example", &hosts),
+            "https://backup.example"
+        );
+        assert_eq!(
+            available_pairing_url("https://removed.example", &hosts),
+            "https://jarvis.example"
+        );
+        assert_eq!(available_pairing_url("https://removed.example", &[]), "");
     }
 
     #[test]

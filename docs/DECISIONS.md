@@ -1290,6 +1290,15 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `gradle -p apps/android -Pjarvis.coreOnly=true :core-client:test --no-daemon` e `git diff --check` superati. Il build dell'app Compose è sospeso perché nell'ambiente non è configurato l'Android SDK; Cargo e il collaudo visivo non sono disponibili.
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md, `apps/desktop/src-tauri/src/app.rs`, `apps/android/app/src/main/java/local/jarvis/app/MainActivity.kt`.
 
+### ADR-0074 — Rifinitura di memoria, notifiche e installazione dei client
+
+- **Data** 2026-11-22 · **Stato** implementata nel checkout · **Fonte** richiesta del proprietario.
+- **Contesto:** la ricerca Core non trovava alcuni plurali italiani quando la copertura lessicale usava forme non normalizzate; il client desktop non offriva ricerca nella vista Memoria; pairing, notifiche mobili e istruzioni di installazione avevano passaggi da rendere più chiari.
+- **Decisione:** confrontare la copertura della memoria con gli stessi termini stemmatizzati della ricerca; aggiungere la ricerca testuale desktop tramite l'API già esistente; presentare categoria e gravità delle notifiche desktop, portare il push Android direttamente alla scheda notifiche e consentire la marcatura singola; includere istruzioni DMG e completare il wizard NSIS. Il pairing desktop consente di scegliere fra gli host HTTPS configurati e rende copiabili host selezionato, codice monouso e scope.
+- **Permessi e privacy:** non cambiano scope, pairing o autorizzazioni. I dispositivi associati continuano a non accedere alla memoria del proprietario. FCM resta data-only e il testo del push rimane generico; gli installer non rimuovono i dati nella cartella utente.
+- **Evidenza locale:** `gradle -p apps/android -Pjarvis.coreOnly=true :core-client:test --no-daemon`, `bash -n scripts/package_macos_release.sh`, parsing YAML del workflow release e `git diff --check` superati. Non eseguiti i test Rust e i build desktop perché Cargo/Rust non sono installati; il build Compose richiede l'Android SDK; prove installer e grafiche richiedono macOS/Windows. `tests/e2e/ui_smoke.cjs` non è presente nel checkout; i controlli installer aggiunti saranno eseguiti dalla CI release.
+- **Documenti interessati:** README.md, INTERFACE_AND_DEVICES.md, ROADMAP.md, `core/server/src/memory.rs`, app desktop egui, app Android e flussi di release.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.

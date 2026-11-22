@@ -15,7 +15,15 @@ data class ChatMessage(val role: String, val content: String)
 
 data class TaskSummary(val id: String, val objective: String, val state: String, val createdAt: String)
 
-data class Notice(val id: String, val severity: String, val title: String, val body: String, val createdAt: String, val read: Boolean)
+data class Notice(
+    val id: String,
+    val severity: String,
+    val category: String,
+    val title: String,
+    val body: String,
+    val createdAt: String,
+    val read: Boolean,
+)
 
 data class Notices(val unread: Int, val items: List<Notice>)
 
@@ -127,10 +135,22 @@ class CoreClient(private val transport: Transport = UrlConnectionTransport) {
     fun notices(session: DeviceSession): Notices {
         val json = request(session.origin, "/api/notifications?limit=30", session.token)
         val items = json.items().map {
-            Notice(it.optString("notification_id"), it.optString("severity"), it.optString("title"),
-                it.optString("body"), it.optString("created_at"), !it.isNull("read_at") && it.optString("read_at").isNotEmpty())
+            Notice(
+                it.optString("notification_id"),
+                it.optString("severity"),
+                it.optString("category"),
+                it.optString("title"),
+                it.optString("body"),
+                it.optString("created_at"),
+                !it.isNull("read_at") && it.optString("read_at").isNotEmpty(),
+            )
         }
         return Notices(json.optInt("unread", 0), items)
+    }
+
+    fun markRead(id: String, session: DeviceSession) {
+        if (!Regex("^[0-9a-fA-F-]{36}$").matches(id)) throw CoreException.InvalidResponse()
+        request(session.origin, "/api/notifications/${id.lowercase()}/read", session.token, JSONObject())
     }
 
     fun markAllRead(session: DeviceSession): Int =

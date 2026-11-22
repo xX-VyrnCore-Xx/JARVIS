@@ -450,6 +450,7 @@ impl Store {
         if words.is_empty() || limit == 0 {
             return Ok(Vec::new());
         }
+        let query_terms: HashSet<_> = terms(query).into_iter().collect();
         let equivalents = [
             &["auto", "automobile", "macchina", "vettura"][..],
             &["riunione", "meeting"][..],
@@ -487,9 +488,12 @@ impl Store {
             for row in rows {
                 let (id, text, blob) = row?;
                 let text = normalize(&text);
-                let terms: HashSet<_> = text.split_whitespace().collect();
-                let coverage = words.iter().filter(|word| terms.contains(**word)).count() as f32
-                    / words.len() as f32;
+                let document_terms: HashSet<_> = terms(&text).into_iter().collect();
+                let coverage = query_terms
+                    .iter()
+                    .filter(|term| document_terms.contains(*term))
+                    .count() as f32
+                    / query_terms.len().max(1) as f32;
                 let phrase = words.len() > 1
                     && text
                         .split_whitespace()
@@ -647,5 +651,21 @@ mod tests {
             "b"
         );
         assert!(store.memory_search("il e", None, 5).unwrap().is_empty());
+    }
+
+    #[test]
+    fn search_matches_inflected_terms_and_keeps_exact_phrase_ranking() {
+        let store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        let at = "2026-01-01T00:00:00Z";
+        store
+            .memory_add("meeting", "la riunione del progetto è importante", at)
+            .unwrap();
+        store
+            .memory_add("unrelated", "il progetto viene archiviato", at)
+            .unwrap();
+
+        let results = store.memory_search("le riunioni del progetto", None, 5).unwrap();
+        assert_eq!(results.first().map(|item| item["id"].as_str()), Some(Some("meeting")));
+        assert!(results.iter().any(|item| item["id"] == "unrelated"));
     }
 }

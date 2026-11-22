@@ -1,0 +1,11 @@
+INSTALLAZIONE DI JARVIS
+
+1. Trascina JARVIS.app sull'icona Applicazioni.
+2. Attendi che la copia sia completata prima di espellere il disco immagine.
+3. Apri JARVIS dalla cartella Applicazioni. Al primo avvio macOS potrebbe chiedere conferma.
+
+Il Core, Python e il runtime AI sono inclusi nell'app. I tuoi dati e le impostazioni
+restano nella cartella utente e non vengono rimossi quando elimini l'app.
+
+Per verificare firma e provenienza dell'installer, consulta la sezione "Verifica un
+installer" nel README di JARVIS.

@@ -109,7 +109,7 @@ class CoreClientTest {
     fun tasksAndNoticesUseDeviceRoutesOnly() {
         val t = Recorder(listOf(
             HttpReply(200, """{"items":[{"task_id":"t1","objective":"che ore sono","state":"succeeded","created_at":"2026-11-18T10:00:00Z"}]}"""),
-            HttpReply(200, """{"unread":1,"items":[{"notification_id":"n1","severity":"warning","title":"Conferma richiesta","body":"x","created_at":"2026-11-18T10:00:00Z","read_at":null},{"notification_id":"n2","severity":"info","title":"Fatto","created_at":"2026-11-18T09:00:00Z","read_at":"2026-11-18T09:01:00Z"}]}"""),
+            HttpReply(200, """{"unread":1,"items":[{"notification_id":"n1","severity":"warning","category":"confirmation","title":"Conferma richiesta","body":"x","created_at":"2026-11-18T10:00:00Z","read_at":null},{"notification_id":"n2","severity":"info","category":"system","title":"Fatto","created_at":"2026-11-18T09:00:00Z","read_at":"2026-11-18T09:01:00Z"}]}"""),
             HttpReply(200, """{"unread":0}"""),
         ))
         val client = CoreClient(t)
@@ -118,10 +118,33 @@ class CoreClientTest {
         val notices = client.notices(session)
         assertEquals(1, notices.unread)
         assertEquals(listOf(false, true), notices.items.map { it.read })
+        assertEquals("warning", notices.items.first().severity)
+        assertEquals("system", notices.items.last().category)
         assertEquals(0, client.markAllRead(session))
         assertEquals(listOf("/api/tasks?limit=30", "/api/notifications?limit=30", "/api/notifications/read-all"),
             t.calls.map { it.second.removePrefix("https://jarvis.example") })
         assertTrue(t.calls.all { it.third["X-Jarvis-Device"] == token })
+    }
+
+    @Test
+    fun individualNotificationReadUsesValidatedDeviceRoute() {
+        val id = "6F1C2D3E-4B5A-4C6D-8E7F-901234567890"
+        val t = Recorder(listOf(HttpReply(200, """{"read":true}""")))
+        val client = CoreClient(t)
+        val session = DeviceSession("https://jarvis.example", token, listOf("chat"))
+
+        client.markRead(id, session)
+
+        assertEquals("POST", t.calls.single().first)
+        assertEquals(
+            "https://jarvis.example/api/notifications/${id.lowercase()}/read",
+            t.calls.single().second,
+        )
+        assertEquals(token, t.calls.single().third["X-Jarvis-Device"])
+        assertThrows(CoreException.InvalidResponse::class.java) {
+            client.markRead("../devices", session)
+        }
+        assertEquals(1, t.calls.size)
     }
 
     @Test
