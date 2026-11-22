@@ -144,6 +144,23 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
         }
         "process.list" => process_list(args),
         "code.check_python" => crate::sandbox::check_python(ctx.workspace, s("path")),
+        "text.count" => {
+            let text = s("text");
+            Ok(json!({
+                "words": text.split_whitespace().count(),
+                "lines": text.lines().count(),
+                "characters": text.chars().count(),
+                "utf8_bytes": text.len(),
+            }))
+        }
+        "code.validate_json" => Ok(
+            match serde_json::from_str::<serde::de::IgnoredAny>(s("text")) {
+                Ok(_) => json!({"valid": true}),
+                Err(error) => {
+                    json!({"valid": false, "line": error.line(), "column": error.column()})
+                }
+            },
+        ),
         "math.calc" => crate::toolbox::calc(s("expression")),
         "units.convert" => {
             crate::toolbox::convert(args["value"].as_f64().unwrap_or(0.0), s("from"), s("to"))

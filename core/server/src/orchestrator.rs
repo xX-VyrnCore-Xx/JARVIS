@@ -1321,6 +1321,7 @@ impl Jarvis {
                     "fs.read",
                     "fs.search",
                     "code.check_python",
+                    "code.validate_json",
                     "math.calc",
                 ][..]
             } else {

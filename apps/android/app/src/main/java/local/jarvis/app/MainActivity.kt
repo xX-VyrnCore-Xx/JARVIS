@@ -37,6 +37,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -162,7 +163,11 @@ private fun ColumnScope.DeviceScreen(session: DeviceSession, appInForeground: Bo
         }
         Text("●", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
     }
-    TabRow(selectedTabIndex = tab) {
+    TabRow(
+        selectedTabIndex = tab,
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.primary,
+    ) {
         listOf("Chat", "Attività", "Notifiche").forEachIndexed { i, label ->
             Tab(selected = tab == i, onClick = { tab = i }, text = { Text(label) })
         }
@@ -384,11 +389,14 @@ private fun ColumnScope.ChatScreen(session: DeviceSession, appInForeground: Bool
         val result = withContext(Dispatchers.IO) { runCatching { client.history(session) to client.pending(session) } }
         result.onSuccess { (history, actions) ->
             val stickToEnd = messages.isEmpty() || !list.canScrollForward
-            if (messages != history) {
-                messages.clear(); messages.addAll(history)
-                if (stickToEnd && messages.isNotEmpty()) list.scrollToItem(messages.size - 1)
+            val historyChanged = messages != history
+            val actionsChanged = pending != actions
+            if (historyChanged) { messages.clear(); messages.addAll(history) }
+            if (actionsChanged) { pending.clear(); pending.addAll(actions) }
+            val lastItem = messages.size + pending.size - 1
+            if (stickToEnd && lastItem >= 0 && (historyChanged || actionsChanged)) {
+                list.scrollToItem(lastItem)
             }
-            if (pending != actions) { pending.clear(); pending.addAll(actions) }
             status = null
         }.onFailure(::handle)
     }
@@ -402,34 +410,10 @@ private fun ColumnScope.ChatScreen(session: DeviceSession, appInForeground: Bool
     }
 
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text("JARVIS", style = MaterialTheme.typography.titleLarge)
+        Text("Conversazione", style = MaterialTheme.typography.titleMedium, modifier = Modifier.align(Alignment.CenterVertically))
         TextButton(onClick = { scope.launch { refresh() } }) { Text("Aggiorna") }
     }
     status?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp)) }
-    for (action in pending) {
-        Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Conferma richiesta", style = MaterialTheme.typography.titleSmall)
-                Text(action.expectedEffect)
-                Text(action.target, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
-                if (session.canConfirm) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for ((label, approve) in listOf("Approva" to true, "Rifiuta" to false)) {
-                            val decide = {
-                                scope.launch {
-                                    withContext(Dispatchers.IO) { runCatching { client.decide(action, approve, session) } }.onFailure(::handle)
-                                    refresh()
-                                }
-                            }
-                            if (approve) Button(onClick = { decide() }) { Text(label) } else OutlinedButton(onClick = { decide() }) { Text(label) }
-                        }
-                    }
-                } else {
-                    Text("Si conferma dal computer: questo dispositivo non ha il permesso di confermare.", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-    }
     LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         items(messages) { m ->
             val fromUser = m.role == "user"
@@ -442,6 +426,8 @@ private fun ColumnScope.ChatScreen(session: DeviceSession, appInForeground: Bool
                     colors = CardDefaults.cardColors(
                         containerColor = if (fromUser) MaterialTheme.colorScheme.primaryContainer
                         else MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = if (fromUser) MaterialTheme.colorScheme.onPrimaryContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                     ),
                 ) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -456,19 +442,49 @@ private fun ColumnScope.ChatScreen(session: DeviceSession, appInForeground: Bool
                 }
             }
         }
-    }
-    Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(input, { input = it }, placeholder = { Text("Scrivi a JARVIS…") }, modifier = Modifier.weight(1f))
-        Button(enabled = !busy && input.isNotBlank(), onClick = {
-            val text = input.trim()
-            input = ""
-            busy = true
-            messages.add(ChatMessage("user", text))
-            scope.launch {
-                withContext(Dispatchers.IO) { runCatching { client.send(text, session) } }.onFailure(::handle)
-                busy = false
-                refresh()
+        items(pending, key = { "confirmation-${it.confirmationId}" }) { action ->
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Conferma richiesta", style = MaterialTheme.typography.titleSmall)
+                    Text(action.expectedEffect)
+                    Text(action.target, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                    if (session.canConfirm) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            for ((label, approve) in listOf("Approva" to true, "Rifiuta" to false)) {
+                                val decide = {
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) { runCatching { client.decide(action, approve, session) } }.onFailure(::handle)
+                                        refresh()
+                                    }
+                                }
+                                if (approve) Button(onClick = { decide() }) { Text(label) } else OutlinedButton(onClick = { decide() }) { Text(label) }
+                            }
+                        }
+                    } else {
+                        Text("Si conferma dal computer: questo dispositivo non ha il permesso di confermare.", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
             }
-        }) { Text("Invia") }
+        }
+    }
+    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(input, { input = it }, placeholder = { Text("Scrivi a JARVIS…") }, modifier = Modifier.weight(1f))
+            Button(enabled = !busy && input.isNotBlank(), onClick = {
+                val text = input.trim()
+                input = ""
+                busy = true
+                messages.add(ChatMessage("user", text))
+                scope.launch {
+                    withContext(Dispatchers.IO) { runCatching { client.send(text, session) } }.onFailure(::handle)
+                    busy = false
+                    refresh()
+                }
+            }) { Text("Invia") }
+        }
     }
 }

@@ -1261,6 +1261,12 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** test unitario `google_oauth_requests_a_refresh_token`; script di configurazione verificato sintatticamente. Il consenso reale e le chiamate ai servizi richiedono l'account Google del proprietario.
 - **Documenti interessati:** FIREBASE_SETUP.md, `core/server/src/oauth.rs`, `scripts/configure_google_connectors.py`.
 
+### ADR-0070 — Analisi del testo e del JSON nel Core
+
+- **Data** 2026-11-22 · **Stato** implementata.
+- Il Core conta parole separate da spazi, righe, caratteri Unicode e byte UTF-8. Il validatore JSON verifica la sintassi e riporta riga e colonna. Entrambi gli strumenti elaborano al massimo 12.000 caratteri e usano il permesso di calcolo già previsto dal catalogo.
+- I comandi `conta le parole:` e `valida il JSON:` sono disponibili anche nella chat offline. Lo smoke test API verifica i due comandi, il conteggio Unicode e un errore di sintassi.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.

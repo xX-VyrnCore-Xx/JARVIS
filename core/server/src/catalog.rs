@@ -20,6 +20,7 @@ macro_rules! tool_file {
 const SOURCES: &[&str] = &[
     tool_file!("code.check_python"),
     tool_file!("code.run_python"),
+    tool_file!("code.validate_json"),
     tool_file!("date.calc"),
     tool_file!("fs.delete"),
     tool_file!("fs.mkdir"),
@@ -32,6 +33,7 @@ const SOURCES: &[&str] = &[
     tool_file!("notes.list"),
     tool_file!("notes.search"),
     tool_file!("system.disks"),
+    tool_file!("text.count"),
     tool_file!("todo.add"),
     tool_file!("todo.done"),
     tool_file!("todo.list"),
