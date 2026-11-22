@@ -73,10 +73,11 @@ Dopo la pubblicazione, `scripts/prune_releases.py` conserva la release con la ve
 
 ### Firma degli installer
 
-Le release non applicano firme native ai DMG macOS né ai setup Windows. Il proprietario non deve
-configurare certificati, password o account commerciali Apple/Azure per questi pacchetti.
-Sigstore e le attestazioni di provenienza continuano a verificare gli artefatti tramite OIDC GitHub.
-L'APK Android resta firmato separatamente con il keystore Android persistente.
+Le release desktop provano prima i P12/PFX nei GitHub Actions Secrets. Se i Secret sono assenti o
+errati, il runner crea automaticamente un certificato autofirmato temporaneo e firma comunque.
+Non sono necessari account o licenze Apple/Azure né passaggi manuali. Sigstore e le attestazioni
+OIDC continuano a verificare gli artefatti. L'APK Android resta firmato separatamente con il
+keystore Android persistente.
 
 ### Aggiornamenti da repository private
 

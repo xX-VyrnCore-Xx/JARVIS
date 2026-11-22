@@ -2,9 +2,12 @@
 
 Apri **Settings → Secrets and variables → Actions** nel repository `xX-VyrnCore-Xx/JARVIS`.
 
-Le release non usano certificati o account commerciali Apple/Azure per DMG macOS e setup Windows.
-Non configurare i vecchi Secrets `JARVIS_MACOS_SIGNING_*` o `JARVIS_WINDOWS_SIGNING_*`: il workflow li
-ignora deliberatamente e non richiede alcuna operazione manuale per le firme desktop.
+Le release desktop preferiscono i certificati nei Secrets:
+`JARVIS_MACOS_SIGNING_P12_BASE64` con `JARVIS_MACOS_SIGNING_PASSWORD`, e
+`JARVIS_WINDOWS_SIGNING_PFX_BASE64` con `JARVIS_WINDOWS_SIGNING_PASSWORD`.
+Se i Secret sono assenti o non validi, il workflow genera automaticamente un certificato
+autofirmato temporaneo sul runner. Non serve configurare account Apple/Azure né eseguire
+passaggi manuali. L'APK Android usa separatamente i quattro Secret Android.
 
 ## Firma APK Android
 
