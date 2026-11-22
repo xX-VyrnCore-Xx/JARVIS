@@ -1410,7 +1410,7 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 
 ### ADR-0087 — Collegamenti espliciti e dati affidabili fra client e Core
 
-- **Data:** 2026-11-22 · **Stato:** implementata nel checkout · **Fonte:** richiesta di migliorare i collegamenti desktop–Android, multi-Core e connettori esterni.
+- **Data:** 2026-11-22 · **Stato:** implementata su `main` (`1c3679f`) · **Fonte:** richiesta di migliorare i collegamenti desktop–Android, multi-Core e connettori esterni.
 - **Contesto:** Android riceve notifiche con destinazioni valide per il contratto ma non supportate dal client; i riepiloghi di Core offline o le richieste attività fallite presentavano risultati sconosciuti come zeri; l'avvio OAuth non segnalava risposte senza URL di autorizzazione.
 - **Decisione:**
   - Android mantiene la navigazione diretta per Chat, Attività e Plancia. Per altre viste valide ma non supportate mostra un'indicazione esplicita, senza instradare verso una schermata diversa né ampliare i permessi.
@@ -1418,7 +1418,7 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
   - Il desktop apre per OAuth solo URL HTTPS senza credenziali incorporate. Una risposta priva di URL sicuro diventa un errore visibile; dopo l'avvio viene indicato di completare l'autorizzazione e aggiornare lo stato. L'utente deve comunque premere Autorizza.
 - **Motivazione:** rendere esplicito quando un collegamento o un dato non è disponibile, senza inventare esiti e senza spostare chat, mutazioni o credenziali fra Core.
 - **Conseguenze:** le viste non supportate restano tali su Android; non si aggiungono scope, inoltro delle operazioni o autorizzazioni implicite. La prova della resa Android e del flusso OAuth reale resta dipendente da SDK/dispositivi e provider configurati.
-- **Evidenza:** test unitari desktop per URL OAuth e contatori offline; `cargo check`, Clippy e compilazione/link dei test per Windows superati. L'esecuzione desktop nativa su Linux non è supportata; build Android Compose e CI macOS restano da verificare.
+- **Evidenza:** i test desktop coprono URL OAuth e contatori offline; `cargo check`, Clippy e compilazione/link dei test per Windows superati. Il run CI `45067836302` sulla revisione `1c3679f` è verde, inclusi desktop macOS e workflow Android/APK release. La conferma OAuth con un account reale autorizzato resta un collaudo operativo.
 - **Documenti interessati:** `README.md`, `INTERFACE_AND_DEVICES.md`, ROADMAP.md, app desktop e Android.
 
 ### ADR-0088 — Output limitato e guard-rail del terminale
@@ -1454,6 +1454,16 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Conseguenze:** le routine n8n restano solo promemoria e verifiche audit predefinite, non workflow arbitrari. L'immagine fissata è `docker.n8n.io/n8nio/n8n:2.48.7`; la cache n8n deve restare temporanea ma scrivibile dall'UID 1000. Il daemon Docker locale resta una superficie privilegiata dell'host.
 - **Evidenza:** suite Core (`cargo test --manifest-path core/Cargo.toml --locked -p jarvis-core`: 84 test unitari superati, tutte le suite d'integrazione superate; due test Docker normalmente ignorati sono stati eseguiti separatamente e superati), 14 test contratti, fmt, Clippy con `-D warnings` e `git diff --check`; integrazione n8n con avvio, importazione e rimozione della routine; smoke test Python Docker con rete disabilitata e senza workspace; test per sorgente oltre 64 KiB, archivio n8n corrotto/non valido ed endpoint Docker locale.
 - **Documenti interessati:** `AUTONOMY_AND_TOOLS.md`, `SECURITY_AND_PRIVACY.md`, `core/server/src/container_runtime.rs`, `core/server/src/n8n.rs`, `core/server/src/sandbox.rs`, `core/server/src/api.rs`.
+
+### ADR-0091 — Plancia desktop originale e layout adattivo
+
+- **Data:** 2026-11-22 · **Stato:** implementata nel checkout; verifica visiva su macOS/Windows sospesa.
+- **Contesto:** la Plancia mostrava azioni rapide in un pannello separato, aveva una gerarchia visiva piatta e la barra superiore poteva comprimersi male nelle finestre strette. L'immagine fornita dall'utente richiede un riferimento visivo più moderno, ma alcuni pannelli rappresentati non corrispondono a dati disponibili nel Core.
+- **Decisione:** adottare una palette blu notte/ciano più contrastata, un riquadro hero a zone adattive con riepiloghi reali Core/AI, avatar vettoriale, alone animato a bassa intensità e azioni contestuali. Compattare la barra superiore nelle finestre strette; mantenere le schede statistiche semantiche e avvolgere gli elementi delle attività invece di farli uscire dalla card. Non mostrare agenti, progetti, risorse hardware o grafici senza API e dati attendibili; non aggiungere fotografie, risorse remote o dipendenze.
+- **Motivazione:** riprendere la chiarezza della gerarchia del riferimento senza introdurre numeri fittizi, WebView o variazioni dei confini nativi macOS/Windows.
+- **Conseguenze:** barra e navigazione restano fisse e lo scroll continua nel pannello centrale. «Riduci animazioni» ferma sia l'avatar sia l'alone decorativo. Le soglie di layout sono adattive; il collaudo grafico ai limiti di scroll su macOS/Windows resta necessario.
+- **Evidenza:** `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check`, cross-check Windows `cargo check --target x86_64-pc-windows-gnu --locked --tests`, Clippy Windows con `--all-targets -D warnings`, compilazione/link dei test Windows con `cargo test --target x86_64-pc-windows-gnu --locked --no-run` e `git diff --check`, superati. I test unitari Windows non sono stati eseguiti su Linux. Il cross-check macOS è stato tentato ma il compilatore host GCC non supporta i flag Apple e non è installato un SDK Apple; l'host non offre una sessione grafica macOS/Windows. `tests/e2e/ui_smoke.cjs` non è presente nel checkout.
+- **Documenti interessati:** `INTERFACE_AND_DEVICES.md`, ROADMAP.md e `apps/desktop/src-tauri/src/app.rs`.
 
 ## Aggiornamento del registro
 

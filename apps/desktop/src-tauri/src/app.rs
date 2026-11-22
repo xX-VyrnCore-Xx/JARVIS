@@ -11,11 +11,11 @@ use serde_json::{json, Value};
 use crate::client::ApiClient;
 use jarvis_launcher::{launch, LaunchConfig, RunningCore};
 
-const BACKGROUND: egui::Color32 = egui::Color32::from_rgb(9, 17, 26);
-const SURFACE: egui::Color32 = egui::Color32::from_rgb(15, 27, 39);
-const RAISED: egui::Color32 = egui::Color32::from_rgb(22, 38, 53);
-const ACCENT: egui::Color32 = egui::Color32::from_rgb(120, 224, 231);
-const SELECTED: egui::Color32 = egui::Color32::from_rgb(22, 62, 75);
+const BACKGROUND: egui::Color32 = egui::Color32::from_rgb(5, 13, 24);
+const SURFACE: egui::Color32 = egui::Color32::from_rgb(10, 24, 39);
+const RAISED: egui::Color32 = egui::Color32::from_rgb(16, 36, 55);
+const ACCENT: egui::Color32 = egui::Color32::from_rgb(83, 215, 241);
+const SELECTED: egui::Color32 = egui::Color32::from_rgb(13, 69, 91);
 const POSITIVE: egui::Color32 = egui::Color32::from_rgb(105, 220, 174);
 const CAUTION: egui::Color32 = egui::Color32::from_rgb(245, 190, 96);
 const NEGATIVE: egui::Color32 = egui::Color32::from_rgb(255, 125, 135);
@@ -156,12 +156,12 @@ impl JarvisApp {
         style.visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
         style.visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(10);
         style.visuals.widgets.inactive.bg_stroke =
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(39, 57, 72));
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(37, 67, 87));
         style.visuals.widgets.active.bg_fill = SELECTED;
         style.visuals.widgets.active.corner_radius = egui::CornerRadius::same(10);
         style.visuals.widgets.active.bg_stroke =
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(48, 132, 151));
-        style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(28, 70, 84);
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(48, 158, 187));
+        style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(24, 67, 86);
         style.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(10);
         style.visuals.widgets.hovered.bg_stroke =
             egui::Stroke::new(1.0, egui::Color32::from_rgb(56, 122, 141));
@@ -1062,60 +1062,118 @@ impl JarvisApp {
                 }
             }
         });
-        let core_color = self.data.as_ref().map_or(ACCENT, |data| {
-            let online = data["aggregate"]["online"].as_u64().unwrap_or(1);
-            let total = data["aggregate"]["total"].as_u64().unwrap_or(1);
-            if online == total {
-                POSITIVE
-            } else if online == 0 {
-                NEGATIVE
-            } else {
-                CAUTION
-            }
-        });
-        let ai_color = self.data.as_ref().map_or(ACCENT, |data| {
-            let online = data["aggregate"]["ai_online"].as_u64();
-            let total = data["aggregate"]["total"].as_u64();
-            match (online, total) {
-                (Some(online), Some(total)) if online == total => POSITIVE,
-                (Some(0), Some(_)) => NEGATIVE,
-                (Some(_), Some(_)) => CAUTION,
-                _ => service_color(&ai_status),
-            }
-        });
+        let core_color = self.data.as_ref().map_or(ACCENT, dashboard_core_color);
+        let ai_color = self
+            .data
+            .as_ref()
+            .map_or(ACCENT, |data| dashboard_ai_color(data, &ai_status));
 
         egui::Frame::new()
             .fill(SURFACE)
             .stroke(egui::Stroke::new(
                 1.0,
-                egui::Color32::from_rgb(25, 100, 126),
+                egui::Color32::from_rgb(30, 112, 145),
             ))
-            .corner_radius(18)
-            .inner_margin(16)
+            .corner_radius(22)
+            .inner_margin(18)
             .show(ui, |ui| {
                 let width = ui.available_width();
                 ui.set_min_width(width);
+
+                let time = ctx.input(|input| input.time) as f32;
+                let pulse = if self.reduce_motion {
+                    0.0
+                } else {
+                    (time * 1.1).sin() * 0.5 + 0.5
+                };
+                let rect = ui.max_rect();
+                let painter = ui.painter().with_clip_rect(rect);
+                let orbit_x = if width >= 900.0 {
+                    rect.left() + rect.width() * 0.59
+                } else {
+                    rect.right() - rect.width() * 0.22
+                };
+                let orbit = egui::pos2(orbit_x, rect.center().y);
+                painter.circle_filled(
+                    orbit,
+                    96.0 + pulse * 8.0,
+                    egui::Color32::from_rgba_unmultiplied(25, 161, 210, 8),
+                );
+                painter.circle_stroke(
+                    orbit,
+                    108.0 + pulse * 4.0,
+                    egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(64, 194, 225, 42)),
+                );
+                painter.circle_stroke(
+                    orbit,
+                    122.0,
+                    egui::Stroke::new(0.7, egui::Color32::from_rgba_unmultiplied(64, 194, 225, 22)),
+                );
+
                 if width < 570.0 {
-                    self.dashboard_intro(ui);
-                    ui.add_space(8.0);
+                    self.dashboard_intro(ui, ctx, &core_status, &ai_status, core_color, ai_color);
+                    ui.add_space(6.0);
                     ui.vertical_centered(|ui| show_avatar(ui, ctx, self.reduce_motion));
+                    ui.add_space(4.0);
+                    self.dashboard_actions(ui, ctx);
+                } else if width >= 900.0 {
+                    ui.set_height(228.0);
+                    let intro_width = (width * 0.49).clamp(280.0, width - 424.0);
+                    let avatar_width = 220.0;
+                    let actions_width = (width - intro_width - avatar_width - 28.0).max(170.0);
+                    ui.horizontal_top(|ui| {
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(intro_width, 220.0),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                self.dashboard_intro(
+                                    ui,
+                                    ctx,
+                                    &core_status,
+                                    &ai_status,
+                                    core_color,
+                                    ai_color,
+                                )
+                            },
+                        );
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(avatar_width, 220.0),
+                            egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                            |ui| show_avatar(ui, ctx, self.reduce_motion),
+                        );
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(actions_width, 220.0),
+                            egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                            |ui| self.dashboard_actions(ui, ctx),
+                        );
+                    });
                 } else {
                     ui.set_height(240.0);
                     let intro_width = width * 0.62;
-                    let avatar_width = (width - intro_width - 12.0).max(140.0);
+                    let avatar_width = (width - intro_width - 12.0).max(132.0);
                     ui.horizontal_top(|ui| {
                         ui.allocate_ui_with_layout(
-                            egui::vec2(intro_width, 240.0),
+                            egui::vec2(intro_width, 220.0),
                             egui::Layout::top_down(egui::Align::Min),
-                            |ui| self.dashboard_intro(ui),
+                            |ui| {
+                                self.dashboard_intro(
+                                    ui,
+                                    ctx,
+                                    &core_status,
+                                    &ai_status,
+                                    core_color,
+                                    ai_color,
+                                )
+                            },
                         );
-                        ui.separator();
                         ui.allocate_ui_with_layout(
-                            egui::vec2(avatar_width, 240.0),
+                            egui::vec2(avatar_width, 220.0),
                             egui::Layout::centered_and_justified(egui::Direction::TopDown),
                             |ui| show_avatar(ui, ctx, self.reduce_motion),
                         );
                     });
+                    ui.add_space(4.0);
+                    self.dashboard_actions(ui, ctx);
                 }
             });
 
@@ -1132,6 +1190,7 @@ impl JarvisApp {
         let audit_color = match audit_status {
             "Verificato" => POSITIVE,
             "Da controllare" => NEGATIVE,
+            "Parziale" => CAUTION,
             _ => ACCENT,
         };
         let metrics = [
@@ -1189,11 +1248,19 @@ impl JarvisApp {
                 for (label, value, detail, color) in row {
                     egui::Frame::new()
                         .fill(RAISED)
-                        .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(35, 57, 74)))
+                        .stroke(egui::Stroke::new(
+                            1.0,
+                            egui::Color32::from_rgba_unmultiplied(
+                                color.r(),
+                                color.g(),
+                                color.b(),
+                                92,
+                            ),
+                        ))
                         .corner_radius(14)
-                        .inner_margin(12)
+                        .inner_margin(13)
                         .show(ui, |ui| {
-                            ui.set_width((card_width - 26.0).max(80.0));
+                            ui.set_width((card_width - 28.0).max(80.0));
                             ui.horizontal(|ui| {
                                 ui.label(egui::RichText::new("●").color(*color).small());
                                 ui.label(egui::RichText::new(*label).small().strong().weak());
@@ -1213,70 +1280,6 @@ impl JarvisApp {
         }
 
         self.show_dashboard_backends(ui, ctx);
-
-        ui.add_space(12.0);
-        egui::Frame::new()
-            .fill(SURFACE)
-            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(29, 49, 65)))
-            .corner_radius(16)
-            .inner_margin(14)
-            .show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
-                ui.horizontal_wrapped(|ui| {
-                    ui.heading("Azioni rapide");
-                    ui.label(
-                        egui::RichText::new("I controlli che usi più spesso")
-                            .small()
-                            .weak(),
-                    );
-                });
-                ui.add_space(8.0);
-                ui.horizontal_wrapped(|ui| {
-                    if ui
-                        .add(
-                            egui::Button::new(
-                                egui::RichText::new("Nuova chat").strong().color(ACCENT),
-                            )
-                            .fill(SELECTED)
-                            .min_size(egui::vec2(148.0, 44.0)),
-                        )
-                        .clicked()
-                    {
-                        self.current = "chat".into();
-                    }
-                    if ui
-                        .add(egui::Button::new("Attività").min_size(egui::vec2(132.0, 44.0)))
-                        .clicked()
-                    {
-                        self.current = "tasks".into();
-                        self.data = None;
-                        self.refresh(ctx);
-                    }
-                    if ui
-                        .add(egui::Button::new("Sistema").min_size(egui::vec2(132.0, 44.0)))
-                        .clicked()
-                    {
-                        self.current = "system".into();
-                        self.data = None;
-                        self.refresh(ctx);
-                    }
-                });
-                if self
-                    .data
-                    .as_ref()
-                    .is_some_and(|data| data["first_run"] == true)
-                    && ui
-                        .add(
-                            egui::Button::new("Completa la configurazione iniziale")
-                                .min_size(egui::vec2(220.0, 44.0)),
-                        )
-                        .clicked()
-                {
-                    self.current = "system".into();
-                    self.data = None;
-                    self.refresh(ctx);
-                }
-            });
 
         if ui.available_width() >= 820.0 {
             ui.columns(2, |columns| {
@@ -1478,7 +1481,7 @@ impl JarvisApp {
                         .as_str()
                         .unwrap_or("Attività senza titolo")
                         .to_owned();
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         let state = task["state"].as_str().unwrap_or("in attesa");
                         let color = if state == "failed" {
                             egui::Color32::LIGHT_RED
@@ -1545,35 +1548,137 @@ impl JarvisApp {
             });
     }
 
-    fn dashboard_intro(&mut self, ui: &mut egui::Ui) {
+    fn dashboard_intro(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        core_status: &str,
+        ai_status: &str,
+        core_color: egui::Color32,
+        ai_color: egui::Color32,
+    ) {
         ui.label(
-            egui::RichText::new("IL TUO ASSISTENTE PERSONALE")
+            egui::RichText::new("JARVIS  /  CENTRO DI CONTROLLO")
                 .small()
                 .strong()
                 .color(ACCENT),
         );
-        ui.add_space(8.0);
-        ui.heading(egui::RichText::new("Bentornato.").size(30.0));
+        ui.add_space(10.0);
+        ui.heading(egui::RichText::new("JARVIS, in un colpo d'occhio.").size(29.0));
         ui.label(
-            egui::RichText::new("Sono JARVIS. Tutto pronto per aiutarti?")
-                .size(16.0)
-                .color(egui::Color32::from_rgb(180, 203, 222)),
+            egui::RichText::new(
+                "Un quadro chiaro dei tuoi Core, delle attività e delle notifiche.",
+            )
+            .size(15.0)
+            .color(egui::Color32::from_rgb(180, 203, 222)),
         );
-        ui.add_space(12.0);
         ui.add_space(14.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
+            for (label, value, color) in [
+                ("CORE", core_status, core_color),
+                ("AI", ai_status, ai_color),
+            ] {
+                egui::Frame::new()
+                    .fill(RAISED)
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 100),
+                    ))
+                    .corner_radius(egui::CornerRadius::same(12))
+                    .inner_margin(egui::Margin::symmetric(10, 6))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("●").color(color).small());
+                            ui.label(
+                                egui::RichText::new(format!("{label}  {value}"))
+                                    .small()
+                                    .strong(),
+                            );
+                        });
+                    });
+            }
+        });
+        ui.add_space(8.0);
+        ui.checkbox(&mut self.reduce_motion, "Riduci animazioni");
+        if self
+            .data
+            .as_ref()
+            .is_some_and(|data| data["first_run"] == true)
+            && ui.button("Completa la configurazione iniziale").clicked()
+        {
+            self.current = "system".into();
+            self.data = None;
+            self.refresh(ctx);
+        }
+    }
+
+    fn dashboard_actions(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.label(
+            egui::RichText::new("AZIONI RAPIDE")
+                .small()
+                .strong()
+                .color(ACCENT),
+        );
+        ui.add_space(6.0);
+
+        let stacked = ui.available_width() < 230.0;
+        if stacked {
             if ui
-                .add(
-                    egui::Button::new(egui::RichText::new("Apri la chat").strong().color(ACCENT))
-                        .fill(SELECTED)
-                        .min_size(egui::vec2(148.0, 42.0)),
+                .add_sized(
+                    [ui.available_width(), 40.0],
+                    egui::Button::new(egui::RichText::new("Nuova chat").strong().color(ACCENT))
+                        .fill(SELECTED),
                 )
                 .clicked()
             {
                 self.current = "chat".into();
             }
-            ui.checkbox(&mut self.reduce_motion, "Riduci animazioni");
-        });
+            if ui
+                .add_sized([ui.available_width(), 38.0], egui::Button::new("Attività"))
+                .clicked()
+            {
+                self.current = "tasks".into();
+                self.data = None;
+                self.refresh(ctx);
+            }
+            if ui
+                .add_sized([ui.available_width(), 38.0], egui::Button::new("Sistema"))
+                .clicked()
+            {
+                self.current = "system".into();
+                self.data = None;
+                self.refresh(ctx);
+            }
+        } else {
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .add(
+                        egui::Button::new(egui::RichText::new("Nuova chat").strong().color(ACCENT))
+                            .fill(SELECTED)
+                            .min_size(egui::vec2(132.0, 40.0)),
+                    )
+                    .clicked()
+                {
+                    self.current = "chat".into();
+                }
+                if ui
+                    .add(egui::Button::new("Attività").min_size(egui::vec2(112.0, 38.0)))
+                    .clicked()
+                {
+                    self.current = "tasks".into();
+                    self.data = None;
+                    self.refresh(ctx);
+                }
+                if ui
+                    .add(egui::Button::new("Sistema").min_size(egui::vec2(112.0, 38.0)))
+                    .clicked()
+                {
+                    self.current = "system".into();
+                    self.data = None;
+                    self.refresh(ctx);
+                }
+            });
+        }
     }
 
     fn show_memory(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -2515,6 +2620,7 @@ impl eframe::App for JarvisApp {
             return;
         }
 
+        let compact_header = ctx.viewport_rect().width() < 720.0;
         egui::Panel::top("topbar").exact_size(62.0).show(ui, |ui| {
             ui.horizontal_centered(|ui| {
                 ui.heading(
@@ -2523,22 +2629,26 @@ impl eframe::App for JarvisApp {
                         .strong()
                         .size(20.0),
                 );
-                ui.separator();
-                ui.label(egui::RichText::new(title(&self.current)).strong());
+                if !compact_header || ctx.viewport_rect().width() >= 460.0 {
+                    ui.separator();
+                    ui.label(egui::RichText::new(title(&self.current)).strong());
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let unread = self
                         .notifications
                         .iter()
                         .filter(|notification| notification["read_at"].is_null())
                         .count();
+                    let notification_label = if compact_header {
+                        format!("Notifiche {unread}")
+                    } else {
+                        format!("Notifiche   {unread}")
+                    };
                     if ui
                         .add(
-                            egui::Button::new(format!("Notifiche   {unread}"))
-                                .fill(RAISED)
-                                .stroke(egui::Stroke::new(
-                                    1.0,
-                                    egui::Color32::from_rgb(44, 64, 80),
-                                )),
+                            egui::Button::new(notification_label).fill(RAISED).stroke(
+                                egui::Stroke::new(1.0, egui::Color32::from_rgb(44, 76, 96)),
+                            ),
                         )
                         .clicked()
                     {
@@ -2547,40 +2657,54 @@ impl eframe::App for JarvisApp {
                         self.refresh(&ctx);
                     }
                     ui.add_space(8.0);
-                    egui::Frame::new()
-                        .fill(if self.remote {
-                            RAISED
-                        } else {
-                            egui::Color32::from_rgb(15, 48, 44)
-                        })
-                        .stroke(egui::Stroke::new(
-                            1.0,
-                            if self.remote {
-                                egui::Color32::from_rgb(44, 64, 80)
+                    let core_label = if self.remote {
+                        "Core remoto"
+                    } else {
+                        "Core locale"
+                    };
+                    if compact_header {
+                        ui.label(
+                            egui::RichText::new("●")
+                                .color(if self.remote { ACCENT } else { POSITIVE })
+                                .strong(),
+                        )
+                        .on_hover_text(core_label);
+                    } else {
+                        egui::Frame::new()
+                            .fill(if self.remote {
+                                RAISED
                             } else {
-                                egui::Color32::from_rgb(40, 100, 79)
-                            },
-                        ))
-                        .corner_radius(egui::CornerRadius::same(16))
-                        .inner_margin(egui::Margin::symmetric(10, 5))
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("●").color(if self.remote {
-                                    ACCENT
+                                egui::Color32::from_rgb(15, 48, 44)
+                            })
+                            .stroke(egui::Stroke::new(
+                                1.0,
+                                if self.remote {
+                                    egui::Color32::from_rgb(44, 76, 96)
                                 } else {
-                                    POSITIVE
-                                }));
-                                ui.label(
-                                    egui::RichText::new(if self.remote {
-                                        "CORE REMOTO"
+                                    egui::Color32::from_rgb(40, 100, 79)
+                                },
+                            ))
+                            .corner_radius(egui::CornerRadius::same(16))
+                            .inner_margin(egui::Margin::symmetric(10, 5))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    ui.label(egui::RichText::new("●").color(if self.remote {
+                                        ACCENT
                                     } else {
-                                        "CORE LOCALE"
-                                    })
-                                    .small()
-                                    .strong(),
-                                );
+                                        POSITIVE
+                                    }));
+                                    ui.label(
+                                        egui::RichText::new(if self.remote {
+                                            "CORE REMOTO"
+                                        } else {
+                                            "CORE LOCALE"
+                                        })
+                                        .small()
+                                        .strong(),
+                                    );
+                                });
                             });
-                        });
+                    }
                 });
             });
         });
@@ -2975,6 +3099,32 @@ fn service_color(status: &str) -> egui::Color32 {
         "down" | "error" | "failed" | "offline" | "unavailable" | "stopped" => NEGATIVE,
         _ => ACCENT,
     }
+}
+
+fn availability_color(online: Option<u64>, total: Option<u64>) -> Option<egui::Color32> {
+    match (online, total) {
+        (Some(online), Some(total)) if total > 0 && online == total => Some(POSITIVE),
+        (Some(0), Some(total)) if total > 0 => Some(NEGATIVE),
+        (Some(_), Some(total)) if total > 0 => Some(CAUTION),
+        _ => None,
+    }
+}
+
+fn dashboard_core_color(data: &Value) -> egui::Color32 {
+    availability_color(
+        data["aggregate"]["online"].as_u64(),
+        data["aggregate"]["total"].as_u64(),
+    )
+    .or_else(|| data["core"]["status"].as_str().map(service_color))
+    .unwrap_or(ACCENT)
+}
+
+fn dashboard_ai_color(data: &Value, status: &str) -> egui::Color32 {
+    availability_color(
+        data["aggregate"]["ai_online"].as_u64(),
+        data["aggregate"]["total"].as_u64(),
+    )
+    .unwrap_or_else(|| service_color(status))
 }
 
 fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
@@ -3529,6 +3679,26 @@ mod tests {
         for (id, _, _) in NAV {
             assert!(!endpoint(id).is_empty(), "missing endpoint for {id}");
         }
+    }
+
+    #[test]
+    fn dashboard_status_colors_use_service_state_when_aggregate_counts_are_missing() {
+        assert_eq!(
+            dashboard_core_color(&json!({"core": {"status": "down"}})),
+            NEGATIVE
+        );
+        assert_eq!(
+            dashboard_core_color(&json!({
+                "core": {"status": "up"},
+                "aggregate": {"online": 1, "total": 2}
+            })),
+            CAUTION
+        );
+        assert_eq!(
+            dashboard_ai_color(&json!({"aggregate": {"ai_online": 0, "total": 0}}), "down"),
+            NEGATIVE
+        );
+        assert_eq!(dashboard_core_color(&json!({})), ACCENT);
     }
 
     #[test]
