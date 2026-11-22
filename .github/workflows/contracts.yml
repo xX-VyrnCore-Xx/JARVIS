@@ -108,19 +108,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: apps/desktop/src-tauri
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - name: Librerie grafiche egui (Linux)
-        if: runner.os == 'Linux'
-        working-directory: .
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxkbcommon-dev libgl1-mesa-dev libdbus-1-dev
       - run: rustup component add rustfmt clippy
       - run: cargo fmt --check
       - run: cargo clippy --locked -- -D warnings
@@ -160,6 +154,15 @@ jobs:
       JARVIS_TOKEN: jarvise2eownertoken0000000000000000
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Verifica il ritiro del desktop Linux
+        if: runner.os == 'Linux'
+        run: |
+          if output=$(./jarvis.sh desktop 2>&1); then
+            echo "::error::Il launcher non deve avviare il desktop su Linux."
+            exit 1
+          fi
+          printf '%s\n' "$output"
+          printf '%s\n' "$output" | grep -Fq 'disponibile solo per macOS e Windows'
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.13"

@@ -1284,7 +1284,7 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Data** 2026-11-22 · **Stato** implementata nel checkout · **Fonte** richiesta del proprietario e immagine di riferimento.
 - **Contesto:** la Plancia egui era un riepilogo testuale, mentre Android si apriva sulla chat senza una home o un avatar. La UI Web precedente è stata ritirata con ADR-0067.
 - **Opzioni considerate:** ripristinare immagini/WebView oppure disegnare l'avatar nei client nativi. Si sceglie la seconda per evitare dipendenze remote, mantenere la compatibilità Windows/macOS/Android e conservare i confini nativi.
-- **Decisione:** la Plancia desktop usa una composizione a schede adattiva per Windows, macOS e Linux, con avatar vettoriale originale animato, accessi rapidi e riepiloghi provenienti dalle API del Core. Il controllo «Riduci animazioni» ferma il moto dell'avatar. Android aggiunge la Plancia come destinazione iniziale, con avatar Compose animato, accesso alla chat e attività recenti.
+- **Decisione:** la Plancia desktop usa una composizione a schede adattiva per Windows e macOS, con avatar vettoriale originale animato, accessi rapidi e riepiloghi provenienti dalle API del Core. Il controllo «Riduci animazioni» ferma il moto dell'avatar. Android aggiunge la Plancia come destinazione iniziale, con avatar Compose animato, accesso alla chat e attività recenti. Il supporto desktop Linux inizialmente previsto è stato ritirato dall'ADR-0075; Linux resta supportato per il Core headless.
 - **Motivazione:** conteggi, stato e notifiche sono letti dal Core con le autorizzazioni già assegnate al dispositivo; non vengono inventate metriche hardware non disponibili. Intestazione e controlli di navigazione restano ancorati al viewport e il contenuto scorre nei pannelli interni. L'animazione Compose segue la scala di movimento del sistema.
 - **Conseguenze:** la parità visiva con il riferimento è adattata ai client nativi; non si reintroducono immagini remote o il client Web. Il collaudo grafico su Windows, macOS e dispositivi Android reali resta necessario.
 - **Evidenza:** `gradle -p apps/android -Pjarvis.coreOnly=true :core-client:test --no-daemon` e `git diff --check` superati. Il build dell'app Compose è sospeso perché nell'ambiente non è configurato l'Android SDK; Cargo e il collaudo visivo non sono disponibili.
@@ -1298,6 +1298,24 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Permessi e privacy:** non cambiano scope, pairing o autorizzazioni. I dispositivi associati continuano a non accedere alla memoria del proprietario. FCM resta data-only e il testo del push rimane generico; gli installer non rimuovono i dati nella cartella utente.
 - **Evidenza locale:** `gradle -p apps/android -Pjarvis.coreOnly=true :core-client:test --no-daemon`, `bash -n scripts/package_macos_release.sh`, parsing YAML del workflow release e `git diff --check` superati. Non eseguiti i test Rust e i build desktop perché Cargo/Rust non sono installati; il build Compose richiede l'Android SDK; prove installer e grafiche richiedono macOS/Windows. `tests/e2e/ui_smoke.cjs` non è presente nel checkout; i controlli installer aggiunti saranno eseguiti dalla CI release.
 - **Documenti interessati:** README.md, INTERFACE_AND_DEVICES.md, ROADMAP.md, `core/server/src/memory.rs`, app desktop egui, app Android e flussi di release.
+
+### ADR-0075 — Ritiro del desktop Linux
+
+- **Data** 2026-11-22 · **Stato** adottata · **Fonte** scelta del proprietario in questa sessione.
+- **Contesto:** la CI tentava di compilare il client egui e installare dipendenze X11 su Ubuntu, mentre la distribuzione desktop prevista è macOS e Windows.
+- **Decisione:** il client desktop e i relativi installer sono supportati solo su macOS e Windows. Il launcher rifiuta `desktop` su Linux e il crate non è compilabile su sistemi non supportati; la CI desktop usa solo runner macOS/Windows. Il Core headless Linux, i job CI Ubuntu, gli archivi standalone del Core e i controlli API restano supportati.
+- **Conseguenze:** le dipendenze X11 non sono più richieste dal client; la pipeline release continua a produrre DMG macOS, setup Windows e APK Android. Non si rimuovono i controlli Linux di Core, AI, API, audit o avvio.
+- **Evidenza:** un run CI sul commit base ha mostrato errori `cargo fmt --check` nell'app desktop e nel test `memory.rs`; le correzioni di formattazione, la rimozione della matrice desktop Ubuntu e il test del rifiuto Linux sono nel checkout locale. La verifica completa e l'aggiornamento del lockfile sono registrati nel checkpoint roadmap.
+- **Documenti interessati:** README.md, TECH_STACK.md, DEVELOPMENT.md, INTERFACE_AND_DEVICES.md, REQUIREMENTS.md, ACCEPTANCE.md, DEVOPS_QA_OBSERVABILITY.md, ROADMAP.md e workflow `contracts.yml`.
+
+### ADR-0076 — Icona desktop e avvio recuperabile
+
+- **Data** 2026-11-22 · **Stato** implementata nel checkout · **Fonte** richiesta del proprietario.
+- **Contesto:** le risorse ICO/ICNS erano usate dagli installer ma non impostate come icona della finestra egui; un errore di connessione lasciava la schermata iniziale senza un'azione per riprovare.
+- **Decisione:** mantenere un'illustrazione vettoriale originale come sorgente e generare PNG, ICO e ICNS coerenti; usare il PNG come icona di finestra egui e come marchio della schermata iniziale. La connessione resta asincrona; durante il caricamento si mostra lo stato locale/remoto e, in caso di errore, dettagli leggibili e un comando Riprova.
+- **Conseguenze:** nessuna modifica alle API, ai permessi o al lifecycle del Core; installatori e client usano lo stesso marchio. Gli errori di avvio restano espliciti e non richiedono un riavvio manuale dell'app.
+- **Evidenza:** risorse raster generate e controllate localmente; formattazione e build desktop da verificare sui runner supportati; la verifica visiva richiede macOS o Windows.
+- **Documenti interessati:** CLAUDE.md, INTERFACE_AND_DEVICES.md, ROADMAP.md e risorse/app desktop.
 
 ### Decisione operativa — Merge automatico con CI verde
 

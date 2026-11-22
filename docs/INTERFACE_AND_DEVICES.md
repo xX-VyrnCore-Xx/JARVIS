@@ -2,21 +2,23 @@
 
 | Superficie | Funzioni |
 |---|---|
-| Desktop Windows, macOS e Linux | App nativa Rust/egui, chat streaming, dati del Core e notifiche OS |
+| Desktop macOS e Windows | App nativa Rust/egui, chat streaming, dati del Core e notifiche OS |
 | Mobile Android | App Jetpack Compose, associazione, chat, attività e notifiche push |
-| Core | API HTTP autenticate; non distribuisce pagine o bundle Web |
+| Core headless (Linux incluso) | API HTTP autenticate; non distribuisce pagine o bundle Web |
 
 Il client iOS e l'interfaccia Web/PWA sono stati ritirati. L'associazione e la gestione dei permessi continuano a usare le API Core: non è disponibile una pagina di pairing nel browser.
 
 ## App desktop nativa
 
-`./jarvis.sh desktop` compila e avvia l'app egui dai sorgenti; gli installer includono GUI, Core, Python e runtime AI. Il DMG mostra istruzioni per trascinare JARVIS in Applicazioni; il wizard Windows ricorda la cartella scelta, crea collegamenti in Start e sul Desktop e offre l'avvio facoltativo al termine. La disinstallazione Windows elimina l'app, non i dati dell'utente. Il client può avviare il Core locale oppure associarsi a un Core remoto HTTPS con invito monouso. Le credenziali remote vengono conservate nella cartella dati dell'utente con permessi restrittivi.
+Il client egui dai sorgenti si avvia con `./jarvis.sh desktop` su macOS o `.\jarvis.ps1 desktop` su Windows; gli installer includono GUI, Core, Python e runtime AI. Il DMG mostra istruzioni per trascinare JARVIS in Applicazioni; il wizard Windows ricorda la cartella scelta, crea collegamenti in Start e sul Desktop e offre l'avvio facoltativo al termine. La disinstallazione Windows elimina l'app, non i dati dell'utente. Il client può avviare il Core locale oppure associarsi a un Core remoto HTTPS con invito monouso. Le credenziali remote vengono conservate nella cartella dati dell'utente con permessi restrittivi.
+
+L'icona originale vettoriale ha risorse ottimizzate per PNG, ICO e ICNS; la stessa immagine è impostata sulla finestra e usata dal DMG e dai collegamenti Windows. Durante l'avvio una schermata di benvenuto mostra lo stato della connessione locale o remota; se il Core non parte, l'errore è visibile e si può riprovare senza chiudere l'app.
 
 La finestra usa una barra superiore e una navigazione laterale fisse; lo scorrimento è confinato al contenuto centrale. A larghezze strette la navigazione si compatta, mentre chat e barra di composizione restano visibili. Le sezioni disponibili sono Plancia, Chat, Attività, Automazioni, Memoria, Competenze, Workspace, Connettori, Dispositivi, Sicurezza, Audit e Sistema.
 
-La chat usa `/api/chat/stream` (NDJSON), mostra le risposte progressivamente e presenta le conferme per approvazione o rifiuto. Il client aggiorna le notifiche ogni cinque secondi anche quando la finestra non è in primo piano e invia le nuove notifiche alle API OS supportate da Linux, macOS e Windows. Gli errori di aggiornamento sono mostrati nell'interfaccia. Il Core continua a generare e conservare notifiche anche senza client connesso.
+La chat usa `/api/chat/stream` (NDJSON), mostra le risposte progressivamente e presenta le conferme per approvazione o rifiuto. Il client aggiorna le notifiche ogni cinque secondi anche quando la finestra non è in primo piano e invia le nuove notifiche alle API OS supportate da macOS e Windows. Gli errori di aggiornamento sono mostrati nell'interfaccia. Il Core continua a generare e conservare notifiche anche senza client connesso.
 
-La Plancia desktop usa una gerarchia di schede con saluto, avatar originale animato, accessi rapidi e riepiloghi reali di Core, AI, conferme, notifiche, automazioni e audit. L'animazione è discreta e si può ridurre dalla Plancia. Le notifiche recenti distinguono categoria e gravità, consentono di aprire solo le viste permesse e di segnare una singola notifica come letta; quelle OS mostrano anche gravità e categoria. La navigazione e l'intestazione restano fisse; lo scorrimento è confinato al contenuto anche nelle finestre strette. La vista usa i colori del tema scuro e la tipografia nativa di egui su Windows, macOS e Linux, senza dipendere da servizi o immagini remote.
+La Plancia desktop usa una gerarchia di schede con saluto, avatar originale animato, accessi rapidi e riepiloghi reali di Core, AI, conferme, notifiche, automazioni e audit. L'animazione è discreta e si può ridurre dalla Plancia. Le notifiche recenti distinguono categoria e gravità, consentono di aprire solo le viste permesse e di segnare una singola notifica come letta; quelle OS mostrano anche gravità e categoria. La navigazione e l'intestazione restano fisse; lo scorrimento è confinato al contenuto anche nelle finestre strette. La vista usa i colori del tema scuro e la tipografia nativa di egui su macOS e Windows, senza dipendere da servizi o immagini remote.
 
 Le viste Attività, Automazioni, Memoria, Competenze, Workspace, Connettori, Dispositivi, Sicurezza, Audit e Sistema leggono le rispettive API. Memoria consente la ricerca testuale e la visualizzazione di tutti i ricordi, mantenendo correzione ed eliminazione sul Core proprietario. La vista Dispositivi consente di scegliere fra gli host HTTPS configurati e copiare istruzioni con host selezionato, codice temporaneo e scope. Sono inoltre disponibili cronologia chat, esecuzione e attivazione delle automazioni, revoca dei dispositivi e creazione di backup. La UI usa ancora una vista JSON generica per varie risposte: non equivale alla parità funzionale con la precedente dashboard.
 

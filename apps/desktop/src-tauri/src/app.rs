@@ -68,6 +68,7 @@ enum Mutation {
 pub struct JarvisApp {
     tx: Sender<Event>,
     rx: Receiver<Event>,
+    startup_icon: egui::TextureHandle,
     client: Option<Arc<ApiClient>>,
     core: Option<RunningCore>,
     remote: bool,
@@ -118,6 +119,15 @@ pub struct JarvisApp {
 
 impl JarvisApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let icon = application_icon();
+        let startup_icon = cc.egui_ctx.load_texture(
+            "jarvis-startup-icon",
+            egui::ColorImage::from_rgba_unmultiplied(
+                [icon.width as usize, icon.height as usize],
+                &icon.rgba,
+            ),
+            egui::TextureOptions::LINEAR,
+        );
         let mut style = (*cc.egui_ctx.style_of(egui::Theme::Dark)).clone();
         style.visuals = egui::Visuals::dark();
         style.visuals.window_fill = SURFACE;
@@ -129,15 +139,12 @@ impl JarvisApp {
         cc.egui_ctx.set_style_of(egui::Theme::Dark, style);
 
         let (tx, rx) = mpsc::channel();
-        let app_tx = tx.clone();
-        std::thread::spawn(move || {
-            let result = connect_core();
-            let _ = app_tx.send(Event::Connected(Box::new(result)));
-        });
+        spawn_connection(tx.clone());
 
         Self {
             tx,
             rx,
+            startup_icon,
             client: None,
             core: None,
             remote: false,
@@ -219,6 +226,7 @@ impl JarvisApp {
                         Err(error) => self.error = Some(error),
                     }
                 }
+
                 Event::Loaded(_, _) => {
                     self.loading = false;
                     self.refresh(ctx);
@@ -337,9 +345,7 @@ impl JarvisApp {
                     self.notifications_primed = true;
                     self.known_notifications = items
                         .iter()
-                        .filter_map(|item| {
-                            item["notification_id"].as_str().map(str::to_owned)
-                        })
+                        .filter_map(|item| item["notification_id"].as_str().map(str::to_owned))
                         .collect();
                     self.notifications = items;
                     ctx.request_repaint();
@@ -347,6 +353,12 @@ impl JarvisApp {
                 Event::Notifications(Err(error)) => self.notifications_error = Some(error),
             }
         }
+    }
+
+    fn retry_connection(&mut self, ctx: &egui::Context) {
+        self.error = None;
+        spawn_connection(self.tx.clone());
+        ctx.request_repaint();
     }
 
     fn start_notification_poll(&self, ctx: &egui::Context) {
@@ -396,7 +408,7 @@ impl JarvisApp {
             endpoint(&page).to_owned()
         };
         std::thread::spawn(move || {
-            let result = client.get(path).and_then(|mut data| {
+            let result = client.get(&path).and_then(|mut data| {
                 if page == "connectors" {
                     data["catalog"] = client.get("/api/connectors/templates")?["templates"].clone();
                 } else if page == "dashboard" {
@@ -724,9 +736,7 @@ impl JarvisApp {
                         ui.label(egui::RichText::new(if unread { "●" } else { "○" }).color(color));
                         ui.vertical(|ui| {
                             ui.horizontal_wrapped(|ui| {
-                                ui.strong(
-                                    notification["title"].as_str().unwrap_or("JARVIS"),
-                                );
+                                ui.strong(notification["title"].as_str().unwrap_or("JARVIS"));
                                 ui.small(
                                     egui::RichText::new(format!("{category} · {severity}"))
                                         .color(color),
@@ -771,8 +781,7 @@ impl JarvisApp {
             "system" => self.show_setup(ui, ctx),
             "connectors" => self.show_connectors(ui, ctx),
             "memory" => self.show_memory(ui, ctx),
-            "tasks" | "automations" | "skills" | "workspace" | "devices" | "security"
-            | "audit" => {
+            "tasks" | "automations" | "skills" | "workspace" | "devices" | "security" | "audit" => {
                 ui.horizontal(|ui| {
                     ui.heading(title(&self.current));
                     if ui.button("Aggiorna").clicked() {
@@ -851,7 +860,13 @@ impl JarvisApp {
             .data
             .as_ref()
             .and_then(|data| data["audit"]["chain_valid"].as_bool())
-            .map(|valid| if valid { "Verificato" } else { "Da controllare" })
+            .map(|valid| {
+                if valid {
+                    "Verificato"
+                } else {
+                    "Da controllare"
+                }
+            })
             .unwrap_or("—")
             .to_owned();
 
@@ -966,14 +981,11 @@ impl JarvisApp {
                     if self.loading {
                         ui.add(egui::Spinner::new());
                     }
-                    ui.with_layout(
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            if ui.button("Segna tutte come lette").clicked() {
-                                self.act(ctx, "/api/notifications/read-all".into(), None);
-                            }
-                        },
-                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Segna tutte come lette").clicked() {
+                            self.act(ctx, "/api/notifications/read-all".into(), None);
+                        }
+                    });
                 });
                 self.show_notifications(ui);
             });
@@ -1715,17 +1727,17 @@ impl JarvisApp {
                     if ui.button("Copia codice").clicked() {
                         ctx.copy_text(code.to_owned());
                     }
-                    if !pairing_url.is_empty() {
-                        if ui.button("Copia istruzioni di associazione").clicked() {
-                            ctx.copy_text(format!(
-                                "Indirizzo HTTPS del Core: {pairing_url}\nCodice monouso: {code}\nPermessi: {}",
-                                if allows_confirm {
-                                    "chat e conferme"
-                                } else {
-                                    "solo chat"
-                                }
-                            ));
-                        }
+                    if !pairing_url.is_empty()
+                        && ui.button("Copia istruzioni di associazione").clicked()
+                    {
+                        ctx.copy_text(format!(
+                            "Indirizzo HTTPS del Core: {pairing_url}\nCodice monouso: {code}\nPermessi: {}",
+                            if allows_confirm {
+                                "chat e conferme"
+                            } else {
+                                "solo chat"
+                            }
+                        ));
                     }
                 }
                 ui.label(format!(
@@ -1974,10 +1986,38 @@ impl eframe::App for JarvisApp {
             } else {
                 egui::CentralPanel::default().show(ui, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.add_space(120.0);
-                        ui.heading("JARVIS");
-                        ui.add(egui::Spinner::new());
-                        ui.label(self.error.as_deref().unwrap_or("Avvio del Core…"));
+                        ui.add_space((ui.available_height() - 390.0).max(8.0) * 0.25);
+                        ui.add(egui::Image::new(egui::load::SizedTexture::new(
+                            self.startup_icon.id(),
+                            egui::vec2(176.0, 176.0),
+                        )));
+                        ui.add_space(12.0);
+                        ui.heading(egui::RichText::new("JARVIS").size(30.0).color(ACCENT));
+                        ui.add_space(8.0);
+                        if let Some(error) = self.error.clone() {
+                            ui.label(egui::RichText::new("Avvio non riuscito").strong());
+                            egui::Frame::new()
+                                .fill(SURFACE)
+                                .corner_radius(10)
+                                .inner_margin(10)
+                                .show(ui, |ui| {
+                                    egui::ScrollArea::vertical()
+                                        .id_salt("startup-error")
+                                        .max_height(84.0)
+                                        .show(ui, |ui| ui.label(error));
+                                });
+                            if ui.button("Riprova").clicked() {
+                                self.retry_connection(&ctx);
+                            }
+                        } else {
+                            ui.add(egui::Spinner::new().size(22.0));
+                            ui.label(if self.remote_url.is_empty() {
+                                "Avvio del Core locale…"
+                            } else {
+                                "Connessione al Core remoto…"
+                            });
+                            ui.small("La finestra resta disponibile durante la connessione.");
+                        }
                     });
                 });
             }
@@ -2076,6 +2116,18 @@ impl eframe::App for JarvisApp {
     }
 }
 
+pub(crate) fn application_icon() -> egui::IconData {
+    eframe::icon_data::from_png_bytes(include_bytes!("../icons/icon.png"))
+        .expect("L'icona PNG incorporata di JARVIS deve essere valida.")
+}
+
+fn spawn_connection(tx: Sender<Event>) {
+    std::thread::spawn(move || {
+        let result = connect_core();
+        let _ = tx.send(Event::Connected(Box::new(result)));
+    });
+}
+
 fn status_pill(ui: &mut egui::Ui, label: &str, value: &str) {
     egui::Frame::new()
         .fill(RAISED)
@@ -2091,7 +2143,7 @@ fn status_pill(ui: &mut egui::Ui, label: &str, value: &str) {
 }
 
 fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
-    let side = ui.available_width().min(236.0).max(132.0);
+    let side = ui.available_width().clamp(132.0, 236.0);
     let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(side), egui::Sense::hover());
     let painter = ui.painter_at(rect);
     let center = rect.center();
@@ -2108,18 +2160,11 @@ fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
     let breath = pulse * 3.0;
     let accent = egui::Color32::from_rgb(35, 198, 244);
 
-    painter.circle_filled(
-        center,
-        side * 0.47,
-        egui::Color32::from_rgb(8, 24, 39),
-    );
+    painter.circle_filled(center, side * 0.47, egui::Color32::from_rgb(8, 24, 39));
     painter.circle_stroke(
         center,
         side * 0.43 + breath,
-        egui::Stroke::new(
-            1.4,
-            egui::Color32::from_rgba_unmultiplied(35, 198, 244, 75),
-        ),
+        egui::Stroke::new(1.4, egui::Color32::from_rgba_unmultiplied(35, 198, 244, 75)),
     );
     painter.circle_stroke(
         center,
@@ -2152,10 +2197,7 @@ fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
             center + egui::Vec2::new(angle.cos(), angle.sin()) * ring_radius
         })
         .collect();
-    painter.add(egui::Shape::line(
-        arc,
-        egui::Stroke::new(2.0, accent),
-    ));
+    painter.add(egui::Shape::line(arc, egui::Stroke::new(2.0, accent)));
     for index in 0..3 {
         let angle = start + time as f32 * 0.7 + index as f32 * std::f32::consts::TAU / 3.0;
         let point = center + egui::Vec2::new(angle.cos(), angle.sin()) * ring_radius;
@@ -2228,8 +2270,14 @@ fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
     for direction in [-1.0, 1.0] {
         painter.line_segment(
             [
-                egui::pos2(face_center.x + direction * side * 0.118, eye_y + side * 0.055),
-                egui::pos2(face_center.x + direction * side * 0.085, eye_y + side * 0.09),
+                egui::pos2(
+                    face_center.x + direction * side * 0.118,
+                    eye_y + side * 0.055,
+                ),
+                egui::pos2(
+                    face_center.x + direction * side * 0.085,
+                    eye_y + side * 0.09,
+                ),
             ],
             egui::Stroke::new(1.0, egui::Color32::from_rgb(59, 129, 154)),
         );
@@ -2430,20 +2478,19 @@ fn data_dir() -> PathBuf {
         return PathBuf::from(path);
     }
     #[cfg(target_os = "windows")]
-    if let Some(path) = std::env::var_os("LOCALAPPDATA") {
-        return PathBuf::from(path).join("JARVIS");
+    {
+        std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir)
+            .join("JARVIS")
     }
     #[cfg(target_os = "macos")]
-    if let Some(path) = std::env::var_os("HOME") {
-        return PathBuf::from(path).join("Library/Application Support/JARVIS");
+    {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(std::env::temp_dir)
+            .join("Library/Application Support/JARVIS")
     }
-    if let Some(path) = std::env::var_os("XDG_DATA_HOME") {
-        return PathBuf::from(path).join("jarvis");
-    }
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join(".local/share/jarvis")
 }
 
 fn resources_dir() -> Option<PathBuf> {
@@ -2462,7 +2509,7 @@ fn is_https_url(value: &str) -> bool {
     url::Url::parse(value).is_ok_and(|url| url.scheme() == "https" && url.host_str().is_some())
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 fn show_notification(item: &Value) {
     let title = item["title"].as_str().unwrap_or("JARVIS");
     let body = item["body"].as_str().unwrap_or("");
@@ -2474,9 +2521,7 @@ fn show_notification(item: &Value) {
         format!("{} · {}: {}", category, severity, body)
     };
     let mut notification = notify_rust::Notification::new();
-    notification
-        .summary(title)
-        .body(&body);
+    notification.summary(title).body(&body);
     if severity == "error" {
         notification.urgency(notify_rust::Urgency::Critical);
     }

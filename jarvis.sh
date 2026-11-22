@@ -53,6 +53,10 @@ if [ "$CMD" = "doctor" ]; then
   exit $?
 fi
 
+if [ "$CMD" = "desktop" ] && [ "$(uname -s)" = "Linux" ]; then
+  fail "L'app desktop è disponibile solo per macOS e Windows; su Linux puoi avviare il Core API."
+fi
+
 python_ok || { doctor || true; fail "Serve Python 3.10 o successivo"; }
 [ "$PREBUILT" = 1 ] || command -v cargo >/dev/null || { doctor || true; fail "Rust non trovato: installalo da https://rustup.rs/ e riapri il terminale"; }
 
@@ -105,9 +109,6 @@ fi
 if [ "$CMD" = "desktop" ]; then
   shift
   [ "$PREBUILT" = 1 ] && fail "Per la release usa l'app JARVIS installata; per avviare il desktop dai sorgenti"
-  if [ "$(uname -s)" = "Linux" ] && ! pkg-config --exists x11 xcursor xrandr xi xkbcommon gl 2>/dev/null; then
-    fail "Per l'app desktop servono le librerie grafiche egui: sudo apt install libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxkbcommon-dev libgl1-mesa-dev libdbus-1-dev"
-  fi
   echo "→ Compilo l'app desktop (la prima volta richiede alcuni minuti)"
   (cd "$ROOT/apps/desktop/src-tauri" && cargo build --release --locked)
   exec "$ROOT/apps/desktop/src-tauri/target/release/jarvis-desktop" "$@"

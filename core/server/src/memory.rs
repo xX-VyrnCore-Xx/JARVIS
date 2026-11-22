@@ -664,8 +664,13 @@ mod tests {
             .memory_add("unrelated", "il progetto viene archiviato", at)
             .unwrap();
 
-        let results = store.memory_search("le riunioni del progetto", None, 5).unwrap();
-        assert_eq!(results.first().map(|item| item["id"].as_str()), Some(Some("meeting")));
+        let results = store
+            .memory_search("le riunioni del progetto", None, 5)
+            .unwrap();
+        assert_eq!(
+            results.first().map(|item| item["id"].as_str()),
+            Some(Some("meeting"))
+        );
         assert!(results.iter().any(|item| item["id"] == "unrelated"));
     }
 }

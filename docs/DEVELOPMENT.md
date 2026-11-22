@@ -6,14 +6,14 @@ Il repository GitHub privato e il mirror locale conservano codice, documenti e c
 /
 ├── README.md, CLAUDE.md
 ├── docs/              specifiche, registro decisioni e checkpoint (ROADMAP.md)
-├── core/              Core Linux e componenti Rust (workspace Cargo)
+├── core/              Core Rust headless (Linux incluso) e workspace Cargo
 │   ├── contracts/     crate jarvis-contracts: validazione dei contratti v1
 │   ├── bridge/        crate jarvis-bridge: prototipo Core–worker Python
 │   └── server/        crate jarvis-core: binario `jarvis` e API locale
 ├── ai/                runtime agenti e adapter Python (jarvis_ai)
 ├── apps/
 │   ├── desktop/       launcher/ (crate jarvis-launcher) e src-tauri/ (app nativa egui)
-│   └── mobile/        client successivi
+│   └── android/       client Kotlin/Compose
 ├── contracts/         schemi, API ed eventi versionati; catalog/tools: descrittori degli strumenti
 ├── integrations/      plugin, connettori e SDK
 ├── migrations/        evoluzione dei dati
@@ -32,15 +32,14 @@ Il repository GitHub privato e il mirror locale conservano codice, documenti e c
 
 ## Client desktop nativo
 
-L'interfaccia è un'app Rust/egui in `apps/desktop/src-tauri`; il Core espone solo API e non serve pagine, bundle o service worker Web. Il client desktop richiede Rust 1.95 o successivo. Su Linux installa le librerie grafiche prima della build:
+L'interfaccia è un'app Rust/egui in `apps/desktop/src-tauri`, supportata su macOS e Windows; il Core espone solo API e non serve pagine, bundle o service worker Web. Il Core resta avviabile e verificato su Linux senza interfaccia desktop. Per compilare il client nativo installa Rust 1.95 o successivo sul sistema supportato:
 
 ```bash
-sudo apt install libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxkbcommon-dev libgl1-mesa-dev libdbus-1-dev
 cd apps/desktop/src-tauri
 cargo fmt --check && cargo clippy --locked -- -D warnings && cargo test --locked
 ```
 
-Il test trasversale `tests/e2e/api_smoke.cjs` verifica il Core HTTP, l'autenticazione, il pairing e lo streaming senza browser. `contracts.yml` compila e testa il client nativo su Linux, macOS e Windows.
+Il test trasversale `tests/e2e/api_smoke.cjs` verifica il Core HTTP, l'autenticazione, il pairing e lo streaming senza browser. `contracts.yml` compila e testa il client nativo su macOS e Windows; i job Ubuntu continuano a verificare Core, API, AI e avvio headless.
 
 ## Dipendenze della voce
 

@@ -43,7 +43,7 @@ Core avviabile con `./jarvis.sh` (porta 8765). Il test E2E API si esegue con il 
 JARVIS_URL=http://127.0.0.1:8765 JARVIS_TOKEN=<token> node tests/e2e/api_smoke.cjs
 ```
 
-App desktop egui: `./jarvis.sh desktop`. Build e controlli (su Linux servono le librerie X11/OpenGL elencate in `docs/DEVELOPMENT.md`):
+App desktop egui supportata su macOS e Windows: `./jarvis.sh desktop` su macOS e `.\jarvis.ps1 desktop` su Windows. Linux resta supportato per il Core headless:
 
 ```bash
 cd apps/desktop/src-tauri && cargo fmt --check && cargo clippy --locked -- -D warnings && cargo build --locked

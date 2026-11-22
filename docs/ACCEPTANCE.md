@@ -15,7 +15,7 @@ Questo documento raccoglie ciò che serve per l'accettazione finale descritta in
 | RF-07 Automazioni | `automation.rs`, E2E | P5 | Verde | — |
 | RF-08 Memoria | `api.rs`, `memory.rs`, E2E | P1 | Verde | Sinonimi con gli embedding di Ollama (ADR-0028); nessun PostgreSQL |
 | RF-09 Voce | `voice.rs`, `tests/ai/test_voice.py`, E2E con motori finti | P6 | Verde (finti) | Motori reali solo sul tuo computer |
-| RF-10 Client | E2E API e CI desktop nativa su 3 sistemi | P7, P8b | In corso | Test su dispositivi reali e parità UI ancora da completare |
+| RF-10 Client | E2E API; CI desktop macOS/Windows e Core headless Linux | P7, P8b | In corso | Test su dispositivi reali e parità UI ancora da completare |
 | RF-11 Dispositivi e nodi | `devices.rs`, `nodes.rs`, `node_tls.rs`, E2E | P8, P13 | Verde | Scelta automatica (ADR-0031); mTLS con certificati fissati (ADR-0041); VPN mesh affidata a Tailscale |
 | RF-12 Dati | backup, rollback | P9 | Verde | Nessuna sincronizzazione fra nodi |
 | RF-13 Notifiche | `notifications.rs`, `channels.rs`, E2E | P5 | Verde | Canali esterni ntfy e Telegram (ADR-0026) |
@@ -28,7 +28,7 @@ Questo documento raccoglie ciò che serve per l'accettazione finale descritta in
 | RNF-05 Local-first | nessun backend cloud | — | Verde | — |
 | RNF-06 Offline | backend offline in tutta la CI | P2 | Verde | — |
 | RNF-07 Osservabilità | metriche, log, esportazione, tracce dei task (`api.rs`) | — | Verde | Tracce W3C locali per task (ADR-0039); nessun esportatore OTLP |
-| RNF-08 Backup e rollback | `backup.rs`, `rollback.rs` | P9 | Verde | Installatori firmati assenti |
+| RNF-08 Backup e rollback | `backup.rs`, `rollback.rs` | P9 | Verde | Firma verificata in CI; aggiornamento in-place da collaudare |
 
 ## Controlli automatici a ogni modifica
 
@@ -36,8 +36,8 @@ Workflow `.github/workflows/contracts.yml`:
 - contratti e runtime AI (Python);
 - Core: fmt, clippy e test;
 - E2E API Core in modalità offline, senza browser;
-- app desktop su Linux, macOS e Windows;
-- avvio reale con i lanciatori sui 3 sistemi, con misura delle latenze;
+- app desktop su macOS e Windows;
+- Core headless avviato su Linux, macOS e Windows, con misura delle latenze;
 - audit delle dipendenze con `cargo audit` e `pip-audit`.
 
 Il workflow `.github/workflows/release.yml` costruisce e installa il DMG macOS Apple Silicon e il setup Windows x64, poi verifica l'avvio del Core installato; il job Android produce l'APK release firmato.
@@ -48,13 +48,13 @@ Da eseguire sul proprio computer con una release o con i sorgenti. Annotare esit
 
 | # | Prova | Come | Atteso |
 |---|---|---|---|
-| P1 | Primo avvio desktop | `./jarvis.sh desktop` (Windows: `jarvis.cmd desktop`) o app installata | La finestra nativa si apre e avvia il Core; chat, conferme e memoria funzionano |
+| P1 | Primo avvio desktop | `./jarvis.sh desktop` su macOS, `.\jarvis.ps1 desktop` su Windows o app installata | La finestra nativa si apre e avvia il Core; chat, conferme e memoria funzionano |
 | P2 | Inferenza cloud | Configura un provider in un ambiente di test e invia una richiesta sintetica | La risposta indica il provider e il modello usato |
 | P3 | File | «scrivi prova.txt: ciao», approva, «leggi prova.txt» | Conferma richiesta; file in `data/workspace` |
 | P4 | Web reale | «cerca Rust linguaggio», poi «apri <link>» | Fonti con link, ora e SHA-256 |
 | P5 | Automazioni e notifiche | «tra 2 minuti che ore sono» | Esecuzione all'ora prevista e notifica nella campanella |
 | P6 | Voce | Sospesa fino all'implementazione dei controlli nei client nativi | Backend API e motori restano disponibili; trascrizione, TTS e wake word non sono esposti dalla UI desktop egui |
-| P7 | App desktop | Installa il DMG macOS o setup EXE Windows; dai sorgenti: `./jarvis.sh desktop` | Si apre senza installare Python o Rust; le nuove notifiche compaiono come notifiche OS quando la finestra non è in primo piano; chiudendo la finestra l'app termina; i dati restano nella cartella utente |
+| P7 | App desktop | Installa il DMG macOS o setup EXE Windows; dai sorgenti usa il launcher del sistema supportato | Si apre senza installare Python o Rust; le nuove notifiche compaiono come notifiche OS quando la finestra non è in primo piano; chiudendo la finestra l'app termina; i dati restano nella cartella utente |
 | P8 | Telefono Android | Configura HTTPS e `JARVIS_ALLOWED_HOSTS`, genera il codice dal desktop e inseriscilo nell'app Android | Associazione, chat e revoca immediata |
 | P8b | Push Android | Installa l'APK release firmato, abilita permessi e consenso push, invia una notifica sintetica con l'app in background | La notifica arriva genericamente senza contenuto privato; la prova reale richiede Firebase configurato |
 | P9 | Backup e rollback | Sezione Sistema → backup; `./jarvis.sh restore <file>`; dopo un aggiornamento `./jarvis.sh rollback` | Dati ripristinati; i dati sostituiti restano in una cartella a parte |
@@ -85,7 +85,7 @@ Il test `tests/contracts/test_packaging.py` verifica gli archivi ZIP e TAR.GZ e 
 **Rilascio:**
 1. Aggiornare la versione in `core/server/Cargo.toml`.
 2. Unire la modifica con CI verde.
-3. Su richiesta del proprietario si crea il tag `vX.Y.Z` (con `git push` del tag oppure avviando a mano il workflow «release» con l'input `tag`, che crea tag e release sul commit costruito e rifiuta un tag diverso dalla versione del Core): il workflow di release costruisce i programmi di installazione (Windows `.msi` e setup `.exe`, macOS `.dmg`, Linux `.deb` e `.AppImage`) con Core, runtime AI e Python autonomo inclusi. Li installa davvero sul runner (`.deb` e `.msi`; su macOS copia l'app dal `.dmg` montato), avvia il Core installato con la prova di avvio e pubblica la release con l'elenco `SHA256SUMS`, firmato con Sigstore, e un'attestazione di provenienza per ogni installer (ADR-0020). Dopo una release stabile restano pubblicati solo quella release e il suo tag. Gli archivi di `scripts/package.py` restano disponibili per l'uso da terminale ma non vengono pubblicati. I tag con suffisso (`-rc.1`) diventano prerelease.
+3. Su richiesta del proprietario si crea il tag `vX.Y.Z` (con `git push` del tag oppure avviando a mano il workflow «release» con l'input `tag`, che crea tag e release sul commit costruito e rifiuta un tag diverso dalla versione del Core): il workflow costruisce e verifica il setup Windows, il DMG macOS e l'APK Android; installa i pacchetti desktop sui runner e avvia il Core incluso. Pubblica i tre artefatti con `SHA256SUMS`, firme Sigstore e attestazioni di provenienza. Dopo una release stabile resta pubblicata solo la release più recente e il suo tag. Gli archivi standalone del Core creati da `scripts/package.py` restano disponibili per l'uso da terminale ma non vengono pubblicati. I tag con suffisso (`-rc.1`) diventano prerelease.
 
 **Verifica di un archivio:**
 

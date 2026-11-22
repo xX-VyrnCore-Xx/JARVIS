@@ -45,13 +45,13 @@ Gli artefatti sono verificabili con l’attestazione GitHub e le firme Sigstore;
 |---|---|
 | Core | Rust, Axum, Tokio, Serde |
 | Worker locale | Python 3, JSON Lines su stdin/stdout, JSON Schema 2020-12 |
-| Desktop | Rust, egui/eframe; API HTTP del Core |
+| Desktop | Rust, egui/eframe su macOS e Windows; API HTTP del Core |
 | Mobile | Kotlin e Jetpack Compose su Android |
 | Dati e memoria | SQLite con rusqlite, FTS5/BM25, vettori lessicali locali e grafo delle conoscenze |
 | Inferenza | Ollama Cloud e NVIDIA NIM, routing per attività e budget, limiter NIM a 35 RPM |
 | Voce | faster-whisper, Piper, openWakeWord e XTTS v2 facoltativo |
 | Automazioni e sandbox | Scheduler Tokio, n8n e Python in container Docker isolati |
-| Sicurezza e distribuzione | rustls, WebAuthn, portachiavi di sistema, GitHub Actions, test API e Sigstore |
+| Sicurezza e distribuzione | rustls, WebAuthn, portachiavi di sistema, GitHub Actions, test API, firme e attestazioni Sigstore |
 
 [Stack e confini dei componenti](docs/TECH_STACK.md)
 
@@ -84,6 +84,6 @@ cd JARVIS
 ./jarvis.sh
 ```
 
-Su Windows usa `jarvis.cmd` o `.\jarvis.ps1`. `./jarvis.sh` avvia il Core API; `./jarvis.sh desktop` apre l'app nativa egui e avvia il Core in automatico. Su Linux servono le librerie X11, XCursor, XRandR, Xi, XKBCommon, OpenGL e DBus indicate in [Sviluppo e CI](docs/DEVELOPMENT.md).
+Su Windows usa `jarvis.cmd` o `.\jarvis.ps1`; per l'app desktop dai sorgenti usa `.\jarvis.ps1 desktop` su Windows e `./jarvis.sh desktop` su macOS. `./jarvis.sh` avvia il Core API, anche su Linux, dove il client desktop non è distribuito.
 
 [Sviluppo e CI](docs/DEVELOPMENT.md) · [Secrets GitHub Actions](docs/GITHUB_ACTIONS_SECRETS.md) · [Firebase](docs/FIREBASE_SETUP.md) · [Architettura](docs/ARCHITECTURE.md) · [Roadmap e checkpoint](docs/ROADMAP.md)

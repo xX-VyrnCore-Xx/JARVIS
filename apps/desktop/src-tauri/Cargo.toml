@@ -12,10 +12,10 @@ publish = false
 
 [dependencies]
 jarvis-launcher = { path = "../launcher" }
-eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "x11"] }
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow"] }
 serde_json = "1"
 ureq = { version = "2", features = ["json"] }
 url = "2"
 
-[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))'.dependencies]
+[target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 notify-rust = "4.19"

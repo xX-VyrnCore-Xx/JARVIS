@@ -2,7 +2,7 @@
 
 ## Build e distribuzione
 
-Il Core Linux combina servizi systemd e componenti Docker. Il progetto prevede installer multipiattaforma e aggiornamenti per modulo con verifica crittografica, canali Development, Beta e Stable, health check e rollback automatico. Ogni release registra commit, versioni dei contratti, artefatti, prerequisiti e compatibilità dei dati. Verificare in ambiente di prova upgrade, compatibilità con client già distribuiti e recupero dopo migrazione fallita.
+Il Core Linux combina servizi systemd e componenti Docker. La distribuzione corrente comprende desktop macOS Apple Silicon, desktop Windows x64 e APK Android; non viene pubblicato un desktop Linux. Gli archivi standalone del Core restano disponibili per l'uso da terminale. Le release verificano firme, impronte, provenienza, health check e rollback; ogni release registra commit, versioni dei contratti, artefatti, prerequisiti e compatibilità dei dati. Verificare in ambiente di prova upgrade, compatibilità con client già distribuiti e recupero dopo migrazione fallita.
 
 ## Verifiche
 
@@ -27,11 +27,12 @@ Per l'accettazione finale raccogliere la matrice requisiti–test con esiti, la 
 
 ## Stato della CI (prototipo v0.1)
 
-Il workflow `.github/workflows/contracts.yml` esegue i test contrattuali e AI, le build del Core e del desktop nativo su Linux/macOS/Windows, il client Android e l'avvio reale del Core sui tre sistemi:
+Il workflow `.github/workflows/contracts.yml` esegue i test contrattuali e AI, le build del Core e del desktop nativo, il client Android e l'avvio reale del Core:
 - **Python:** contratti e AI Gateway;
 - **Rust:** fmt, clippy e test, compresi quelli d'integrazione sull'API con il worker reale;
 - **E2E API:** Core offline e `tests/e2e/api_smoke.cjs`, senza browser o frontend Web. Il test copre 404 delle vecchie pagine, token, endpoint protetti, pairing, permessi del dispositivo e chat NDJSON.
-- **Desktop:** fmt, clippy, build e test di egui su Linux, macOS e Windows.
+- **Desktop:** fmt, clippy, build e test di egui su macOS e Windows.
+- **Core:** test e avvio headless su Linux; avvio d'integrazione anche su macOS e Windows.
 
 Il proprietario ha autorizzato il merge automatico con CI verde ([DEVELOPMENT.md](DEVELOPMENT.md#integrazione-delle-modifiche)).
 
@@ -54,7 +55,7 @@ Il monitor gira a ogni intervallo del pianificatore. Le notifiche si consultano 
 
 ## Avvio verificato per sistema operativo
 
-Il job CI `avvio` esegue i lanciatori reali (`jarvis.sh` su Linux e macOS, `jarvis.ps1` su Windows) da un checkout pulito. Poi `tests/smoke/start_smoke.py` attende il Core e verifica health, chat con caratteri accentati e uno strumento eseguito tramite policy. I lanciatori offrono `doctor` per la diagnosi dei prerequisiti.
+Il job CI `avvio` esegue i lanciatori reali (`jarvis.sh` su Linux e macOS, `jarvis.ps1` su Windows) da un checkout pulito; su Linux e macOS verifica il Core headless, mentre su Windows usa il launcher PowerShell. Poi `tests/smoke/start_smoke.py` attende il Core e verifica health, chat con caratteri accentati e uno strumento eseguito tramite policy. I lanciatori offrono `doctor` per la diagnosi dei prerequisiti.
 
 ## Osservabilità e robustezza (Fase 4, ADR-0011)
 
