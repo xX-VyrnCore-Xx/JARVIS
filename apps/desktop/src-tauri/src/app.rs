@@ -1323,7 +1323,11 @@ impl JarvisApp {
                                 }));
                                 ui.strong(name);
                                 ui.label(if online { "Online" } else { "Offline" });
-                                if removable && ui.button("Dimentica").clicked() {
+                                if removable
+                                    && ui
+                                        .add_enabled(!self.loading, egui::Button::new("Dimentica"))
+                                        .clicked()
+                                {
                                     self.pending_backend_removal = Some(origin.to_owned());
                                 }
                             });
@@ -1367,7 +1371,9 @@ impl JarvisApp {
                         }
                         if ui
                             .add_enabled(
-                                !self.backend_pairing && self.backend_config_error.is_none(),
+                                !self.backend_pairing
+                                    && !self.loading
+                                    && self.backend_config_error.is_none(),
                                 egui::Button::new(if self.backend_pairing {
                                     "Associazione in corso…"
                                 } else {
@@ -1394,7 +1400,10 @@ impl JarvisApp {
                         if ui.button("Annulla").clicked() {
                             self.pending_backend_removal = None;
                         }
-                        if ui.button("Dimentica").clicked() {
+                        if ui
+                            .add_enabled(!self.loading, egui::Button::new("Dimentica"))
+                            .clicked()
+                        {
                             self.forget_core_backend(&origin, ctx);
                         }
                     });
@@ -2580,7 +2589,10 @@ impl eframe::App for JarvisApp {
             }
         });
 
-        if self.current != "chat" && self.last_load.elapsed() > Duration::from_secs(15) {
+        if self.current != "chat"
+            && !self.backend_pairing
+            && self.last_load.elapsed() > Duration::from_secs(15)
+        {
             self.refresh(&ctx);
         }
         if self.core.as_mut().is_some_and(|core| !core.is_alive()) {

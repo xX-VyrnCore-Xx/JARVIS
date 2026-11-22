@@ -54,7 +54,10 @@ impl ApiClient {
         }
         base.set_path("/");
         Ok(Self {
-            agent: ureq::AgentBuilder::new().timeout(timeout).build(),
+            agent: ureq::AgentBuilder::new()
+                .timeout(timeout)
+                .redirects(0)
+                .build(),
             base,
             auth,
         })
