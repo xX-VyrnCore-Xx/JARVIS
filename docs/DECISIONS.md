@@ -1335,6 +1335,14 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza locale:** `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check`, suite contratti (14 test), parsing YAML, sintassi shell e `git diff --check` superati. Il build dell'app e la resa su macOS/Windows non sono verificabili nell'host Linux: il desktop rifiuta Linux e manca il toolchain Apple; il test `tests/e2e/ui_smoke.cjs` non è presente.
 - **Documenti interessati:** `INTERFACE_AND_DEVICES.md`, ROADMAP.md e `apps/desktop/src-tauri/src/app.rs`.
 
+### ADR-0079 — Avatar vettoriale desktop rifinito e rimozione anteprime
+
+- **Data** 2026-11-22 · **Stato** implementata nel checkout; verifica grafica nativa sospesa.
+- **Decisione:** mantenere l'avatar desktop originale disegnato con egui, raffinandone silhouette, contorni, moduli auricolari, occhi, bocca e armatura delle spalle con forme vettoriali coerenti e motion control esistente. Non introdurre fotografie, asset remoti o nuove dipendenze. Eliminare le anteprime statiche create durante la sessione; conservare lo screenshot fornito dall'utente come riferimento.
+- **Conseguenze:** identità e animazione restano native e scalabili su macOS/Windows. La resa finale va controllata su un sistema desktop supportato.
+- **Evidenza locale:** fmt Rust, `cargo check --target x86_64-pc-windows-gnu --locked` e `git diff --check` superati. L'host Linux non dispone di display grafico per catturare la UI in esecuzione.
+- **Documenti interessati:** `INTERFACE_AND_DEVICES.md`, ROADMAP.md e `apps/desktop/src-tauri/src/app.rs`.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.

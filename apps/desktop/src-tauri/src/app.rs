@@ -2311,65 +2311,124 @@ fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
 
     let face_center = center + egui::vec2(0.0, -side * 0.035);
     let shoulders = vec![
-        center + egui::vec2(-side * 0.25, side * 0.31),
-        center + egui::vec2(-side * 0.20, side * 0.19),
-        center + egui::vec2(-side * 0.10, side * 0.13),
-        center + egui::vec2(0.0, side * 0.18),
-        center + egui::vec2(side * 0.10, side * 0.13),
-        center + egui::vec2(side * 0.20, side * 0.19),
-        center + egui::vec2(side * 0.25, side * 0.31),
+        center + egui::vec2(-side * 0.31, side * 0.31),
+        center + egui::vec2(-side * 0.27, side * 0.22),
+        center + egui::vec2(-side * 0.20, side * 0.17),
+        center + egui::vec2(-side * 0.12, side * 0.14),
+        center + egui::vec2(-side * 0.065, side * 0.18),
+        center + egui::vec2(0.0, side * 0.205),
+        center + egui::vec2(side * 0.065, side * 0.18),
+        center + egui::vec2(side * 0.12, side * 0.14),
+        center + egui::vec2(side * 0.20, side * 0.17),
+        center + egui::vec2(side * 0.27, side * 0.22),
+        center + egui::vec2(side * 0.31, side * 0.31),
     ];
     painter.add(egui::Shape::convex_polygon(
         shoulders,
-        egui::Color32::from_rgb(14, 44, 64),
-        egui::Stroke::new(1.5, egui::Color32::from_rgb(36, 149, 185)),
+        egui::Color32::from_rgb(13, 37, 54),
+        egui::Stroke::new(1.7, egui::Color32::from_rgb(36, 149, 185)),
     ));
-    painter.rect_filled(
-        egui::Rect::from_center_size(
-            center + egui::vec2(0.0, side * 0.13),
-            egui::vec2(side * 0.105, side * 0.20),
-        ),
-        egui::CornerRadius::same(8),
-        egui::Color32::from_rgb(18, 54, 72),
-    );
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            center + egui::vec2(-side * 0.19, side * 0.29),
+            center + egui::vec2(-side * 0.15, side * 0.22),
+            center + egui::vec2(-side * 0.075, side * 0.19),
+            center + egui::vec2(-side * 0.12, side * 0.31),
+        ],
+        egui::Color32::from_rgb(20, 57, 75),
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(39, 133, 160)),
+    ));
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            center + egui::vec2(side * 0.19, side * 0.29),
+            center + egui::vec2(side * 0.15, side * 0.22),
+            center + egui::vec2(side * 0.075, side * 0.19),
+            center + egui::vec2(side * 0.12, side * 0.31),
+        ],
+        egui::Color32::from_rgb(20, 57, 75),
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(39, 133, 160)),
+    ));
 
+    let ear_y = face_center.y - side * 0.005;
+    for direction in [-1.0, 1.0] {
+        let ear = egui::pos2(face_center.x + direction * side * 0.15, ear_y);
+        painter.circle_filled(ear, side * 0.035, egui::Color32::from_rgb(13, 39, 54));
+        painter.circle_stroke(
+            ear,
+            side * 0.035,
+            egui::Stroke::new(1.2 * unit, egui::Color32::from_rgb(47, 150, 178)),
+        );
+        painter.circle_filled(
+            ear,
+            side * 0.009,
+            egui::Color32::from_rgba_unmultiplied(35, 198, 244, 170),
+        );
+    }
     let head = vec![
-        face_center + egui::vec2(0.0, -side * 0.255),
-        face_center + egui::vec2(side * 0.135, -side * 0.205),
-        face_center + egui::vec2(side * 0.16, -side * 0.065),
-        face_center + egui::vec2(side * 0.12, side * 0.105),
-        face_center + egui::vec2(0.0, side * 0.175),
-        face_center + egui::vec2(-side * 0.12, side * 0.105),
-        face_center + egui::vec2(-side * 0.16, -side * 0.065),
-        face_center + egui::vec2(-side * 0.135, -side * 0.205),
+        face_center + egui::vec2(0.0, -side * 0.27),
+        face_center + egui::vec2(side * 0.075, -side * 0.255),
+        face_center + egui::vec2(side * 0.14, -side * 0.21),
+        face_center + egui::vec2(side * 0.16, -side * 0.12),
+        face_center + egui::vec2(side * 0.145, -side * 0.025),
+        face_center + egui::vec2(side * 0.12, side * 0.075),
+        face_center + egui::vec2(side * 0.075, side * 0.14),
+        face_center + egui::vec2(0.0, side * 0.17),
+        face_center + egui::vec2(-side * 0.075, side * 0.14),
+        face_center + egui::vec2(-side * 0.12, side * 0.075),
+        face_center + egui::vec2(-side * 0.145, -side * 0.025),
+        face_center + egui::vec2(-side * 0.16, -side * 0.12),
+        face_center + egui::vec2(-side * 0.14, -side * 0.21),
+        face_center + egui::vec2(-side * 0.075, -side * 0.255),
     ];
     painter.add(egui::Shape::convex_polygon(
         head,
-        egui::Color32::from_rgb(19, 43, 58),
+        egui::Color32::from_rgb(16, 40, 56),
         egui::Stroke::new(1.8, egui::Color32::from_rgb(71, 194, 224)),
     ));
     painter.add(egui::Shape::line(
         vec![
-            face_center + egui::vec2(-side * 0.075, -side * 0.175),
-            face_center + egui::vec2(0.0, -side * 0.205),
-            face_center + egui::vec2(side * 0.075, -side * 0.175),
+            face_center + egui::vec2(-side * 0.095, -side * 0.195),
+            face_center + egui::vec2(-side * 0.045, -side * 0.22),
+            face_center + egui::vec2(0.0, -side * 0.225),
+            face_center + egui::vec2(side * 0.045, -side * 0.22),
+            face_center + egui::vec2(side * 0.095, -side * 0.195),
         ],
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(61, 122, 147)),
+        egui::Stroke::new(1.1, egui::Color32::from_rgb(61, 142, 165)),
     ));
+    for direction in [-1.0, 1.0] {
+        painter.line_segment(
+            [
+                face_center + egui::vec2(direction * side * 0.13, -side * 0.12),
+                face_center + egui::vec2(direction * side * 0.115, side * 0.045),
+            ],
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 106, 132)),
+        );
+    }
 
     let eye_y = face_center.y - side * 0.025;
     for direction in [-1.0, 1.0] {
+        let eye = egui::pos2(face_center.x + direction * side * 0.064, eye_y);
         painter.circle_filled(
-            egui::pos2(face_center.x + direction * side * 0.064, eye_y),
-            side * 0.046,
-            egui::Color32::from_rgba_unmultiplied(25, 167, 213, 28),
+            eye,
+            side * 0.049,
+            egui::Color32::from_rgba_unmultiplied(25, 167, 213, 24),
+        );
+        painter.circle_stroke(
+            eye,
+            side * 0.035,
+            egui::Stroke::new(0.8, egui::Color32::from_rgba_unmultiplied(35, 198, 244, 85)),
         );
         painter.line_segment(
             [
                 egui::pos2(face_center.x + direction * side * 0.09, eye_y),
                 egui::pos2(face_center.x + direction * side * 0.035, eye_y),
             ],
-            egui::Stroke::new(2.6 * unit, accent),
+            egui::Stroke::new(2.8 * unit, accent),
+        );
+        painter.circle_filled(
+            egui::pos2(face_center.x + direction * side * 0.064, eye_y),
+            1.0 * unit,
+            egui::Color32::from_rgb(206, 250, 255),
         );
     }
     for direction in [-1.0, 1.0] {
@@ -2387,20 +2446,24 @@ fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
             egui::Stroke::new(1.0, egui::Color32::from_rgb(59, 129, 154)),
         );
     }
-    painter.line_segment(
-        [
-            egui::pos2(face_center.x, eye_y + side * 0.015),
-            egui::pos2(face_center.x - side * 0.018, eye_y + side * 0.07),
+    painter.add(egui::Shape::line(
+        vec![
+            egui::pos2(face_center.x, eye_y + side * 0.005),
+            egui::pos2(face_center.x - side * 0.012, eye_y + side * 0.055),
+            egui::pos2(face_center.x + side * 0.012, eye_y + side * 0.065),
         ],
         egui::Stroke::new(1.2 * unit, egui::Color32::from_rgb(105, 179, 197)),
-    );
-    painter.line_segment(
-        [
-            egui::pos2(face_center.x - side * 0.045, eye_y + side * 0.105),
-            egui::pos2(face_center.x + side * 0.045, eye_y + side * 0.105),
+    ));
+    painter.add(egui::Shape::line(
+        vec![
+            egui::pos2(face_center.x - side * 0.05, eye_y + side * 0.105),
+            egui::pos2(face_center.x - side * 0.025, eye_y + side * 0.117),
+            egui::pos2(face_center.x, eye_y + side * 0.12),
+            egui::pos2(face_center.x + side * 0.025, eye_y + side * 0.117),
+            egui::pos2(face_center.x + side * 0.05, eye_y + side * 0.105),
         ],
-        egui::Stroke::new(1.2 * unit, egui::Color32::from_rgb(105, 179, 197)),
-    );
+        egui::Stroke::new(1.3 * unit, egui::Color32::from_rgb(105, 179, 197)),
+    ));
     let chest = center + egui::vec2(0.0, side * 0.205);
     painter.circle_filled(chest, side * 0.042, egui::Color32::from_rgb(7, 26, 40));
     painter.circle_stroke(
