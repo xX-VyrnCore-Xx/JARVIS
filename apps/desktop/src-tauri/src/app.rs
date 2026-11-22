@@ -2522,6 +2522,7 @@ fn show_notification(item: &Value) {
     };
     let mut notification = notify_rust::Notification::new();
     notification.summary(title).body(&body);
+    #[cfg(target_os = "windows")]
     if severity == "error" {
         notification.urgency(notify_rust::Urgency::Critical);
     }

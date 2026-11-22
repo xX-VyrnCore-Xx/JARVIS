@@ -1308,14 +1308,14 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** un run CI sul commit base ha mostrato errori `cargo fmt --check` nell'app desktop e nel test `memory.rs`; le correzioni di formattazione, la rimozione della matrice desktop Ubuntu e il test del rifiuto Linux sono nel checkout locale. La verifica completa e l'aggiornamento del lockfile sono registrati nel checkpoint roadmap.
 - **Documenti interessati:** README.md, TECH_STACK.md, DEVELOPMENT.md, INTERFACE_AND_DEVICES.md, REQUIREMENTS.md, ACCEPTANCE.md, DEVOPS_QA_OBSERVABILITY.md, ROADMAP.md e workflow `contracts.yml`.
 
-### ADR-0076 — Icona desktop e avvio recuperabile
+### ADR-0076 — Icona condivisa e avvio recuperabile
 
-- **Data** 2026-11-22 · **Stato** implementata nel checkout · **Fonte** richiesta del proprietario.
+- **Data** 2026-11-22 · **Stato** avvio su `main`; icona definitiva e correzione macOS nel checkout · **Fonte** richiesta del proprietario.
 - **Contesto:** le risorse ICO/ICNS erano usate dagli installer ma non impostate come icona della finestra egui; un errore di connessione lasciava la schermata iniziale senza un'azione per riprovare.
-- **Decisione:** mantenere un'illustrazione vettoriale originale come sorgente e generare PNG, ICO e ICNS coerenti; usare il PNG come icona di finestra egui e come marchio della schermata iniziale. La connessione resta asincrona; durante il caricamento si mostra lo stato locale/remoto e, in caso di errore, dettagli leggibili e un comando Riprova.
+- **Decisione:** usare come sorgente l'emblema animato fornito dal proprietario, conservarlo in `icon-source.gif` e derivare dal quinto fotogramma (indice 4) le risorse statiche PNG, ICO, ICNS e Android adaptive icon. Applicare lo stesso emblema a finestra, schermata iniziale e installer, rispettando le safe zone e le dimensioni previste dalle piattaforme. La connessione resta asincrona; durante il caricamento si mostra lo stato locale/remoto e, in caso di errore, dettagli leggibili e un comando Riprova.
 - **Conseguenze:** nessuna modifica alle API, ai permessi o al lifecycle del Core; installatori e client usano lo stesso marchio. Gli errori di avvio restano espliciti e non richiedono un riavvio manuale dell'app.
-- **Evidenza:** risorse raster generate e controllate localmente; formattazione e build desktop da verificare sui runner supportati; la verifica visiva richiede macOS o Windows.
-- **Documenti interessati:** CLAUDE.md, INTERFACE_AND_DEVICES.md, ROADMAP.md e risorse/app desktop.
+- **Evidenza:** la CI su `c2152c8` ha rilevato che `notify_rust::Notification::urgency` è disponibile su Windows ma non con il backend macOS configurato; la chiamata è ora condizionata a Windows. Clippy/build/test Windows e generazione di tutte le risorse sono superati localmente. Il controllo Android di packaging resta sospeso per assenza dell'SDK locale; la CI macOS deve essere ripetuta sul codice corretto.
+- **Documenti interessati:** `scripts/make_brand_assets.py`, risorse/app desktop e Android, ROADMAP.md.
 
 ### Decisione operativa — Merge automatico con CI verde
 

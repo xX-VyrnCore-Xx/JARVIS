@@ -2,14 +2,13 @@
 """Genera icone e grafiche degli installer di JARVIS (ADR-0036).
 
 Uso: python3 scripts/make_brand_assets.py
-Richiede Pillow. I file generati sono versionati in apps/desktop/src-tauri/{icons,installer}: lo script serve
-solo a rigenerarli dopo una modifica al disegno. Nessuna risorsa esterna: forme disegnate e caratteri di sistema
+Richiede Pillow. Il badge sorgente è apps/desktop/src-tauri/icons/icon-source.gif; i font sono di sistema
 (Inter se presente, altrimenti DejaVu o il carattere predefinito di Pillow).
 """
 
 from __future__ import annotations
 
-import math
+from functools import lru_cache
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
@@ -18,9 +17,11 @@ ROOT = Path(__file__).resolve().parent.parent
 TAURI = ROOT / "apps" / "desktop" / "src-tauri"
 ICONS = TAURI / "icons"
 INST = TAURI / "installer"
+ICON_SOURCE = ICONS / "icon-source.gif"
+ICON_SOURCE_FRAME = 4  # Quinto fotogramma, usato per le icone statiche.
+ANDROID_ICONS = ROOT / "apps" / "android" / "app" / "src" / "main" / "res" / "drawable-nodpi"
 
 CYAN = (63, 208, 255)
-VIOLET = (123, 97, 255)
 NAVY_TOP = (14, 44, 78)
 NAVY_BOTTOM = (3, 9, 20)
 
@@ -46,62 +47,34 @@ def vgradient(w: int, h: int, top: tuple, bottom: tuple) -> Image.Image:
     return col.resize((w, h))
 
 
-def radial(size: int, inner: tuple, outer: tuple, power: float = 1.0) -> Image.Image:
-    """Gradiente radiale RGBA (inner al centro, outer al bordo)."""
-    small = 256
-    img = Image.new("RGBA", (small, small))
-    c = (small - 1) / 2
-    for y in range(small):
-        for x in range(small):
-            d = min(math.hypot(x - c, y - c) / c, 1.0) ** power
-            img.putpixel((x, y), tuple(round(a + (b - a) * d) for a, b in zip(inner, outer)))
-    return img.resize((size, size), Image.LANCZOS)
+@lru_cache(maxsize=1)
+def source_emblem() -> Image.Image:
+    """Carica un frame del badge animato fornito dal proprietario, senza lo sfondo trasparente."""
+    with Image.open(ICON_SOURCE) as source:
+        source.seek(min(ICON_SOURCE_FRAME, source.n_frames - 1))
+        frame = source.convert("RGBA")
+    bounds = frame.getchannel("A").getbbox()
+    if bounds is None:
+        raise ValueError(f"Nessun pixel opaco nell'icona sorgente: {ICON_SOURCE}")
+    return frame.crop(bounds)
 
 
-def reactor(size: int) -> Image.Image:
-    """Emblema: anelli concentrici, corona a segmenti e nucleo luminoso (RGBA, sfondo trasparente)."""
-    s = size
-    layer = Image.new("RGBA", (s, s), (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer)
-    c = s / 2
+def brand_emblem(size: int) -> Image.Image:
+    source = source_emblem()
+    scale = min(size / source.width, size / source.height)
+    dimensions = (round(source.width * scale), round(source.height * scale))
+    source = source.resize(dimensions, Image.Resampling.LANCZOS)
+    emblem = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    emblem.alpha_composite(source, ((size - source.width) // 2, (size - source.height) // 2))
+    return emblem
 
-    def ring(r: float, width: float, color: tuple) -> None:
-        d.ellipse((c - r, c - r, c + r, c + r), outline=color, width=max(1, round(width)))
 
-    ring(s * 0.46, s * 0.012, CYAN + (110,))
-    # corona semplificata: 16 segmenti ampi restano leggibili anche nella tray icon
-    r_out, r_in = s * 0.42, s * 0.355
-    for i in range(20):
-        if i % 5 == 4:
-            continue
-        a0 = math.radians(i * 18 + 2.5)
-        a1 = math.radians(i * 18 + 15.5)
-        pts = [
-            (c + r_out * math.cos(a0), c + r_out * math.sin(a0)),
-            (c + r_out * math.cos(a1), c + r_out * math.sin(a1)),
-            (c + r_in * math.cos(a1), c + r_in * math.sin(a1)),
-            (c + r_in * math.cos(a0), c + r_in * math.sin(a0)),
-        ]
-        d.polygon(pts, fill=CYAN + (235,))
-    # arco viola parziale e anello sottile interno
-    rr = s * 0.31
-    d.arc((c - rr, c - rr, c + rr, c + rr), 200, 340, fill=VIOLET + (255,), width=round(s * 0.022))
-    d.arc((c - rr, c - rr, c + rr, c + rr), 20, 160, fill=CYAN + (200,), width=round(s * 0.022))
-    ring(s * 0.25, s * 0.008, (200, 240, 255, 150))
-
-    glow = layer.filter(ImageFilter.GaussianBlur(s * 0.02))
-    out = Image.alpha_composite(Image.new("RGBA", (s, s), (0, 0, 0, 0)), glow)
-    out = Image.alpha_composite(out, layer)
-
-    # nucleo: alone e sfera
-    halo = radial(round(s * 0.62), CYAN + (190,), CYAN + (0,), 0.7)
-    out.alpha_composite(halo, (round(c - halo.width / 2), round(c - halo.height / 2)))
-    core_d = round(s * 0.34)
-    core = radial(core_d, (245, 253, 255, 255), (20, 120, 200, 255), 0.85)
-    mask = Image.new("L", (core_d, core_d), 0)
-    ImageDraw.Draw(mask).ellipse((0, 0, core_d - 1, core_d - 1), fill=255)
-    out.paste(core, (round(c - core_d / 2), round(c - core_d / 2)), mask)
-    return out
+def android_launcher_emblem(size: int = 432) -> Image.Image:
+    """Badge centrato nella safe zone dell'icona Android adattiva."""
+    badge = brand_emblem(round(size * 0.65))
+    foreground = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    foreground.alpha_composite(badge, ((size - badge.width) // 2, (size - badge.height) // 2))
+    return foreground
 
 
 def overlay(img: Image.Image, paint) -> None:
@@ -140,7 +113,7 @@ def app_icon(size: int = 1024, margin: int = 100, shadow: bool = True) -> Image.
     plate = vgradient(S, S, NAVY_TOP, NAVY_BOTTOM).convert("RGBA")
     # griglia leggera e riflesso in alto
     grid(plate, M, M, S - M, S - M, (S - 2 * M) // 8, 12, k)
-    em = reactor(round((S - 2 * M) * 0.86))
+    em = brand_emblem(round((S - 2 * M) * 0.93))
     plate.alpha_composite(em, ((S - em.width) // 2, (S - em.height) // 2))
     shine = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     ImageDraw.Draw(shine).ellipse((M - S * 0.2, M - S * 0.55, S - M + S * 0.2, S * 0.42), fill=(255, 255, 255, 22))
@@ -171,7 +144,7 @@ def glass_card(img: Image.Image, box: tuple[int, int, int, int]) -> None:
 def dmg_background(w: int = 660, h: int = 400) -> Image.Image:
     img = vgradient(w, h, (12, 34, 62), (4, 10, 22)).convert("RGBA")
     grid(img, 0, 0, w, h, 30, 16)
-    em = reactor(520)
+    em = brand_emblem(520)
     em.putalpha(ImageChops.multiply(em.getchannel("A"), Image.new("L", em.size, 34)))
     img.alpha_composite(em, (w - 300, -230))
     d = ImageDraw.Draw(img)
@@ -196,7 +169,7 @@ def dmg_background(w: int = 660, h: int = 400) -> Image.Image:
 
 def nsis_sidebar(w: int = 164, h: int = 314) -> Image.Image:
     img = vgradient(w, h, NAVY_TOP, NAVY_BOTTOM).convert("RGBA")
-    em = reactor(150)
+    em = brand_emblem(150)
     img.alpha_composite(em, ((w - 150) // 2, 52))
     d = ImageDraw.Draw(img)
     d.text((w // 2, 228), "JARVIS", font=font(22, "Bold"), fill=(227, 244, 255), anchor="mm")
@@ -208,7 +181,7 @@ def nsis_sidebar(w: int = 164, h: int = 314) -> Image.Image:
 def nsis_header(w: int = 150, h: int = 57) -> Image.Image:
     img = Image.new("RGBA", (w, h), (255, 255, 255, 255))
     plate = vgradient(70, h, NAVY_TOP, NAVY_BOTTOM).convert("RGBA")
-    em = reactor(50)
+    em = brand_emblem(50)
     plate.alpha_composite(em, (10, 3))
     img.paste(plate, (w - 70, 0))
     return img
@@ -221,17 +194,25 @@ def bmp(img: Image.Image, path: Path) -> None:
 def main() -> None:
     ICONS.mkdir(parents=True, exist_ok=True)
     INST.mkdir(parents=True, exist_ok=True)
+    ANDROID_ICONS.mkdir(parents=True, exist_ok=True)
     mac = app_icon(1024, 100, shadow=True)
-    full = app_icon(1024, 24, shadow=False)  # Windows e Linux: la lastra occupa quasi tutto il riquadro
+    full = app_icon(1024, 24, shadow=False)  # Windows e icona incorporata nella finestra.
     full.save(ICONS / "icon.png")
     mac.save(ICONS / "icon.icns", format="ICNS")
     full.save(ICONS / "icon.ico", format="ICO", sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
     for name, px in (("32x32.png", 32), ("128x128.png", 128), ("128x128@2x.png", 256)):
         full.resize((px, px), Image.LANCZOS).save(ICONS / name)
+    android_launcher_emblem().save(ANDROID_ICONS / "ic_launcher_badge.png")
     dmg_background().convert("RGB").save(INST / "dmg-background.png")
     bmp(nsis_sidebar(), INST / "nsis-sidebar.bmp")
     bmp(nsis_header(), INST / "nsis-header.bmp")
-    print("risorse generate in", ICONS.relative_to(ROOT), "e", INST.relative_to(ROOT))
+    print(
+        "risorse generate in",
+        ICONS.relative_to(ROOT),
+        INST.relative_to(ROOT),
+        "e",
+        ANDROID_ICONS.relative_to(ROOT),
+    )
 
 
 if __name__ == "__main__":
