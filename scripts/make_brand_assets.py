@@ -2,7 +2,7 @@
 """Genera icone e grafiche degli installer di JARVIS (ADR-0036).
 
 Uso: python3 scripts/make_brand_assets.py
-Richiede Pillow. Il badge sorgente è apps/desktop/src-tauri/icons/icon-source.gif; i font sono di sistema
+Richiede Pillow. Il badge sorgente è logo.png nella radice del repository; i font sono di sistema
 (Inter se presente, altrimenti DejaVu o il carattere predefinito di Pillow).
 """
 
@@ -17,8 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 TAURI = ROOT / "apps" / "desktop" / "src-tauri"
 ICONS = TAURI / "icons"
 INST = TAURI / "installer"
-ICON_SOURCE = ICONS / "icon-source.gif"
-ICON_SOURCE_FRAME = 4  # Quinto fotogramma, usato per le icone statiche.
+ICON_SOURCE = ROOT / "logo.png"
 ANDROID_ICONS = ROOT / "apps" / "android" / "app" / "src" / "main" / "res" / "drawable-nodpi"
 
 CYAN = (63, 208, 255)
@@ -49,11 +48,10 @@ def vgradient(w: int, h: int, top: tuple, bottom: tuple) -> Image.Image:
 
 @lru_cache(maxsize=1)
 def source_emblem() -> Image.Image:
-    """Carica un frame del badge animato fornito dal proprietario, senza lo sfondo trasparente."""
+    """Carica il badge originale fornito dal proprietario e ritaglia solo il margine trasparente."""
     with Image.open(ICON_SOURCE) as source:
-        source.seek(min(ICON_SOURCE_FRAME, source.n_frames - 1))
         frame = source.convert("RGBA")
-    bounds = frame.getchannel("A").getbbox()
+    bounds = frame.getchannel("A").point(lambda alpha: 255 if alpha > 16 else 0).getbbox()
     if bounds is None:
         raise ValueError(f"Nessun pixel opaco nell'icona sorgente: {ICON_SOURCE}")
     return frame.crop(bounds)
@@ -111,13 +109,8 @@ def app_icon(size: int = 1024, margin: int = 100, shadow: bool = True) -> Image.
         ImageDraw.Draw(sh).rounded_rectangle((box[0], box[1] + 14 * k, box[2], box[3] + 14 * k), radius=radius, fill=(0, 0, 0, 120))
         canvas = Image.alpha_composite(canvas, sh.filter(ImageFilter.GaussianBlur(18 * k)))
     plate = vgradient(S, S, NAVY_TOP, NAVY_BOTTOM).convert("RGBA")
-    # griglia leggera e riflesso in alto
-    grid(plate, M, M, S - M, S - M, (S - 2 * M) // 8, 12, k)
     em = brand_emblem(round((S - 2 * M) * 0.93))
     plate.alpha_composite(em, ((S - em.width) // 2, (S - em.height) // 2))
-    shine = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-    ImageDraw.Draw(shine).ellipse((M - S * 0.2, M - S * 0.55, S - M + S * 0.2, S * 0.42), fill=(255, 255, 255, 22))
-    plate = Image.alpha_composite(plate, shine)
     mask = squircle_mask(S, box, radius)
     canvas.paste(plate, (0, 0), mask)
     # bordo interno sottile
