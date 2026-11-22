@@ -389,11 +389,14 @@ private fun ColumnScope.ChatScreen(session: DeviceSession, appInForeground: Bool
         val result = withContext(Dispatchers.IO) { runCatching { client.history(session) to client.pending(session) } }
         result.onSuccess { (history, actions) ->
             val stickToEnd = messages.isEmpty() || !list.canScrollForward
-            if (messages != history) {
-                messages.clear(); messages.addAll(history)
-                if (stickToEnd && messages.isNotEmpty()) list.scrollToItem(messages.size - 1)
+            val historyChanged = messages != history
+            val actionsChanged = pending != actions
+            if (historyChanged) { messages.clear(); messages.addAll(history) }
+            if (actionsChanged) { pending.clear(); pending.addAll(actions) }
+            val lastItem = messages.size + pending.size - 1
+            if (stickToEnd && lastItem >= 0 && (historyChanged || actionsChanged)) {
+                list.scrollToItem(lastItem)
             }
-            if (pending != actions) { pending.clear(); pending.addAll(actions) }
             status = null
         }.onFailure(::handle)
     }
@@ -411,30 +414,6 @@ private fun ColumnScope.ChatScreen(session: DeviceSession, appInForeground: Bool
         TextButton(onClick = { scope.launch { refresh() } }) { Text("Aggiorna") }
     }
     status?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp)) }
-    for (action in pending) {
-        Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
-            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("Conferma richiesta", style = MaterialTheme.typography.titleSmall)
-                Text(action.expectedEffect)
-                Text(action.target, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
-                if (session.canConfirm) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        for ((label, approve) in listOf("Approva" to true, "Rifiuta" to false)) {
-                            val decide = {
-                                scope.launch {
-                                    withContext(Dispatchers.IO) { runCatching { client.decide(action, approve, session) } }.onFailure(::handle)
-                                    refresh()
-                                }
-                            }
-                            if (approve) Button(onClick = { decide() }) { Text(label) } else OutlinedButton(onClick = { decide() }) { Text(label) }
-                        }
-                    }
-                } else {
-                    Text("Si conferma dal computer: questo dispositivo non ha il permesso di confermare.", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        }
-    }
     LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp), state = list, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         items(messages) { m ->
             val fromUser = m.role == "user"
@@ -459,6 +438,30 @@ private fun ColumnScope.ChatScreen(session: DeviceSession, appInForeground: Bool
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(m.content, style = MaterialTheme.typography.bodyLarge)
+                    }
+                }
+            }
+        }
+        items(pending, key = { "confirmation-${it.confirmationId}" }) { action ->
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Conferma richiesta", style = MaterialTheme.typography.titleSmall)
+                    Text(action.expectedEffect)
+                    Text(action.target, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                    if (session.canConfirm) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            for ((label, approve) in listOf("Approva" to true, "Rifiuta" to false)) {
+                                val decide = {
+                                    scope.launch {
+                                        withContext(Dispatchers.IO) { runCatching { client.decide(action, approve, session) } }.onFailure(::handle)
+                                        refresh()
+                                    }
+                                }
+                                if (approve) Button(onClick = { decide() }) { Text(label) } else OutlinedButton(onClick = { decide() }) { Text(label) }
+                            }
+                        }
+                    } else {
+                        Text("Si conferma dal computer: questo dispositivo non ha il permesso di confermare.", style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }
