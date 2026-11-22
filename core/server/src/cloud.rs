@@ -365,6 +365,7 @@ fn retry_after(raw: Option<&str>, now: chrono::DateTime<chrono::Utc>) -> Duratio
 pub const TOOLS: &[&str] = &[
     "date.calc",
     "math.calc",
+    "text.count",
     "units.convert",
     "time.now",
     "system.info",
@@ -382,6 +383,7 @@ pub const TOOLS: &[&str] = &[
     "memory.search",
     "security.status",
     "code.check_python",
+    "code.validate_json",
     "agent.delegate",
 ];
 
