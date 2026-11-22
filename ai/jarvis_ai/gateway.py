@@ -50,6 +50,16 @@ def _describe_tool_result(result: dict) -> str:
         return f"{tool} non è riuscito: {_reason(output)}."
     if tool == "time.now":
         return f"Sono le {output.get('local', '?')} (UTC {output.get('utc', '?')})."
+    if tool == "text.count":
+        words, lines, characters = output["words"], output["lines"], output["characters"]
+        return (f"{words} {'parola' if words == 1 else 'parole'}, "
+                f"{lines} {'riga' if lines == 1 else 'righe'}, "
+                f"{characters} {'carattere' if characters == 1 else 'caratteri'} Unicode, "
+                f"{output['utf8_bytes']} byte UTF-8.")
+    if tool == "code.validate_json":
+        if output["valid"]:
+            return "Il JSON è valido."
+        return f"JSON non valido alla riga {output['line']}, colonna {output['column']}."
     if tool == "math.calc":
         return f"{output.get('expression')} = {output.get('result')}"
     if tool == "units.convert":
@@ -298,6 +308,10 @@ def _form_fields(text: str) -> dict:
 
 
 _RULES: list[tuple[re.Pattern[str], str, Any]] = [
+    (re.compile(r"^\s*conta le parole:[ \t]*(.*)$", re.I | re.S), "text.count",
+     lambda m: {"text": m.group(1)}),
+    (re.compile(r"^\s*(?:valida|verifica) (?:il )?json:[ \t]*(.*)$", re.I | re.S), "code.validate_json",
+     lambda m: {"text": m.group(1)}),
     # Strumenti quotidiani (ADR-0046).
     (re.compile(r"^\s*(?:calcola|quanto fa|quanto vale|calc)\s*:?\s+(.+?)\s*\??$", re.I), "math.calc", lambda m: {"expression": m.group(1)}),
     (re.compile(r"^\s*(?:converti|quanti|quante)\s+(-?\d+(?:[.,]\d+)?)\s*([a-z°/0-9]+)\s+(?:in|a)\s+([a-z°/0-9]+)\s*\??$", re.I), "units.convert",
@@ -479,6 +493,7 @@ Prova con:
 • "che ore sono"
 • "info sistema"
 • "elenca file"
+• "conta le parole: città blu" · 'valida il JSON: {"ok": true}'
 • "delega a un agente analista: che ore sono" (agente temporaneo con strumenti di sola lettura)
 • "calcola 15% di 230" · "converti 10 km in mi" · "quanti giorni mancano al 2026-12-25" · "meteo a Roma" · "spazio su disco"
 • "prendi nota: …" · "le mie note" · "ricordami di pagare la bolletta entro 2026-11-30 18:00" · "cose da fare" · "fatto <id>"

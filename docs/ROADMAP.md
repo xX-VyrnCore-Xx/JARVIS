@@ -65,6 +65,9 @@ Il checkpoint è la sezione di ripresa versionata con Git. Ogni voce va aggiorna
 
 **Release desktop con firma automatica (2026-11-22).** Il workflow usa prima i P12/PFX dei Secret macOS/Windows e verifica password e chiave privata. Se i Secret mancano o sono non validi, genera automaticamente un certificato autofirmato temporaneo sul runner e firma comunque DMG, app e setup. Le attestazioni GitHub/Sigstore restano attive e l'APK Android conserva la firma con keystore persistente. Aggiornati script, Secret guida e documenti. Verifiche: parsing YAML, Bash syntax e `git diff --check` superati. La validità reale dei Secret resta verificabile dalla build GitHub.
 
+**Strumenti e client nativi (2026-11-22).** Fase 6. Aggiunti il conteggio del testo e la validazione sintattica JSON (ADR-0070). La navigazione desktop rimane disponibile nelle finestre strette, con conversazione e compositore distinti. Android adotta la stessa palette scura, superfici dei messaggi e compositore ancorato. Lo smoke API verifica i nuovi strumenti. La resa su dispositivi fisici resta da verificare.
+
+
 Il checkpoint precedente è riportato qui sotto per riferimento.
 
 | Campo | Stato al 2026-11-18 (diciottesima ripresa) |

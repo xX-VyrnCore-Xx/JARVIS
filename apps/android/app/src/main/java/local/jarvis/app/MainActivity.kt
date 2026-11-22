@@ -37,6 +37,7 @@ import androidx.compose.material3.TabRow
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -162,7 +163,11 @@ private fun ColumnScope.DeviceScreen(session: DeviceSession, appInForeground: Bo
         }
         Text("●", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.titleMedium)
     }
-    TabRow(selectedTabIndex = tab) {
+    TabRow(
+        selectedTabIndex = tab,
+        containerColor = MaterialTheme.colorScheme.surface,
+        contentColor = MaterialTheme.colorScheme.primary,
+    ) {
         listOf("Chat", "Attività", "Notifiche").forEachIndexed { i, label ->
             Tab(selected = tab == i, onClick = { tab = i }, text = { Text(label) })
         }
@@ -402,7 +407,7 @@ private fun ColumnScope.ChatScreen(session: DeviceSession, appInForeground: Bool
     }
 
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text("JARVIS", style = MaterialTheme.typography.titleLarge)
+        Text("Conversazione", style = MaterialTheme.typography.titleMedium, modifier = Modifier.align(Alignment.CenterVertically))
         TextButton(onClick = { scope.launch { refresh() } }) { Text("Aggiorna") }
     }
     status?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp)) }
@@ -442,6 +447,8 @@ private fun ColumnScope.ChatScreen(session: DeviceSession, appInForeground: Bool
                     colors = CardDefaults.cardColors(
                         containerColor = if (fromUser) MaterialTheme.colorScheme.primaryContainer
                         else MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = if (fromUser) MaterialTheme.colorScheme.onPrimaryContainer
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                     ),
                 ) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -457,18 +464,24 @@ private fun ColumnScope.ChatScreen(session: DeviceSession, appInForeground: Bool
             }
         }
     }
-    Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedTextField(input, { input = it }, placeholder = { Text("Scrivi a JARVIS…") }, modifier = Modifier.weight(1f))
-        Button(enabled = !busy && input.isNotBlank(), onClick = {
-            val text = input.trim()
-            input = ""
-            busy = true
-            messages.add(ChatMessage("user", text))
-            scope.launch {
-                withContext(Dispatchers.IO) { runCatching { client.send(text, session) } }.onFailure(::handle)
-                busy = false
-                refresh()
-            }
-        }) { Text("Invia") }
+    Surface(color = MaterialTheme.colorScheme.surface, tonalElevation = 2.dp) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            OutlinedTextField(input, { input = it }, placeholder = { Text("Scrivi a JARVIS…") }, modifier = Modifier.weight(1f))
+            Button(enabled = !busy && input.isNotBlank(), onClick = {
+                val text = input.trim()
+                input = ""
+                busy = true
+                messages.add(ChatMessage("user", text))
+                scope.launch {
+                    withContext(Dispatchers.IO) { runCatching { client.send(text, session) } }.onFailure(::handle)
+                    busy = false
+                    refresh()
+                }
+            }) { Text("Invia") }
+        }
     }
 }

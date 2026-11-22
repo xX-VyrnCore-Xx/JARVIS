@@ -10,6 +10,12 @@ use serde_json::{json, Value};
 use crate::client::ApiClient;
 use jarvis_launcher::{launch, LaunchConfig, RunningCore};
 
+const BACKGROUND: egui::Color32 = egui::Color32::from_rgb(9, 17, 26);
+const SURFACE: egui::Color32 = egui::Color32::from_rgb(15, 27, 39);
+const RAISED: egui::Color32 = egui::Color32::from_rgb(22, 38, 53);
+const ACCENT: egui::Color32 = egui::Color32::from_rgb(120, 224, 231);
+const SELECTED: egui::Color32 = egui::Color32::from_rgb(22, 62, 75);
+
 const NAV: [(&str, &str, bool); 14] = [
     ("dashboard", "Plancia", true),
     ("chat", "Chat", false),
@@ -103,10 +109,11 @@ impl JarvisApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut style = (*cc.egui_ctx.style_of(egui::Theme::Dark)).clone();
         style.visuals = egui::Visuals::dark();
-        style.visuals.window_fill = egui::Color32::from_rgb(12, 21, 34);
-        style.visuals.panel_fill = egui::Color32::from_rgb(13, 24, 39);
-        style.visuals.widgets.active.bg_fill = egui::Color32::from_rgb(16, 185, 190);
-        style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(28, 93, 112);
+        style.visuals.window_fill = SURFACE;
+        style.visuals.panel_fill = BACKGROUND;
+        style.visuals.widgets.inactive.bg_fill = RAISED;
+        style.visuals.widgets.active.bg_fill = SELECTED;
+        style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(28, 70, 84);
         style.spacing.item_spacing = egui::vec2(10.0, 9.0);
         cc.egui_ctx.set_style_of(egui::Theme::Dark, style);
 
@@ -465,29 +472,23 @@ impl JarvisApp {
 
     fn navigation(&mut self, ui: &mut egui::Ui, compact: bool, ctx: &egui::Context) {
         for (id, label, owner_only) in NAV {
-            if (self.remote && owner_only) || (compact && id != "chat") {
+            if self.remote && owner_only {
                 continue;
             }
             let selected = self.current == id;
-            let button = egui::Button::new(
-                egui::RichText::new(if compact {
-                    label.chars().next().unwrap_or('•').to_string()
-                } else {
-                    label.to_string()
-                })
-                .color(if selected {
-                    egui::Color32::from_rgb(118, 236, 229)
-                } else {
-                    egui::Color32::from_rgb(204, 218, 231)
-                }),
-            )
+            let button = egui::Button::new(egui::RichText::new(label).color(if selected {
+                ACCENT
+            } else {
+                egui::Color32::from_rgb(204, 218, 231)
+            }))
             .fill(if selected {
-                egui::Color32::from_rgb(18, 54, 70)
+                SELECTED
             } else {
                 egui::Color32::TRANSPARENT
             })
             .corner_radius(egui::CornerRadius::same(8));
-            if ui.add_sized([ui.available_width(), 38.0], button).clicked() {
+            let width = if compact { 122.0 } else { ui.available_width() };
+            if ui.add_sized([width, 38.0], button).clicked() {
                 self.current = id.into();
                 self.data = None;
                 self.refresh(ctx);
@@ -508,7 +509,8 @@ impl JarvisApp {
         egui::ScrollArea::vertical()
             .id_salt("chat-scroll")
             .stick_to_bottom(true)
-            .max_height(ui.available_height() - 75.0)
+            .auto_shrink([false, false])
+            .max_height((ui.available_height() - 75.0).max(0.0))
             .show(ui, |ui| {
                 if self.chat.is_empty() {
                     ui.add_space(40.0);
@@ -533,14 +535,27 @@ impl JarvisApp {
                     } else {
                         ("JARVIS", egui::Color32::from_rgb(180, 203, 222))
                     };
-                    ui.horizontal_top(|ui| {
-                        ui.label(egui::RichText::new(label).strong().color(color));
-                        ui.label(if message.text.is_empty() && self.chat_busy {
-                            self.streaming.as_str()
+                    egui::Frame::new()
+                        .fill(if message.role == "user" {
+                            SELECTED
                         } else {
-                            message.text.as_str()
+                            RAISED
+                        })
+                        .corner_radius(12)
+                        .inner_margin(12)
+                        .show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            ui.label(egui::RichText::new(label).small().strong().color(color));
+                            ui.add(
+                                egui::Label::new(if message.text.is_empty() && self.chat_busy {
+                                    self.streaming.as_str()
+                                } else {
+                                    message.text.as_str()
+                                })
+                                .wrap()
+                                .selectable(true),
+                            );
                         });
-                    });
                     ui.add_space(10.0);
                 }
                 for confirmation in self.confirmations.clone() {
@@ -580,7 +595,7 @@ impl JarvisApp {
         ui.separator();
         ui.horizontal(|ui| {
             let input = ui.add_sized(
-                [ui.available_width() - 90.0, 42.0],
+                [(ui.available_width() - 90.0).max(0.0), 42.0],
                 egui::TextEdit::singleline(&mut self.chat_input).hint_text("Messaggio a JARVIS…"),
             );
             let send = ui.add_enabled(
@@ -1289,9 +1304,7 @@ impl eframe::App for JarvisApp {
 
         egui::Panel::top("topbar").exact_size(58.0).show(ui, |ui| {
             ui.horizontal_centered(|ui| {
-                ui.heading(
-                    egui::RichText::new("JARVIS").color(egui::Color32::from_rgb(118, 236, 229)),
-                );
+                ui.heading(egui::RichText::new("JARVIS").color(ACCENT));
                 ui.separator();
                 ui.label(title(&self.current));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1319,33 +1332,42 @@ impl eframe::App for JarvisApp {
         });
 
         let compact = ctx.viewport_rect().width() < 720.0;
-        egui::Panel::left("navigation")
-            .resizable(false)
-            .exact_size(if compact { 58.0 } else { 190.0 })
-            .show(ui, |ui| {
-                let footer_height = 34.0;
-                let navigation_height = (ui.available_height() - footer_height).max(0.0);
-                ui.allocate_ui_with_layout(
-                    egui::vec2(ui.available_width(), navigation_height),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        ui.add_space(12.0);
-                        egui::ScrollArea::vertical()
-                            .id_salt("navigation-list")
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| self.navigation(ui, compact, &ctx));
-                    },
-                );
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-                    ui.separator();
-                    ui.label(if self.remote {
-                        "Core remoto"
-                    } else {
-                        "Core attivo"
+        if compact {
+            egui::Panel::top("compact-navigation")
+                .exact_size(52.0)
+                .show(ui, |ui| {
+                    egui::ScrollArea::horizontal()
+                        .id_salt("compact-navigation-list")
+                        .show(ui, |ui| ui.horizontal(|ui| self.navigation(ui, true, &ctx)));
+                });
+        } else {
+            egui::Panel::left("navigation")
+                .resizable(false)
+                .exact_size(190.0)
+                .show(ui, |ui| {
+                    let footer_height = 34.0;
+                    let navigation_height = (ui.available_height() - footer_height).max(0.0);
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(ui.available_width(), navigation_height),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.add_space(12.0);
+                            egui::ScrollArea::vertical()
+                                .id_salt("navigation-list")
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| self.navigation(ui, false, &ctx));
+                        },
+                    );
+                    ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
+                        ui.separator();
+                        ui.label(if self.remote {
+                            "Core remoto"
+                        } else {
+                            "Core attivo"
+                        });
                     });
                 });
-            });
-
+        }
         egui::CentralPanel::default().show(ui, |ui| {
             ui.add_space(12.0);
             if self.current == "chat" {

@@ -88,6 +88,19 @@ function check(condition, message) {
   });
   const events = chat.text.split("\n").filter(Boolean).map((line) => JSON.parse(line));
   check(chat.status === 200 && events.some((event) => event.type === "done"), "chat streaming NDJSON disponibile al client nativo");
+
+  for (const [message, tool, matches] of [
+    ["conta le parole: città blu", "text.count",
+      /2 parole, 1 riga, 9 caratteri Unicode, 10 byte UTF-8/],
+    ['valida il JSON: {"ok": true}', "code.validate_json", /Il JSON è valido/],
+    ['valida il JSON: {"ok": }', "code.validate_json",
+      /JSON non valido alla riga 1, colonna [1-9]/],
+  ]) {
+    const response = await request("/api/chat/stream", { method: "POST", token: ownerToken, body: { message } });
+    const result = response.text.split("\n").filter(Boolean).map(JSON.parse).find((event) => event.type === "done")?.result;
+    const step = result?.steps.find((item) => item.kind === "tool_result" && item.tool === tool);
+    check(response.status === 200 && step?.status === "succeeded" && matches.test(result.reply), `strumento offline eseguito: ${message}`);
+  }
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;
