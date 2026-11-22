@@ -2,7 +2,7 @@
 """Genera icone e grafiche degli installer di JARVIS (ADR-0036).
 
 Uso: python3 scripts/make_brand_assets.py
-Richiede Pillow. Il badge sorgente è logo.png nella radice del repository; i font sono di sistema
+Richiede Pillow. Il badge sorgente è apps/desktop/src-tauri/icons/icon-source.png; i font sono di sistema
 (Inter se presente, altrimenti DejaVu o il carattere predefinito di Pillow).
 """
 
@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 TAURI = ROOT / "apps" / "desktop" / "src-tauri"
 ICONS = TAURI / "icons"
 INST = TAURI / "installer"
-ICON_SOURCE = ROOT / "logo.png"
+ICON_SOURCE = ICONS / "icon-source.png"
 ANDROID_ICONS = ROOT / "apps" / "android" / "app" / "src" / "main" / "res" / "drawable-nodpi"
 
 CYAN = (63, 208, 255)
