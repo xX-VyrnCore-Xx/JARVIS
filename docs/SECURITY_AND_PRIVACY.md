@@ -49,16 +49,17 @@ Documentare insieme ai contratti la classificazione dei dati, i flussi egress, l
 | Dipendenze Python della voce | Versioni transitive e hash SHA-256 nel lock `ai/requirements-voice.txt`; installazione con `pip --require-hashes` | `web_can_be_disabled_or_restricted_to_an_allowlist` |
 | Azioni CI | Riferimenti a commit SHA immutabili; CLI Tauri installata con versione esatta | `web_can_be_disabled_or_restricted_to_an_allowlist` |
 
-Da completare:
-- identità con passkey o WebAuthn e MFA;
-- identità dei nodi e mTLS;
-- isolamento dei plugin con codice;
-- chiave dei segreti nel portachiavi del sistema operativo;
-- cifratura dei dati a riposo e dei backup;
-- firma o ancoraggio esterno dell'audit.
+## Lacune e limiti residui
+
+- **Identità del proprietario:** WebAuthn protegge le approvazioni dei dispositivi associati quando viene registrata una passkey; non costituisce MFA generale per ogni accesso al Core. L'API resta protetta dalla sessione del Core e la sua esposizione remota richiede il proxy HTTPS privato previsto.
+- **Identità dei nodi:** mTLS è disponibile per gli esecutori quando `JARVIS_NODE_TLS_ADDR` è configurato; non va interpretato come requisito per tutti i trasporti interni o per i client.
+- **Plugin con codice:** non sono supportati. I connettori installabili sono manifest dichiarativi e non eseguono codice plugin; un futuro runtime plugin richiederà isolamento prima di essere abilitato.
+- **Dati a riposo:** credenziali e backup sono protetti come descritto sopra, ma il database applicativo SQLite non è cifrato integralmente. Proteggerlo con account utente, permessi del filesystem e cifratura del disco del sistema operativo.
+- **Audit:** gli eventi sono firmati con Ed25519, ma chiave e registro sono sullo stesso host. La verifica indipendente richiede di conservare la chiave pubblica fuori dal sistema; non esiste un ancoraggio remoto a prova di amministratore locale.
+- **Terminale:** `shell.run` resta un'esecuzione di comandi arbitrari con i permessi dell'utente dopo consenso esplicito, non una sandbox. È disattivato per impostazione predefinita e vietato nei workflow e nei nodi; il filtro di comandi pericolosi non sostituisce un isolamento. Output e tempo sono limitati, ma non usare il terminale su input non fidato.
 
 
-**Terminale (ADR-0038).** Ogni comando di `shell.run` richiede la conferma del proprietario con il testo esatto del comando; nessuna variabile `JARVIS_*` passa al processo; comandi con `sudo` o distruttivi noti sono negati dalla policy; il terminale non è ammesso in automazioni e nodi e si disattiva con `JARVIS_SHELL=off`.
+**Terminale (ADR-0038).** Ogni comando di `shell.run` richiede la conferma del proprietario con il testo esatto del comando; nessuna variabile `JARVIS_*` passa al processo; comandi con `sudo`, `doas`, `pkexec`, `runas` o distruttivi noti sono negati dalla policy; stdout e stderr vengono drenati ma conservano al massimo 8.000 caratteri ciascuno; il processo ha timeout di 60 secondi. Il terminale non è ammesso in automazioni e nodi e si disattiva con `JARVIS_SHELL=off`. Non è isolamento di processo: l'utente deve esaminare il comando prima di confermarlo.
 
 
 **mTLS dei nodi (ADR-0041).** Con `JARVIS_NODE_TLS_ADDR` il Core apre una porta TLS solo per i nodi: certificato client obbligatorio e registrato all'associazione, Core fissato per impronta dal nodo, token e certificato richiesti insieme. La chiave privata del nodo non lascia mai il nodo; la revoca vale subito.

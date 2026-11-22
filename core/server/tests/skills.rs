@@ -51,6 +51,8 @@ fn owner_manages_skills_and_they_activate_from_the_request() {
         "ricerca",
         "organizzazione",
         "spese",
+        "sicurezza",
+        "sviluppo",
     ] {
         assert!(ids.contains(&id), "{list}");
     }
@@ -86,6 +88,16 @@ fn owner_manages_skills_and_they_activate_from_the_request() {
         .unwrap()
         .to_json();
     assert_eq!(skill_steps(&out), ["spese"], "richiamo per nome: {out}");
+    let out = j
+        .chat("fai una code review di questa modifica")
+        .unwrap()
+        .to_json();
+    assert_eq!(skill_steps(&out), ["sviluppo"], "{out}");
+    let out = j
+        .chat("fai una revisione della sicurezza del software")
+        .unwrap()
+        .to_json();
+    assert_eq!(skill_steps(&out), ["sicurezza"], "{out}");
     assert!(skill_steps(&j.chat("che ore sono").unwrap().to_json()).is_empty());
 
     // Disattivata: non si attiva più.

@@ -1086,14 +1086,14 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Contesto:** le preferenze in memoria guidano lo stile, ma non descrivono procedure in più passi (briefing, revisione di testi, ricerca con fonti, registro delle spese). Il modello locale va guidato con istruzioni brevi e mirate, non con un prompt sempre più lungo.
 - **Decisione:**
   - una competenza ha nome, descrizione, parole di attivazione, istruzioni (al massimo 4000 caratteri), strumenti suggeriti del catalogo e stato attivo/disattivo; è salvata nella tabella `skills` (schema 6);
-  - cinque competenze incluse al primo avvio, modificabili e disattivabili ma non eliminabili: «Briefing del mattino», «Scrittura e revisione», «Ricerca con fonti», «Organizzazione», «Spese»;
+  - sette competenze incluse al primo avvio, modificabili e disattivabili ma non eliminabili: «Briefing del mattino», «Scrittura e revisione», «Ricerca con fonti», «Organizzazione», «Spese», «Sicurezza difensiva», «Sviluppo e revisione del codice»;
   - una competenza si attiva quando la richiesta contiene una parola di attivazione o la richiama per nome («usa Spese: …», «competenza Spese»); al massimo 2 per richiesta;
   - il Core aggiunge le competenze attive agli input della delega (`inputs.skills`, aggiunta compatibile al contratto); il worker inserisce le istruzioni nel prompt di sistema, prima delle regole di sicurezza, e offre per primi i loro strumenti;
   - gli strumenti suggeriti devono esistere nel catalogo; possono allargare l'ambito dello specialista scelto per la richiesta (es. `todo.list` durante una ricerca con il briefing), ma non i permessi: policy, conferme e audit restano quelli di ogni strumento; gli agenti temporanei non ricevono competenze;
   - API solo del proprietario: `GET/POST /api/skills`, `PUT/DELETE /api/skills/{id}`; ogni modifica è registrata nell'audit (`skill.save`, `skill.delete`); nella chat il passo «competenza · <nome>» mostra quale procedura è stata applicata; nuova vista «Competenze» nella dashboard.
 - **Alternative scartate:** competenze come plugin con codice (escluse dalla decisione 81 sui plugin isolati); attivazione decisa dal modello (meno prevedibile e più costosa in token con modelli piccoli).
 - **Conseguenze:** il proprietario insegna a JARVIS nuove procedure senza modificare il codice. Le parole di attivazione sono confronti di testo semplici: parole troppo generiche attivano la competenza più spesso del voluto.
-- **Evidenza:** `tests/skills.rs` (incluse, validazione, attivazione per parola e per nome, disattivazione, eliminazione, audit); `active_skills_enter_the_prompt_and_widen_only_the_offered_tools` in `tests/agent_loop.rs`; test Python del prompt e dell'ordine degli strumenti; E2E: competenza creata dalla dashboard e attivata in chat (84/84).
+- **Evidenza:** `tests/skills.rs` (incluse, validazione, attivazione per parola e per nome, disattivazione, eliminazione, audit); `active_skills_enter_the_prompt_and_widen_only_the_offered_tools` in `tests/agent_loop.rs`; test Python del prompt e dell'ordine degli strumenti; E2E: competenza creata dalla dashboard e attivata in chat (84/84). Gli errori di lettura non vengono più convertiti in una lista vuota; l'ambito strumenti si chiude senza gli strumenti suggeriti e l'errore nel contesto della delega viene restituito. Il briefing predefinito viene aggiornato solo se descrizione, istruzioni e strumenti corrispondono ancora alla versione originale; le personalizzazioni del proprietario sono preservate.
 - **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ACCEPTANCE.md, ROADMAP.md, contratto `delegation`.
 
 ### ADR-0049 — Backend: bundle compresso, ambito degli strumenti calcolato una volta, conservazione dello storico
@@ -1420,6 +1420,26 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Conseguenze:** le viste non supportate restano tali su Android; non si aggiungono scope, inoltro delle operazioni o autorizzazioni implicite. La prova della resa Android e del flusso OAuth reale resta dipendente da SDK/dispositivi e provider configurati.
 - **Evidenza:** test unitari desktop per URL OAuth e contatori offline; `cargo check`, Clippy e compilazione/link dei test per Windows superati. L'esecuzione desktop nativa su Linux non è supportata; build Android Compose e CI macOS restano da verificare.
 - **Documenti interessati:** `README.md`, `INTERFACE_AND_DEVICES.md`, ROADMAP.md, app desktop e Android.
+
+### ADR-0088 — Output limitato e guard-rail del terminale
+
+- **Data:** 2026-11-22 · **Stato:** implementata nel checkout.
+- **Contesto:** `shell.run` drenava stdout e stderr interamente prima di troncarli, consentendo output voluminosi in memoria. Il controllo dei comandi elevati non riconosceva in modo affidabile separatori whitespace, percorsi e nomi eseguibili Windows.
+- **Decisione:** conservare al massimo 8.000 caratteri per stream, drenando comunque i byte restanti; decodificare senza tagliare sequenze UTF-8 e restituire esplicitamente gli errori di lettura. Negare i token `sudo`, `doas`, `pkexec` e `runas` dopo la normalizzazione di separatori e percorsi, oltre ai comandi distruttivi già bloccati.
+- **Motivazione:** porre un limite reale al buffering e ridurre varianti banali di comandi elevati senza presentare il filtro come un confine di sicurezza.
+- **Conseguenze:** il terminale continua a eseguire comandi con i permessi dell'utente dopo consenso e non è una sandbox; il timeout e la policy esistenti restano invariati. Il filtro non sostituisce l'isolamento di processo.
+- **Evidenza:** test per output ampio, UTF-8, troncamento e varianti di whitespace/percorso; intera suite Core superata (76 test, 1 ignorato perché richiede Docker), fmt, Clippy con `-D warnings` e `git diff --check` superati.
+- **Documenti interessati:** `SECURITY_AND_PRIVACY.md`, `AUTONOMY_AND_TOOLS.md`, `core/server/src/tools.rs`.
+
+### ADR-0089 — Competenze affidabili e fallimenti espliciti
+
+- **Data:** 2026-11-22 · **Stato:** implementata nel checkout.
+- **Contesto:** il briefing predefinito poteva suggerire dati email/calendario senza connettori disponibili; errori nel caricamento delle competenze potevano apparire come una lista vuota e i guasti nel calcolo dell'ambito degli strumenti non erano esplicitamente registrati.
+- **Decisione:** aggiornare il briefing predefinito affinché dichiari quando le fonti non sono disponibili, senza sovrascrivere personalizzazioni dell'utente; aggiungere le competenze incluse **Sicurezza difensiva** e **Sviluppo e revisione del codice** senza nuovi permessi; propagare gli errori di storage delle competenze e registrare i guasti di calcolo dell'ambito, omettendo gli strumenti suggeriti in caso di errore.
+- **Motivazione:** rendere i limiti e i guasti osservabili, mantenendo procedure di sicurezza circoscritte e senza attribuire alle competenze poteri aggiuntivi.
+- **Conseguenze:** policy, conferme e audit restano invariati. La migrazione modifica la descrizione del briefing soltanto se corrisponde ancora al contenuto incluso originariamente.
+- **Evidenza:** test per errori storage, migrazione non distruttiva e attivazione delle competenze; suite Core completa superata (76 test, 1 ignorato perché richiede Docker), fmt, Clippy con `-D warnings` e `git diff --check` superati. Test contratti (14) e AI (31; uno saltato per `openwakeword` assente) superati.
+- **Documenti interessati:** `AUTONOMY_AND_TOOLS.md`, `SECURITY_AND_PRIVACY.md`, `core/server/src/skills.rs`, `core/server/src/orchestrator.rs`.
 
 ## Aggiornamento del registro
 

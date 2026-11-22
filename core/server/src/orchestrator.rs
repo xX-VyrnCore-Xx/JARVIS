@@ -547,11 +547,19 @@ impl Jarvis {
         let skill_tools: Vec<String> = if temporary.is_some() || specialist.is_none() {
             Vec::new()
         } else {
-            crate::skills::active(&self.store, &objective)
-                .iter()
-                .flat_map(|s| s["tools"].as_array().cloned().unwrap_or_default())
-                .filter_map(|v| v.as_str().map(str::to_string))
-                .collect()
+            match crate::skills::active(&self.store, &objective) {
+                Ok(skills) => skills
+                    .iter()
+                    .flat_map(|s| s["tools"].as_array().cloned().unwrap_or_default())
+                    .filter_map(|v| v.as_str().map(str::to_string))
+                    .collect(),
+                Err(error) => {
+                    eprintln!(
+                        "[competenze] impossibile caricare l'ambito degli strumenti: {error}"
+                    );
+                    Vec::new()
+                }
+            }
         };
         let explicit_desktop = crate::desktop::Target::from_request(&objective).is_some();
         move |tool: &str| match &temporary {
@@ -675,6 +683,7 @@ impl Jarvis {
         let memory = budget_memory(self.memory_context(&query)?, MEMORY_CHARS);
         // Competenze attivate dalla richiesta (ADR-0048).
         let skills: Vec<Value> = crate::skills::active(&self.store, &query)
+            .map_err(internal)?
             .into_iter()
             .map(|s| json!({"id": s["id"], "name": s["name"], "instructions": s["instructions"], "tools": s["tools"]}))
             .collect();

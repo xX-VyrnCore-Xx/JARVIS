@@ -349,6 +349,7 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
 
 /// Caratteri conservati di stdout e stderr di un comando.
 const SHELL_OUTPUT: usize = 8000;
+const SHELL_OUTPUT_BYTES: usize = SHELL_OUTPUT * 4;
 /// Durata massima di un comando del terminale.
 const SHELL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
@@ -452,13 +453,43 @@ pub fn command_blocked(command: &str) -> bool {
         "rd /s",
         "> /dev/sd",
     ];
-    BLOCKED.iter().any(|b| c.contains(b)) || c.contains("sudo ")
+    let privilege_escalation = words.iter().any(|word| {
+        matches!(
+            word.rsplit(['/', '\\'])
+                .next()
+                .unwrap_or(word)
+                .trim_end_matches(".exe"),
+            "sudo" | "doas" | "pkexec" | "runas"
+        )
+    });
+    BLOCKED.iter().any(|b| c.contains(b)) || privilege_escalation
+}
+
+fn capture_shell_output(mut reader: impl std::io::Read) -> std::io::Result<(String, bool)> {
+    let mut output = Vec::with_capacity(SHELL_OUTPUT_BYTES);
+    let mut buffer = [0; 8192];
+    let mut truncated = false;
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        let remaining = SHELL_OUTPUT_BYTES.saturating_sub(output.len());
+        let retained = read.min(remaining);
+        output.extend_from_slice(&buffer[..retained]);
+        truncated |= retained < read;
+    }
+
+    let text = String::from_utf8_lossy(&output);
+    let mut chars = text.chars();
+    let output: String = chars.by_ref().take(SHELL_OUTPUT).collect();
+    truncated |= chars.next().is_some();
+    Ok((output, truncated))
 }
 
 /// Esegue un comando confermato nella workspace con la shell del sistema. Le variabili `JARVIS_*` (token,
 /// percorsi interni) non passano al comando; output limitato e interruzione dopo 60 secondi.
 pub fn shell_run(workspace: &Path, command: &str) -> Result<Value, ToolError> {
-    use std::io::Read;
     let mut cmd = if cfg!(windows) {
         let mut c = std::process::Command::new("cmd");
         c.args(["/C", command]);
@@ -490,15 +521,16 @@ pub fn shell_run(workspace: &Path, command: &str) -> Result<Value, ToolError> {
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| ToolError::new("shell.unavailable", e.to_string()))?;
-    let drain = |mut r: Box<dyn Read + Send>| {
-        std::thread::spawn(move || {
-            let mut buf = Vec::new();
-            let _ = r.read_to_end(&mut buf);
-            buf
-        })
-    };
-    let out = drain(Box::new(child.stdout.take().expect("stdout")));
-    let err = drain(Box::new(child.stderr.take().expect("stderr")));
+    let drain =
+        |r: Box<dyn std::io::Read + Send>| std::thread::spawn(move || capture_shell_output(r));
+    let stdout_pipe = child.stdout.take().ok_or_else(|| {
+        ToolError::new("shell.unavailable", "stdout del processo non disponibile")
+    })?;
+    let stderr_pipe = child.stderr.take().ok_or_else(|| {
+        ToolError::new("shell.unavailable", "stderr del processo non disponibile")
+    })?;
+    let out = drain(Box::new(stdout_pipe));
+    let err = drain(Box::new(stderr_pipe));
     let status = loop {
         if let Some(s) = child
             .try_wait()
@@ -513,15 +545,14 @@ pub fn shell_run(workspace: &Path, command: &str) -> Result<Value, ToolError> {
         }
         std::thread::sleep(std::time::Duration::from_millis(25));
     };
-    let text = |b: Vec<u8>| -> (String, bool) {
-        let s = String::from_utf8_lossy(&b);
-        (
-            s.chars().take(SHELL_OUTPUT).collect(),
-            s.chars().count() > SHELL_OUTPUT,
-        )
+    let read_output = |output: std::thread::JoinHandle<std::io::Result<(String, bool)>>| {
+        output
+            .join()
+            .map_err(|_| ToolError::new("shell.output_read", "lettura dell'output interrotta"))?
+            .map_err(|e| ToolError::new("shell.output_read", e.to_string()))
     };
-    let (stdout, cut_out) = text(out.join().unwrap_or_default());
-    let (stderr, cut_err) = text(err.join().unwrap_or_default());
+    let (stdout, cut_out) = read_output(out)?;
+    let (stderr, cut_err) = read_output(err)?;
     let Some(status) = status else {
         return Err(ToolError::new(
             "shell.timeout",
@@ -540,7 +571,8 @@ pub fn shell_run(workspace: &Path, command: &str) -> Result<Value, ToolError> {
 
 #[cfg(test)]
 mod tests {
-    use super::command_blocked;
+    use super::{capture_shell_output, command_blocked, SHELL_OUTPUT};
+    use std::io::Cursor;
 
     #[test]
     fn recursive_remove_with_separator_or_long_flags_is_blocked() {
@@ -548,5 +580,32 @@ mod tests {
         assert!(command_blocked("/bin/rm --recursive --force /"));
         assert!(command_blocked("rm \"-rf\" /"));
         assert!(command_blocked("sudo rm -rf /tmp/x"));
+    }
+
+    #[test]
+    fn privilege_escalation_commands_are_blocked_with_whitespace_and_paths() {
+        for command in [
+            "sudo\tid",
+            "/usr/bin/sudo\nid",
+            "doas id",
+            "pkexec id",
+            "runas.exe app",
+        ] {
+            assert!(command_blocked(command), "{command}");
+        }
+        assert!(!command_blocked("echo hello"));
+    }
+
+    #[test]
+    fn shell_output_is_bounded_and_utf8_safe() {
+        let large = vec![b'x'; SHELL_OUTPUT * 64];
+        let (output, truncated) = capture_shell_output(Cursor::new(large)).unwrap();
+        assert_eq!(output.chars().count(), SHELL_OUTPUT);
+        assert!(truncated);
+
+        let unicode = "è".repeat(SHELL_OUTPUT);
+        let (output, truncated) = capture_shell_output(Cursor::new(unicode.as_bytes())).unwrap();
+        assert_eq!(output, unicode);
+        assert!(!truncated);
     }
 }
