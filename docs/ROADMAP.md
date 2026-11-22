@@ -64,6 +64,8 @@ Il checkpoint è la sezione di ripresa versionata con Git. Ogni voce va aggiorna
 
 **Manutenzione Actions e dipendenze (2026-11-22).** PR #60 ha aggiornato i pin SHA Actions a release che usano Node.js 24; merge commit `8791418`. L'audit `45013017330` ha rilevato `url` 2.5.8 (RUSTSEC-2026-0592), quindi PR #61 ha aggiornato il Core a `url` 2.5.9 (merge commit `2a25853`). I build locked hanno poi rilevato che `url` 2.5.9 richiede `form_urlencoded` almeno 1.2.3: il relativo lockfile desktop era già corretto, quello Core no. La correzione di `core/Cargo.lock` è in questa PR. Verifica locale: parsing TOML dei lockfile e `git diff --check` superati; Cargo non è installato in questo ambiente. Il run post-merge `45015053147` e i controlli aggiornati sono stati avviati; per evitare polling, non ne viene atteso l'esito. Prossimo passo: consultare il risultato quando disponibile e pubblicare solo dopo CI verde.
 
+**Release desktop con firma automatica (2026-11-22).** Il workflow usa prima i P12/PFX dei Secret macOS/Windows e verifica password e chiave privata. Se i Secret mancano o sono non validi, genera automaticamente un certificato autofirmato temporaneo sul runner e firma comunque DMG, app e setup. Le attestazioni GitHub/Sigstore restano attive e l'APK Android conserva la firma con keystore persistente. Aggiornati script, Secret guida e documenti. Verifiche: parsing YAML, Bash syntax e `git diff --check` superati. La validità reale dei Secret resta verificabile dalla build GitHub.
+
 Il checkpoint precedente è riportato qui sotto per riferimento.
 
 | Campo | Stato al 2026-11-18 (diciottesima ripresa) |

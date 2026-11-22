@@ -34,7 +34,10 @@ installer='JARVIS_<versione>_aarch64.dmg'
 cosign verify-blob   --bundle "$installer.sigstore.json"   --certificate-identity-regexp '^https://github\.com/xX-VyrnCore-Xx/JARVIS/\.github/workflows/release\.yml@refs/(heads/main|tags/v[^/]+)$'   --certificate-oidc-issuer https://token.actions.githubusercontent.com   "$installer"
 ```
 
-La firma che il sistema operativo riconosce dipende dalle credenziali di pubblicazione. Quando la release indica **firma nativa verificata**, macOS ha firma Developer ID e notarizzazione Apple, Windows ha Authenticode con marca temporale. Le release precedenti prive del bundle individuale si verificano con l’attestazione GitHub o con `SHA256SUMS.sigstore.json`. [Configurazione delle firme](docs/DEVELOPMENT.md#firma-degli-installer)
+Gli installer desktop macOS e Windows sono firmati automaticamente con i certificati nei Secret,
+oppure con un certificato temporaneo autofirmato se i Secret sono assenti o non validi.
+macOS può richiedere l’autorizzazione manuale e Windows può mostrare un avviso SmartScreen.
+Gli artefatti sono verificabili con l’attestazione GitHub e le firme Sigstore; l’APK Android usa il keystore Android.
 
 ## Stack tecnologico
 

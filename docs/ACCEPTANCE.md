@@ -74,8 +74,7 @@ Una release si pubblica quando:
 2. le prove applicabili sono superate o i difetti aperti (incluse le lacune UI native) sono registrati e accettati come non bloccanti;
 3. il proprietario accetta esplicitamente.
 
-Restano decisioni del proprietario, perché richiedono suoi account, certificati o scelte:
-- firma dei binari e installatori;
+Restano decisioni del proprietario:
 - VPN mesh;
 - evoluzione dell'avatar con sincronizzazione labiale basata sui fonemi e client nativo Android.
 

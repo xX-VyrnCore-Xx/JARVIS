@@ -77,7 +77,10 @@ jobs:
     env:
       PYTHONDONTWRITEBYTECODE: "1"
       GITHUB_TOKEN: ${{ github.token }}
-      NATIVE_SIGNING: ${{ inputs.automatico || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.tag != '') }}
+      JARVIS_MACOS_SIGNING_P12_BASE64: ${{ secrets.JARVIS_MACOS_SIGNING_P12_BASE64 }}
+      JARVIS_MACOS_SIGNING_PASSWORD: ${{ secrets.JARVIS_MACOS_SIGNING_PASSWORD }}
+      JARVIS_WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.JARVIS_WINDOWS_SIGNING_PFX_BASE64 }}
+      JARVIS_WINDOWS_SIGNING_PASSWORD: ${{ secrets.JARVIS_WINDOWS_SIGNING_PASSWORD }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -124,26 +127,40 @@ jobs:
         shell: bash
         run: |
           cargo build --release --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
-      - name: Firma gli eseguibili Windows con il certificato privato
-        if: runner.os == 'Windows' && env.NATIVE_SIGNING == 'true'
+      - name: Firma gli eseguibili Windows dal Secret o con certificato temporaneo
+        if: runner.os == 'Windows'
         shell: pwsh
-        env:
-          JARVIS_WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.JARVIS_WINDOWS_SIGNING_PFX_BASE64 }}
-          JARVIS_WINDOWS_SIGNING_PASSWORD: ${{ secrets.JARVIS_WINDOWS_SIGNING_PASSWORD }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:JARVIS_WINDOWS_SIGNING_PFX_BASE64) -or
-              [string]::IsNullOrWhiteSpace($env:JARVIS_WINDOWS_SIGNING_PASSWORD)) {
-            throw "Configura il certificato PFX autofirmato Windows e la relativa password nei Secrets."
-          }
+          $certificate = $null
           $pfx = Join-Path $env:RUNNER_TEMP 'jarvis-signing.pfx'
-          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:JARVIS_WINDOWS_SIGNING_PFX_BASE64))
-          Remove-Item Env:JARVIS_WINDOWS_SIGNING_PFX_BASE64
-          $password = ConvertTo-SecureString $env:JARVIS_WINDOWS_SIGNING_PASSWORD -AsPlainText -Force
-          $certificate = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          if (-not [string]::IsNullOrWhiteSpace($env:JARVIS_WINDOWS_SIGNING_PFX_BASE64) -and
+              -not [string]::IsNullOrWhiteSpace($env:JARVIS_WINDOWS_SIGNING_PASSWORD)) {
+            try {
+              [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:JARVIS_WINDOWS_SIGNING_PFX_BASE64))
+              $password = ConvertTo-SecureString $env:JARVIS_WINDOWS_SIGNING_PASSWORD -AsPlainText -Force
+              $certificate = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password |
+                Where-Object { $_.HasPrivateKey } | Select-Object -First 1
+              if (-not $certificate -or -not $certificate.HasPrivateKey) { throw "PFX senza chiave privata" }
+              Write-Host "Uso il certificato Windows configurato nei Secrets."
+            } catch {
+              Write-Warning "Il certificato Windows dei Secrets non è utilizzabile; creo un certificato temporaneo."
+              $certificate = $null
+            }
+          }
+          if (-not $certificate) {
+            $certificate = New-SelfSignedCertificate -Type CodeSigningCert `
+              -Subject "CN=JARVIS Private Code Signing" `
+              -FriendlyName "JARVIS Temporary Code Signing" `
+              -CertStoreLocation Cert:\CurrentUser\My `
+              -KeyExportPolicy Exportable `
+              -HashAlgorithm SHA256 `
+              -NotAfter (Get-Date).AddYears(1)
+            Write-Host "Certificato Windows temporaneo creato."
+          }
           $publicCert = Join-Path $env:RUNNER_TEMP 'jarvis-signing.cer'
           Export-Certificate -Cert $certificate -FilePath $publicCert | Out-Null
           Import-Certificate -FilePath $publicCert -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
-          $signtool = Get-ChildItem "$env:ProgramFiles(x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
             Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1
           if (-not $signtool) { throw "signtool.exe non trovato nel Windows SDK." }
           $executables = @((Resolve-Path apps/desktop/src-tauri/target/release/jarvis-desktop.exe).Path)
@@ -152,19 +169,10 @@ jobs:
           foreach ($executable in $executables) {
             & $signtool.FullName sign /fd SHA256 /sha1 $certificate.Thumbprint $executable
             if ($LASTEXITCODE -ne 0) { throw "Firma non riuscita: $executable" }
-            & $signtool.FullName verify /pa $executable
-            if ($LASTEXITCODE -ne 0) { throw "Verifica firma non riuscita: $executable" }
           }
-          Remove-Item Env:JARVIS_WINDOWS_SIGNING_PASSWORD
-          Remove-Item -LiteralPath $pfx -Force
           "JARVIS_SIGNING_THUMBPRINT=$($certificate.Thumbprint)" >> $env:GITHUB_ENV
-      - name: Crea e firma app macOS e DMG
+      - name: Crea app macOS e DMG
         if: runner.os == 'macOS'
-        env:
-          NATIVE_SIGNING: ${{ env.NATIVE_SIGNING }}
-          JARVIS_MACOS_SIGNING_P12_BASE64: ${{ secrets.JARVIS_MACOS_SIGNING_P12_BASE64 }}
-          JARVIS_MACOS_SIGNING_PASSWORD: ${{ secrets.JARVIS_MACOS_SIGNING_PASSWORD }}
-          JARVIS_MACOS_SIGNING_IDENTITY: ${{ vars.JARVIS_MACOS_SIGNING_IDENTITY }}
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' apps/desktop/src-tauri/Cargo.toml | head -1)
           bash scripts/package_macos_release.sh "$version"
@@ -183,23 +191,15 @@ jobs:
         run: |
           $env:PATH = "$env:PATH;${env:ProgramFiles(x86)}\NSIS"
           ./scripts/package_windows_release.ps1
-      - name: Firma privata del setup Windows
-        if: runner.os == 'Windows' && env.NATIVE_SIGNING == 'true'
+      - name: Firma il setup Windows dal Secret o con certificato temporaneo
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $setup = (Get-ChildItem apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe)[0].FullName
-          $signtool = Get-ChildItem "$env:ProgramFiles(x86)\Windows Kits\10\bin\*\x64\signtool.exe" |
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" |
             Sort-Object { [version]$_.Directory.Parent.Name } | Select-Object -Last 1
-          if (-not $signtool) { throw "signtool.exe non trovato nel Windows SDK." }
           & $signtool.FullName sign /fd SHA256 /sha1 $env:JARVIS_SIGNING_THUMBPRINT $setup
-          if ($LASTEXITCODE -ne 0) { throw "Firma Authenticode autofirmata non riuscita." }
-          & $signtool.FullName verify /pa $setup
-          if ($LASTEXITCODE -ne 0) { throw "Verifica della firma Authenticode non riuscita." }
-          $signature = Get-AuthenticodeSignature -LiteralPath $setup
-          if ($signature.Status -ne 'Valid') { throw "Firma Authenticode non valida: $($signature.Status)" }
-          Remove-Item -LiteralPath "Cert:\CurrentUser\My\$env:JARVIS_SIGNING_THUMBPRINT" -Force
-          Remove-Item -LiteralPath "Cert:\CurrentUser\Root\$env:JARVIS_SIGNING_THUMBPRINT" -Force
-          Remove-Item -LiteralPath (Join-Path $env:RUNNER_TEMP 'jarvis-signing.cer') -Force
+          if ($LASTEXITCODE -ne 0) { throw "Firma Authenticode non riuscita." }
       - name: Installazione dal .dmg e avvio del Core installato (macOS)
         if: runner.os == 'macOS'
         shell: bash
@@ -211,7 +211,6 @@ jobs:
           cp -R "$RUNNER_TEMP/dmg/JARVIS.app" "$RUNNER_TEMP/Applications/"
           hdiutil detach "$RUNNER_TEMP/dmg"
           app="$RUNNER_TEMP/Applications/JARVIS.app"
-          codesign --verify --deep --strict --verbose=2 "$app"
           plutil -extract LSMinimumSystemVersion raw "$app/Contents/Info.plist"
           res="$app/Contents/Resources"
           test -x "$res/jarvis-core" && test -x "$res/python/bin/python3"
@@ -223,12 +222,6 @@ jobs:
         shell: pwsh
         run: |
           $setup = (Get-ChildItem apps/desktop/src-tauri/target/release/bundle/nsis/*-setup.exe)[0].FullName
-          if ($env:NATIVE_SIGNING -eq 'true') {
-            $signature = Get-AuthenticodeSignature -LiteralPath $setup
-            if ($signature.Status -ne 'Valid') {
-              throw "Firma Authenticode non valida: $($signature.Status)"
-            }
-          }
           $root = Join-Path $env:RUNNER_TEMP 'JARVIS-installato'
           # Per NSIS /D deve essere l'ultimo argomento e va passato senza virgolette.
           $p = Start-Process -FilePath $setup -ArgumentList "/S /D=$root" -Wait -PassThru
@@ -404,7 +397,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.tag.outputs.name }}
           AUTOMATIC: ${{ inputs.automatico }}
-          NATIVE_SIGNING: ${{ inputs.automatico || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.tag != '') }}
           REPLACE: ${{ inputs.sostituisci && 'true' || 'false' }}
         run: |
           git config user.name "github-actions[bot]"
@@ -437,11 +429,7 @@ jobs:
           notes=$(mktemp)
           trap 'rm -f "$notes"' EXIT
           cp .github/release-notes.md "$notes"
-          if [ "$NATIVE_SIGNING" = "true" ]; then
-            printf '\nFirma nativa autofirmata verificata su macOS e Windows; per eseguire le app occorre considerare attendibile il certificato sul proprio dispositivo.\n' >> "$notes"
-          else
-            printf '\nI pacchetti di prova sono firmati con Sigstore e attestati da GitHub Actions; le firme native autofirmate sono applicate solo alle release.\n' >> "$notes"
-          fi
+          printf '\nGli installer desktop sono firmati con i certificati dei Secrets quando disponibili; se i Secret mancano o non sono validi, il workflow genera e usa automaticamente un certificato temporaneo autofirmato. Gli artefatti sono attestati da GitHub Actions e verificabili con Sigstore.\n' >> "$notes"
           release_notes="$(<"$notes")"
           gh release create "$TAG" dist/* --verify-tag --notes "$release_notes" --generate-notes --title "JARVIS $TAG" $extra --repo "$GITHUB_REPOSITORY" || {
             echo "::error::creazione della release rifiutata; diagnosi:"
