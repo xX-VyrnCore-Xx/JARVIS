@@ -1481,37 +1481,73 @@ impl JarvisApp {
                         .as_str()
                         .unwrap_or("Attività senza titolo")
                         .to_owned();
-                    ui.horizontal_wrapped(|ui| {
-                        let state = task["state"].as_str().unwrap_or("in attesa");
-                        let color = if state == "failed" {
-                            egui::Color32::LIGHT_RED
-                        } else {
-                            ACCENT
-                        };
-                        ui.label(egui::RichText::new("●").color(color));
-                        ui.vertical(|ui| {
-                            ui.label(&objective);
-                            ui.small(
-                                egui::RichText::new(format!(
-                                    "{} · {} · {}",
-                                    state,
-                                    task["created_at"]
-                                        .as_str()
-                                        .unwrap_or("")
-                                        .chars()
-                                        .take(16)
-                                        .collect::<String>(),
-                                    task["backend"].as_str().unwrap_or("Core")
-                                ))
-                                .weak(),
-                            );
+                    let state = task["state"].as_str().unwrap_or_default();
+                    let (state_label, state_color) = dashboard_task_state(state);
+                    let created_at = task["created_at"]
+                        .as_str()
+                        .unwrap_or("")
+                        .chars()
+                        .take(16)
+                        .collect::<String>();
+                    let backend = task["backend"].as_str().unwrap_or("Core");
+                    egui::Frame::new()
+                        .fill(RAISED)
+                        .stroke(egui::Stroke::new(
+                            1.0,
+                            egui::Color32::from_rgba_unmultiplied(
+                                state_color.r(),
+                                state_color.g(),
+                                state_color.b(),
+                                72,
+                            ),
+                        ))
+                        .corner_radius(12)
+                        .inner_margin(10)
+                        .show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            ui.horizontal_wrapped(|ui| {
+                                egui::Frame::new()
+                                    .fill(egui::Color32::from_rgba_unmultiplied(
+                                        state_color.r(),
+                                        state_color.g(),
+                                        state_color.b(),
+                                        24,
+                                    ))
+                                    .corner_radius(egui::CornerRadius::same(8))
+                                    .inner_margin(egui::Margin::symmetric(8, 4))
+                                    .show(ui, |ui| {
+                                        ui.label(
+                                            egui::RichText::new(state_label)
+                                                .small()
+                                                .strong()
+                                                .color(state_color),
+                                        );
+                                    });
+                                ui.label(egui::RichText::new(backend).small().weak());
+                                if !created_at.is_empty() {
+                                    ui.label(egui::RichText::new(&created_at).small().weak());
+                                }
+                            });
+                            ui.add_space(6.0);
+                            ui.label(egui::RichText::new(&objective).strong());
+                            ui.add_space(6.0);
+                            if ui
+                                .add(
+                                    egui::Button::new(
+                                        egui::RichText::new("Prepara ripresa in chat")
+                                            .small()
+                                            .strong()
+                                            .color(ACCENT),
+                                    )
+                                    .fill(SELECTED),
+                                )
+                                .clicked()
+                            {
+                                self.chat_input = format!("Riprendi l'attività: {objective}");
+                                self.current = "chat".into();
+                            }
                         });
-                        if ui.small_button("Prepara ripresa in chat").clicked() {
-                            self.chat_input = format!("Riprendi l'attività: {objective}");
-                            self.current = "chat".into();
-                        }
-                    });
-                    ui.separator();
+                    ui.add_space(8.0);
                 }
             });
     }
@@ -3127,6 +3163,20 @@ fn dashboard_ai_color(data: &Value, status: &str) -> egui::Color32 {
     .unwrap_or_else(|| service_color(status))
 }
 
+fn dashboard_task_state(state: &str) -> (&'static str, egui::Color32) {
+    match state {
+        "pending" => ("In attesa", ACCENT),
+        "planned" => ("Pianificata", ACCENT),
+        "running" => ("In corso", ACCENT),
+        "waiting_confirmation" => ("Richiede conferma", CAUTION),
+        "blocked" => ("Bloccata", CAUTION),
+        "succeeded" => ("Completata", POSITIVE),
+        "failed" => ("Non riuscita", NEGATIVE),
+        "cancelled" => ("Annullata", egui::Color32::from_rgb(157, 176, 191)),
+        _ => ("Stato non riconosciuto", CAUTION),
+    }
+}
+
 fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
     let side = ui.available_width().clamp(132.0, 236.0);
     let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(side), egui::Sense::hover());
@@ -3699,6 +3749,20 @@ mod tests {
             NEGATIVE
         );
         assert_eq!(dashboard_core_color(&json!({})), ACCENT);
+    }
+
+    #[test]
+    fn dashboard_task_states_have_clear_localized_labels_and_semantic_colors() {
+        assert_eq!(dashboard_task_state("succeeded"), ("Completata", POSITIVE));
+        assert_eq!(
+            dashboard_task_state("waiting_confirmation"),
+            ("Richiede conferma", CAUTION)
+        );
+        assert_eq!(dashboard_task_state("failed"), ("Non riuscita", NEGATIVE));
+        assert_eq!(
+            dashboard_task_state("future_state"),
+            ("Stato non riconosciuto", CAUTION)
+        );
     }
 
     #[test]

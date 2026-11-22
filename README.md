@@ -57,9 +57,21 @@ Gli artefatti sono verificabili con l’attestazione GitHub e le firme Sigstore;
 
 ## Collega più dispositivi
 
-1. Sul Mac, configura un proxy HTTPS privato verso `127.0.0.1:8765`, per esempio con `tailscale serve 8765`.
-2. Scrivi il nome host del proxy in `remote-hosts.txt` nella cartella dati del Mac host, oppure imposta `JARVIS_ALLOWED_HOSTS`. Riavvia JARVIS per usare la porta stabile.
-3. Apri **Dispositivi**, genera un invito monouso e inserisci il codice nel client autorizzato. Il Mac resta l’host. Le app associate vedono chat, conferme, attività e notifiche secondo i permessi assegnati.
+Per collegare un Android o un secondo desktop al Core sul Mac senza pubblicarlo su Internet:
+
+1. Installa Tailscale sul Mac host e sui client, accedendo alla stessa rete privata (tailnet). Avvia JARVIS sul Mac: il Core ascolta sulla porta locale `8765`.
+2. Nel Terminale del Mac esegui:
+
+   ```bash
+   tailscale serve --bg 8765
+   tailscale serve status
+   ```
+
+   Se richiesto, abilita HTTPS nelle impostazioni della tailnet. `serve status` mostra l'indirizzo HTTPS del Mac. Tailscale termina TLS e inoltra la richiesta al Core locale; il servizio resta accessibile alla tailnet. **Non usare `tailscale funnel`**, che renderebbe il servizio pubblico. Consulta la [documentazione ufficiale di Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve).
+3. Autorizza quell'host in JARVIS: nel file `remote-hosts.txt` dentro `~/Library/Application Support/JARVIS/` scrivi solo il nome host mostrato da Tailscale, senza `https://`, porta o percorso. In alternativa imposta `JARVIS_ALLOWED_HOSTS` con lo stesso nome. Se JARVIS usa una cartella dati personalizzata, usa quella. Riavvia JARVIS.
+4. Sul Mac apri **Dispositivi** e genera un invito monouso, selezionando solo i permessi necessari. Dal client remoto inserisci l'origine `https://<host-mac>.ts.net` (sostituiscila con l'indirizzo mostrato da Tailscale) e il codice. Il codice scade dopo dieci minuti.
+
+Il client deve essere connesso a Tailscale per raggiungere il Mac. Il Core resta l'host: app desktop e Android condividono i dati e vedono solo le funzioni consentite dai permessi assegnati. Per verificare la configurazione sul Mac usa `tailscale serve status`; per annullare una configurazione Serve usa `tailscale serve reset` (rimuove tutte le condivisioni Serve configurate su quel Mac).
 
 Per un secondo desktop, imposta `JARVIS_REMOTE_URL` o salva l'origine HTTPS in `remote-core-url.txt` nella sua cartella dati. L'app desktop e quella Android si associano con l'origine HTTPS e il codice. [Interfacce e dispositivi](docs/INTERFACE_AND_DEVICES.md)
 

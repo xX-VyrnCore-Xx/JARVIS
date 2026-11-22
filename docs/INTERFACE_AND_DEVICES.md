@@ -18,7 +18,7 @@ La finestra usa una barra superiore e una navigazione laterale fisse; lo scorrim
 
 La chat usa `/api/chat/stream` (NDJSON), mostra le risposte progressivamente e presenta le conferme per approvazione o rifiuto. Il client aggiorna le notifiche ogni cinque secondi anche quando la finestra non è in primo piano e invia le nuove notifiche alle API OS supportate da macOS e Windows. Gli errori di aggiornamento sono mostrati nell'interfaccia. Il Core continua a generare e conservare notifiche anche senza client connesso.
 
-La Plancia desktop usa un riquadro di benvenuto a tre zone nelle finestre ampie: sintesi dei Core e dell'AI, avatar vettoriale animato e azioni rapide. Nelle finestre medie le azioni passano sotto il riquadro; in quelle strette introduzione, avatar e comandi si dispongono in verticale. La barra superiore compatta evita sovrapposizioni e mantiene accessibili notifiche e indicatore del Core. Le schede di stato hanno un accento cromatico semantico e si dispongono in tre, due o una colonna; attività e notifiche sono affiancate solo quando la larghezza lo consente. Non vengono mostrate risorse hardware, progetti o agenti senza dati API attendibili.
+La Plancia desktop usa un riquadro di benvenuto a tre zone nelle finestre ampie: sintesi dei Core e dell'AI, avatar vettoriale animato e azioni rapide. Nelle finestre medie le azioni passano sotto il riquadro; in quelle strette introduzione, avatar e comandi si dispongono in verticale. La barra superiore compatta evita sovrapposizioni e mantiene accessibili notifiche e indicatore del Core. Le schede di stato hanno un accento cromatico semantico e si dispongono in tre, due o una colonna; attività e notifiche sono affiancate solo quando la larghezza lo consente. Le attività recenti usano schede compatte con stato localizzato e colore semantico, metadati secondari e un'azione esplicita per preparare una bozza in chat. Non vengono mostrate risorse hardware, progetti o agenti senza dati API attendibili.
 
 Se sono associati più Core, riepiloghi e attività recenti sono aggregati solo in questa vista: richieste parallele con timeout breve producono risultati parziali e indicano i Core non raggiungibili. I conteggi di un Core offline o con salute non disponibile, e le attività recenti quando la relativa richiesta fallisce, restano sconosciuti e sono mostrati come «—», non come zeri. I dati della risposta di salute vengono ridotti ai soli campi di riepilogo. Chat, viste dettagliate, notifiche interattive e azioni continuano a usare il Core attivo; i Core aggiunti non ricevono chat né mutazioni. L'elenco delle notifiche mostra il Core attivo, mentre il conteggio non lette somma i Core raggiungibili.
 
@@ -34,9 +34,21 @@ Configura Firebase seguendo [FIREBASE_SETUP.md](FIREBASE_SETUP.md). Il workflow 
 
 ## Associazione e sicurezza
 
-1. Esporre il Core solo tramite un proxy HTTPS privato e fidato, ad esempio `tailscale serve 8765`.
-2. Configurare `JARVIS_ALLOWED_HOSTS=<nome-host>` e riavviare il Core.
-3. Dalla sezione Dispositivi del client desktop locale generare un invito monouso; inserirlo nel client desktop remoto o Android. Il codice scade dopo dieci minuti e può essere annullato.
+Per usare il Mac come host condiviso mantenendo il Core legato a `127.0.0.1:8765`, Tailscale Serve fornisce HTTPS privato all'interno della tailnet:
+
+1. Installa Tailscale sul Mac e sui client e collegali alla stessa tailnet. Avvia il Core JARVIS sul Mac.
+2. Nel Terminale del Mac configura il reverse proxy HTTPS:
+
+   ```bash
+   tailscale serve --bg 8765
+   tailscale serve status
+   ```
+
+   Se richiesto, approva l'abilitazione dei certificati HTTPS nelle impostazioni della tailnet. Usa l'indirizzo HTTPS mostrato da `serve status`. Serve inoltra a `127.0.0.1:8765` e rende il servizio disponibile ai dispositivi autorizzati nella tailnet; non è necessario aprire porte sul router. Non usare **Funnel**, che espone un servizio a Internet. Per opzioni e comportamento aggiornati, consulta la [documentazione ufficiale di Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve).
+3. Autorizza il nome host nel Core, senza schema, porta o percorso: aggiungilo a `remote-hosts.txt` nella cartella dati del Core, una voce per riga, oppure imposta `JARVIS_ALLOWED_HOSTS=<host>`. Per l'app desktop macOS installata la cartella predefinita è `~/Library/Application Support/JARVIS`; se `JARVIS_DATA_DIR` è configurato, usa quella cartella. Riavvia JARVIS perché la lista è letta all'avvio.
+4. Nella sezione **Dispositivi** del Mac genera un invito monouso e assegna solo gli scope necessari. Sul client Android o desktop inserisci l'origine HTTPS (`https://<host-mac>.ts.net`, sostituita con l'indirizzo effettivo) e il codice. Il codice scade dopo dieci minuti e può essere annullato.
+
+Il client deve essere connesso a Tailscale. Per controllare o rimuovere le configurazioni Serve usa `tailscale serve status` e `tailscale serve reset`; il reset rimuove tutte le condivisioni Serve configurate su quel Mac. Come alternativa, un altro reverse proxy privato e fidato può terminare TLS e inoltrare solo al loopback.
 
 Le conferme e le altre operazioni restano limitate agli scope assegnati. I dispositivi associati non possono gestire inviti, audit, backup o connettori. La revoca ha effetto immediato. I nodi esecutori continuano a usare `./jarvis.sh node <indirizzo> <codice>` e richieste in uscita.
 
