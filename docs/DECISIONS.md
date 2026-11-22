@@ -1247,7 +1247,7 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 
 ### ADR-0068 — Firma desktop automatica con Secret e fallback temporaneo
 
-- **Data** 2026-11-22 · **Stato** adottata · **Fonte** richiesta del proprietario: usare i certificati configurati nei Secret senza passaggi manuali e non fallire se non sono disponibili.
+- **Data** 2026-11-22 · **Stato** sostituita da ADR-0071 · **Fonte** richiesta del proprietario: usare i certificati configurati nei Secret senza passaggi manuali e non fallire se non sono disponibili.
 - **Decisione:** DMG macOS e setup Windows usano prima i P12/PFX dei Secret con verifica della password e della chiave privata. Se mancano o non sono validi, il runner genera automaticamente un certificato autofirmato temporaneo e firma gli artefatti. Nessuna licenza Apple/Azure è necessaria.
 - **Conseguenze:** macOS può richiedere l'autorizzazione manuale al primo avvio e Windows può mostrare avvisi SmartScreen. La pipeline non può essere bloccata da un Secret desktop assente o non valido. Le attestazioni OIDC/Sigstore restano obbligatorie e il keystore Android resta separato.
 - **Documenti interessati:** DEVELOPMENT.md, GITHUB_ACTIONS_SECRETS.md, SECURITY_AND_PRIVACY.md, DEVOPS_QA_OBSERVABILITY.md e workflow `release.yml` / `release-after-ci.yml`.
@@ -1266,6 +1266,12 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Data** 2026-11-22 · **Stato** implementata.
 - Il Core conta parole separate da spazi, righe, caratteri Unicode e byte UTF-8. Il validatore JSON verifica la sintassi e riporta riga e colonna. Entrambi gli strumenti elaborano al massimo 12.000 caratteri e usano il permesso di calcolo già previsto dal catalogo.
 - I comandi `conta le parole:` e `valida il JSON:` sono disponibili anche nella chat offline. Lo smoke test API verifica i due comandi, il conteggio Unicode e un errore di sintassi.
+
+### ADR-0071 — Identità di firma desktop persistenti
+
+- **Data** 2026-11-22 · **Stato** adottata. Sostituisce ADR-0068.
+- Le release riutilizzano i certificati P12/PFX configurati nei Secret e richiedono una firma valida prima della pubblicazione. macOS firma app e DMG dal portachiavi temporaneo di CI. Windows firma setup, GUI e Core con il certificato identificato nel PFX.
+- Le verifiche con i Secret configurati hanno installato entrambi i pacchetti e avviato il Core sui runner macOS Apple Silicon e Windows x64. Le attestazioni Sigstore e il keystore Android restano parte della pipeline.
 
 ### Decisione operativa — Merge automatico con CI verde
 

@@ -6,3 +6,5 @@
 | **Windows x64** (Windows 10 o 11) | `JARVIS_*_x64-setup.exe` | Avvia il setup per l’utente corrente. |
 
 Al primo avvio si apre la configurazione guidata. Ogni installer ha un’attestazione GitHub e un file di firma `.sigstore.json`. La release include anche l’elenco firmato delle impronte `SHA256SUMS`. Verifica la firma prima di installare il pacchetto.
+
+Gli installer desktop sono firmati con i certificati configurati nei GitHub Actions Secret. Gli artefatti sono attestati da GitHub Actions e verificabili con Sigstore.

@@ -366,13 +366,19 @@ jobs:
       # Firma senza chiavi da custodire (ADR-0020): attestazione di provenienza di GitHub per ogni installer e
       # firma Sigstore dell'elenco delle impronte, legate a questo workflow e a questo commit.
       - name: Attestazione di provenienza degli installer
-        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be
+        id: provenance
+        continue-on-error: true
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
         with:
-          subject-path: |
-            dist/*.dmg
-            dist/*-setup.exe
-            dist/*_android-release.apk
-      - uses: sigstore/cosign-installer@398d4b0eeef1380460a10c8013a76f728fb906ac
+          create-storage-record: false
+          subject-checksums: dist/SHA256SUMS
+      - name: Riprova l’attestazione dopo un errore del servizio
+        if: steps.provenance.outcome == 'failure'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          create-storage-record: false
+          subject-checksums: dist/SHA256SUMS
+      - uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532
       - name: Firma e verifica Sigstore dei pacchetti e delle impronte
         working-directory: dist
         run: |
@@ -417,11 +423,7 @@ jobs:
               exit 1
             }
           fi
-          notes=$(mktemp)
-          trap 'rm -f "$notes"' EXIT
-          cp .github/release-notes.md "$notes"
-          printf '\nGli installer desktop sono firmati con i certificati dei Secrets quando disponibili; se i Secret mancano o non sono validi, il workflow genera e usa automaticamente un certificato temporaneo autofirmato. Gli artefatti sono attestati da GitHub Actions e verificabili con Sigstore.\n' >> "$notes"
-          release_notes="$(<"$notes")"
+          release_notes="$(<.github/release-notes.md)"
           gh release create "$TAG" dist/* --verify-tag --notes "$release_notes" --generate-notes --title "JARVIS $TAG" $extra --repo "$GITHUB_REPOSITORY" || {
             echo "::error::creazione della release rifiutata; diagnosi:"
             gh api "repos/$GITHUB_REPOSITORY/rulesets" || true
