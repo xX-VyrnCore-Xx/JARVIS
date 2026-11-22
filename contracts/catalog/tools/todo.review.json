@@ -1,0 +1,38 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "todo.review",
+  "version": "1.0.0",
+  "summary": "Esamina le attività scadute e quelle in scadenza entro un orizzonte configurabile e propone i prossimi passi senza modificarle",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {
+      "horizon_hours": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 168,
+        "default": 24
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.todo:read"
+  ],
+  "errors": [
+    "todo.invalid",
+    "todo.unavailable"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

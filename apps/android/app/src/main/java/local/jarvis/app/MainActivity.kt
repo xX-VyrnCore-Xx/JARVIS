@@ -112,9 +112,11 @@ internal fun notificationSeverityLabel(severity: String): String = when (severit
 /** Client Android di JARVIS (ADR-0018, ADR-0032): associazione, chat, conferme, attività e notifiche. */
 class MainActivity : ComponentActivity() {
     private val appInForeground = mutableStateOf(false)
+    private val openNotificationId = mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        openNotificationId.value = intent?.getStringExtra(PushMessagingService.NOTIFICATION_ID_EXTRA)
         val store = SessionStore(applicationContext)
         setContent {
             JarvisTheme(dark = isSystemInDarkTheme()) {
@@ -132,7 +134,9 @@ class MainActivity : ComponentActivity() {
                                         PushMessagingService.OPEN_NOTIFICATIONS_EXTRA,
                                         false,
                                     ) == true
+                                    || openNotificationId.value != null
                                 ) NOTIFICATIONS_TAB_INDEX else 0,
+                                notificationId = openNotificationId.value,
                                 onRevoked = { store.clear(); session = null },
                             )
                         }
@@ -140,6 +144,13 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        openNotificationId.value =
+            intent.getStringExtra(PushMessagingService.NOTIFICATION_ID_EXTRA)
     }
 
     override fun onStart() {
@@ -200,11 +211,17 @@ private fun ColumnScope.DeviceScreen(
     session: DeviceSession,
     appInForeground: Boolean,
     initialTab: Int,
+    notificationId: String?,
     onRevoked: () -> Unit,
 ) {
     var tab by rememberSaveable { mutableStateOf(initialTab) }
+    var linkedTaskId by rememberSaveable { mutableStateOf<String?>(null) }
+    var chatDraft by rememberSaveable { mutableStateOf<String?>(null) }
     var sending by remember { mutableStateOf(false) }
     val tabs = listOf("Plancia" to "⌂", "Chat" to "◉", "Attività" to "≡", "Notifiche" to "◇", "Core" to "◎")
+    LaunchedEffect(notificationId) {
+        if (notificationId != null) tab = NOTIFICATIONS_TAB_INDEX
+    }
     Text(
         tabs[tab].first,
         modifier = Modifier.padding(horizontal = 22.dp, vertical = 12.dp),
@@ -228,10 +245,45 @@ private fun ColumnScope.DeviceScreen(
                     onRevoked = onRevoked,
                     onOpenChat = { tab = 1 },
                     onOpenTasks = { tab = 2 },
+                    onResumeTask = { objective ->
+                        chatDraft = "Riprendi l'attività: $objective"
+                        tab = 1
+                    },
                 )
-                1 -> ChatScreen(session, appInForeground, onRevoked) { sending = it }
-                2 -> TasksScreen(session, appInForeground, onRevoked)
-                3 -> NoticesScreen(session, appInForeground, onRevoked)
+                1 -> ChatScreen(
+                    session = session,
+                    appInForeground = appInForeground,
+                    onRevoked = onRevoked,
+                    initialDraft = chatDraft,
+                    onDraftConsumed = { chatDraft = null },
+                    onSending = { sending = it },
+                )
+                2 -> TasksScreen(
+                    session,
+                    appInForeground,
+                    onRevoked,
+                    linkedTaskId,
+                    onResumeTask = { objective ->
+                        chatDraft = "Riprendi l'attività: $objective"
+                        tab = 1
+                    },
+                )
+                3 -> NoticesScreen(
+                    session = session,
+                    appInForeground = appInForeground,
+                    onRevoked = onRevoked,
+                    focusNotificationId = notificationId,
+                    onOpenLink = { link ->
+                        when (link.view) {
+                            "chat" -> tab = 1
+                            "tasks" -> {
+                                linkedTaskId = link.ref
+                                tab = 2
+                            }
+                            "dashboard" -> tab = 0
+                        }
+                    },
+                )
                 else -> CoreScreen(session, onRevoked)
             }
         }
@@ -263,6 +315,7 @@ private fun ColumnScope.HomeScreen(
     onRevoked: () -> Unit,
     onOpenChat: () -> Unit,
     onOpenTasks: () -> Unit,
+    onResumeTask: (String) -> Unit,
 ) {
     var snapshot by remember { mutableStateOf<HomeSnapshot?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
@@ -401,6 +454,9 @@ private fun ColumnScope.HomeScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    TextButton(onClick = { onResumeTask(task.objective) }) {
+                        Text("Prepara la ripresa in chat")
+                    }
                 }
             }
         }
@@ -612,10 +668,17 @@ private val STATE_LABEL = mapOf(
 )
 
 @Composable
-private fun ColumnScope.TasksScreen(session: DeviceSession, appInForeground: Boolean, onRevoked: () -> Unit) {
+private fun ColumnScope.TasksScreen(
+    session: DeviceSession,
+    appInForeground: Boolean,
+    onRevoked: () -> Unit,
+    selectedTaskId: String?,
+    onResumeTask: (String) -> Unit,
+) {
     val tasks = remember { mutableStateListOf<TaskSummary>() }
     var status by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
     suspend fun refresh() {
         withContext(Dispatchers.IO) { runCatching { client.tasks(session) } }
             .onSuccess { tasks.clear(); tasks.addAll(it); status = if (it.isEmpty()) "Nessuna attività." else null }
@@ -628,15 +691,35 @@ private fun ColumnScope.TasksScreen(session: DeviceSession, appInForeground: Boo
             delay(5_000)
         }
     }
+    LaunchedEffect(tasks.toList(), selectedTaskId) {
+        val index = tasks.indexOfFirst { it.id == selectedTaskId }
+        if (index >= 0) listState.animateScrollToItem(index)
+    }
     TextButton(onClick = { scope.launch { refresh() } }, modifier = Modifier.padding(horizontal = 8.dp)) { Text("Aggiorna") }
     status?.let { Text(it, modifier = Modifier.padding(horizontal = 16.dp)) }
-    LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    if (selectedTaskId != null && tasks.isNotEmpty() && tasks.none { it.id == selectedTaskId }) {
+        Text("L'attività collegata non è tra le più recenti.", modifier = Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
+    }
+    LazyColumn(
+        Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
+        state = listState,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         items(tasks) { t ->
-            Card(Modifier.fillMaxWidth()) {
+            Card(
+                Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (t.id == selectedTaskId) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surface,
+                ),
+            ) {
                 Column(Modifier.padding(12.dp)) {
                     Text(t.objective, style = MaterialTheme.typography.bodyLarge)
                     Text("${STATE_LABEL[t.state] ?: t.state} · ${t.createdAt.take(16).replace('T', ' ')}", style = MaterialTheme.typography.bodySmall,
                         color = if (t.state == "failed") MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant)
+                    TextButton(onClick = { onResumeTask(t.objective) }) {
+                        Text("Prepara la ripresa in chat")
+                    }
                 }
             }
         }
@@ -644,7 +727,13 @@ private fun ColumnScope.TasksScreen(session: DeviceSession, appInForeground: Boo
 }
 
 @Composable
-private fun ColumnScope.NoticesScreen(session: DeviceSession, appInForeground: Boolean, onRevoked: () -> Unit) {
+private fun ColumnScope.NoticesScreen(
+    session: DeviceSession,
+    appInForeground: Boolean,
+    onRevoked: () -> Unit,
+    focusNotificationId: String?,
+    onOpenLink: (local.jarvis.client.NotificationLink) -> Unit,
+) {
     var notices by remember { mutableStateOf<Notices?>(null) }
     var status by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
@@ -652,6 +741,7 @@ private fun ColumnScope.NoticesScreen(session: DeviceSession, appInForeground: B
     var pushEnabled by remember { mutableStateOf(store.pushEnabled()) }
     var pushStatus by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
 
     fun registerToken() {
         if (!JarvisApplication.firebaseConfigured()) {
@@ -743,6 +833,10 @@ private fun ColumnScope.NoticesScreen(session: DeviceSession, appInForeground: B
             delay(5_000)
         }
     }
+    LaunchedEffect(notices, focusNotificationId) {
+        val index = notices?.items?.indexOfFirst { it.id == focusNotificationId } ?: -1
+        if (index >= 0) listState.animateScrollToItem(index)
+    }
     Card(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Notifiche in background", style = MaterialTheme.typography.titleSmall)
@@ -775,9 +869,19 @@ private fun ColumnScope.NoticesScreen(session: DeviceSession, appInForeground: B
         }
     }
     status?.let { Text(it, modifier = Modifier.padding(horizontal = 16.dp)) }
-    LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    LazyColumn(
+        Modifier.weight(1f).fillMaxWidth().padding(horizontal = 16.dp),
+        state = listState,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         items(notices?.items ?: emptyList()) { n ->
-            Card(Modifier.fillMaxWidth()) {
+            Card(
+                Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (n.id == focusNotificationId) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.surface,
+                ),
+            ) {
                 Column(
                     Modifier.padding(14.dp),
                     verticalArrangement = Arrangement.spacedBy(5.dp),
@@ -818,6 +922,17 @@ private fun ColumnScope.NoticesScreen(session: DeviceSession, appInForeground: B
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (n.body.isNotEmpty()) Text(n.body, style = MaterialTheme.typography.bodyMedium)
+                    n.link?.let { link ->
+                        val destination = when (link.view) {
+                            "chat" -> "Apri chat"
+                            "tasks" -> "Apri attività"
+                            "dashboard" -> "Apri plancia"
+                            else -> null
+                        }
+                        if (destination != null) {
+                            TextButton(onClick = { onOpenLink(link) }) { Text(destination) }
+                        }
+                    }
                     Row(
                         Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -851,7 +966,14 @@ private fun ColumnScope.NoticesScreen(session: DeviceSession, appInForeground: B
 }
 
 @Composable
-private fun ColumnScope.ChatScreen(session: DeviceSession, appInForeground: Boolean, onRevoked: () -> Unit, onSending: (Boolean) -> Unit) {
+private fun ColumnScope.ChatScreen(
+    session: DeviceSession,
+    appInForeground: Boolean,
+    onRevoked: () -> Unit,
+    initialDraft: String?,
+    onDraftConsumed: () -> Unit,
+    onSending: (Boolean) -> Unit,
+) {
     val messages = remember { mutableStateListOf<ChatMessage>() }
     val pending = remember { mutableStateListOf<PendingAction>() }
     var input by rememberSaveable { mutableStateOf("") }
@@ -878,6 +1000,13 @@ private fun ColumnScope.ChatScreen(session: DeviceSession, appInForeground: Bool
             }
             status = null
         }.onFailure(::handle)
+    }
+
+    LaunchedEffect(initialDraft) {
+        if (initialDraft != null) {
+            input = initialDraft
+            onDraftConsumed()
+        }
     }
 
     LaunchedEffect(session, appInForeground) {

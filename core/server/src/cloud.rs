@@ -374,6 +374,7 @@ pub const TOOLS: &[&str] = &[
     "weather.forecast",
     "web.search",
     "todo.list",
+    "todo.review",
     "notes.list",
     "fs.list",
     "fs.read",

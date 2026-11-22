@@ -1369,6 +1369,24 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** test unitari desktop per normalizzazione HTTPS, round-trip e permessi `0600` su Unix, aggregazione con Core offline e minimizzazione della risposta salute. Build e lint vengono registrati nel checkpoint roadmap.
 - **Documenti interessati:** `README.md`, `INTERFACE_AND_DEVICES.md`, `ROADMAP.md` e app desktop egui.
 
+### ADR-0083 — Ripresa cross-device tramite collegamenti verificabili
+
+- **Data** 2026-11-22 · **Stato** implementata nel checkout; build completa dell'app Android in attesa dell'Android SDK.
+- **Contesto:** desktop e Android condividono già cronologia, attività e notifiche quando usano lo stesso Core, ma una notifica Android apriva solo l'elenco generico e l'obiettivo di un task non aveva un'azione di ripresa.
+- **Decisione:** passare al tap push l'ID della notifica (non titolo, corpo o ref), aprire la relativa notifica e metterla in evidenza nell'elenco ottenuto dal Core autenticato. Le notifiche API conservano un `link` validato secondo le viste del contratto; Android offre navigazione diretta per chat, attività e Plancia. I link task selezionano ed evidenziano l'attività se è nell'elenco recente. La Plancia desktop e Android offrono **Prepara ripresa in chat**, che mette l'obiettivo del task nella bozza della chat condivisa senza inviare il messaggio né eseguire azioni.
+- **Motivazione:** migliora continuità fra dispositivi usando le API e i permessi esistenti, con una scelta esplicita dell'utente prima di inviare o produrre effetti.
+- **Conseguenze:** il Core resta la fonte di verità e la sola destinazione della chat; il payload FCM rimane privo di contenuto privato e riferimenti task. Le viste non disponibili sul client mobile non vengono simulate.
+- **Evidenza:** test `CoreClient` per parsing del link supportato e rifiuto di viste non riconosciute; suite del modulo superata. Il compile Kotlin dell'app è sospeso perché manca Android SDK nell'host. La correzione CI macOS importa `PermissionsExt` nello scope del secondo blocco Unix, evitando l'errore `E0599`; fmt e check/lint Windows superati, ma la conferma macOS richiede CI.
+- **Documenti interessati:** `README.md`, `INTERFACE_AND_DEVICES.md`, `ROADMAP.md`, client Android e desktop.
+
+### ADR-0084 — Revisione proattiva e non mutante delle scadenze
+
+- **Data:** 2026-11-22 · **Stato:** implementata nel checkout.
+- `todo.review` legge attività aperte scadute o in scadenza entro un orizzonte predefinito di 24 ore, configurabile fra 1 ora e 7 giorni. Restituisce gruppi distinti e un suggerimento per ciascuna attività; non completa, rischedula o crea attività.
+- La competenza Briefing e Organizzazione possono usare lo strumento. I comandi offline comprendono «controlla le scadenze» e «cosa devo fare oggi». Le notifiche di scadenza esistenti non vengono duplicate né anticipate; non vengono inviati messaggi o eseguite azioni automaticamente.
+- **Evidenza:** test Core dalla chat con attività sintetiche scadute e imminenti, controllo che restino aperte dopo la revisione, test AI per instradamento offline e descrizione dei suggerimenti.
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, README.md, ROADMAP.md e `contracts/catalog/tools/todo.review.json`.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.

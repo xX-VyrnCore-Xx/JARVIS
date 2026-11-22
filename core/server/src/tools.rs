@@ -180,6 +180,7 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
         "notes.delete" => crate::toolbox::notes_delete(ctx.store, s("id")),
         "todo.add" => crate::toolbox::todo_add(ctx.store, args),
         "todo.list" => crate::toolbox::todo_list(ctx.store, args),
+        "todo.review" => crate::toolbox::todo_review(ctx.store, args, &crate::now()),
         "todo.done" => crate::toolbox::todo_done(ctx.store, s("id")),
         "memory.update" => {
             let ok = ctx

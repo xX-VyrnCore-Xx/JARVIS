@@ -36,7 +36,7 @@ pub const SPECIALISTS: [Agent; 6] = [
         name: "automation",
         role: "Automazioni: crea, modifica ed esegue automazioni pianificate; descrivi chiaramente quando e cosa eseguiranno.",
         keywords: &["n8n", "automazion", "pianific", "ogni giorno", "ogni ora", "ogni settimana", "tra 1", "tra 2", "tra 3", "tra 5", "tra 10", "tra un", "tra mezz"],
-        tools: &["n8n.create", "workflow.create", "workflow.list", "workflow.run", "workflow.update", "workflow.delete", "system.info", "fs.write", "todo.add", "todo.list", "todo.done"],
+        tools: &["n8n.create", "workflow.create", "workflow.list", "workflow.run", "workflow.update", "workflow.delete", "system.info", "fs.write", "todo.add", "todo.list", "todo.review", "todo.done"],
     },
     Agent {
         name: "memory",

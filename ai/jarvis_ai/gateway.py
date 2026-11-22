@@ -103,6 +103,20 @@ def _describe_tool_result(result: dict) -> str:
         if not todos:
             return "Nessuna cosa da fare."
         return "Cose da fare:\n" + "\n".join(f"• [{t['id']}] {t['text']}" + (f" (entro {t['due_at']})" if t.get("due_at") else "") for t in todos)
+    if tool == "todo.review":
+        hours = output.get("horizon_hours", 24)
+        overdue = output.get("overdue", [])
+        upcoming = output.get("upcoming", [])
+        if not overdue and not upcoming:
+            return f"Nessuna scadenza passata o in arrivo nelle prossime {hours} ore."
+        items = []
+        for label, todos in (("Scaduta", overdue), ("In scadenza", upcoming)):
+            items.extend(
+                f"• [{t['id']}] {t['text']} — {label.lower()} ({t['due_at']}). "
+                f"Suggerimento: {t['suggestion']}"
+                for t in todos
+            )
+        return f"Promemoria da rivedere (prossime {hours} ore):\n" + "\n".join(items)
     if tool == "todo.done":
         return f"Fatto! Attività {output.get('id')} completata."
     if tool == "memory.update":
@@ -329,6 +343,8 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
     (re.compile(r"^\s*cerca nelle note\s*:?\s+(.+)$", re.I), "notes.search", lambda m: {"query": m.group(1)[:200]}),
     (re.compile(r"^\s*(?:aggiungi (?:alle|tra le) cose da fare|da fare|ricordami di)\s*:?\s+(.+?)(?:\s+(?:entro|per il|il)\s+(\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2})?))?\s*$", re.I), "todo.add",
      lambda m: {"text": m.group(1)[:500], **({"due": m.group(2)} if m.group(2) else {})}),
+    (re.compile(r"^\s*(?:controlla le scadenze|promemoria in arrivo|cosa ho in scadenza|cosa scade a breve|cosa devo fare oggi)(?:\s+(?:entro|nei prossimi)\s+(?:([1-9]\d?)\s+ore?|([1-7])\s+giorni?))?\s*\??$", re.I),
+     "todo.review", lambda m: {"horizon_hours": int(m.group(1) or 24 * int(m.group(2)))} if m.group(1) or m.group(2) else {}),
     (re.compile(r"^\s*(?:cose da fare|lista delle cose da fare|cosa devo fare)\s*\??$", re.I), "todo.list", lambda m: {}),
     (re.compile(r"^\s*fatto\s+([0-9a-f]{8})\s*$", re.I), "todo.done", lambda m: {"id": m.group(1)}),
     (re.compile(r"^\s*(?:crea (?:la )?cartella|mkdir)\s+[«\"']?([^«»\"'\s]+)[»\"']?\s*$", re.I), "fs.mkdir", lambda m: {"path": m.group(1)}),
@@ -496,7 +512,7 @@ Prova con:
 • "conta le parole: città blu" · 'valida il JSON: {"ok": true}'
 • "delega a un agente analista: che ore sono" (agente temporaneo con strumenti di sola lettura)
 • "calcola 15% di 230" · "converti 10 km in mi" · "quanti giorni mancano al 2026-12-25" · "meteo a Roma" · "spazio su disco"
-• "prendi nota: …" · "le mie note" · "ricordami di pagare la bolletta entro 2026-11-30 18:00" · "cose da fare" · "fatto <id>"
+• "prendi nota: …" · "le mie note" · "ricordami di pagare la bolletta entro 2026-11-30 18:00" · "cose da fare" · "controlla le scadenze entro 3 giorni" · "fatto <id>"
 • "trova file con «bolletta»" · "crea cartella archivio" · "sposta a.txt in archivio/a.txt" · "elimina vecchio.txt" (conferma)
 • "processi" · "processi per memoria" · "terminale: ls -la" (ogni comando chiede conferma)
 • "scrivi note.txt: testo da salvare" (chiede conferma)

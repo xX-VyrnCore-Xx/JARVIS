@@ -732,6 +732,64 @@ pub fn todo_list(store: &Store, args: &Value) -> Result<Value, ToolError> {
     )
 }
 
+pub fn todo_review(store: &Store, args: &Value, now: &str) -> Result<Value, ToolError> {
+    let horizon_hours = args["horizon_hours"].as_u64().unwrap_or(24);
+    if !(1..=168).contains(&horizon_hours) {
+        return Err(err(
+            "todo.invalid",
+            "l'orizzonte deve essere compreso tra 1 e 168 ore",
+        ));
+    }
+    let now = chrono::DateTime::parse_from_rfc3339(now)
+        .map_err(|e| err("todo.invalid", e.to_string()))?
+        .with_timezone(&chrono::Utc);
+    let now_s = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let cutoff = (now + chrono::Duration::hours(horizon_hours as i64))
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let mut stmt = store
+        .conn
+        .prepare(
+            "SELECT id, text, due_at, priority FROM todos
+             WHERE done_at IS NULL AND due_at IS NOT NULL AND due_at <= ?1
+             ORDER BY due_at, created_at LIMIT 100",
+        )
+        .map_err(|e| err("todo.unavailable", e.to_string()))?;
+    let rows = stmt
+        .query_map([cutoff], |r| {
+            Ok(json!({
+                "id": r.get::<_, String>(0)?,
+                "text": r.get::<_, String>(1)?,
+                "due_at": r.get::<_, String>(2)?,
+                "priority": r.get::<_, String>(3)?
+            }))
+        })
+        .map_err(|e| err("todo.unavailable", e.to_string()))?;
+    let mut overdue = Vec::new();
+    let mut upcoming = Vec::new();
+    for row in rows {
+        let mut item = row.map_err(|e| err("todo.unavailable", e.to_string()))?;
+        let is_overdue = item["due_at"]
+            .as_str()
+            .is_some_and(|due| due <= now_s.as_str());
+        item["suggestion"] = json!(if is_overdue {
+            "Verifica se è ancora necessaria; se completata, segnala il task come fatto, altrimenti valuta una nuova scadenza."
+        } else {
+            "Valuta la priorità e il prossimo passo; se la scadenza non è realistica, considera di aggiornarla."
+        });
+        if is_overdue {
+            overdue.push(item);
+        } else {
+            upcoming.push(item);
+        }
+    }
+    Ok(json!({
+        "checked_at": now_s,
+        "horizon_hours": horizon_hours,
+        "overdue": overdue,
+        "upcoming": upcoming
+    }))
+}
+
 pub fn todo_done(store: &Store, id: &str) -> Result<Value, ToolError> {
     let n = store
         .conn

@@ -109,7 +109,7 @@ class CoreClientTest {
     fun tasksAndNoticesUseDeviceRoutesOnly() {
         val t = Recorder(listOf(
             HttpReply(200, """{"items":[{"task_id":"t1","objective":"che ore sono","state":"succeeded","created_at":"2026-11-18T10:00:00Z"}]}"""),
-            HttpReply(200, """{"unread":1,"items":[{"notification_id":"n1","severity":"warning","category":"confirmation","title":"Conferma richiesta","body":"x","created_at":"2026-11-18T10:00:00Z","read_at":null},{"notification_id":"n2","severity":"info","category":"system","title":"Fatto","created_at":"2026-11-18T09:00:00Z","read_at":"2026-11-18T09:01:00Z"}]}"""),
+            HttpReply(200, """{"unread":1,"items":[{"notification_id":"n1","severity":"warning","category":"confirmation","title":"Conferma richiesta","body":"x","created_at":"2026-11-18T10:00:00Z","read_at":null,"link":{"view":"tasks","ref":"task-1"}},{"notification_id":"n2","severity":"info","category":"system","title":"Fatto","created_at":"2026-11-18T09:00:00Z","read_at":"2026-11-18T09:01:00Z","link":{"view":"untrusted","ref":"../devices"}}]}"""),
             HttpReply(200, """{"unread":0}"""),
         ))
         val client = CoreClient(t)
@@ -120,6 +120,8 @@ class CoreClientTest {
         assertEquals(listOf(false, true), notices.items.map { it.read })
         assertEquals("warning", notices.items.first().severity)
         assertEquals("system", notices.items.last().category)
+        assertEquals(NotificationLink("tasks", "task-1"), notices.items.first().link)
+        assertNull(notices.items.last().link)
         assertEquals(0, client.markAllRead(session))
         assertEquals(listOf("/api/tasks?limit=30", "/api/notifications?limit=30", "/api/notifications/read-all"),
             t.calls.map { it.second.removePrefix("https://jarvis.example") })

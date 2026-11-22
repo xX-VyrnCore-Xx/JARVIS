@@ -63,11 +63,12 @@ Gli artefatti sono verificabili con l’attestazione GitHub e le firme Sigstore;
 
 Per un secondo desktop, imposta `JARVIS_REMOTE_URL` o salva l'origine HTTPS in `remote-core-url.txt` nella sua cartella dati. L'app desktop e quella Android si associano con l'origine HTTPS e il codice. [Interfacce e dispositivi](docs/INTERFACE_AND_DEVICES.md)
 
-Nella Plancia desktop puoi associare altri Core con **Core collegati → Associa un altro Core**, usando per ciascuno un invito monouso generato nella sezione Dispositivi di quel Core. La Plancia aggrega stato, conteggi e attività recenti dei Core raggiungibili; un Core offline non blocca gli altri. Chat, viste dettagliate e azioni restano sul Core attivo e non vengono inoltrate ai Core aggiunti.
+Nella Plancia desktop puoi associare altri Core con **Core collegati → Associa un altro Core**, usando per ciascuno un invito monouso generato nella sezione Dispositivi di quel Core. La Plancia aggrega stato, conteggi e attività recenti dei Core raggiungibili; un Core offline non blocca gli altri. Chat, viste dettagliate e azioni restano sul Core attivo e non vengono inoltrate ai Core aggiunti. Desktop e Android sullo stesso Core condividono la cronologia: i collegamenti nelle notifiche aprono la sezione pertinente, mentre **Prepara la ripresa in chat** trasferisce l'obiettivo di un'attività come bozza da controllare e inviare.
 
 ## Usa JARVIS
 
 - **Chat.** Invia richieste al Core e consulta la cronologia della conversazione. Le azioni sensibili restano soggette a policy e conferma.
+- **Promemoria.** Chiedi «controlla le scadenze» o includi il controllo nel briefing: JARVIS evidenzia attività scadute e in scadenza entro 24 ore e propone come procedere. Puoi chiedere un orizzonte fino a sette giorni; nessuna attività viene modificata e nessun messaggio viene inviato automaticamente.
 - **Modelli cloud e voce.** La sezione Modelli AI dell'app desktop permette di configurare o rimuovere le chiavi per Ollama Cloud e NVIDIA NIM; il Core instrada le richieste al provider selezionato. Il runtime vocale è incluso nel Core, ma i controlli vocali non sono ancora disponibili nell'interfaccia desktop nativa.
 - **Dispositivi e notifiche.** Associa client Android o desktop tramite invito monouso. Le notifiche push Android richiedono Firebase; il Core continua a conservarle anche quando un client non è connesso.
 - **Memoria.** Cerca i ricordi dal client desktop usando gli indici locali del Core. La memoria non viene esposta ai dispositivi associati; le app mobile mostrano solo le funzioni consentite dal permesso `chat`.

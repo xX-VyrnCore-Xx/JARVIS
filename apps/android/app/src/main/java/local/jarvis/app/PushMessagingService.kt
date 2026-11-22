@@ -38,9 +38,12 @@ class PushMessagingService : FirebaseMessagingService() {
         val body = message.notification?.body ?: message.data["body"] ?: "Apri JARVIS per i dettagli."
         val launch = packageManager.getLaunchIntentForPackage(packageName) ?: return
         launch.putExtra(OPEN_NOTIFICATIONS_EXTRA, true)
+        val notificationId = message.data["notification_id"]
+        launch.putExtra(NOTIFICATION_ID_EXTRA, notificationId)
+        launch.addFlags(android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val pending = PendingIntent.getActivity(
             this,
-            message.data["notification_id"]?.hashCode() ?: 0,
+            notificationId?.hashCode() ?: 0,
             launch,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -67,6 +70,7 @@ class PushMessagingService : FirebaseMessagingService() {
     companion object {
         const val CHANNEL_ID = "jarvis_notifications"
         const val OPEN_NOTIFICATIONS_EXTRA = "local.jarvis.app.OPEN_NOTIFICATIONS"
+        const val NOTIFICATION_ID_EXTRA = "local.jarvis.app.NOTIFICATION_ID"
         private const val TAG = "JarvisPush"
     }
 }

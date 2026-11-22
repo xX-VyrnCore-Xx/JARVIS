@@ -47,6 +47,8 @@ class OfflineBackend(unittest.TestCase):
             "cosa sai di Marco?": ("memory.search", {"query": "Marco"}),
             "cerca nella memoria: compleanno": ("memory.search", {"query": "compleanno"}),
             "cosa sai di me": ("memory.list", {}),
+            "controlla le scadenze": ("todo.review", {}),
+            "controlla le scadenze entro 3 giorni": ("todo.review", {"horizon_hours": 72}),
         }
         for message, (tool, args) in cases.items():
             with self.subTest(message=message):
@@ -115,6 +117,13 @@ class OfflineBackend(unittest.TestCase):
         self.assertIn("[a] t", r["text"])
         r = self.call("x", tool_result={"tool": "memory.search", "status": "succeeded", "output": {"query": "q", "items": [{"id": "b", "text": "u", "kind": "procedural"}]}})
         self.assertIn("[b] (preferenza) u", r["text"])
+        r = self.call("x", tool_result={"tool": "todo.review", "status": "succeeded", "output": {
+            "horizon_hours": 24,
+            "overdue": [{"id": "1a2b3c4d", "text": "task sintetico", "due_at": "2026-11-20T09:00:00Z",
+                         "suggestion": "Verifica il prossimo passo."}],
+            "upcoming": []}})
+        self.assertIn("scaduta", r["text"])
+        self.assertIn("Verifica il prossimo passo", r["text"])
 
     def test_followup_asks_for_a_reference_and_ignores_unrelated_memory(self):
         answer = self.call("E quello di prima?", memory=["prima di pranzo leggo", "quello è un promemoria"])

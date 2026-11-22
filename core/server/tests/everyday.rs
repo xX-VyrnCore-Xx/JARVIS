@@ -111,6 +111,53 @@ fn everyday_tools_work_from_the_chat() {
 }
 
 #[test]
+fn reminder_review_suggests_actions_without_changing_tasks() {
+    let (mut j, data) = jarvis("reminder-review", jarvis_core::web::WebConfig::default());
+    let due_soon = (chrono::Local::now() + chrono::Duration::hours(12))
+        .format("%Y-%m-%d %H:%M")
+        .to_string();
+    say(
+        &mut j,
+        &format!("ricordami di inviare la proposta entro {due_soon}"),
+    );
+    say(
+        &mut j,
+        "ricordami di rivedere il preventivo entro 2020-01-01 09:00",
+    );
+    let due_later = (chrono::Local::now() + chrono::Duration::hours(48))
+        .format("%Y-%m-%d %H:%M")
+        .to_string();
+    say(
+        &mut j,
+        &format!("ricordami di rivedere il contratto entro {due_later}"),
+    );
+
+    let review = reply(&say(&mut j, "controlla le scadenze"));
+    assert!(
+        review.contains("invio la proposta") || review.contains("inviare la proposta"),
+        "{review}"
+    );
+    assert!(review.contains("in scadenza"), "{review}");
+    assert!(
+        review.contains("preventivo") && review.contains("scaduta"),
+        "{review}"
+    );
+    assert!(!review.contains("contratto"), "{review}");
+    assert!(review.contains("Suggerimento:"), "{review}");
+
+    let wider_review = reply(&say(&mut j, "controlla le scadenze entro 3 giorni"));
+    assert!(wider_review.contains("contratto"), "{wider_review}");
+    let todos = reply(&say(&mut j, "cose da fare"));
+    assert!(
+        todos.contains("inviare la proposta")
+            && todos.contains("preventivo")
+            && todos.contains("contratto"),
+        "{todos}"
+    );
+    let _ = std::fs::remove_dir_all(&data);
+}
+
+#[test]
 fn weather_uses_open_meteo_through_the_web_policy() {
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

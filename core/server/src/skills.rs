@@ -28,8 +28,8 @@ const BUILTIN: [Builtin; 5] = [
         "Briefing del mattino",
         "Riepilogo della giornata: ora, meteo, cose da fare, agenda ed email non lette.",
         &["briefing", "buongiorno", "riepilogo della giornata", "cosa ho oggi"],
-        "Prepara un briefing breve in cinque punti al massimo: data e ora, meteo della città del proprietario (dalla memoria; se manca chiedila), cose da fare in scadenza, eventi di oggi dal calendario collegato e numero di email non lette con i mittenti principali. Usa solo gli strumenti disponibili: se un servizio non è collegato, dillo in una riga senza insistere. Chiudi con la priorità consigliata per la giornata.",
-        &["time.now", "weather.forecast", "todo.list"],
+        "Prepara un briefing breve in cinque punti al massimo: data e ora, meteo della città del proprietario (dalla memoria; se manca chiedila), cose da fare e scadenze passate o entro 24 ore, eventi di oggi dal calendario collegato e numero di email non lette con i mittenti principali. Per le scadenze usa todo.review e proponi i prossimi passi senza completare o rischedulare attività. Usa solo gli strumenti disponibili: se un servizio non è collegato, dillo in una riga senza insistere. Chiudi con la priorità consigliata per la giornata.",
+        &["time.now", "weather.forecast", "todo.list", "todo.review"],
     ),
     (
         "scrittura",
@@ -52,8 +52,8 @@ const BUILTIN: [Builtin; 5] = [
         "Organizzazione",
         "Pianificazione di giornata e settimana con cose da fare e note.",
         &["organizza", "pianifica la settimana", "pianifica la giornata", "aiutami a organizzare"],
-        "Aiuta il proprietario a pianificare: raccogli le cose da fare aperte e le scadenze, proponi un ordine per priorità e durata stimata, suggerisci cosa rimandare. Crea nuove cose da fare solo se il proprietario lo chiede esplicitamente.",
-        &["todo.list", "todo.add", "notes.search", "time.now"],
+        "Aiuta il proprietario a pianificare: raccogli le cose da fare aperte e usa todo.review per individuare scadenze passate o imminenti, proponi un ordine per priorità e durata stimata e suggerisci cosa rimandare. Non completare o rischedulare attività senza una richiesta esplicita. Crea nuove cose da fare solo se il proprietario lo chiede esplicitamente.",
+        &["todo.list", "todo.review", "todo.add", "notes.search", "time.now"],
     ),
     (
         "spese",

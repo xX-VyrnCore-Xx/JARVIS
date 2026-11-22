@@ -1440,6 +1440,10 @@ impl JarvisApp {
                     });
                 }
                 for task in tasks {
+                    let objective = task["objective"]
+                        .as_str()
+                        .unwrap_or("Attività senza titolo")
+                        .to_owned();
                     ui.horizontal(|ui| {
                         let state = task["state"].as_str().unwrap_or("in attesa");
                         let color = if state == "failed" {
@@ -1449,11 +1453,7 @@ impl JarvisApp {
                         };
                         ui.label(egui::RichText::new("●").color(color));
                         ui.vertical(|ui| {
-                            ui.label(
-                                task["objective"]
-                                    .as_str()
-                                    .unwrap_or("Attività senza titolo"),
-                            );
+                            ui.label(&objective);
                             ui.small(
                                 egui::RichText::new(format!(
                                     "{} · {} · {}",
@@ -1469,6 +1469,10 @@ impl JarvisApp {
                                 .weak(),
                             );
                         });
+                        if ui.small_button("Prepara ripresa in chat").clicked() {
+                            self.chat_input = format!("Riprendi l'attività: {objective}");
+                            self.current = "chat".into();
+                        }
                     });
                     ui.separator();
                 }
@@ -2700,6 +2704,7 @@ fn save_core_backends(path: &Path, backends: &[CoreBackend]) -> Result<(), Strin
         .map_err(|error| error.to_string())?;
     #[cfg(unix)]
     {
+        use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
             .map_err(|error| error.to_string())?;
     }

@@ -37,6 +37,7 @@ const SOURCES: &[&str] = &[
     tool_file!("todo.add"),
     tool_file!("todo.done"),
     tool_file!("todo.list"),
+    tool_file!("todo.review"),
     tool_file!("units.convert"),
     tool_file!("weather.forecast"),
     tool_file!("agent.delegate"),

@@ -23,6 +23,14 @@ data class Notice(
     val body: String,
     val createdAt: String,
     val read: Boolean,
+    val link: NotificationLink? = null,
+)
+
+data class NotificationLink(val view: String, val ref: String?)
+
+private val notificationViews = setOf(
+    "chat", "tasks", "automations", "audit", "memory",
+    "workspace", "connectors", "system", "devices", "dashboard",
 )
 
 data class Notices(val unread: Int, val items: List<Notice>)
@@ -143,6 +151,17 @@ class CoreClient(private val transport: Transport = UrlConnectionTransport) {
                 it.optString("body"),
                 it.optString("created_at"),
                 !it.isNull("read_at") && it.optString("read_at").isNotEmpty(),
+                it.optJSONObject("link")?.let { link ->
+                    val view = link.optString("view").takeIf { target ->
+                        target in notificationViews
+                    }
+                    view?.let {
+                        NotificationLink(
+                            it,
+                            link.optString("ref").takeIf { ref -> ref.isNotEmpty() && ref.length <= 200 },
+                        )
+                    }
+                },
             )
         }
         return Notices(json.optInt("unread", 0), items)
