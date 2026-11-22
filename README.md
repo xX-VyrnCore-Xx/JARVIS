@@ -63,6 +63,8 @@ Gli artefatti sono verificabili con l’attestazione GitHub e le firme Sigstore;
 
 Per un secondo desktop, imposta `JARVIS_REMOTE_URL` o salva l'origine HTTPS in `remote-core-url.txt` nella sua cartella dati. L'app desktop e quella Android si associano con l'origine HTTPS e il codice. [Interfacce e dispositivi](docs/INTERFACE_AND_DEVICES.md)
 
+Nella Plancia desktop puoi associare altri Core con **Core collegati → Associa un altro Core**, usando per ciascuno un invito monouso generato nella sezione Dispositivi di quel Core. La Plancia aggrega stato, conteggi e attività recenti dei Core raggiungibili; un Core offline non blocca gli altri. Chat, viste dettagliate e azioni restano sul Core attivo e non vengono inoltrate ai Core aggiunti.
+
 ## Usa JARVIS
 
 - **Chat.** Invia richieste al Core e consulta la cronologia della conversazione. Le azioni sensibili restano soggette a policy e conferma.

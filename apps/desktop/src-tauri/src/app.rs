@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -45,6 +46,7 @@ struct ChatMessage {
 enum Event {
     Connected(Box<Result<Connection, String>>),
     Loaded(String, Result<Value, String>),
+    BackendsUpdated(Result<Vec<CoreBackend>, String>),
     History(Result<Value, String>),
     ActionDone(Result<Value, String>),
     ConnectorOAuth(Result<Value, String>),
@@ -59,6 +61,12 @@ struct Connection {
     client: ApiClient,
     core: Option<RunningCore>,
     remote: bool,
+}
+
+#[derive(Clone, Debug)]
+struct CoreBackend {
+    origin: String,
+    token: String,
 }
 
 #[derive(Clone, Copy)]
@@ -100,6 +108,13 @@ pub struct JarvisApp {
     pair_code: String,
     pairing: bool,
     pair_error: Option<String>,
+    backend_url: String,
+    backend_pair_code: String,
+    backend_pairing: bool,
+    backend_pair_error: Option<String>,
+    backends: Vec<CoreBackend>,
+    backend_config_error: Option<String>,
+    pending_backend_removal: Option<String>,
     pending_delete: Option<(String, String)>,
     device_invite: Option<Value>,
     pairing_url: String,
@@ -137,13 +152,32 @@ impl JarvisApp {
         style.visuals.window_fill = SURFACE;
         style.visuals.panel_fill = BACKGROUND;
         style.visuals.widgets.inactive.bg_fill = RAISED;
+        style.visuals.widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+        style.visuals.widgets.inactive.corner_radius = egui::CornerRadius::same(10);
+        style.visuals.widgets.inactive.bg_stroke =
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(39, 57, 72));
         style.visuals.widgets.active.bg_fill = SELECTED;
+        style.visuals.widgets.active.corner_radius = egui::CornerRadius::same(10);
+        style.visuals.widgets.active.bg_stroke =
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(48, 132, 151));
         style.visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(28, 70, 84);
-        style.spacing.item_spacing = egui::vec2(10.0, 9.0);
+        style.visuals.widgets.hovered.corner_radius = egui::CornerRadius::same(10);
+        style.visuals.widgets.hovered.bg_stroke =
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(56, 122, 141));
+        style.visuals.selection.bg_fill = egui::Color32::from_rgb(24, 76, 91);
+        style.visuals.selection.stroke = egui::Stroke::new(1.0, ACCENT);
+        style.spacing.item_spacing = egui::vec2(12.0, 10.0);
+        style.spacing.button_padding = egui::vec2(12.0, 7.0);
+        style.spacing.interact_size = egui::vec2(40.0, 38.0);
         cc.egui_ctx.set_style_of(egui::Theme::Dark, style);
 
         let (tx, rx) = mpsc::channel();
         spawn_connection(tx.clone());
+        let (backends, backend_config_error) =
+            match load_core_backends(&data_dir().join("remote-backends.json")) {
+                Ok(backends) => (backends, None),
+                Err(error) => (Vec::new(), Some(error)),
+            };
 
         Self {
             tx,
@@ -177,6 +211,13 @@ impl JarvisApp {
             pair_code: String::new(),
             pairing: false,
             pair_error: None,
+            backend_url: String::new(),
+            backend_pair_code: String::new(),
+            backend_pairing: false,
+            backend_pair_error: None,
+            backends,
+            backend_config_error,
+            pending_backend_removal: None,
             pending_delete: None,
             device_invite: None,
             pairing_url: String::new(),
@@ -234,6 +275,23 @@ impl JarvisApp {
                 Event::Loaded(_, _) => {
                     self.loading = false;
                     self.refresh(ctx);
+                }
+                Event::BackendsUpdated(result) => {
+                    self.backend_pairing = false;
+                    match result {
+                        Ok(backends) => {
+                            self.backends = backends;
+                            self.backend_config_error = None;
+                            self.backend_pair_error = None;
+                            self.backend_url.clear();
+                            self.backend_pair_code.clear();
+                            self.data = None;
+                            self.last_load = Instant::now() - Duration::from_secs(60);
+                            self.refresh(ctx);
+                        }
+                        Err(error) => self.backend_pair_error = Some(error),
+                    }
+                    ctx.request_repaint();
                 }
                 Event::History(Ok(history)) => {
                     self.history_loading = false;
@@ -405,6 +463,17 @@ impl JarvisApp {
         self.loading = true;
         self.last_load = Instant::now();
         let page = self.current.clone();
+        let backends = self.backends.clone();
+        let primary_name = if self.remote {
+            backend_display_name(&self.remote_url)
+        } else {
+            "Core locale".into()
+        };
+        let primary_origin = if self.remote {
+            normalize_core_origin(&self.remote_url).unwrap_or_else(|_| self.remote_url.clone())
+        } else {
+            "Core locale".into()
+        };
         let tx = self.tx.clone();
         let path = if page == "memory" {
             memory_endpoint(&self.memory_search)
@@ -412,20 +481,101 @@ impl JarvisApp {
             endpoint(&page).to_owned()
         };
         std::thread::spawn(move || {
-            let result = client.get(&path).and_then(|mut data| {
-                if page == "connectors" {
-                    data["catalog"] = client.get("/api/connectors/templates")?["templates"].clone();
-                } else if page == "dashboard" {
-                    if let Ok(setup) = client.get("/api/setup") {
-                        data["first_run"] = setup["first_run"].clone();
+            let result = if page == "dashboard" {
+                load_dashboard(&client, &primary_name, &primary_origin, &backends)
+            } else {
+                client.get(&path).and_then(|mut data| {
+                    if page == "connectors" {
+                        data["catalog"] =
+                            client.get("/api/connectors/templates")?["templates"].clone();
                     }
-                    data["recent_tasks"] = client.get("/api/tasks?limit=4")?["items"].clone();
-                }
-                Ok(data)
-            });
+                    Ok(data)
+                })
+            };
             let _ = tx.send(Event::Loaded(page, result));
         });
         ctx.request_repaint();
+    }
+
+    fn add_core_backend(&mut self, ctx: &egui::Context) {
+        if self.backend_config_error.is_some() {
+            self.backend_pair_error =
+                Some("Correggi prima la configurazione dei Core associati.".into());
+            return;
+        }
+        let origin = match normalize_core_origin(&self.backend_url) {
+            Ok(origin) => origin,
+            Err(error) => {
+                self.backend_pair_error = Some(error);
+                return;
+            }
+        };
+        if !is_https_url(&origin) {
+            self.backend_pair_error =
+                Some("Per associare un Core aggiuntivo serve un indirizzo HTTPS valido.".into());
+            return;
+        }
+        if self.backends.iter().any(|backend| backend.origin == origin)
+            || (self.remote
+                && normalize_core_origin(&self.remote_url).is_ok_and(|primary| primary == origin))
+        {
+            self.backend_pair_error = Some("Questo Core è già collegato.".into());
+            return;
+        }
+        let code = self.backend_pair_code.trim().to_owned();
+        if code.is_empty() {
+            self.backend_pair_error = Some("Inserisci il codice monouso del Core.".into());
+            return;
+        }
+
+        self.backend_pairing = true;
+        self.backend_pair_error = None;
+        let tx = self.tx.clone();
+        let path = data_dir().join("remote-backends.json");
+        std::thread::spawn(move || {
+            let result = ApiClient::unauthenticated(&origin)
+                .and_then(|client| client.pair(&code))
+                .and_then(|response| {
+                    response["token"]
+                        .as_str()
+                        .filter(|token| !token.is_empty())
+                        .map(str::to_owned)
+                        .ok_or_else(|| {
+                            "Il Core non ha restituito le credenziali del dispositivo".into()
+                        })
+                })
+                .and_then(|token| {
+                    let mut backends = load_core_backends(&path)?;
+                    if backends.iter().any(|backend| backend.origin == origin) {
+                        return Err("Questo Core è già collegato.".into());
+                    }
+                    backends.push(CoreBackend { origin, token });
+                    save_core_backends(&path, &backends)?;
+                    Ok(backends)
+                });
+            let _ = tx.send(Event::BackendsUpdated(result));
+        });
+        ctx.request_repaint();
+    }
+
+    fn forget_core_backend(&mut self, origin: &str, ctx: &egui::Context) {
+        let backends: Vec<_> = self
+            .backends
+            .iter()
+            .filter(|backend| backend.origin != origin)
+            .cloned()
+            .collect();
+        match save_core_backends(&data_dir().join("remote-backends.json"), &backends) {
+            Ok(()) => {
+                self.backends = backends;
+                self.backend_config_error = None;
+                self.pending_backend_removal = None;
+                self.data = None;
+                self.last_load = Instant::now() - Duration::from_secs(60);
+                self.refresh(ctx);
+            }
+            Err(error) => self.backend_config_error = Some(error),
+        }
     }
 
     fn send_chat(&mut self) {
@@ -553,18 +703,34 @@ impl JarvisApp {
             }
             let selected = self.current == id;
             let button = egui::Button::new(egui::RichText::new(label).color(if selected {
-                ACCENT
+                egui::Color32::from_rgb(177, 245, 246)
             } else {
-                egui::Color32::from_rgb(204, 218, 231)
+                egui::Color32::from_rgb(180, 195, 207)
             }))
             .fill(if selected {
                 SELECTED
             } else {
                 egui::Color32::TRANSPARENT
             })
-            .corner_radius(egui::CornerRadius::same(8));
+            .corner_radius(egui::CornerRadius::same(10))
+            .stroke(if selected {
+                egui::Stroke::new(1.0, egui::Color32::from_rgb(40, 105, 121))
+            } else {
+                egui::Stroke::NONE
+            });
             let width = if compact { 122.0 } else { ui.available_width() };
-            if ui.add_sized([width, 38.0], button).clicked() {
+            let response = ui.add_sized([width, 42.0], button);
+            if selected {
+                ui.painter().rect_filled(
+                    egui::Rect::from_min_size(
+                        response.rect.min + egui::vec2(3.0, 8.0),
+                        egui::vec2(2.0, response.rect.height() - 16.0),
+                    ),
+                    egui::CornerRadius::same(1),
+                    ACCENT,
+                );
+            }
+            if response.clicked() {
                 self.connector_credential.clear();
                 self.current = id.into();
                 self.data = None;
@@ -827,13 +993,21 @@ impl JarvisApp {
         let core_status = self
             .data
             .as_ref()
-            .and_then(|data| data["core"]["status"].as_str())
+            .and_then(|data| {
+                data["aggregate"]["core_label"]
+                    .as_str()
+                    .or_else(|| data["core"]["status"].as_str())
+            })
             .unwrap_or("—")
             .to_owned();
         let ai_status = self
             .data
             .as_ref()
-            .and_then(|data| data["ai"]["status"].as_str())
+            .and_then(|data| {
+                data["aggregate"]["ai_label"]
+                    .as_str()
+                    .or_else(|| data["ai"]["status"].as_str())
+            })
             .unwrap_or("—")
             .to_owned();
         let confirmations = self
@@ -860,19 +1034,38 @@ impl JarvisApp {
             .and_then(|data| data["automations"].as_u64())
             .map(|count| count.to_string())
             .unwrap_or_else(|| "—".into());
-        let audit_status = self
-            .data
-            .as_ref()
-            .and_then(|data| data["audit"]["chain_valid"].as_bool())
-            .map(|valid| {
-                if valid {
-                    "Verificato"
-                } else {
-                    "Da controllare"
+        let audit_status = self.data.as_ref().map_or("—", |data| {
+            if data["aggregate"]["all_online"] == false {
+                "Parziale"
+            } else {
+                match data["audit"]["chain_valid"].as_bool() {
+                    Some(true) => "Verificato",
+                    Some(false) => "Da controllare",
+                    None => "—",
                 }
-            })
-            .unwrap_or("—")
-            .to_owned();
+            }
+        });
+        let core_color = self.data.as_ref().map_or(ACCENT, |data| {
+            let online = data["aggregate"]["online"].as_u64().unwrap_or(1);
+            let total = data["aggregate"]["total"].as_u64().unwrap_or(1);
+            if online == total {
+                POSITIVE
+            } else if online == 0 {
+                NEGATIVE
+            } else {
+                CAUTION
+            }
+        });
+        let ai_color = self.data.as_ref().map_or(ACCENT, |data| {
+            let online = data["aggregate"]["ai_online"].as_u64();
+            let total = data["aggregate"]["total"].as_u64();
+            match (online, total) {
+                (Some(online), Some(total)) if online == total => POSITIVE,
+                (Some(0), Some(_)) => NEGATIVE,
+                (Some(_), Some(_)) => CAUTION,
+                _ => service_color(&ai_status),
+            }
+        });
 
         egui::Frame::new()
             .fill(SURFACE)
@@ -919,23 +1112,18 @@ impl JarvisApp {
             );
         });
         ui.add_space(8.0);
-        let audit_color = match audit_status.as_str() {
+        let audit_color = match audit_status {
             "Verificato" => POSITIVE,
             "Da controllare" => NEGATIVE,
             _ => ACCENT,
         };
         let metrics = [
-            (
-                "CORE",
-                core_status.as_str(),
-                version.as_str(),
-                service_color(&core_status),
-            ),
+            ("CORE", core_status.as_str(), version.as_str(), core_color),
             (
                 "INTELLIGENZA ARTIFICIALE",
                 ai_status.as_str(),
                 "Stato del servizio",
-                service_color(&ai_status),
+                ai_color,
             ),
             (
                 "CONFERME",
@@ -964,7 +1152,7 @@ impl JarvisApp {
             ("AUTOMAZIONI", automations.as_str(), "Attive", ACCENT),
             (
                 "INTEGRITÀ AUDIT",
-                audit_status.as_str(),
+                audit_status,
                 "Registro locale",
                 audit_color,
             ),
@@ -1006,6 +1194,8 @@ impl JarvisApp {
             });
             ui.add_space(gap);
         }
+
+        self.show_dashboard_backends(ui, ctx);
 
         ui.add_space(12.0);
         egui::Frame::new()
@@ -1083,6 +1273,135 @@ impl JarvisApp {
         }
     }
 
+    fn show_dashboard_backends(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        egui::Frame::new()
+            .fill(SURFACE)
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(29, 49, 65)))
+            .corner_radius(16)
+            .inner_margin(14)
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.horizontal_wrapped(|ui| {
+                    ui.heading("Core collegati");
+                    ui.label(
+                        egui::RichText::new("Stato e riepiloghi in sola lettura")
+                            .small()
+                            .weak(),
+                    );
+                    if ui
+                        .add_enabled(!self.loading, egui::Button::new("Aggiorna"))
+                        .clicked()
+                    {
+                        self.data = None;
+                        self.refresh(ctx);
+                    }
+                });
+                if let Some(error) = &self.backend_config_error {
+                    ui.colored_label(NEGATIVE, error);
+                }
+                let summaries = self
+                    .data
+                    .as_ref()
+                    .and_then(|data| data["connected_backends"].as_array())
+                    .cloned()
+                    .unwrap_or_default();
+                for summary in summaries {
+                    let name = summary["name"].as_str().unwrap_or("Core");
+                    let origin = summary["origin"].as_str().unwrap_or("");
+                    let online = summary["online"] == true;
+                    let removable = self.backends.iter().any(|backend| backend.origin == origin);
+                    egui::Frame::new()
+                        .fill(RAISED)
+                        .corner_radius(12)
+                        .inner_margin(10)
+                        .show(ui, |ui| {
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(egui::RichText::new("●").color(if online {
+                                    POSITIVE
+                                } else {
+                                    NEGATIVE
+                                }));
+                                ui.strong(name);
+                                ui.label(if online { "Online" } else { "Offline" });
+                                if removable && ui.button("Dimentica").clicked() {
+                                    self.pending_backend_removal = Some(origin.to_owned());
+                                }
+                            });
+                            ui.small(
+                                egui::RichText::new(format!(
+                                    "AI {} · {} attività recenti · {} notifiche non lette",
+                                    if summary["ai_online"] == true {
+                                        "operativa"
+                                    } else {
+                                        "non disponibile"
+                                    },
+                                    summary["recent_tasks"].as_array().map_or(0, Vec::len),
+                                    summary["notifications_unread"].as_u64().unwrap_or(0),
+                                ))
+                                .weak(),
+                            );
+                            if let Some(error) = summary["error"].as_str() {
+                                ui.colored_label(CAUTION, error);
+                            }
+                        });
+                }
+                egui::CollapsingHeader::new("Associa un altro Core")
+                    .id_salt("add-core-backend")
+                    .show(ui, |ui| {
+                        ui.label(
+                            "Usa l’origine HTTPS e il codice monouso generato in Dispositivi.",
+                        );
+                        ui.add_sized(
+                            [ui.available_width(), 38.0],
+                            egui::TextEdit::singleline(&mut self.backend_url)
+                                .hint_text("https://jarvis.example.com"),
+                        );
+                        ui.add_sized(
+                            [ui.available_width(), 38.0],
+                            egui::TextEdit::singleline(&mut self.backend_pair_code)
+                                .password(true)
+                                .hint_text("Codice monouso"),
+                        );
+                        if let Some(error) = &self.backend_pair_error {
+                            ui.colored_label(NEGATIVE, error);
+                        }
+                        if ui
+                            .add_enabled(
+                                !self.backend_pairing && self.backend_config_error.is_none(),
+                                egui::Button::new(if self.backend_pairing {
+                                    "Associazione in corso…"
+                                } else {
+                                    "Associa Core"
+                                }),
+                            )
+                            .clicked()
+                        {
+                            self.add_core_backend(ctx);
+                        }
+                    });
+            });
+
+        if let Some(origin) = self.pending_backend_removal.clone() {
+            egui::Window::new("Dimenticare questo Core?")
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.label(format!("Rimuovere le credenziali salvate per {origin}?"));
+                    ui.small(
+                        "L'autorizzazione sul Core remoto resta attiva: revocala in Dispositivi.",
+                    );
+                    ui.horizontal(|ui| {
+                        if ui.button("Annulla").clicked() {
+                            self.pending_backend_removal = None;
+                        }
+                        if ui.button("Dimentica").clicked() {
+                            self.forget_core_backend(&origin, ctx);
+                        }
+                    });
+                });
+        }
+    }
+
     fn show_dashboard_tasks(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         egui::Frame::new()
             .fill(SURFACE)
@@ -1128,14 +1447,15 @@ impl JarvisApp {
                             );
                             ui.small(
                                 egui::RichText::new(format!(
-                                    "{} · {}",
+                                    "{} · {} · {}",
                                     state,
                                     task["created_at"]
                                         .as_str()
                                         .unwrap_or("")
                                         .chars()
                                         .take(16)
-                                        .collect::<String>()
+                                        .collect::<String>(),
+                                    task["backend"].as_str().unwrap_or("Core")
                                 ))
                                 .weak(),
                             );
@@ -1170,6 +1490,9 @@ impl JarvisApp {
                         self.act(ctx, "/api/notifications/read-all".into(), None);
                     }
                 });
+                ui.small(
+                    "Elenco del Core attivo; il conteggio in alto somma i Core raggiungibili.",
+                );
                 ui.add_space(4.0);
                 self.show_notifications(ui);
             });
@@ -2135,31 +2458,72 @@ impl eframe::App for JarvisApp {
             return;
         }
 
-        egui::Panel::top("topbar").exact_size(58.0).show(ui, |ui| {
+        egui::Panel::top("topbar").exact_size(62.0).show(ui, |ui| {
             ui.horizontal_centered(|ui| {
-                ui.heading(egui::RichText::new("JARVIS").color(ACCENT));
+                ui.heading(
+                    egui::RichText::new("JARVIS")
+                        .color(ACCENT)
+                        .strong()
+                        .size(20.0),
+                );
                 ui.separator();
-                ui.label(title(&self.current));
+                ui.label(egui::RichText::new(title(&self.current)).strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(if self.remote {
-                        "DISPOSITIVO ASSOCIATO"
-                    } else {
-                        "CORE LOCALE"
-                    });
+                    let unread = self
+                        .notifications
+                        .iter()
+                        .filter(|notification| notification["read_at"].is_null())
+                        .count();
                     if ui
-                        .button(format!(
-                            "🔔 {}",
-                            self.notifications
-                                .iter()
-                                .filter(|n| n["read_at"].is_null())
-                                .count()
-                        ))
+                        .add(
+                            egui::Button::new(format!("Notifiche   {unread}"))
+                                .fill(RAISED)
+                                .stroke(egui::Stroke::new(
+                                    1.0,
+                                    egui::Color32::from_rgb(44, 64, 80),
+                                )),
+                        )
                         .clicked()
                     {
                         self.current = "dashboard".into();
                         self.data = None;
                         self.refresh(&ctx);
                     }
+                    ui.add_space(8.0);
+                    egui::Frame::new()
+                        .fill(if self.remote {
+                            RAISED
+                        } else {
+                            egui::Color32::from_rgb(15, 48, 44)
+                        })
+                        .stroke(egui::Stroke::new(
+                            1.0,
+                            if self.remote {
+                                egui::Color32::from_rgb(44, 64, 80)
+                            } else {
+                                egui::Color32::from_rgb(40, 100, 79)
+                            },
+                        ))
+                        .corner_radius(egui::CornerRadius::same(16))
+                        .inner_margin(egui::Margin::symmetric(10, 5))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new("●").color(if self.remote {
+                                    ACCENT
+                                } else {
+                                    POSITIVE
+                                }));
+                                ui.label(
+                                    egui::RichText::new(if self.remote {
+                                        "CORE REMOTO"
+                                    } else {
+                                        "CORE LOCALE"
+                                    })
+                                    .small()
+                                    .strong(),
+                                );
+                            });
+                        });
                 });
             });
         });
@@ -2231,6 +2595,306 @@ pub(crate) fn application_icon() -> egui::IconData {
         .expect("L'icona PNG incorporata di JARVIS deve essere valida.")
 }
 
+fn normalize_core_origin(value: &str) -> Result<String, String> {
+    let mut url = url::Url::parse(value.trim()).map_err(|_| "Indirizzo del Core non valido")?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || !matches!(url.path(), "" | "/")
+    {
+        return Err("Inserisci l’origine del Core, senza percorso né credenziali".into());
+    }
+    url.set_path("/");
+    Ok(url.as_str().trim_end_matches('/').to_owned())
+}
+
+fn backend_display_name(origin: &str) -> String {
+    url::Url::parse(origin)
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_owned))
+        .unwrap_or_else(|| "Core associato".into())
+}
+
+fn load_core_backends(path: &Path) -> Result<Vec<CoreBackend>, String> {
+    let content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("Configurazione Core non leggibile: {error}")),
+    };
+    let config: Value = serde_json::from_str(&content)
+        .map_err(|error| format!("Configurazione Core non valida: {error}"))?;
+    if config["version"] != 1 {
+        return Err("Versione della configurazione Core non supportata.".into());
+    }
+    let entries = config["backends"]
+        .as_array()
+        .ok_or("Elenco dei Core associati non valido")?;
+    let mut backends = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let origin = entry["origin"]
+            .as_str()
+            .ok_or("Origine del Core associato mancante")?;
+        let origin = normalize_core_origin(origin)?;
+        if !is_https_url(&origin) {
+            return Err("Un Core associato deve usare HTTPS.".into());
+        }
+        let token = entry["token"]
+            .as_str()
+            .filter(|token| !token.trim().is_empty())
+            .ok_or("Credenziale del Core associato mancante")?
+            .to_owned();
+        ApiClient::device(&origin, token.clone())?;
+        if backends
+            .iter()
+            .any(|backend: &CoreBackend| backend.origin == origin)
+        {
+            return Err("La configurazione contiene Core duplicati.".into());
+        }
+        backends.push(CoreBackend { origin, token });
+    }
+    Ok(backends)
+}
+
+fn save_core_backends(path: &Path, backends: &[CoreBackend]) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or("Cartella della configurazione Core non valida")?;
+    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let content = serde_json::to_vec(&json!({
+        "version": 1,
+        "backends": backends.iter().map(|backend| json!({
+            "origin": backend.origin,
+            "token": backend.token,
+        })).collect::<Vec<_>>(),
+    }))
+    .map_err(|error| error.to_string())?;
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        if !path.exists() {
+            options.mode(0o600);
+        } else {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    let mut file = options.open(path).map_err(|error| error.to_string())?;
+    file.write_all(&content)
+        .map_err(|error| error.to_string())?;
+    #[cfg(unix)]
+    {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn load_dashboard(
+    client: &ApiClient,
+    primary_name: &str,
+    primary_origin: &str,
+    backends: &[CoreBackend],
+) -> Result<Value, String> {
+    let mut data = client.get("/api/health")?;
+    if let Ok(setup) = client.get("/api/setup") {
+        data["first_run"] = setup["first_run"].clone();
+    }
+    let primary_tasks = client.get("/api/tasks?limit=4")?;
+    let primary_tasks = primary_tasks["items"]
+        .as_array()
+        .cloned()
+        .ok_or("Risposta attività del Core principale non valida")?;
+    let mut summaries = vec![dashboard_backend_summary(
+        primary_name,
+        primary_origin,
+        &data,
+        primary_tasks,
+        None,
+    )];
+
+    let peer_summaries = std::thread::scope(|scope| {
+        let workers: Vec<_> = backends
+            .iter()
+            .map(|backend| scope.spawn(move || fetch_backend_summary(backend)))
+            .collect();
+        workers
+            .into_iter()
+            .enumerate()
+            .map(|(index, worker)| {
+                worker.join().unwrap_or_else(|_| {
+                    unavailable_backend_summary(
+                        &backend_display_name(&backends[index].origin),
+                        &backends[index].origin,
+                        "Aggiornamento del Core non riuscito.",
+                    )
+                })
+            })
+            .collect::<Vec<_>>()
+    });
+    summaries.extend(peer_summaries);
+    merge_dashboard_summaries(&mut data, summaries);
+    Ok(data)
+}
+
+fn fetch_backend_summary(backend: &CoreBackend) -> Value {
+    let name = backend_display_name(&backend.origin);
+    let client = match ApiClient::device_with_timeout(
+        &backend.origin,
+        backend.token.clone(),
+        Duration::from_secs(4),
+    ) {
+        Ok(client) => client,
+        Err(_) => {
+            return unavailable_backend_summary(
+                &name,
+                &backend.origin,
+                "Connessione al Core non riuscita.",
+            );
+        }
+    };
+    let health = match client.get("/api/health") {
+        Ok(health) => health,
+        Err(_) => {
+            return unavailable_backend_summary(
+                &name,
+                &backend.origin,
+                "Core non raggiungibile o non autorizzato.",
+            );
+        }
+    };
+    let (tasks, error) = match client.get("/api/tasks?limit=4") {
+        Ok(response) => match response["items"].as_array() {
+            Some(items) => (items.clone(), None),
+            None => (Vec::new(), Some("Riepilogo attività non disponibile.")),
+        },
+        Err(_) => (Vec::new(), Some("Riepilogo attività non disponibile.")),
+    };
+    dashboard_backend_summary(&name, &backend.origin, &health, tasks, error)
+}
+
+fn unavailable_backend_summary(name: &str, origin: &str, error: &str) -> Value {
+    json!({
+        "name": name,
+        "origin": origin,
+        "online": false,
+        "ai_online": false,
+        "pending_confirmations": 0,
+        "notifications_unread": 0,
+        "automations": 0,
+        "audit_valid": null,
+        "recent_tasks": [],
+        "error": error,
+    })
+}
+
+fn dashboard_backend_summary(
+    name: &str,
+    origin: &str,
+    health: &Value,
+    tasks: Vec<Value>,
+    error: Option<&str>,
+) -> Value {
+    let online = health["core"]["status"] == "up";
+    let tasks: Vec<_> = tasks
+        .into_iter()
+        .map(|task| {
+            json!({
+                "objective": task["objective"],
+                "state": task["state"],
+                "created_at": task["created_at"],
+                "backend": name,
+            })
+        })
+        .collect();
+    json!({
+        "name": name,
+        "origin": origin,
+        "online": online,
+        "ai_online": online && health["ai"]["status"] == "up",
+        "pending_confirmations": health["pending_confirmations"].as_u64().unwrap_or(0),
+        "notifications_unread": health["notifications_unread"].as_u64().unwrap_or(0),
+        "automations": health["automations"].as_u64().unwrap_or(0),
+        "audit_valid": health["audit"]["chain_valid"].as_bool(),
+        "recent_tasks": tasks,
+        "error": error,
+    })
+}
+
+fn merge_dashboard_summaries(data: &mut Value, summaries: Vec<Value>) {
+    let total = summaries.len() as u64;
+    let online = summaries
+        .iter()
+        .filter(|summary| summary["online"] == true)
+        .count() as u64;
+    let ai_online = summaries
+        .iter()
+        .filter(|summary| summary["ai_online"] == true)
+        .count() as u64;
+    let sum = |key: &str| {
+        summaries
+            .iter()
+            .filter(|summary| summary["online"] == true)
+            .map(|summary| summary[key].as_u64().unwrap_or(0))
+            .sum::<u64>()
+    };
+    let pending_confirmations = sum("pending_confirmations");
+    let notifications_unread = sum("notifications_unread");
+    let automations = sum("automations");
+    let all_audits_valid = online == total
+        && summaries
+            .iter()
+            .all(|summary| summary["audit_valid"] == true);
+    let mut tasks: Vec<Value> = summaries
+        .iter()
+        .flat_map(|summary| {
+            summary["recent_tasks"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .cloned()
+        })
+        .collect();
+    tasks.sort_by(|left, right| {
+        right["created_at"]
+            .as_str()
+            .cmp(&left["created_at"].as_str())
+    });
+    tasks.truncate(4);
+    let core_label = if total > 1 {
+        format!("{online}/{total} online")
+    } else {
+        data["core"]["status"].as_str().unwrap_or("—").to_owned()
+    };
+    let ai_label = if total > 1 {
+        format!("{ai_online}/{online} operativi")
+    } else {
+        data["ai"]["status"].as_str().unwrap_or("—").to_owned()
+    };
+    data["pending_confirmations"] = pending_confirmations.into();
+    data["notifications_unread"] = notifications_unread.into();
+    data["automations"] = automations.into();
+    data["audit"]["chain_valid"] = if online == total {
+        Value::Bool(all_audits_valid)
+    } else {
+        Value::Null
+    };
+    data["recent_tasks"] = tasks.into();
+    data["connected_backends"] = summaries.into();
+    data["aggregate"] = json!({
+        "total": total,
+        "online": online,
+        "ai_online": ai_online,
+        "core_label": core_label,
+        "ai_label": ai_label,
+        "all_online": online == total,
+    });
+}
+
 fn spawn_connection(tx: Sender<Event>) {
     std::thread::spawn(move || {
         let result = connect_core();
@@ -2266,6 +2930,11 @@ fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
     let accent = egui::Color32::from_rgb(35, 198, 244);
 
     painter.circle_filled(center, side * 0.47, egui::Color32::from_rgb(8, 24, 39));
+    painter.circle_filled(
+        center,
+        side * 0.39,
+        egui::Color32::from_rgba_unmultiplied(13, 89, 117, 18 + (pulse * 10.0) as u8),
+    );
     painter.circle_stroke(
         center,
         side * 0.43 + breath,
@@ -2276,19 +2945,29 @@ fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
         side * 0.36 - breath * 0.35,
         egui::Stroke::new(1.0, egui::Color32::from_rgb(32, 83, 112)),
     );
-    for angle in [
-        0.0_f32,
-        std::f32::consts::FRAC_PI_2,
-        std::f32::consts::PI,
-        std::f32::consts::PI * 1.5,
-    ] {
+    painter.circle_stroke(
+        center,
+        side * 0.31,
+        egui::Stroke::new(0.7, egui::Color32::from_rgba_unmultiplied(51, 125, 151, 90)),
+    );
+    for index in 0..12 {
+        let angle = std::f32::consts::TAU * index as f32 / 12.0;
         let direction = egui::Vec2::new(angle.cos(), angle.sin());
+        let inner = if index % 3 == 0 { 0.395 } else { 0.407 };
         painter.line_segment(
             [
-                center + direction * side * 0.405,
+                center + direction * side * inner,
                 center + direction * side * 0.435,
             ],
-            egui::Stroke::new(1.2, egui::Color32::from_rgb(61, 143, 171)),
+            egui::Stroke::new(
+                if index % 3 == 0 { 1.3 } else { 0.8 },
+                egui::Color32::from_rgba_unmultiplied(
+                    61,
+                    143,
+                    171,
+                    if index % 3 == 0 { 200 } else { 110 },
+                ),
+            ),
         );
     }
 
@@ -2306,6 +2985,11 @@ fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
     for index in 0..3 {
         let angle = start + time as f32 * 0.7 + index as f32 * std::f32::consts::TAU / 3.0;
         let point = center + egui::Vec2::new(angle.cos(), angle.sin()) * ring_radius;
+        painter.circle_filled(
+            point,
+            4.0 * unit,
+            egui::Color32::from_rgba_unmultiplied(35, 198, 244, 30),
+        );
         painter.circle_filled(point, 2.2 * unit, accent);
     }
 
@@ -2347,6 +3031,51 @@ fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
         ],
         egui::Color32::from_rgb(20, 57, 75),
         egui::Stroke::new(1.0, egui::Color32::from_rgb(39, 133, 160)),
+    ));
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            center + egui::vec2(-side * 0.055, side * 0.105),
+            center + egui::vec2(side * 0.055, side * 0.105),
+            center + egui::vec2(side * 0.065, side * 0.22),
+            center + egui::vec2(0.0, side * 0.245),
+            center + egui::vec2(-side * 0.065, side * 0.22),
+        ],
+        egui::Color32::from_rgb(17, 49, 66),
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(40, 124, 151)),
+    ));
+    painter.line_segment(
+        [
+            center + egui::vec2(-side * 0.045, side * 0.205),
+            center + egui::vec2(0.0, side * 0.225),
+        ],
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(71, 166, 188)),
+    );
+    painter.line_segment(
+        [
+            center + egui::vec2(side * 0.045, side * 0.205),
+            center + egui::vec2(0.0, side * 0.225),
+        ],
+        egui::Stroke::new(1.0, egui::Color32::from_rgb(71, 166, 188)),
+    );
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            face_center + egui::vec2(-side * 0.075, side * 0.115),
+            face_center + egui::vec2(-side * 0.12, side * 0.07),
+            face_center + egui::vec2(-side * 0.105, side * 0.015),
+            face_center + egui::vec2(-side * 0.075, side * 0.045),
+        ],
+        egui::Color32::from_rgb(20, 54, 72),
+        egui::Stroke::new(0.8, egui::Color32::from_rgb(46, 131, 157)),
+    ));
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            face_center + egui::vec2(side * 0.075, side * 0.115),
+            face_center + egui::vec2(side * 0.12, side * 0.07),
+            face_center + egui::vec2(side * 0.105, side * 0.015),
+            face_center + egui::vec2(side * 0.075, side * 0.045),
+        ],
+        egui::Color32::from_rgb(20, 54, 72),
+        egui::Stroke::new(0.8, egui::Color32::from_rgb(46, 131, 157)),
     ));
 
     let ear_y = face_center.y - side * 0.005;
@@ -2395,7 +3124,25 @@ fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
         ],
         egui::Stroke::new(1.1, egui::Color32::from_rgb(61, 142, 165)),
     ));
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            face_center + egui::vec2(0.0, -side * 0.19),
+            face_center + egui::vec2(side * 0.025, -side * 0.16),
+            face_center + egui::vec2(0.0, -side * 0.125),
+            face_center + egui::vec2(-side * 0.025, -side * 0.16),
+        ],
+        egui::Color32::from_rgb(24, 81, 102),
+        egui::Stroke::new(0.8, egui::Color32::from_rgb(75, 195, 220)),
+    ));
+    let eye_y = face_center.y - side * 0.025;
     for direction in [-1.0, 1.0] {
+        painter.line_segment(
+            [
+                face_center + egui::vec2(direction * side * 0.035, -side * 0.075),
+                face_center + egui::vec2(direction * side * 0.09, -side * 0.068),
+            ],
+            egui::Stroke::new(1.2, egui::Color32::from_rgb(57, 134, 158)),
+        );
         painter.line_segment(
             [
                 face_center + egui::vec2(direction * side * 0.13, -side * 0.12),
@@ -2405,13 +3152,12 @@ fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
         );
     }
 
-    let eye_y = face_center.y - side * 0.025;
     for direction in [-1.0, 1.0] {
         let eye = egui::pos2(face_center.x + direction * side * 0.064, eye_y);
         painter.circle_filled(
             eye,
             side * 0.049,
-            egui::Color32::from_rgba_unmultiplied(25, 167, 213, 24),
+            egui::Color32::from_rgba_unmultiplied(25, 167, 213, 24 + (pulse * 28.0) as u8),
         );
         painter.circle_stroke(
             eye,
@@ -2427,7 +3173,7 @@ fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
         );
         painter.circle_filled(
             egui::pos2(face_center.x + direction * side * 0.064, eye_y),
-            1.0 * unit,
+            1.0 * unit + pulse * 0.5 * unit,
             egui::Color32::from_rgb(206, 250, 255),
         );
     }
@@ -2747,6 +3493,118 @@ mod tests {
             "https://jarvis.example"
         );
         assert_eq!(available_pairing_url("https://removed.example", &[]), "");
+    }
+
+    #[test]
+    fn core_origins_are_normalized_and_reject_paths_or_credentials() {
+        assert_eq!(
+            normalize_core_origin(" https://jarvis.example/ ").unwrap(),
+            "https://jarvis.example"
+        );
+        assert!(normalize_core_origin("https://user:pass@jarvis.example").is_err());
+        assert!(normalize_core_origin("https://jarvis.example/api").is_err());
+        assert!(!is_https_url("http://jarvis.example"));
+    }
+
+    #[test]
+    fn dashboard_aggregates_available_cores_and_keeps_offline_results_partial() {
+        let mut data = json!({
+            "core": {"status": "up"},
+            "ai": {"status": "up"},
+            "audit": {"chain_valid": true}
+        });
+        merge_dashboard_summaries(
+            &mut data,
+            vec![
+                json!({
+                    "name": "primary.example",
+                    "origin": "https://primary.example",
+                    "online": true,
+                    "ai_online": true,
+                    "pending_confirmations": 2,
+                    "notifications_unread": 3,
+                    "automations": 4,
+                    "audit_valid": true,
+                    "recent_tasks": [
+                        {"created_at": "2026-11-22T10:00:00Z", "backend": "primary.example"}
+                    ]
+                }),
+                json!({
+                    "name": "offline.example",
+                    "origin": "https://offline.example",
+                    "online": false,
+                    "ai_online": false,
+                    "pending_confirmations": 0,
+                    "notifications_unread": 0,
+                    "automations": 0,
+                    "audit_valid": null,
+                    "recent_tasks": [],
+                    "error": "Core non raggiungibile o non autorizzato."
+                }),
+            ],
+        );
+
+        assert_eq!(data["aggregate"]["online"], 1);
+        assert_eq!(data["aggregate"]["total"], 2);
+        assert_eq!(data["core"]["status"], "up");
+        assert_eq!(data["aggregate"]["core_label"], "1/2 online");
+        assert_eq!(data["pending_confirmations"], 2);
+        assert_eq!(data["notifications_unread"], 3);
+        assert_eq!(data["automations"], 4);
+        assert!(data["audit"]["chain_valid"].is_null());
+        assert_eq!(data["recent_tasks"][0]["backend"], "primary.example");
+        assert_eq!(data["connected_backends"][1]["online"], false);
+    }
+
+    #[test]
+    fn backend_summary_exposes_only_selected_health_fields() {
+        let health = json!({
+            "core": {"status": "up", "secrets_store": "/private/example"},
+            "ai": {"status": "up", "error": "private detail"},
+            "audit": {"chain_valid": true, "events": 42},
+            "web": {"configured_host": "private.example"},
+            "pending_confirmations": 1,
+            "notifications_unread": 2,
+            "automations": 3
+        });
+        let summary =
+            dashboard_backend_summary("example", "https://example.test", &health, vec![], None);
+        assert_eq!(summary["online"], true);
+        assert_eq!(summary["pending_confirmations"], 1);
+        assert!(summary.get("web").is_none());
+        assert!(summary["core"].is_null());
+        assert!(summary["ai"].is_null());
+        assert!(!summary.to_string().contains("private"));
+    }
+
+    #[test]
+    fn backend_config_round_trips_with_restrictive_unix_permissions() {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "jarvis-desktop-backends-{}-{nonce}.json",
+            std::process::id()
+        ));
+        let backends = vec![CoreBackend {
+            origin: "https://core.example".into(),
+            token: "synthetic-device-token".into(),
+        }];
+        save_core_backends(&path, &backends).unwrap();
+        let loaded = load_core_backends(&path).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].origin, backends[0].origin);
+        assert_eq!(loaded[0].token, backends[0].token);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

@@ -20,11 +20,27 @@ impl ApiClient {
         Self::new(base, Some(("X-Jarvis-Device", token)))
     }
 
+    pub fn device_with_timeout(
+        base: &str,
+        token: String,
+        timeout: Duration,
+    ) -> Result<Self, String> {
+        Self::new_with_timeout(base, Some(("X-Jarvis-Device", token)), timeout)
+    }
+
     pub fn unauthenticated(base: &str) -> Result<Self, String> {
         Self::new(base, None)
     }
 
     fn new(base: &str, auth: Option<(&'static str, String)>) -> Result<Self, String> {
+        Self::new_with_timeout(base, auth, Duration::from_secs(30))
+    }
+
+    fn new_with_timeout(
+        base: &str,
+        auth: Option<(&'static str, String)>,
+        timeout: Duration,
+    ) -> Result<Self, String> {
         let mut base = Url::parse(base).map_err(|_| "Indirizzo del Core non valido")?;
         if !matches!(base.scheme(), "http" | "https")
             || base.host_str().is_none()
@@ -38,9 +54,7 @@ impl ApiClient {
         }
         base.set_path("/");
         Ok(Self {
-            agent: ureq::AgentBuilder::new()
-                .timeout(Duration::from_secs(30))
-                .build(),
+            agent: ureq::AgentBuilder::new().timeout(timeout).build(),
             base,
             auth,
         })

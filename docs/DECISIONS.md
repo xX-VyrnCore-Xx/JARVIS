@@ -1343,6 +1343,32 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza locale:** fmt Rust, `cargo check --target x86_64-pc-windows-gnu --locked` e `git diff --check` superati. L'host Linux non dispone di display grafico per catturare la UI in esecuzione.
 - **Documenti interessati:** `INTERFACE_AND_DEVICES.md`, ROADMAP.md e `apps/desktop/src-tauri/src/app.rs`.
 
+### ADR-0080 — Avatar HUD con dettagli vettoriali e motion coerente
+
+- **Data** 2026-11-22 · **Stato** implementata nel checkout.
+- **Decisione:** arricchire l'avatar egui con alone a bassa intensità, quadrante con tacche gerarchiche, punti orbitali, crest e visiera, dettagli delle guance e collarino. Le luci pulsano con l'animazione esistente; «Riduci animazioni» continua a congelare anello e intensità.
+- **Conseguenze:** avatar interamente vettoriale, scalabile e senza asset fotografici o rete. Il perimetro di disegno resta contenuto nel riquadro dell'avatar; intestazione, navigazione e scroll interno non cambiano.
+- **Evidenza locale:** `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check`, `cargo check --target x86_64-pc-windows-gnu --locked` e `git diff --check` superati; la cattura runtime richiede un desktop Windows o macOS.
+- **Documenti interessati:** `INTERFACE_AND_DEVICES.md`, ROADMAP.md e `apps/desktop/src-tauri/src/app.rs`.
+
+### ADR-0081 — Finitura coerente dell'interfaccia desktop
+
+- **Data** 2026-11-22 · **Stato** implementata nel checkout; collaudo visivo macOS/Windows sospeso.
+- **Decisione:** uniformare i controlli egui con angoli, contorni, stati attivi e target cliccabili più leggibili; evidenziare la sezione selezionata con un indicatore laterale; sostituire l'emoji delle notifiche con un pulsante testuale stabile tra font di piattaforma e presentare l'origine Core in un indicatore cromatico locale/remoto.
+- **Conseguenze:** stessa interfaccia e stessi flussi su Windows e macOS, senza modifiche a endpoint o credenziali. Intestazione e navigazione restano ancorate; lo scroll rimane nel pannello centrale.
+- **Evidenza locale:** `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check`, cross-check Windows `cargo check --target x86_64-pc-windows-gnu --locked` e `git diff --check` superati. Non disponibile una cattura runtime multipiattaforma nell'host Linux.
+- **Documenti interessati:** `INTERFACE_AND_DEVICES.md`, ROADMAP.md e `apps/desktop/src-tauri/src/app.rs`.
+
+### ADR-0082 — Riepiloghi in sola lettura da più Core nella Plancia
+
+- **Data** 2026-11-22 · **Stato** implementata nel checkout; build multipiattaforma e verifica grafica in attesa.
+- **Contesto:** il client desktop supportava un solo Core per volta. Il proprietario ha scelto di aggregare più Core simultaneamente solo nella Plancia; Chat, dettagli e azioni devono restare sul Core attivo. L'indisponibilità di un Core non deve bloccare i risultati degli altri.
+- **Decisione:** associare ciascun Core aggiuntivo tramite origine HTTPS e invito monouso, mantenendo credenziali separate nella configurazione locale con permessi restrittivi. Nella Plancia interrogare i Core aggiunti in parallelo con timeout breve e richieste di sola lettura a salute e attività; aggregare stati, conteggi e attività recenti, mostrando separatamente Core offline o parziali. Ridurre la risposta di salute ai campi necessari prima di inserirla nei riepiloghi. Le altre viste, la chat e le mutazioni continuano a usare esclusivamente il Core attivo. «Dimentica» rimuove la credenziale dal client, senza revocare il dispositivo remoto: la revoca è esplicita nella sezione Dispositivi del Core.
+- **Motivazione:** offre una panoramica simultanea senza cambiare routing delle scritture, cronologia o proprietà dei dati, e isola i guasti di rete.
+- **Conseguenze:** ogni Core resta autorità indipendente per dati, audit e autorizzazioni; il riepilogo usa solo ciò che la credenziale associata può leggere. Il conteggio delle notifiche è aggregato, ma l'elenco e le relative azioni restano sul Core attivo. I controlli visivi reali e la verifica multipiattaforma restano necessari.
+- **Evidenza:** test unitari desktop per normalizzazione HTTPS, round-trip e permessi `0600` su Unix, aggregazione con Core offline e minimizzazione della risposta salute. Build e lint vengono registrati nel checkpoint roadmap.
+- **Documenti interessati:** `README.md`, `INTERFACE_AND_DEVICES.md`, `ROADMAP.md` e app desktop egui.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.
