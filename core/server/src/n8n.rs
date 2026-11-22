@@ -1,7 +1,7 @@
 //! n8n isolato e gestito da JARVIS. Docker riceve solo comandi fissi e workflow da modelli interni.
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -10,63 +10,10 @@ use sha2::{Digest, Sha256};
 
 const IMAGE: &str = "docker.n8n.io/n8nio/n8n:2.48.7";
 const JOBS: &str = "n8n-jobs.json";
-
-fn docker_binary() -> PathBuf {
-    #[cfg(target_os = "macos")]
-    for path in [
-        "/usr/local/bin/docker",
-        "/Applications/Docker.app/Contents/Resources/bin/docker",
-    ] {
-        if std::path::Path::new(path).is_file() {
-            return path.into();
-        }
-    }
-    #[cfg(windows)]
-    if let Some(root) = std::env::var_os("ProgramFiles") {
-        let path = PathBuf::from(root).join("Docker/Docker/resources/bin/docker.exe");
-        if path.is_file() {
-            return path;
-        }
-    }
-    "docker".into()
-}
-
-/// Docker viene usato solo sul computer che ospita il Core.
-fn docker_host() -> String {
-    #[cfg(unix)]
-    {
-        let mut sockets = Vec::new();
-        #[cfg(target_os = "macos")]
-        if let Some(home) = std::env::var_os("HOME") {
-            sockets.push(PathBuf::from(home).join(".docker/run/docker.sock"));
-        }
-        if let Some(dir) = std::env::var_os("XDG_RUNTIME_DIR") {
-            sockets.push(PathBuf::from(dir).join("docker.sock"));
-        }
-        sockets.push(PathBuf::from("/var/run/docker.sock"));
-        if let Some(socket) = sockets
-            .iter()
-            .find(|socket| socket.is_absolute() && socket.exists())
-        {
-            return format!("unix://{}", socket.display());
-        }
-        "unix:///var/run/docker.sock".into()
-    }
-    #[cfg(windows)]
-    {
-        "npipe:////./pipe/docker_engine".into()
-    }
-}
+const JOBS_MAX_BYTES: u64 = 32 * 1024;
 
 fn docker(args: &[&str], input: Option<&[u8]>, timeout: Duration) -> Result<String, String> {
-    let mut cmd = Command::new(docker_binary());
-    cmd.env_remove("DOCKER_HOST")
-        .env_remove("DOCKER_CONTEXT")
-        .env_remove("DOCKER_TLS_VERIFY")
-        .env_remove("DOCKER_CERT_PATH")
-        .arg("--host")
-        .arg(docker_host());
-    crate::hide_console(&mut cmd);
+    let mut cmd = crate::container_runtime::docker_command();
     let mut child = cmd
         .args(args)
         .stdin(if input.is_some() {
@@ -84,9 +31,12 @@ fn docker(args: &[&str], input: Option<&[u8]>, timeout: Duration) -> Result<Stri
         std::thread::spawn(move || {
             let mut data = Vec::new();
             let mut pipe = pipe;
-            let _ = (&mut pipe).take(128 * 1024).read_to_end(&mut data);
-            let _ = std::io::copy(&mut pipe, &mut std::io::sink());
-            String::from_utf8_lossy(&data).into_owned()
+            let first_error = (&mut pipe).take(128 * 1024).read_to_end(&mut data).err();
+            let drain_error = std::io::copy(&mut pipe, &mut std::io::sink()).err();
+            match first_error.or(drain_error) {
+                Some(error) => Err(error),
+                None => Ok(String::from_utf8_lossy(&data).into_owned()),
+            }
         })
     };
     let stdout = read(Box::new(stdout));
@@ -100,18 +50,31 @@ fn docker(args: &[&str], input: Option<&[u8]>, timeout: Duration) -> Result<Stri
     }
     let until = Instant::now() + timeout;
     let status = loop {
-        match child.try_wait().map_err(|e| e.to_string())? {
-            Some(status) => break status,
-            None if Instant::now() >= until => {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() >= until => {
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err("Docker non ha risposto entro il tempo previsto".into());
             }
-            None => std::thread::sleep(Duration::from_millis(50)),
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!(
+                    "controllo del processo Docker non riuscito: {error}"
+                ));
+            }
         }
     };
-    let out = stdout.join().unwrap_or_default();
-    let err = stderr.join().unwrap_or_default();
+    let out = stdout
+        .join()
+        .map_err(|_| "lettura stdout Docker interrotta".to_string())?
+        .map_err(|error| format!("lettura stdout Docker non riuscita: {error}"))?;
+    let err = stderr
+        .join()
+        .map_err(|_| "lettura stderr Docker interrotta".to_string())?
+        .map_err(|error| format!("lettura stderr Docker non riuscita: {error}"))?;
     if status.success() {
         Ok(out)
     } else {
@@ -153,11 +116,8 @@ impl Manager {
         }
     }
 
-    fn jobs(&self) -> Vec<Value> {
-        std::fs::read(self.dir.join(JOBS))
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
+    fn jobs(&self) -> Result<Vec<Value>, String> {
+        read_jobs(&self.dir.join(JOBS))
     }
 
     fn state(&self) -> Result<Option<bool>, String> {
@@ -183,18 +143,26 @@ impl Manager {
     }
 
     pub fn status(&self) -> Value {
-        let jobs = self.jobs();
-        if !self.enabled() {
-            return json!({"enabled": false, "running": false, "items": jobs, "image": IMAGE});
-        }
-        match self.state() {
-            Ok(state) => {
-                json!({"enabled": true, "running": state == Some(true), "docker_connected": true, "container_created": state.is_some(), "items": jobs, "image": IMAGE})
+        let (jobs, jobs_error) = match self.jobs() {
+            Ok(jobs) => (jobs, None),
+            Err(error) => (Vec::new(), Some(error)),
+        };
+        let mut status = if !self.enabled() {
+            json!({"enabled": false, "running": false, "items": jobs, "image": IMAGE})
+        } else {
+            match self.state() {
+                Ok(state) => {
+                    json!({"enabled": true, "running": state == Some(true), "docker_connected": true, "container_created": state.is_some(), "items": jobs, "image": IMAGE})
+                }
+                Err(error) => {
+                    json!({"enabled": true, "running": false, "docker_connected": false, "items": jobs, "error": error, "image": IMAGE})
+                }
             }
-            Err(error) => {
-                json!({"enabled": true, "running": false, "docker_connected": false, "items": jobs, "error": error, "image": IMAGE})
-            }
+        };
+        if let Some(error) = jobs_error {
+            status["jobs_error"] = json!(error);
         }
+        status
     }
 
     pub fn set_running(&self, running: bool) -> Result<Value, String> {
@@ -203,13 +171,17 @@ impl Manager {
         match (running, self.state()?) {
             (true, None) => {
                 let volume = format!("{}:/home/node/.n8n", self.name);
-                docker(&["run", "-d", "--name", &self.name, "--label", "local.jarvis.n8n=1",
+                docker(&["run", "-d", "--init", "--read-only", "--user", "1000:1000",
+                    "--tmpfs", "/tmp:rw,noexec,nosuid,nodev,size=64m",
+                    "--tmpfs", "/home/node/.cache:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700",
+                    "--log-driver", "local", "--log-opt", "max-size=10m", "--log-opt", "max-file=3",
+                    "--name", &self.name, "--label", "local.jarvis.n8n=1",
                     "--network", "none", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
                     "--pids-limit", "256", "--memory", "768m", "--cpus", "1.5", "--restart", "unless-stopped", "--volume", &volume,
                     "-e", "N8N_LISTEN_ADDRESS=127.0.0.1",
                     "-e", "N8N_DIAGNOSTICS_ENABLED=false", "-e", "N8N_VERSION_NOTIFICATIONS_ENABLED=false",
                     "-e", "N8N_TEMPLATES_ENABLED=false", "-e", "N8N_COMMUNITY_PACKAGES_ENABLED=false",
-                    "-e", "N8N_BLOCK_ENV_ACCESS_IN_NODE=true",
+                    "-e", "N8N_BLOCK_ENV_ACCESS_IN_NODE=true", "-e", "N8N_RUNNERS_ENABLED=false",
                     "-e", "NODES_INCLUDE=[\"n8n-nodes-base.scheduleTrigger\",\"n8n-nodes-base.noOp\"]",
                     "-e", "EXECUTIONS_DATA_SAVE_ON_SUCCESS=all", "-e", "EXECUTIONS_DATA_MAX_AGE=24",
                     IMAGE], None, Duration::from_secs(180))?;
@@ -314,6 +286,14 @@ if (action === "create") {
             &[
                 "run",
                 "--rm",
+                "--init",
+                "--read-only",
+                "--user",
+                "1000:1000",
+                "--tmpfs",
+                "/tmp:rw,noexec,nosuid,nodev,size=64m",
+                "--tmpfs",
+                "/home/node/.cache:rw,noexec,nosuid,nodev,size=64m,uid=1000,gid=1000,mode=0700",
                 "--name",
                 &companion,
                 "-i",
@@ -329,6 +309,8 @@ if (action === "create") {
                 "N8N_DIAGNOSTICS_ENABLED=false",
                 "-e",
                 "N8N_VERSION_NOTIFICATIONS_ENABLED=false",
+                "-e",
+                "N8N_RUNNERS_ENABLED=false",
                 "--entrypoint",
                 "node",
                 IMAGE,
@@ -371,7 +353,7 @@ if (action === "create") {
         if self.state()? != Some(true) {
             return Err("Avvia il container n8n prima di creare la routine".into());
         }
-        let mut jobs = self.jobs();
+        let mut jobs = self.jobs()?;
         if jobs.len() >= 20 {
             return Err("Sono ammesse al massimo 20 routine".into());
         }
@@ -392,7 +374,7 @@ if (action === "create") {
     pub fn remove(&self, id: &str) -> Result<Value, String> {
         self.ensure_enabled()?;
         let _lock = self.mutex.lock().map_err(|e| e.to_string())?;
-        let mut jobs = self.jobs();
+        let mut jobs = self.jobs()?;
         let index = jobs
             .iter()
             .position(|job| job["id"] == id)
@@ -413,16 +395,20 @@ if (action === "create") {
         crate::backup::atomic_write(&self.dir.join(JOBS), &bytes).map_err(|e| e.to_string())
     }
 
-    pub fn completed(&self) -> Vec<Value> {
+    pub fn completed(&self) -> Result<Vec<Value>, String> {
         if !self.enabled() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
-        let Ok(_lock) = self.mutex.try_lock() else {
-            return Vec::new();
+        let _lock = match self.mutex.try_lock() {
+            Ok(lock) => lock,
+            Err(std::sync::TryLockError::WouldBlock) => return Ok(Vec::new()),
+            Err(std::sync::TryLockError::Poisoned(error)) => {
+                return Err(format!("blocco n8n non disponibile: {error}"))
+            }
         };
-        let mut jobs = self.jobs();
-        if jobs.is_empty() || self.state() != Ok(Some(true)) {
-            return Vec::new();
+        let mut jobs = self.jobs()?;
+        if jobs.is_empty() || self.state()? != Some(true) {
+            return Ok(Vec::new());
         }
         // Legge solo l’esito delle routine del catalogo, con connessione SQLite in sola lettura.
         let script = r#"const db = new (require("node:sqlite").DatabaseSync)("/home/node/.n8n/database.sqlite", {readOnly:true});
@@ -430,12 +416,10 @@ const query = db.prepare("SELECT max(id) AS latest FROM execution_entity WHERE w
 console.log(JSON.stringify(process.argv.slice(1).map(id => [id, query.get(id).latest])));"#;
         let mut args = vec!["exec", &self.name, "node", "-e", script];
         args.extend(jobs.iter().filter_map(|job| job["id"].as_str()));
-        let Ok(data) = docker(&args, None, Duration::from_secs(8)) else {
-            return Vec::new();
-        };
-        let Ok(executions) = serde_json::from_str::<Vec<(String, Option<u64>)>>(&data) else {
-            return Vec::new();
-        };
+        let data = docker(&args, None, Duration::from_secs(8))
+            .map_err(|error| format!("lettura delle esecuzioni n8n: {error}"))?;
+        let executions = serde_json::from_str::<Vec<(String, Option<u64>)>>(&data)
+            .map_err(|error| format!("risposta delle esecuzioni n8n non valida: {error}"))?;
         let mut completed = Vec::new();
         for job in &mut jobs {
             let latest = executions
@@ -447,12 +431,12 @@ console.log(JSON.stringify(process.argv.slice(1).map(id => [id, query.get(id).la
                 completed.push(job.clone());
             }
         }
-        completed
+        Ok(completed)
     }
 
     pub fn acknowledge(&self, completed: &[Value]) -> Result<(), String> {
         let _lock = self.mutex.lock().map_err(|e| e.to_string())?;
-        let mut jobs = self.jobs();
+        let mut jobs = self.jobs()?;
         for job in &mut jobs {
             let latest = completed
                 .iter()
@@ -466,6 +450,45 @@ console.log(JSON.stringify(process.argv.slice(1).map(id => [id, query.get(id).la
         }
         self.save(&jobs)
     }
+}
+
+fn read_jobs(path: &std::path::Path) -> Result<Vec<Value>, String> {
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("lettura delle routine n8n non riuscita: {error}")),
+    };
+    let mut bytes = Vec::new();
+    file.take(JOBS_MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("lettura delle routine n8n non riuscita: {error}"))?;
+    if bytes.len() as u64 > JOBS_MAX_BYTES {
+        return Err("archivio delle routine n8n troppo grande".into());
+    }
+    let jobs: Vec<Value> = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("archivio delle routine n8n non valido: {error}"))?;
+    for (index, job) in jobs.iter().enumerate() {
+        let valid_id = job["id"]
+            .as_str()
+            .is_some_and(|id| id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_hexdigit()));
+        let valid_name = job["name"].as_str().is_some_and(|name| {
+            !name.trim().is_empty()
+                && name.chars().count() <= 80
+                && !name.chars().any(char::is_control)
+        });
+        let valid_kind = matches!(job["kind"].as_str(), Some("audit" | "reminder"));
+        let valid_minutes = job["minutes"]
+            .as_u64()
+            .is_some_and(|minutes| (1..=59).contains(&minutes));
+        let valid_last_run = job["last_run"].is_null() || job["last_run"].as_u64().is_some();
+        if !valid_id || !valid_name || !valid_kind || !valid_minutes || !valid_last_run {
+            return Err(format!(
+                "archivio delle routine n8n non valido: elemento {}",
+                index + 1
+            ));
+        }
+    }
+    Ok(jobs)
 }
 
 fn workflow(id: &str, name: &str, minutes: u64) -> Value {
@@ -496,5 +519,137 @@ mod tests {
             5
         );
         assert_eq!(entry["nodes"][1]["type"], "n8n-nodes-base.noOp");
+    }
+
+    #[test]
+    fn missing_jobs_file_means_no_jobs() {
+        let path = std::env::temp_dir().join(format!(
+            "jarvis-n8n-missing-{}.json",
+            uuid::Uuid::new_v4().simple()
+        ));
+        assert!(read_jobs(&path).unwrap().is_empty());
+    }
+
+    #[test]
+    fn corrupt_jobs_file_is_reported_instead_of_reset() {
+        let dir =
+            std::env::temp_dir().join(format!("jarvis-n8n-jobs-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(JOBS);
+        std::fs::write(&path, b"{").unwrap();
+        assert!(read_jobs(&path).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn persisted_jobs_are_validated_before_use() {
+        let dir =
+            std::env::temp_dir().join(format!("jarvis-n8n-jobs-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(JOBS);
+        std::fs::write(
+            &path,
+            br#"[{"id":"invalid","name":"routine","kind":"reminder","minutes":5}]"#,
+        )
+        .unwrap();
+        assert!(read_jobs(&path).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn status_surfaces_a_corrupt_jobs_file() {
+        let dir = std::env::temp_dir().join(format!(
+            "jarvis-n8n-status-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(JOBS), b"{").unwrap();
+        let manager = Manager::new(dir.clone());
+        let status = manager.status();
+        assert_eq!(status["items"], json!([]));
+        assert!(status["jobs_error"].as_str().is_some());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn persisted_jobs_accept_the_current_saved_shape() {
+        let dir = std::env::temp_dir().join(format!(
+            "jarvis-n8n-valid-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(JOBS);
+        std::fs::write(
+            &path,
+            br#"[{"id":"0123456789abcdef0123456789abcdef","name":"routine","kind":"reminder","minutes":5,"last_run":12}]"#,
+        )
+        .unwrap();
+        let jobs = read_jobs(&path).unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0]["last_run"], 12);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn oversized_jobs_file_is_rejected_without_full_read() {
+        let dir = std::env::temp_dir().join(format!(
+            "jarvis-n8n-large-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(JOBS);
+        std::fs::write(&path, vec![b' '; (JOBS_MAX_BYTES + 1) as usize]).unwrap();
+        assert!(read_jobs(&path).is_err());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    #[ignore = "richiede Docker locale e l'immagine docker.n8n.io/n8nio/n8n:2.48.7"]
+    fn hardened_container_can_import_and_remove_a_routine() {
+        let dir = std::env::temp_dir().join(format!(
+            "jarvis-n8n-integration-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("n8n-enabled"), b"1").unwrap();
+        let manager = Manager::new(dir.clone());
+        let cleanup_name = manager.name.clone();
+
+        let result = (|| {
+            let status = manager.set_running(true)?;
+            assert_eq!(status["running"], true);
+            let status = manager.add(&json!({
+                "name": "routine di test",
+                "minutes": 1,
+                "kind": "reminder"
+            }))?;
+            let id = status["items"][0]["id"].as_str().unwrap();
+            manager.remove(id)?;
+            let status = manager.set_running(false)?;
+            assert_eq!(status["running"], false);
+            Ok::<(), String>(())
+        })();
+
+        if let Err(error) = &result {
+            let logs = docker(
+                &["logs", "--tail", "40", &cleanup_name],
+                None,
+                Duration::from_secs(8),
+            )
+            .unwrap_or_else(|log_error| log_error);
+            eprintln!("[n8n test] {error}; log container: {logs}");
+        }
+        let _ = docker(
+            &["rm", "-f", "-v", &cleanup_name],
+            None,
+            Duration::from_secs(15),
+        );
+        let _ = docker(
+            &["volume", "rm", &cleanup_name],
+            None,
+            Duration::from_secs(15),
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+        result.unwrap();
     }
 }

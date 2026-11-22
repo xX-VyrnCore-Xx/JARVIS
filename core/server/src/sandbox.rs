@@ -38,26 +38,29 @@ pub fn check_python(workspace: &Path, path: &str) -> Result<Value, ToolError> {
 }
 
 pub fn run_python(source: &str) -> Result<Value, ToolError> {
+    if source.len() as u64 > SOURCE_LIMIT {
+        return Err(error(
+            "code.invalid_source",
+            "Il codice Python supera 64 KiB",
+        ));
+    }
     isolated_python(source.as_bytes().to_vec(), &["-"])
 }
 
 fn docker() -> Command {
-    let mut cmd = Command::new("docker");
-    cmd.args(["--context", "default"]);
-    crate::hide_console(&mut cmd);
-    cmd
+    crate::container_runtime::docker_command()
 }
 
-fn limited_output(mut stream: impl Read) -> (String, bool) {
+fn limited_output(mut stream: impl Read) -> std::io::Result<(String, bool)> {
     let mut kept = Vec::new();
-    let _ = stream
+    stream
         .by_ref()
         .take(OUTPUT_LIMIT + 1)
-        .read_to_end(&mut kept);
+        .read_to_end(&mut kept)?;
     let truncated = kept.len() as u64 > OUTPUT_LIMIT;
     kept.truncate(OUTPUT_LIMIT as usize);
-    let _ = std::io::copy(&mut stream, &mut std::io::sink());
-    (String::from_utf8_lossy(&kept).into_owned(), truncated)
+    std::io::copy(&mut stream, &mut std::io::sink())?;
+    Ok((String::from_utf8_lossy(&kept).into_owned(), truncated))
 }
 
 fn isolated_python(source: Vec<u8>, args: &[&str]) -> Result<Value, ToolError> {
@@ -66,6 +69,7 @@ fn isolated_python(source: Vec<u8>, args: &[&str]) -> Result<Value, ToolError> {
         .args([
             "run",
             "--rm",
+            "--init",
             "--pull",
             "never",
             "--name",
@@ -131,9 +135,48 @@ fn isolated_python(source: Vec<u8>, args: &[&str]) -> Result<Value, ToolError> {
             }
         }
     };
-    let _ = write.join();
-    let (stdout, out_cut) = out.join().unwrap_or_default();
-    let (stderr, err_cut) = err.join().unwrap_or_default();
+    write
+        .join()
+        .map_err(|_| {
+            error(
+                "code.input_failed",
+                "Invio del codice al container non riuscito",
+            )
+        })?
+        .map_err(|_| {
+            error(
+                "code.input_failed",
+                "Invio del codice al container non riuscito",
+            )
+        })?;
+    let (stdout, out_cut) = out
+        .join()
+        .map_err(|_| {
+            error(
+                "code.output_failed",
+                "Lettura dell'output del container non riuscita",
+            )
+        })?
+        .map_err(|_| {
+            error(
+                "code.output_failed",
+                "Lettura dell'output del container non riuscita",
+            )
+        })?;
+    let (stderr, err_cut) = err
+        .join()
+        .map_err(|_| {
+            error(
+                "code.output_failed",
+                "Lettura dell'output del container non riuscita",
+            )
+        })?
+        .map_err(|_| {
+            error(
+                "code.output_failed",
+                "Lettura dell'output del container non riuscita",
+            )
+        })?;
     let status =
         status.ok_or_else(|| error("code.timeout", "Sandbox interrotta per limite di tempo"))?;
     if matches!(status.code(), Some(125..=127)) {
@@ -155,9 +198,15 @@ mod tests {
     #[test]
     fn keeps_output_bounded_while_draining() {
         let input = vec![b'x'; (OUTPUT_LIMIT * 2) as usize];
-        let (stdout, truncated) = limited_output(input.as_slice());
+        let (stdout, truncated) = limited_output(input.as_slice()).unwrap();
         assert!(truncated);
         assert_eq!(stdout.len() as u64, OUTPUT_LIMIT);
+    }
+
+    #[test]
+    fn oversized_inline_code_is_refused_before_docker() {
+        let source = "x".repeat(SOURCE_LIMIT as usize + 1);
+        assert_eq!(run_python(&source).unwrap_err().code, "code.invalid_source");
     }
 
     #[test]

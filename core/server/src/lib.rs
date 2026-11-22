@@ -16,6 +16,7 @@ pub mod cloud;
 pub mod config;
 pub mod connector_catalog;
 pub mod connectors;
+mod container_runtime;
 pub mod memory;
 pub mod n8n;
 pub mod node_agent;

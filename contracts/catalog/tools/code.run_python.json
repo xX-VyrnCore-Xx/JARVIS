@@ -32,7 +32,9 @@
   "errors": [
     "code.unavailable",
     "code.timeout",
-    "code.invalid_source"
+    "code.invalid_source",
+    "code.input_failed",
+    "code.output_failed"
   ],
   "timeout_ms": 20000,
   "retry": {

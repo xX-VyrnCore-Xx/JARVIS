@@ -59,6 +59,12 @@ Dettagli in ADR-0005.
 
 **Modifica (ADR-0008):** nome, frequenza, passi e comportamento in caso di errore si modificano dalla chat («modifica automazione <id> ogni 2 ore», «modifica automazione <id>: info sistema», «rinomina automazione <id> in …») o dall'interfaccia. Ogni modifica crea una nuova versione con una nuova approvazione; le versioni precedenti e il legame fra esecuzione e versione restano consultabili.
 
+**n8n locale (ADR-0053, ADR-0090):** n8n offre solo routine predefinite di promemoria e verifica dell'audit, fino a 20, pianificate ogni 1–59 minuti. I workflow sono generati dal Core con nodi fissi; non vengono importati workflow arbitrari né eseguiti codice o credenziali utente. Ogni esecuzione riuscita produce una notifica locale. n8n è disabilitato finché il proprietario non lo abilita; il Core applica la policy e mantiene il proprio scheduler per le automazioni `jarvis.workflow/1`.
+
+Il servizio usa l'immagine versionata `docker.n8n.io/n8nio/n8n:2.48.7`, l'utente non root `1000:1000`, filesystem root in sola lettura, cache e `/tmp` temporanei, rete Docker disabilitata, capability rimosse, `no-new-privileges`, task runner disabilitati, limiti di PID/memoria/CPU e log locali ruotati. Il solo volume persistente contiene i dati n8n; il container amministrativo condivide il volume solo mentre il servizio è fermo. Le chiamate Docker sono fissate al daemon locale. Lo stato delle routine corrotto o non leggibile viene segnalato, non interpretato come archivio vuoto.
+
+**Sandbox Python Docker:** `code.run_python` richiede conferma e limita il sorgente a 64 KiB, l'output a 8 KiB per stream e l'esecuzione a 12 secondi. Il container effimero usa l'immagine locale `python:3.13-alpine`, il daemon Docker locale, rete disabilitata, root filesystem in sola lettura, utente non root, nessun mount della workspace, capacità rimosse e limiti di processo, memoria e CPU. Non è un ambiente di produzione né una garanzia contro tutte le vulnerabilità del kernel Docker.
+
 
 **Più strumenti per richiesta (ADR-0037).** L'orchestratore esegue fino a 4 strumenti in sequenza per richiesta; ognuno passa da policy, audit ed eventuale conferma, e una proposta ripetuta chiude il ciclo. Con OAuth un 401 provoca un rinnovo immediato e una sola nuova chiamata.
 

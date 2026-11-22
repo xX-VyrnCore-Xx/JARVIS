@@ -1803,22 +1803,34 @@ pub fn spawn_scheduler(state: Shared, tick: std::time::Duration) -> tokio::task:
             .await;
             if state.n8n.enabled() {
                 let manager = state.n8n.clone();
-                if let Ok(completed) =
-                    tokio::task::spawn_blocking(move || manager.completed()).await
-                {
-                    if !completed.is_empty() {
+                match tokio::task::spawn_blocking(move || manager.completed()).await {
+                    Ok(Ok(completed)) if !completed.is_empty() => {
                         let notices = completed.clone();
-                        if with_core(&state, move |j| j.n8n_notices(&notices))
-                            .await
-                            .is_ok()
-                        {
-                            let manager = state.n8n.clone();
-                            let _ = tokio::task::spawn_blocking(move || {
-                                manager.acknowledge(&completed)
-                            })
-                            .await;
+                        match with_core(&state, move |j| j.n8n_notices(&notices)).await {
+                            Ok(()) => {
+                                let manager = state.n8n.clone();
+                                match tokio::task::spawn_blocking(move || {
+                                    manager.acknowledge(&completed)
+                                })
+                                .await
+                                {
+                                    Ok(Ok(())) => {}
+                                    Ok(Err(error)) => {
+                                        eprintln!("[n8n] conferma esecuzioni non riuscita: {error}")
+                                    }
+                                    Err(error) => {
+                                        eprintln!("[n8n] conferma esecuzioni interrotta: {error}")
+                                    }
+                                }
+                            }
+                            Err(error) => {
+                                eprintln!("[n8n] registrazione notifiche non riuscita: {error:?}")
+                            }
                         }
                     }
+                    Ok(Ok(_)) => {}
+                    Ok(Err(error)) => eprintln!("[n8n] lettura esecuzioni non riuscita: {error}"),
+                    Err(error) => eprintln!("[n8n] controllo esecuzioni interrotto: {error}"),
                 }
             }
             // Aggiornamenti (ADR-0034): al massimo ogni ora, con la rete fuori dal blocco.

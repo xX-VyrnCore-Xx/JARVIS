@@ -1441,6 +1441,20 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** test per errori storage, migrazione non distruttiva e attivazione delle competenze; suite Core completa superata (76 test, 1 ignorato perché richiede Docker), fmt, Clippy con `-D warnings` e `git diff --check` superati. Test contratti (14) e AI (31; uno saltato per `openwakeword` assente) superati.
 - **Documenti interessati:** `AUTONOMY_AND_TOOLS.md`, `SECURITY_AND_PRIVACY.md`, `core/server/src/skills.rs`, `core/server/src/orchestrator.rs`.
 
+### ADR-0090 — Routine n8n affidabili e container Docker locali isolati
+
+- **Data:** 2026-11-22 · **Stato:** implementata nel checkout.
+- **Contesto:** il registro delle routine n8n trattava errori di lettura o JSON malformato come lista vuota; anche errori nel rilevamento delle esecuzioni riuscite e nella registrazione delle notifiche venivano nascosti. Il sandbox Python usava il contesto Docker predefinito, configurabile dall'ambiente/CLI, anziché fissare il daemon locale.
+- **Decisione:**
+  - Leggere e validare il registro delle routine prima di usarlo; trattare come vuoto solo il file non ancora creato e riportare errori o record non validi nello stato n8n. Propagare gli errori del controllo delle esecuzioni e registrare esplicitamente i fallimenti di notifica e acknowledgement.
+  - Usare un helper Docker condiviso che seleziona il socket locale o la pipe Docker locale e rimuove le variabili che possono reindirizzare il client a un daemon remoto. Applicarlo sia a n8n sia alla sandbox Python.
+  - Eseguire n8n come UID 1000 con root filesystem read-only, tmpfs limitati per `/tmp` e cache, `--init`, log driver locale con rotazione, rete disabilitata, capability drop, `no-new-privileges`, task runner disabilitati e limiti di risorse. Applicare le restrizioni filesystem anche al container amministrativo, che usa il volume persistente solo a servizio fermo.
+  - Limitare il sorgente Python inline a 64 KiB e rendere espliciti gli errori di invio/lettura degli stream del container.
+- **Motivazione:** preservare gli archivi in caso di guasto, rendere visibili esecuzioni perse e ridurre privilegi e scritture del container senza ampliare la rete, gli strumenti n8n o le capacità delle automazioni.
+- **Conseguenze:** le routine n8n restano solo promemoria e verifiche audit predefinite, non workflow arbitrari. L'immagine fissata è `docker.n8n.io/n8nio/n8n:2.48.7`; la cache n8n deve restare temporanea ma scrivibile dall'UID 1000. Il daemon Docker locale resta una superficie privilegiata dell'host.
+- **Evidenza:** suite Core (`cargo test --manifest-path core/Cargo.toml --locked -p jarvis-core`: 84 test unitari superati, tutte le suite d'integrazione superate; due test Docker normalmente ignorati sono stati eseguiti separatamente e superati), 14 test contratti, fmt, Clippy con `-D warnings` e `git diff --check`; integrazione n8n con avvio, importazione e rimozione della routine; smoke test Python Docker con rete disabilitata e senza workspace; test per sorgente oltre 64 KiB, archivio n8n corrotto/non valido ed endpoint Docker locale.
+- **Documenti interessati:** `AUTONOMY_AND_TOOLS.md`, `SECURITY_AND_PRIVACY.md`, `core/server/src/container_runtime.rs`, `core/server/src/n8n.rs`, `core/server/src/sandbox.rs`, `core/server/src/api.rs`.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.
