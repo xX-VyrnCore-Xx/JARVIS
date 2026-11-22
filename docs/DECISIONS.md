@@ -1243,7 +1243,6 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - La CI sostituisce Chromium/Playwright con un test API offline (`tests/e2e/api_smoke.cjs`) e compila/testa il client desktop su Linux, macOS e Windows. Il workflow release produce DMG egui e installer NSIS. Il fixture E2E del token rispetta la validazione del Core (almeno 32 caratteri alfanumerici). I pacchetti pubblicati sono firmati con un certificato autofirmato privato su macOS e Windows, senza firma commerciale o notarizzazione.
 - **Conseguenze:** la UI desktop non ha ancora parità con la dashboard rimossa: controlli vocali, moduli guidati completi per connettori/configurazione, viste tipizzate per alcuni pannelli e comportamento tray restano da implementare nei client nativi. La cronologia testuale della conversazione viene ripristinata all'apertura della chat. Queste lacune non autorizzano a reintrodurre il client Web.
 - **Evidenze locali:** `cargo fmt --check`, Clippy e `cargo test --locked` del Core superati (un test Docker ignorato); test launcher 4/4; test `:core-client:test` Gradle superati; `tests/e2e/api_smoke.cjs` 15/15; `tests/smoke/start_smoke.py` 6/6 senza route Web; test Python e contratti superati (un test voce ignorato perché `openwakeword` non è installato). La prima CI ha individuato che il test di avvio leggeva ancora il token dalla pagina `/`; corretto per usare il token fixture passato dall'ambiente. Esito della CI aggiornata ancora atteso.
-- **Configurazione proprietario:** i certificati autofirmati restano da creare e registrare nei Secrets Actions; Firebase è validato localmente ma l'integrazione non può leggere/scrivere GitHub Actions variables con il token della sessione (HTTP 403). Nessun file di configurazione Google è tracciato da Git.
 - **Documenti interessati:** README.md, ROADMAP.md, DEVELOPMENT.md, TECH_STACK.md, INTERFACE_AND_DEVICES.md, REQUIREMENTS.md e DEVOPS_QA_OBSERVABILITY.md.
 
 ### ADR-0068 — Firma desktop automatica con Secret e fallback temporaneo
@@ -1264,7 +1263,7 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 
 ### Decisione operativa — Merge automatico con CI verde
 
-- **Data:** 2026-11-17 · **Fonte:** richiesta esplicita del proprietario in sessione («merge sempre se CI verde automaticamente»).
+- **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.
 - **Regola:** dettagliata in [DEVELOPMENT.md](DEVELOPMENT.md#integrazione-delle-modifiche).
 
 ## Aggiornamento del registro

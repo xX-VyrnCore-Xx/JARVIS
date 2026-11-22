@@ -26,50 +26,9 @@ credenziale FCM e non va caricato nelle Actions. Può però servire per autorizz
 separati Gmail/Google Calendar: in tal caso configura l'ID client nel connettore e conserva il
 client secret nell'archivio cifrato del Core, dopo il consenso esplicito agli scope richiesti.
 
-## Connettori Gmail e Google Calendar
+## Connettori Google
 
-Per collegare l'account Google con il client OAuth desktop, imposta temporaneamente un token Core
-conosciuto nei due terminali locali:
-
-```bash
-mkdir -p data
-umask 077
-python3 -c 'import secrets; print(secrets.token_hex(32))' > data/.google-oauth-token
-export JARVIS_TOKEN="$(cat data/.google-oauth-token)"
-./jarvis.sh
-```
-
-In un secondo terminale, dalla stessa radice:
-
-```bash
-export JARVIS_TOKEN="$(cat data/.google-oauth-token)"
-python3 scripts/configure_google_connectors.py "$HOME/.jarvis/google/client_secret.json"
-```
-
-Lo script accetta solo un Core HTTP su loopback, installa i manifest Gmail e Calendar, invia il
-client secret al Core localmente e apre i due flussi Google nel browser. Conferma personalmente
-gli scope richiesti: Gmail `gmail.readonly`/`gmail.compose` e Calendar `calendar.readonly`/
-`calendar.events`. Il Core conserva i token OAuth nel proprio archivio cifrato; Google deve
-riconoscere il tuo account come utente di test se il progetto OAuth è in modalità Testing. Il Core
-aggiunge `access_type=offline` per ricevere un refresh token e usa il redirect loopback richiesto da
-Google Desktop (`http://127.0.0.1:<porta>`, senza percorso). La radice `/` resta 404 salvo quando
-riceve il `state` di un callback OAuth valido. Non eseguire questo flusso su un Core remoto o non
-fidato.
-
-Dopo che entrambi i connettori risultano autorizzati, arresta il Core e rimuovi il token temporaneo e
-il file client OAuth dal checkout:
-
-```bash
-rm -- data/.google-oauth-token "$HOME/.jarvis/google/client_secret.json"
-```
-
-La chiave privata OAuth non va committata né registrata nelle GitHub Actions. Se i connettori sono
-già autorizzati, il Core non ha bisogno del file client per continuare a usare i token cifrati.
-
-La build Android legge gli stessi valori da variabili d'ambiente o proprietà Gradle con prefisso
-`jarvisFirebase` (per esempio `JARVIS_FIREBASE_PROJECT_ID` o
-`-PjarvisFirebaseProjectId=...`). Senza i quattro valori l'APK è costruibile, ma l'attivazione push
-resta disabilitata. La release GitHub rifiuta una configurazione parziale.
+Gmail e Calendar usano un’autorizzazione OAuth separata dalle notifiche push. Configura il client sul Core locale e approva gli ambiti nel browser. Conserva credenziali e token nell’archivio protetto del Core. Usa configurazioni sintetiche quando documenti o testi il flusso.
 
 ## Credenziale server sul Core
 
