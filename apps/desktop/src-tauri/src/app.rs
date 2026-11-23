@@ -22,13 +22,14 @@ const POSITIVE: egui::Color32 = egui::Color32::from_rgb(105, 220, 174);
 const CAUTION: egui::Color32 = egui::Color32::from_rgb(245, 190, 96);
 const NEGATIVE: egui::Color32 = egui::Color32::from_rgb(255, 125, 135);
 
-const NAV: [(&str, &str, bool); 14] = [
+const NAV: [(&str, &str, bool); 15] = [
     ("dashboard", "Plancia", true),
     ("chat", "Chat", false),
     ("tasks", "Attività", false),
     ("automations", "Automazioni", true),
     ("memory", "Memoria", true),
     ("skills", "Competenze", true),
+    ("missions", "Missioni", true),
     ("workspace", "Workspace", true),
     ("connectors", "Connettori", true),
     ("devices", "Dispositivi", true),
@@ -121,6 +122,10 @@ pub struct JarvisApp {
     setup_stt: String,
     setup_tts: String,
     connector_template: String,
+    mission_goal: String,
+    mission_every: String,
+    mission_connectors: bool,
+    proactive_times: Option<[String; 3]>,
     connector_client_id: String,
     connector_credential: String,
     connector_oauth_notice: Option<String>,
@@ -223,6 +228,10 @@ impl JarvisApp {
             setup_stt: "small".into(),
             setup_tts: "it_IT-paola-medium".into(),
             connector_template: String::new(),
+            mission_goal: String::new(),
+            mission_every: String::new(),
+            mission_connectors: false,
+            proactive_times: None,
             connector_client_id: String::new(),
             connector_credential: String::new(),
             connector_oauth_notice: None,
@@ -963,6 +972,7 @@ impl JarvisApp {
             "system" => self.show_setup(ui, ctx),
             "connectors" => self.show_connectors(ui, ctx),
             "memory" => self.show_memory(ui, ctx),
+            "missions" => self.show_missions(ui, ctx),
             "tasks" | "automations" | "skills" | "workspace" | "devices" | "security" | "audit" => {
                 ui.horizontal(|ui| {
                     ui.heading(title(&self.current));
@@ -995,6 +1005,210 @@ impl JarvisApp {
             }
             _ => {}
         }
+    }
+
+    /// Missioni autonome e iniziative proattive (ADR-0096, ADR-0097).
+    fn show_missions(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.horizontal(|ui| {
+            ui.heading("Missioni");
+            if ui.button("Aggiorna").clicked() {
+                self.data = None;
+                self.refresh(ctx);
+            }
+            if self.loading {
+                ui.add(egui::Spinner::new());
+            }
+        });
+        if let Some(error) = &self.error {
+            ui.colored_label(NEGATIVE, error);
+        }
+        let Some(data) = self.data.clone() else {
+            return;
+        };
+        ui.label(
+            "Obiettivi che JARVIS persegue da solo in background, con strumenti che non chiedono conferma, \
+             e un rapporto a ogni esecuzione.",
+        );
+        if data["cloud"] != true {
+            ui.colored_label(
+                CAUTION,
+                "Nessun modello cloud configurato: le missioni usano solo i comandi locali (Modelli AI).",
+            );
+        }
+        egui::Frame::new()
+            .fill(SURFACE)
+            .corner_radius(14)
+            .inner_margin(12)
+            .show(ui, |ui| {
+                ui.strong("Nuova missione");
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.mission_goal)
+                        .desired_rows(2)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("Es. «Ogni mattina controlla le novità su Rust e riassumile»"),
+                );
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Ripeti ogni (minuti, facoltativo)");
+                    ui.add(egui::TextEdit::singleline(&mut self.mission_every).desired_width(70.0));
+                    ui.checkbox(&mut self.mission_connectors, "Può usare i connettori");
+                });
+                let goal = self.mission_goal.trim().to_string();
+                let every = self.mission_every.trim().parse::<u64>().ok();
+                let invalid_every = !self.mission_every.trim().is_empty() && every.is_none();
+                if invalid_every {
+                    ui.colored_label(
+                        CAUTION,
+                        "L'intervallo è un numero di minuti (da 5 a 10080).",
+                    );
+                }
+                let ready = goal.chars().count() >= 8 && !invalid_every;
+                if ui
+                    .add_enabled(ready, egui::Button::new("Avvia missione"))
+                    .clicked()
+                {
+                    let mut body = json!({"goal": goal, "connectors": self.mission_connectors});
+                    if let Some(minutes) = every {
+                        body["every_minutes"] = json!(minutes);
+                    }
+                    self.act(ctx, "/api/missions".into(), Some(body));
+                    self.mission_goal.clear();
+                    self.mission_every.clear();
+                }
+            });
+        ui.add_space(8.0);
+        let items = data["items"].as_array().cloned().unwrap_or_default();
+        if items.is_empty() {
+            ui.label(
+                "Nessuna missione. Creane una qui sopra o scrivi in chat «avvia una missione: …».",
+            );
+        }
+        for item in &items {
+            self.show_mission(ui, ctx, item);
+        }
+        ui.add_space(12.0);
+        self.show_proactive(ui, ctx, &data["proactive"]);
+    }
+
+    fn show_mission(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, item: &Value) {
+        let id = item["id"].as_str().unwrap_or_default().to_string();
+        let status = item["status"].as_str().unwrap_or_default();
+        let (label, color) = match status {
+            "active" => ("attiva", POSITIVE),
+            "paused" => ("in pausa", CAUTION),
+            "completed" => ("completata", ACCENT),
+            "failed" => ("interrotta", NEGATIVE),
+            _ => ("annullata", egui::Color32::GRAY),
+        };
+        ui.group(|ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.colored_label(color, label);
+                ui.strong(item["goal"].as_str().unwrap_or("Missione"));
+            });
+            let mut meta = vec![
+                format!("id {id}"),
+                format!("{} esecuzioni su {}", item["runs"], item["max_runs"]),
+            ];
+            if let Some(minutes) = item["every_minutes"].as_u64() {
+                meta.push(format!("ogni {minutes} minuti"));
+            }
+            if let Some(next) = item["next_run_at"].as_str() {
+                meta.push(format!("prossima: {next}"));
+            }
+            ui.small(meta.join(" · "));
+            if let Some(result) = item["result"].as_str() {
+                ui.label(result);
+            } else if let Some(last) = item["journal"].as_array().and_then(|j| j.last()) {
+                ui.label(last["summary"].as_str().unwrap_or_default());
+            }
+            if let Some(journal) = item["journal"].as_array().filter(|j| j.len() > 1) {
+                egui::CollapsingHeader::new(format!("Diario ({} esecuzioni)", journal.len()))
+                    .id_salt(format!("mission-journal-{id}"))
+                    .show(ui, |ui| {
+                        for entry in journal.iter().rev() {
+                            ui.small(entry["at"].as_str().unwrap_or_default());
+                            ui.label(entry["summary"].as_str().unwrap_or_default());
+                        }
+                    });
+            }
+            ui.horizontal_wrapped(|ui| {
+                let mut act = |ui: &mut egui::Ui, text: &str, action: &str| {
+                    if ui.button(text).clicked() {
+                        self.act(ctx, format!("/api/missions/{id}/{action}"), Some(json!({})));
+                    }
+                };
+                match status {
+                    "active" => {
+                        act(ui, "Esegui ora", "run");
+                        act(ui, "Pausa", "pause");
+                        act(ui, "Annulla", "cancel");
+                    }
+                    "paused" => {
+                        act(ui, "Riprendi", "resume");
+                        act(ui, "Annulla", "cancel");
+                    }
+                    _ => act(ui, "Elimina", "delete"),
+                }
+            });
+        });
+    }
+
+    fn show_proactive(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, settings: &Value) {
+        egui::Frame::new()
+            .fill(SURFACE)
+            .corner_radius(14)
+            .inner_margin(12)
+            .show(ui, |ui| {
+                ui.strong("Iniziative proattive");
+                ui.label(
+                    "JARVIS si fa avanti da solo: tutto è calcolato sul tuo computer e non esce dal Core. \
+                     Durante le ore di silenzio non invia nulla.",
+                );
+                let toggles = [
+                    ("enabled", "Iniziative attive"),
+                    ("briefing", "Briefing quotidiano"),
+                    ("disk", "Avvisi sullo spazio disco"),
+                    ("confirmations", "Promemoria delle conferme in attesa"),
+                    ("workflows", "Automazioni che continuano a fallire"),
+                    ("stale_todos", "Cose da fare lasciate indietro"),
+                ];
+                for (key, text) in toggles {
+                    let mut value = settings[key].as_bool().unwrap_or(false);
+                    if ui.checkbox(&mut value, text).changed() {
+                        self.mutate(ctx, Mutation::Patch, "/api/proactive".into(), Some(json!({key: value})));
+                    }
+                }
+                let times = self.proactive_times.get_or_insert_with(|| {
+                    ["briefing_time", "quiet_from", "quiet_to"]
+                        .map(|k| settings[k].as_str().unwrap_or("08:00").to_string())
+                });
+                let valid = times.iter().all(|t| {
+                    t.len() == 5 && t.as_bytes()[2] == b':' && t[..2].parse::<u8>().is_ok_and(|h| h < 24)
+                        && t[3..].parse::<u8>().is_ok_and(|m| m < 60)
+                });
+                ui.horizontal_wrapped(|ui| {
+                    for (index, text) in ["Briefing alle", "Silenzio dalle", "alle"].iter().enumerate() {
+                        ui.label(*text);
+                        ui.add(egui::TextEdit::singleline(&mut times[index]).desired_width(52.0));
+                    }
+                });
+                let snapshot = times.clone();
+                ui.horizontal(|ui| {
+                    if ui.add_enabled(valid, egui::Button::new("Salva orari")).clicked() {
+                        self.mutate(
+                            ctx,
+                            Mutation::Patch,
+                            "/api/proactive".into(),
+                            Some(json!({"briefing_time": snapshot[0], "quiet_from": snapshot[1], "quiet_to": snapshot[2]})),
+                        );
+                    }
+                    if ui.button("Briefing adesso").clicked() {
+                        self.act(ctx, "/api/proactive/briefing".into(), Some(json!({})));
+                    }
+                });
+                if !valid {
+                    ui.colored_label(CAUTION, "Usa il formato HH:MM, per esempio 08:00.");
+                }
+            });
     }
 
     fn show_dashboard(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -3626,6 +3840,7 @@ fn endpoint(page: &str) -> &'static str {
         "automations" => "/api/workflows",
         "memory" => "/api/memory",
         "skills" => "/api/skills",
+        "missions" => "/api/missions",
         "workspace" => "/api/workspace",
         "connectors" => "/api/connectors",
         "devices" => "/api/devices",

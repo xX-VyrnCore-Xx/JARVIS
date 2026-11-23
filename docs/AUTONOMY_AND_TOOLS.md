@@ -25,6 +25,10 @@ La sezione Connettori mostra lo schema dei parametri di ogni operazione. Il modu
 
 Le proposte di auto-evoluzione passano attraverso modifiche versionate, test isolati e i controlli di rilascio. La configurazione di sicurezza resta sotto controllo del proprietario.
 
+## Missioni e iniziative
+
+Una **missione** (ADR-0096) è un obiettivo che JARVIS persegue da solo: lo scheduler la avvia, un agente isolato usa solo strumenti senza conferma e a rischio non alto (lettura, note e promemoria) e ogni esecuzione termina con un rapporto e una notifica. Con una chiave cloud il modello decide i passi; senza, valgono i comandi locali. Ambito, policy, ripetizioni e audit sono quelli di ogni strumento, con identità `agent:mission`; un'azione che richiederebbe conferma viene descritta nel rapporto. Le **iniziative proattive** (ADR-0097) sono regole locali e deterministiche, con ore di silenzio: briefing quotidiano, spazio disco, conferme dimenticate, automazioni che falliscono, cose da fare lasciate indietro. Il briefing non interroga i connettori.
+
 ## Stato del prototipo v0.1
 
 Il catalogo iniziale è in `contracts/catalog/tools`, con un descrittore `jarvis.tool/1` per ogni strumento:

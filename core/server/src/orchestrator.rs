@@ -21,6 +21,10 @@ use crate::observability::{Observability, Timer};
 use crate::store::Store;
 use crate::{automation, now, policy, tools};
 
+mod initiatives;
+mod mission_runner;
+pub use mission_runner::{MissionRun, Next};
+
 /// Memoria nel contesto dell'agente (ADR-0022).
 const MEMORY_PROCEDURAL: usize = 20;
 const MEMORY_SMALL: usize = 30;
@@ -118,6 +122,17 @@ const MAX_STEPS: usize = 4;
 /// Agenti temporanei per richiesta e passi di ciascuno (ADR-0040).
 const MAX_SUBAGENTS: usize = 2;
 const SUBAGENT_STEPS: usize = 3;
+/// Strumenti per ciascuna esecuzione di una missione (ADR-0096).
+const MISSION_STEPS: usize = 5;
+
+/// Agente isolato in esecuzione (sotto-agente o missione): ruolo, strumenti concessi e passi consentiti.
+struct TempAgent {
+    role: String,
+    tools: Vec<String>,
+    steps: usize,
+    /// Identità nell'audit e nella policy: `temporary` o `mission`.
+    actor: &'static str,
+}
 /// Strumenti predefiniti di un agente temporaneo: sola lettura.
 const SUBAGENT_DEFAULT_TOOLS: [&str; 7] = [
     "time.now",
@@ -189,7 +204,9 @@ pub struct Jarvis {
     /// Porta TLS dei nodi e impronta del certificato del Core, se l'mTLS è attivo (ADR-0041).
     node_tls: Option<(u16, String)>,
     /// Agenti temporanei in esecuzione (ADR-0040): task figlio → ruolo e strumenti concessi.
-    temporary: HashMap<String, (String, Vec<String>)>,
+    temporary: HashMap<String, TempAgent>,
+    /// Ultima valutazione delle iniziative proattive (ADR-0097).
+    proactive_checked: Option<std::time::Instant>,
     obs: std::sync::Arc<Observability>,
     secrets: crate::secrets::SecretStore,
     push: crate::push::PushSubscriptions,
@@ -268,6 +285,7 @@ impl Jarvis {
             worker: None,
             pending: HashMap::new(),
             temporary: HashMap::new(),
+            proactive_checked: None,
             node_tls: None,
             obs: std::sync::Arc::new(Observability::new(Some(&cfg_logs))),
             secrets,
@@ -434,14 +452,14 @@ impl Jarvis {
             "task_id": task.id(),
             "objective": task.doc["objective"],
             "delegate": match (self.temporary.get(&task.id()), crate::agents::route(task.doc["objective"].as_str().unwrap_or_default())) {
-                (Some((role, _)), _) => json!({"agent": "temporary", "temporary": true, "role": role}),
+                (Some(agent), _) => json!({"agent": "temporary", "temporary": true, "role": agent.role}),
                 (None, Some(a)) => json!({"agent": a.name, "temporary": false, "role": a.role}),
                 (None, None) => json!({"agent": crate::agents::GENERAL, "temporary": false}),
             },
             "context": {"refs": [format!("jarvis://task/{}", task.id())]},
             "tools": tools.iter().map(|t| json!({"name": t.name(), "version": t.version()})).collect::<Vec<_>>(),
-            "limits": if self.temporary.contains_key(&task.id()) {
-                json!({"max_steps": SUBAGENT_STEPS, "max_subdelegations": 0, "allow_cloud": false})
+            "limits": if let Some(agent) = self.temporary.get(&task.id()) {
+                json!({"max_steps": agent.steps, "max_subdelegations": 0, "allow_cloud": false})
             } else {
                 json!({"max_steps": MAX_STEPS, "max_subdelegations": MAX_SUBAGENTS, "allow_cloud": false})
             },
@@ -552,7 +570,7 @@ impl Jarvis {
         let temporary = self
             .temporary
             .get(&task.id())
-            .map(|(_, tools)| tools.clone());
+            .map(|agent| agent.tools.clone());
         let objective = task.doc["objective"]
             .as_str()
             .unwrap_or_default()
@@ -1524,71 +1542,17 @@ impl Jarvis {
         );
         sub.transition("running", "Agente temporaneo in esecuzione");
         self.save(&sub)?;
-        self.temporary
-            .insert(sub.id(), (role.clone(), requested.clone()));
+        self.temporary.insert(
+            sub.id(),
+            TempAgent {
+                role: role.clone(),
+                tools: requested.clone(),
+                steps: SUBAGENT_STEPS,
+                actor: "temporary",
+            },
+        );
         let inputs = json!({"messages": [{"role": "user", "content": objective}], "memory": []});
-        let mut sub_out = Outcome::default();
-        let mut history: Vec<Value> = Vec::new();
-        let mut first = inputs.clone();
-        first["steps_left"] = json!(SUBAGENT_STEPS);
-        let mut result = self.call_agent(&sub, &first);
-        let reply = loop {
-            let r = match result {
-                Ok(r) => r,
-                Err(e) => break Err(e),
-            };
-            if r["kind"] == "reply" {
-                break Ok(r["text"].as_str().unwrap_or_default().to_string());
-            }
-            let call = &r["tool_call"];
-            let tool = call["tool"].as_str().unwrap_or_default().to_string();
-            let version = call["version"].as_str().unwrap_or_default().to_string();
-            let arguments = call["arguments"].clone();
-            let digest = canonical_digest(
-                &json!({"tool": tool, "version": version, "arguments": arguments}),
-            );
-            let (status, output) = if !self.task_allows(&sub, &tool)
-                || history.iter().any(|h| h["digest"] == digest.as_str())
-            {
-                (
-                    "denied",
-                    json!({"code": "policy.not_delegated", "message": policy::explain("policy.not_delegated")}),
-                )
-            } else {
-                let (sid, corr) = (sub.id(), sub.correlation());
-                let decision = policy::decide(
-                    &self.catalog,
-                    &self.cfg.web,
-                    &policy::Request {
-                        subject: json!({"kind": "agent", "id": "temporary"}),
-                        task_id: &sid,
-                        correlation_id: &corr,
-                        tool: &tool,
-                        version: &version,
-                        arguments: &arguments,
-                        digest: &digest,
-                    },
-                );
-                let allowed = decision["decision"] == "allow";
-                self.audit(json!({
-                    "correlation_id": corr, "task_id": sid, "actor": {"kind": "agent", "id": "temporary"}, "node": "core-local",
-                    "action": decision["request"]["action"]["tool"], "decision_id": decision["decision_id"],
-                    "outcome": if allowed { "allowed" } else { "denied" },
-                }))?;
-                if allowed {
-                    self.run_tool(&sub, &tool, &arguments, false, &mut sub_out)?
-                } else {
-                    let code = decision["reasons"][0].as_str().unwrap_or("policy.denied");
-                    (
-                        "denied",
-                        json!({"code": code, "message": policy::explain(code)}),
-                    )
-                }
-            };
-            history.push(step_record(&tool, &arguments, &digest, status, output));
-            let last = history.len() >= SUBAGENT_STEPS;
-            result = Ok(self.next_step(&sub, &inputs, &history, last, &mut sub_out));
-        };
+        let (reply, history) = self.run_agent_loop(&sub, &inputs)?;
         self.temporary.remove(&sub.id());
         let tools_used: Vec<Value> = history
             .iter()
@@ -1621,6 +1585,100 @@ impl Jarvis {
         );
         out.steps.push(json!({"kind": "subagent", "task_id": sub.id(), "role": role, "status": status, "tools": tools_used}));
         Ok((status, output))
+    }
+
+    /// Esegue una chiamata proposta da un agente isolato: ambito concesso, ripetizioni, policy e audit
+    /// (ADR-0040, ADR-0096). Restituisce impronta, esito e risultato; un rifiuto non è un errore del Core.
+    fn isolated_call(
+        &mut self,
+        sub: &Task,
+        actor: &str,
+        call: (&str, &str, &Value),
+        history: &[Value],
+        out: &mut Outcome,
+    ) -> Result<(String, &'static str, Value), CoreError> {
+        let (tool, version, arguments) = call;
+        let digest =
+            canonical_digest(&json!({"tool": tool, "version": version, "arguments": arguments}));
+        if !self.task_allows(sub, tool) || history.iter().any(|h| h["digest"] == digest.as_str()) {
+            return Ok((
+                digest,
+                "denied",
+                json!({"code": "policy.not_delegated", "message": policy::explain("policy.not_delegated")}),
+            ));
+        }
+        let (sid, corr) = (sub.id(), sub.correlation());
+        let decision = policy::decide(
+            &self.catalog,
+            &self.cfg.web,
+            &policy::Request {
+                subject: json!({"kind": "agent", "id": actor}),
+                task_id: &sid,
+                correlation_id: &corr,
+                tool,
+                version,
+                arguments,
+                digest: &digest,
+            },
+        );
+        let allowed = decision["decision"] == "allow";
+        self.audit(json!({
+            "correlation_id": corr, "task_id": sid, "actor": {"kind": "agent", "id": actor}, "node": "core-local",
+            "action": decision["request"]["action"]["tool"], "decision_id": decision["decision_id"],
+            "outcome": if allowed { "allowed" } else { "denied" },
+        }))?;
+        let (status, output) = if allowed {
+            self.run_tool(sub, tool, arguments, false, out)?
+        } else {
+            let code = decision["reasons"][0].as_str().unwrap_or("policy.denied");
+            (
+                "denied",
+                json!({"code": code, "message": policy::explain(code)}),
+            )
+        };
+        Ok((digest, status, output))
+    }
+
+    /// Ciclo di un agente isolato (ADR-0040, ADR-0096): propone strumenti uno alla volta, ciascuno passa dalla
+    /// policy e dall'ambito concesso, finché risponde o esaurisce i passi. Restituisce risposta (o errore) e storico.
+    fn run_agent_loop(
+        &mut self,
+        sub: &Task,
+        inputs: &Value,
+    ) -> Result<(Result<String, Value>, Vec<Value>), CoreError> {
+        let (steps, actor) = self
+            .temporary
+            .get(&sub.id())
+            .map_or((SUBAGENT_STEPS, "temporary"), |a| (a.steps, a.actor));
+        let mut sub_out = Outcome::default();
+        let mut history: Vec<Value> = Vec::new();
+        let mut first = inputs.clone();
+        first["steps_left"] = json!(steps);
+        let mut result = self.call_agent(sub, &first);
+        let reply = loop {
+            let r = match result {
+                Ok(r) => r,
+                Err(e) => break Err(e),
+            };
+            if r["kind"] == "reply" {
+                break Ok(r["text"].as_str().unwrap_or_default().to_string());
+            }
+            let call = &r["tool_call"];
+            let tool = call["tool"].as_str().unwrap_or_default().to_string();
+            let version = call["version"].as_str().unwrap_or_default().to_string();
+            let arguments = call["arguments"].clone();
+            let (digest, status, output) = self.isolated_call(
+                sub,
+                actor,
+                (&tool, &version, &arguments),
+                &history,
+                &mut sub_out,
+            )?;
+            history.push(step_record(&tool, &arguments, &digest, status, output));
+            let last = history.len() >= steps;
+            result = Ok(self.next_step(sub, inputs, &history, last, &mut sub_out));
+        };
+        Ok((reply, history))
     }
 
     /// Passo successivo dell'agente con i risultati raccolti finora. Con `last` l'agente non riceve strumenti
@@ -2745,6 +2803,7 @@ impl Jarvis {
     ) -> Result<Vec<Value>, CoreError> {
         let tolerance = chrono::Duration::seconds(self.cfg.scheduler_tick_s as i64 * 2 + 60);
         let mut runs = Vec::new();
+        self.proactive_poll(now_t);
         // Cose da fare scadute (ADR-0046): una notifica per ciascuna, una sola volta.
         let now_s = now_t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         for t in crate::toolbox::todos_due(&self.store, &now_s) {

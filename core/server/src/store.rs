@@ -16,7 +16,7 @@ pub struct Store {
 pub type StoreResult<T> = Result<T, rusqlite::Error>;
 
 /// Versione dello schema (ADR-0037): 1 = schema fino a 1.3.x con migrazioni additive; 3 = tracce dei task (ADR-0039); 4 = passkey (ADR-0042); 5 = note e cose da fare (ADR-0046).
-pub const SCHEMA_VERSION: i64 = 8;
+pub const SCHEMA_VERSION: i64 = 9;
 
 pub(crate) struct ConversationTurn {
     pub user: String,
@@ -79,7 +79,11 @@ impl Store {
                  tags TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS todos (id TEXT PRIMARY KEY, text TEXT NOT NULL, due_at TEXT, priority TEXT NOT NULL,
                  created_at TEXT NOT NULL, done_at TEXT, notified_at TEXT);
-             CREATE INDEX IF NOT EXISTS todos_open ON todos (done_at, due_at);",
+             CREATE INDEX IF NOT EXISTS todos_open ON todos (done_at, due_at);
+             CREATE TABLE IF NOT EXISTS missions (id TEXT PRIMARY KEY, doc TEXT NOT NULL, status TEXT NOT NULL,
+                 next_run_at TEXT, updated_at TEXT NOT NULL);
+             CREATE INDEX IF NOT EXISTS missions_due ON missions (status, next_run_at);
+             CREATE TABLE IF NOT EXISTS proactive_sent (key TEXT PRIMARY KEY, at TEXT NOT NULL);",
         )?;
         // Migrazione additiva: database creati prima delle fonti Web (RF-06).
         let has_sources = conn.prepare("SELECT sources FROM messages LIMIT 0").is_ok();
@@ -313,6 +317,95 @@ impl Store {
             [done_before],
         )?;
         Ok(runs + todos)
+    }
+
+    /// Crea o aggiorna una missione (ADR-0096); `next_run_at` vale solo per le missioni attive.
+    pub fn mission_put(&self, doc: &Value, next_run_at: Option<&str>) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT INTO missions (id, doc, status, next_run_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(id) DO UPDATE SET doc = excluded.doc, status = excluded.status,
+                 next_run_at = excluded.next_run_at, updated_at = excluded.updated_at",
+            params![
+                doc["id"].as_str(),
+                doc.to_string(),
+                doc["status"].as_str(),
+                next_run_at,
+                doc["updated_at"].as_str()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn mission_get(&self, id: &str) -> StoreResult<Option<(Value, Option<String>)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT doc, next_run_at FROM missions WHERE id = ?1")?;
+        let mut rows = stmt.query_map([id], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+        })?;
+        Ok(rows
+            .next()
+            .transpose()?
+            .and_then(|(doc, next)| serde_json::from_str(&doc).ok().map(|d| (d, next))))
+    }
+
+    /// Missioni dalla più recente; ciascun documento riporta anche `next_run_at`.
+    pub fn missions(&self, limit: u32) -> StoreResult<Vec<Value>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT doc, next_run_at FROM missions ORDER BY updated_at DESC LIMIT ?1")?;
+        let rows = stmt.query_map([limit], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+        })?;
+        Ok(rows
+            .flatten()
+            .filter_map(|(doc, next)| {
+                let mut doc: Value = serde_json::from_str(&doc).ok()?;
+                doc["next_run_at"] = json!(next);
+                Some(doc)
+            })
+            .collect())
+    }
+
+    /// Missioni attive la cui prossima esecuzione è scaduta, dalla più in ritardo.
+    pub fn missions_due(&self, now: &str, limit: u32) -> StoreResult<Vec<Value>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT doc FROM missions WHERE status = 'active' AND next_run_at IS NOT NULL AND next_run_at <= ?1
+             ORDER BY next_run_at LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![now, limit], |r| r.get::<_, String>(0))?;
+        Ok(rows
+            .flatten()
+            .filter_map(|doc| serde_json::from_str(&doc).ok())
+            .collect())
+    }
+
+    pub fn missions_open(&self) -> StoreResult<u32> {
+        self.conn.query_row(
+            "SELECT COUNT(*) FROM missions WHERE status IN ('active', 'paused')",
+            [],
+            |r| r.get(0),
+        )
+    }
+
+    pub fn mission_delete(&self, id: &str) -> StoreResult<bool> {
+        Ok(self
+            .conn
+            .execute("DELETE FROM missions WHERE id = ?1", [id])?
+            > 0)
+    }
+
+    /// Registra un'iniziativa proattiva: vero solo la prima volta per `key` (ADR-0097).
+    pub fn proactive_claim(&self, key: &str, at: &str) -> StoreResult<bool> {
+        Ok(self.conn.execute(
+            "INSERT OR IGNORE INTO proactive_sent (key, at) VALUES (?1, ?2)",
+            params![key, at],
+        )? == 1)
+    }
+
+    pub fn proactive_prune(&self, before: &str) -> StoreResult<usize> {
+        self.conn
+            .execute("DELETE FROM proactive_sent WHERE at < ?1", [before])
     }
 
     /// Versione dello schema registrata nel file (`PRAGMA user_version`).

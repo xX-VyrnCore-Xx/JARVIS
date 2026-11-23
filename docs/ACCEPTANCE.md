@@ -7,12 +7,12 @@ Questo documento raccoglie ciò che serve per l'accettazione finale descritta in
 | ID | Verifica automatica (CI) | Prova del proprietario | Esito automatico | Limite noto |
 |---|---|---|---|---|
 | RF-01 Conversazione | `core/server/tests/api.rs`, E2E | P1, P2 | Verde | Qualità con modelli reali da valutare |
-| RF-02 Orchestrazione | `api.rs`, `agent_loop.rs`, contratti task | — | Verde | Ciclo fino a 4 strumenti per richiesta (ADR-0037) |
+| RF-02 Orchestrazione | `api.rs`, `agent_loop.rs`, `missions.rs`, `orchestrator/mission_runner.rs`, contratti task | P18 | Verde | Ciclo fino a 4 strumenti per richiesta (ADR-0037); missioni autonome in background con strumenti senza conferma (ADR-0096); il ciclo guidato dal modello cloud va collaudato con una chiave reale |
 | RF-03 Agenti | contratti delega, `agents.rs`, `agent_loop.rs`, `subagents.rs`, `skills.rs`, `tests/ai` | P17 | Verde | 5 specializzazioni con ambito di strumenti (ADR-0038); agenti temporanei di sola lettura, un livello (ADR-0040); competenze del proprietario (ADR-0048) |
 | RF-04 AI Gateway | `tests/ai/test_gateway.py`, guasti in `resilience.rs` | P2 | Verde | Solo backend locali |
 | RF-05 Computer Use | strumenti file, sistema, processi e terminale; `api.rs`, `terminal.rs` | P3, P14 | Verde | Terminale con conferma a ogni comando (ADR-0038); niente controllo di desktop e mouse |
 | RF-06 Web | `web.rs` (SSRF, iniezioni), `browser.rs` (`tests/browser.rs`), E2E | P4, P15 | Verde | Navigazione con il browser del sistema (ADR-0043); niente sessioni con le credenziali del proprietario |
-| RF-07 Automazioni | `automation.rs`, E2E | P5 | Verde | — |
+| RF-07 Automazioni | `automation.rs`, `proactive.rs`, E2E | P5, P19 | Verde | Iniziative proattive locali: briefing, disco, conferme, automazioni in errore (ADR-0097) |
 | RF-08 Memoria | `api.rs`, `memory.rs`, E2E | P1 | Verde | Sinonimi con gli embedding di Ollama (ADR-0028); nessun PostgreSQL |
 | RF-09 Voce | `voice.rs`, `tests/ai/test_voice.py`, E2E con motori finti | P6 | Verde (finti) | Motori reali solo sul tuo computer |
 | RF-10 Client | E2E API; CI desktop macOS/Windows e Core headless Linux | P7, P8b | In corso | Test su dispositivi reali e parità UI ancora da completare |
@@ -66,6 +66,8 @@ Da eseguire sul proprio computer con una release o con i sorgenti. Annotare esit
 | P15 | Navigazione Web | Con Chrome o Edge installato: «naviga https://it.wikipedia.org e clicca Storia», poi «compila modulo <pagina con un modulo di prova>: campo=valore» e approva | Testo della pagina seguita con fonte; il modulo chiede conferma, mostra i campi e viene inviato solo dopo l'approvazione |
 | P16 | Gmail e Calendar | Sospesa fino al completamento della UI nativa guidata e alla configurazione del provider | Le API e il catalogo esistono; non verificato il flusso OAuth dal client nativo |
 | P17 | Competenze | In Competenze crea «Viaggi» con attivazione «itinerario», istruzioni «proponi un itinerario giorno per giorno» e strumento `weather.forecast`; in chat: «prepara un itinerario per Lisbona» | Passo «competenza · Viaggi», risposta che segue le istruzioni con il modello locale; disattivata, non si attiva più |
+| P18 | Missioni autonome | In Modelli AI salva una chiave cloud; in Missioni crea «controlla le novità su Rust e riassumile» con ripetizione ogni 60 minuti, oppure in chat «avvia una missione: …» e approva | Dopo al massimo un giro dello scheduler arriva una notifica «Missione, rapporto» con fatti e fonti; il diario registra gli strumenti usati; Pausa, Annulla ed Esegui ora funzionano; senza chiave la missione usa solo i comandi locali |
+| P19 | Iniziative proattive | In Missioni → Iniziative imposta il briefing fra due minuti e disattiva il silenzio; aggiungi una cosa da fare scaduta e premi «Briefing adesso» | Arriva «Buongiorno: …» con le cose da fare, le conferme e le notifiche reali; il briefing automatico arriva una sola volta al giorno e mai nelle ore di silenzio |
 
 ## Criteri di rilascio
 
