@@ -334,6 +334,7 @@ impl Jarvis {
             for (k, v) in &self.cfg.worker_env {
                 cmd.env(k, v);
             }
+            cmd.env_remove("JARVIS_TOKEN");
             let spawned = Worker::spawn(cmd).map_err(|e| e.to_contract());
             self.obs.count(if spawned.is_ok() {
                 "worker.spawned"

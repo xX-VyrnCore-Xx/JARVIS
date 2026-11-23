@@ -217,6 +217,8 @@ jobs:
           export JARVIS_TOKEN=jarvise2eownertoken0000000000000000
           JARVIS_HOME="$res" JARVIS_PYTHON="$res/python/bin/python3" JARVIS_DATA_DIR="$RUNNER_TEMP/dati" "$res/jarvis-core" > core.log 2>&1 &
           python tests/smoke/start_smoke.py http://127.0.0.1:8765 120 || { cat core.log; exit 1; }
+          JARVIS_HOME="$res" JARVIS_PYTHON="$res/python/bin/python3" \
+            python tests/smoke/macos_session.py "$res/jarvis-core" "$RUNNER_TEMP/dati-sessione"
       - name: Installazione reale (setup EXE) e avvio del Core installato (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

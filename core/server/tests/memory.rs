@@ -230,3 +230,33 @@ async fn same_fact_is_not_stored_twice_and_database_reports_health() {
     assert!(db["size_bytes"].as_i64().unwrap() > 0);
     let _ = std::fs::remove_dir_all(&env.data);
 }
+
+#[tokio::test]
+async fn credentials_are_rejected_by_memory_commands_and_owner_edits() {
+    let env = env();
+    let fixture = "client_secret=synthetic-value-only";
+    let rejected = env.chat(&format!("ricorda che {fixture}")).await;
+    assert_eq!(rejected["task"]["state"], "failed", "{rejected}");
+    assert!(texts(&env.items("").await)
+        .iter()
+        .all(|text| !text.contains(fixture)));
+    env.chat("ricorda che il cane si chiama Fido").await;
+    let items = env.items("?kind=semantic").await;
+    let item = items
+        .iter()
+        .find(|item| item["text"].as_str().unwrap_or_default().contains("Fido"))
+        .unwrap();
+    let id = item["id"].as_str().unwrap();
+    let (status, _) = env
+        .api(
+            "PATCH",
+            &format!("/api/memory/{id}"),
+            Some(json!({"text": fixture})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(texts(&env.items("").await)
+        .iter()
+        .all(|text| !text.contains(fixture)));
+    let _ = std::fs::remove_dir_all(&env.data);
+}

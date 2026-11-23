@@ -10,7 +10,7 @@ Scarica il pacchetto dalla pagina [Releases](https://github.com/xX-VyrnCore-Xx/J
 
 | Sistema | Pacchetto | Installazione |
 |---|---|---|
-| macOS Apple Silicon | `JARVIS_<versione>_aarch64.dmg` | Apri il DMG, trascina JARVIS in **Applicazioni**, attendi la copia e avvia l'app dalla cartella Applicazioni. |
+| macOS 14+ su Apple Silicon | `JARVIS_<versione>_aarch64.dmg` | Apri il DMG, trascina JARVIS in **Applicazioni**, attendi la copia e avvia l'app dalla cartella Applicazioni. |
 | Windows x64 | `JARVIS_<versione>_x64-setup.exe` | Avvia il wizard per l’utente corrente, scegli la cartella e avvia JARVIS facoltativamente al termine; crea collegamenti in Start e sul Desktop. |
 | Android | `JARVIS_<versione>_android-release.apk` | Installa l'APK release firmato (non usare APK di debug). |
 
@@ -45,7 +45,7 @@ Gli artefatti sono verificabili con l’attestazione GitHub e le firme Sigstore;
 |---|---|
 | Core | Rust, Axum, Tokio, Serde |
 | Worker locale | Python 3, JSON Lines su stdin/stdout, JSON Schema 2020-12 |
-| Desktop | Rust, egui/eframe su macOS e Windows; API HTTP del Core |
+| Desktop | SwiftUI su macOS, Rust ed egui su Windows; API del Core |
 | Mobile | Kotlin e Jetpack Compose su Android |
 | Dati e memoria | SQLite con rusqlite, FTS5/BM25, vettori lessicali locali e grafo delle conoscenze |
 | Inferenza | Ollama Cloud e NVIDIA NIM, routing per attività e budget, limiter NIM a 35 RPM |
@@ -77,11 +77,15 @@ Per un secondo desktop, imposta `JARVIS_REMOTE_URL` o salva l'origine HTTPS in `
 
 Nella Plancia desktop puoi associare altri Core con **Core collegati → Associa un altro Core**, usando per ciascuno un invito monouso generato nella sezione Dispositivi di quel Core. La Plancia aggrega stato, conteggi e attività recenti dei Core raggiungibili; per un Core offline o un riepilogo non disponibile i dati ignoti sono indicati come tali, non come zeri. Chat, viste dettagliate e azioni restano sul Core attivo e non vengono inoltrate ai Core aggiunti. Desktop e Android sullo stesso Core condividono la cronologia: le notifiche offrono i collegamenti supportati dal client; le altre viste non disponibili su Android sono indicate senza reindirizzamenti impropri. **Prepara la ripresa in chat** trasferisce l'obiettivo di un'attività come bozza da controllare e inviare.
 
+## Accesso da macOS
+
+Apri JARVIS e autentica la sessione con Touch ID o con la password del Mac. Il client avvia il Core dopo la verifica; chiudendo la finestra termina la sessione e i dispositivi associati perdono la connessione. Minimizzare e tornare in primo piano mantiene la sessione aperta. Per connettere un dispositivo serve comunque un Core raggiungibile tramite HTTPS privato, configurato come sopra.
+
 ## Usa JARVIS
 
 - **Chat.** Invia richieste al Core e consulta la cronologia della conversazione. Le azioni sensibili restano soggette a policy e conferma.
 - **Promemoria.** Chiedi «controlla le scadenze» o includi il controllo nel briefing: JARVIS evidenzia attività scadute e in scadenza entro 24 ore e propone come procedere. Puoi chiedere un orizzonte fino a sette giorni; nessuna attività viene modificata e nessun messaggio viene inviato automaticamente.
-- **Modelli cloud e voce.** La sezione Modelli AI dell'app desktop permette di configurare o rimuovere le chiavi per Ollama Cloud e NVIDIA NIM; il Core instrada le richieste al provider selezionato. Il runtime vocale è incluso nel Core, ma i controlli vocali non sono ancora disponibili nell'interfaccia desktop nativa.
+- **Modelli cloud e voce.** La sezione Modelli AI dell'app desktop permette di configurare o rimuovere le chiavi per Ollama Cloud e NVIDIA NIM; il Core instrada le richieste al provider selezionato. Su macOS configura la voce locale in Sistema. In Chat e voce puoi dettare, ascoltare le risposte e vedere l’avatar sincronizzato durante la riproduzione.
 - **Gmail e Google Calendar.** In **Connettori → Google Workspace**, seleziona il file JSON OAuth di tipo **App desktop** e completa il consenso nel browser. Puoi selezionare lo stesso file per entrambi i servizi. Abilita Gmail API e Google Calendar API nel progetto Google e aggiungi il tuo account agli utenti di test se la schermata di consenso è in modalità test. Dopo il consenso aggiorna Connettori e verifica che il servizio risulti autorizzato. L’accesso già configurato può essere rinnovato riusando il secret cifrato. Su un Core senza app desktop puoi usare `scripts/configure_google_connectors.py` con il token del proprietario in ambiente.
 - **Agenti temporanei.** Per abilitare risposte testuali locali ai compiti che il motore a regole non riconosce, installa un modello Ollama locale, ad esempio `ollama pull qwen2.5:3b`, e avvia JARVIS con `JARVIS_SUBAGENT_MODEL=qwen2.5:3b`. Il servizio Ollama deve essere raggiungibile su `127.0.0.1:11434`.
 - **Dispositivi e notifiche.** Associa client Android o desktop tramite invito monouso. Le notifiche push Android richiedono Firebase; il Core continua a conservarle anche quando un client non è connesso.

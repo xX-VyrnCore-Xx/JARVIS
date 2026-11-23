@@ -8,8 +8,12 @@ struct Record: Identifiable {
 
     init(_ data: [String: Any], index: Int) {
         self.data = data
-        id = ["id", "confirmation_id", "task_id", "device_id", "workflow_id", "notification_id", "connector_id", "name"]
-            .compactMap { data[$0] as? String }.first ?? "row-\(index)"
+        if let sequence = data["seq"] as? Int {
+            id = "message-\(sequence)"
+        } else {
+            id = ["id", "confirmation_id", "task_id", "device_id", "workflow_id", "notification_id", "event_id", "connector_id", "name"]
+                .compactMap { data[$0] as? String }.first ?? "row-\(index)"
+        }
     }
 
     subscript(_ key: String) -> String? { data[key] as? String }
@@ -85,7 +89,11 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
                 }
                 if let status = try? await request("/api/tools", timeout: 1),
                    status["tools"] is [[String: Any]] || status["items"] is [[String: Any]] {
-                    health = (try? await request("/api/health", timeout: 1)) ?? [:]
+                    let status = (try? await request("/api/health", timeout: 2)) ?? [:]
+                    guard phase == .starting, process?.isRunning == true else {
+                        throw CoreFailure(message: "Il Core si è arrestato durante l’avvio.")
+                    }
+                    health = status
                     phase = .ready
                     return
                 }
@@ -175,6 +183,9 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
 
     func bytes(_ path: String, method: String, body: [String: Any]?, timeout: TimeInterval,
                contentType: String = "application/json", raw: Data? = nil) async throws -> Data {
+        guard process?.isRunning == true, parentPipe != nil else {
+            throw CoreFailure(message: "La sessione del Core è chiusa.")
+        }
         guard path.hasPrefix("/api/"), let url = URL(string: "http://127.0.0.1:8765" + path) else {
             throw CoreFailure(message: "Indirizzo del Core non valido.")
         }

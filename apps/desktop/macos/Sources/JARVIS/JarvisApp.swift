@@ -4,6 +4,10 @@ import UniformTypeIdentifiers
 
 @MainActor final class AppLifecycle: NSObject, NSApplicationDelegate {
     let core = CoreSession()
+    func applicationDidBecomeActive(_ notification: Notification) {
+        Task { await core.authenticateOnLaunch() }
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     func applicationWillTerminate(_ notification: Notification) { core.stop() }
 }
@@ -94,6 +98,11 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
     @State private var clientID = ""
     @State private var credential = ""
     @State private var connectorAction: Record?
+    @State private var stt = "small"
+    @State private var tts = "it_IT-paola-medium"
+    @State private var backupPassword = ""
+    @State private var updateToken = ""
+    @State private var automaticUpdates = false
     @AppStorage("speakReplies") private var speakReplies = true
     @AppStorage("cloudChat") private var cloudChat = false
 
@@ -110,6 +119,9 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
                 .task {
                     while !Task.isCancelled {
                         await core.refreshHealth()
+                        if section == .system, (payload["setup"] as? [String: Any])?["running"] as? Bool == true {
+                            await load(.system)
+                        }
                         try? await Task.sleep(for: .seconds(12))
                     }
                 }
@@ -118,7 +130,9 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
             }
         }
         .background(base)
-        .task { await core.authenticateOnLaunch() }
+        .task {
+            if NSApplication.shared.isActive { await core.authenticateOnLaunch() }
+        }
         .onChange(of: core.phase) { _, phase in
             if phase != .ready { voice.cancelRecording(); voice.stopPlayback() }
         }
@@ -305,6 +319,16 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
                     Text(item["content"] ?? item["text"] ?? item.title).textSelection(.enabled)
                 }
             }
+            if let sources = lastReply?["sources"] as? [[String: Any]], !sources.isEmpty {
+                card("Fonti dell’ultima risposta", icon: "link") {
+                    ForEach(Array(sources.enumerated()), id: \.offset) { _, source in
+                        if let raw = source["url"] as? String, let url = URL(string: raw),
+                           ["http", "https"].contains(url.scheme ?? "") {
+                            Link(source["title"] as? String ?? raw, destination: url)
+                        }
+                    }
+                }
+            }
             if let confirmation = lastReply?["confirmation"] as? [String: Any] {
                 Button("Esamina l’azione proposta") { pending = Record(confirmation, index: 0) }
             }
@@ -412,16 +436,28 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
                 }
             }
         case .updates:
-            Button("Controlla aggiornamenti") { mutate("/api/updates/check", body: [:]) }
-        case .system:
-            Button("Apri configurazione voce") {
-                Task {
-                    do {
-                        let status = try await core.request("/api/setup")
-                        payload = status
-                        info = "Stato del setup vocale"
-                    } catch { self.error = error.localizedDescription }
+            card("Canale stabile", icon: "arrow.down.circle") {
+                Toggle("Controllo automatico", isOn: $automaticUpdates)
+                SecureField("Token GitHub per un repository privato", text: $updateToken)
+                HStack {
+                    Button("Salva impostazioni") {
+                        var body: [String: Any] = ["enabled": automaticUpdates, "channel": "stable"]
+                        if !updateToken.isEmpty { body["github_token"] = updateToken }
+                        updateToken = ""
+                        mutate("/api/updates", body: body)
+                    }
+                    Button("Controlla ora") { mutate("/api/updates/check", body: [:]) }
                 }
+            }
+        case .system:
+            voiceSetup
+            card("Backup cifrato", icon: "lock.doc") {
+                SecureField("Passphrase del backup", text: $backupPassword)
+                Button("Crea backup") {
+                    let passphrase = backupPassword
+                    backupPassword = ""
+                    mutate("/api/backup", body: ["passphrase": passphrase])
+                }.disabled(backupPassword.count < 10)
             }
         case .notifications:
             Button("Segna tutte come lette") { mutate("/api/notifications/read-all", body: [:]) }
@@ -447,6 +483,37 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
                     }
                 }
             }
+        }
+    }
+
+    private var voiceSetup: some View {
+        card("Voce locale", icon: "mic") {
+            let setup = payload["setup"] as? [String: Any] ?? [:]
+            let choices = setup["choices"] as? [String: Any] ?? [:]
+            let sttModels = choices["stt_models"] as? [String] ?? []
+            let ttsVoices = choices["tts_voices"] as? [String] ?? []
+            let running = setup["running"] as? Bool == true
+            if !sttModels.isEmpty, !ttsVoices.isEmpty {
+                Picker("Riconoscimento", selection: $stt) {
+                    ForEach(sttModels, id: \.self) { Text($0).tag($0) }
+                }.disabled(running)
+                Picker("Voce", selection: $tts) {
+                    ForEach(ttsVoices, id: \.self) { Text($0).tag($0) }
+                }.disabled(running)
+                if running {
+                    ProgressView("Preparazione del motore vocale")
+                } else {
+                    Button("Configura voce locale") {
+                        mutate("/api/setup/start", body: ["stt_model": stt, "tts_voice": tts])
+                    }
+                }
+            }
+            let current = records(setup, key: "steps")
+            let saved = setup["saved"] as? [String: Any] ?? [:]
+            ForEach(current.isEmpty ? records(saved, key: "steps") : current) { item in
+                LabeledContent(item["label"] ?? item.id, value: item["status"] ?? "—")
+            }
+            Button("Aggiorna configurazione") { refresh += 1 }
         }
     }
 
@@ -645,7 +712,15 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
                 let catalog = try await core.request("/api/connectors/templates")
                 result["templates"] = catalog["templates"]
             }
-            if page == section, !Task.isCancelled { payload = result }
+            if page == .system {
+                result["setup"] = try await core.request("/api/setup")
+            }
+            if page == section, !Task.isCancelled {
+                payload = result
+                if page == .updates {
+                    automaticUpdates = result["enabled"] as? Bool ?? false
+                }
+            }
         } catch {
             if page == section, !Task.isCancelled { self.error = error.localizedDescription }
         }

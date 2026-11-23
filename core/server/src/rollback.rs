@@ -199,6 +199,11 @@ pub fn restore(data_dir: &Path, which: Option<&Path>) -> Result<Value, String> {
 pub(crate) fn replace_data(data: &Path, staging: &Path, aside: &Path) -> Result<bool, String> {
     let has_previous = match fs::symlink_metadata(data) {
         Ok(info) if info.is_dir() => {
+            let marker = ".macos-owner-session";
+            if data.join(marker).is_file() && !staging.join(marker).is_file() {
+                crate::backup::private_file(&staging.join(marker))
+                    .map_err(|e| format!("conservazione della sessione macOS: {e}"))?;
+            }
             fs::rename(data, aside).map_err(|e| format!("spostamento dei dati attuali: {e}"))?;
             true
         }
