@@ -4,15 +4,12 @@ import UniformTypeIdentifiers
 
 @MainActor final class AppLifecycle: NSObject, NSApplicationDelegate {
     let core = CoreSession()
-    let voice = Voice()
     func applicationDidBecomeActive(_ notification: Notification) {
         Task { await core.authenticateOnLaunch() }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
     func applicationWillTerminate(_ notification: Notification) {
-        voice.cancelRecording()
-        voice.stopPlayback()
         core.stop()
     }
 }
@@ -22,7 +19,7 @@ import UniformTypeIdentifiers
 
     var body: some Scene {
         Window("JARVIS", id: "jarvis") {
-            RootView(core: lifecycle.core, voice: lifecycle.voice)
+            RootView(core: lifecycle.core)
                 .frame(minWidth: 580, minHeight: 510)
                 .preferredColorScheme(.dark)
         }
@@ -31,7 +28,7 @@ import UniformTypeIdentifiers
 }
 
 private enum Section: String, CaseIterable, Identifiable {
-    case dashboard = "Plancia", chat = "Chat e voce", tasks = "Attività", confirmations = "Conferme"
+    case dashboard = "Plancia", chat = "Chat", tasks = "Attività", confirmations = "Conferme"
     case workflows = "Automazioni", memory = "Memoria", workspace = "Workspace", connectors = "Connettori"
     case devices = "Dispositivi", skills = "Competenze", security = "Sicurezza", audit = "Audit"
     case system = "Sistema", models = "Modelli AI", updates = "Aggiornamenti", notifications = "Notifiche"
@@ -83,7 +80,6 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
 
 @MainActor private struct RootView: View {
     @ObservedObject var core: CoreSession
-    @ObservedObject var voice: Voice
     @State private var section: Section = .dashboard
     @State private var payload: [String: Any] = [:]
     @State private var message = ""
@@ -96,20 +92,15 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
     @State private var error: String?
     @State private var info: String?
     @State private var sending = false
-    @State private var microphoneBusy = false
     @State private var lastReply: [String: Any]?
     @State private var refresh = 0
     @State private var selectedTemplate = ""
     @State private var clientID = ""
     @State private var credential = ""
     @State private var connectorAction: Record?
-    @State private var stt = "small"
-    @State private var tts = "it_IT-paola-medium"
     @State private var backupPassword = ""
     @State private var updateToken = ""
     @State private var automaticUpdates = false
-    @AppStorage("speakReplies") private var speakReplies = true
-    @AppStorage("cloudChat") private var cloudChat = false
 
     var body: some View {
         Group {
@@ -124,9 +115,6 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
                 .task {
                     while !Task.isCancelled {
                         await core.refreshHealth()
-                        if section == .system, (payload["setup"] as? [String: Any])?["running"] as? Bool == true {
-                            await load(.system)
-                        }
                         try? await Task.sleep(for: .seconds(12))
                     }
                 }
@@ -137,9 +125,6 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
         .background(base)
         .task {
             if NSApplication.shared.isActive { await core.authenticateOnLaunch() }
-        }
-        .onChange(of: core.phase) { _, phase in
-            if phase != .ready { voice.cancelRecording(); voice.stopPlayback() }
         }
         .sheet(item: $pending) { item in confirmationSheet(item) }
         .sheet(item: $memoryEdit) { item in
@@ -274,8 +259,8 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
     private var dashboard: some View {
         VStack(alignment: .leading, spacing: 15) {
             ViewThatFits(in: .horizontal) {
-                HStack { welcome.frame(minWidth: 220); Avatar(voice: voice, thinking: sending).frame(width: 245) }
-                VStack { Avatar(voice: voice, thinking: sending).frame(width: 170); welcome }
+                HStack { welcome.frame(minWidth: 220); Avatar(thinking: sending).frame(width: 245) }
+                VStack { Avatar(thinking: sending).frame(width: 170); welcome }
             }
             .padding(18)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -297,10 +282,8 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
                     Button("Apri automazioni") { select(.workflows) }
                 }
                 card("Motore AI", icon: "brain") {
-                    let status = core.health["ai"] as? [String: Any]
-                    let gateway = status?["gateway"] as? [String: Any]
-                    let backend = gateway?["backend"] as? [String: Any]
-                    Text(backend?["model"] as? String ?? "—").lineLimit(2)
+                    Text(core.health["inference"] == nil ? "In attesa di stato" : "Ollama Cloud / NVIDIA NIM")
+                        .lineLimit(2)
                     Button("Modelli e chiavi") { select(.models) }
                 }
                 card("Integrità audit", icon: "lock.shield") {
@@ -330,16 +313,16 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
         VStack(alignment: .leading, spacing: 12) {
             Text("Sono JARVIS").font(.system(size: 40, weight: .bold)).foregroundStyle(.cyan)
             Text("Gestisci attività, dispositivi e automazioni dal tuo Mac.").foregroundStyle(.secondary)
-            Button { select(.chat) } label: { Label("Parla con JARVIS", systemImage: "waveform") }
+            Button { select(.chat) } label: { Label("Apri chat", systemImage: "bubble.left") }
                 .buttonStyle(.borderedProminent).controlSize(.large)
         }
     }
 
     private var chat: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Avatar(voice: voice, thinking: sending).frame(width: 150).frame(maxWidth: .infinity)
+            Avatar(thinking: sending).frame(width: 150).frame(maxWidth: .infinity)
             let history = records(payload)
-            if history.isEmpty { Text("Scrivi o detta la tua prima richiesta.").foregroundStyle(.secondary) }
+            if history.isEmpty { Text("Scrivi la tua prima richiesta.").foregroundStyle(.secondary) }
             ForEach(history) { item in
                 card(item["role"] == "user" ? "Tu" : "JARVIS",
                      icon: item["role"] == "user" ? "person" : "waveform") {
@@ -365,30 +348,9 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
 
     private var composer: some View {
         VStack(spacing: 8) {
+            Text("Inferenza cloud").font(.caption).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
             HStack {
-                Toggle("Voce", isOn: $speakReplies).toggleStyle(.switch).controlSize(.small)
-                Toggle("Cloud", isOn: $cloudChat).toggleStyle(.switch).controlSize(.small)
-                    .help("Invia il messaggio al provider AI configurato")
-                Spacer()
-                if voice.playing {
-                    Button("Interrompi voce", systemImage: "speaker.slash") { voice.stopPlayback() }
-                }
-            }
-            HStack {
-                Button {
-                    microphoneBusy = true
-                    Task {
-                        defer { microphoneBusy = false }
-                        do {
-                            if voice.recording { message = try await voice.transcribe(through: core) }
-                            else { try await voice.startRecording() }
-                        } catch { self.error = error.localizedDescription }
-                    }
-                } label: {
-                    Image(systemName: voice.recording ? "stop.circle.fill" : "mic")
-                }
-                .disabled(microphoneBusy)
-                .help(voice.recording ? "Ferma e trascrivi" : "Registra")
                 TextField("Messaggio a JARVIS", text: $message)
                     .textFieldStyle(.roundedBorder).onSubmit(send)
                 Button("Invia", systemImage: "arrow.up") { send() }
@@ -405,17 +367,13 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
         error = nil
         lastReply = nil
         message = ""
-        voice.stopPlayback()
         Task {
             do {
-                let result = try await core.request(cloudChat ? "/api/cloud/chat" : "/api/chat", method: "POST",
+                let result = try await core.request("/api/cloud/chat", method: "POST",
                                                      body: ["message": text, "provider": "auto"])
                 lastReply = result
                 await load(.chat)
                 sending = false
-                if speakReplies, let reply = result["reply"] as? String, !reply.isEmpty {
-                    await voice.speak(reply, through: core)
-                }
             } catch {
                 sending = false
                 self.error = error.localizedDescription
@@ -477,7 +435,6 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
                 }
             }
         case .system:
-            voiceSetup
             card("Backup cifrato", icon: "lock.doc") {
                 SecureField("Passphrase del backup", text: $backupPassword)
                 Button("Crea backup") {
@@ -510,37 +467,6 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
                     }
                 }
             }
-        }
-    }
-
-    private var voiceSetup: some View {
-        card("Voce locale", icon: "mic") {
-            let setup = payload["setup"] as? [String: Any] ?? [:]
-            let choices = setup["choices"] as? [String: Any] ?? [:]
-            let sttModels = choices["stt_models"] as? [String] ?? []
-            let ttsVoices = choices["tts_voices"] as? [String] ?? []
-            let running = setup["running"] as? Bool == true
-            if !sttModels.isEmpty, !ttsVoices.isEmpty {
-                Picker("Riconoscimento", selection: $stt) {
-                    ForEach(sttModels, id: \.self) { Text($0).tag($0) }
-                }.disabled(running)
-                Picker("Voce", selection: $tts) {
-                    ForEach(ttsVoices, id: \.self) { Text($0).tag($0) }
-                }.disabled(running)
-                if running {
-                    ProgressView("Preparazione del motore vocale")
-                } else {
-                    Button("Configura voce locale") {
-                        mutate("/api/setup/start", body: ["stt_model": stt, "tts_voice": tts])
-                    }
-                }
-            }
-            let current = records(setup, key: "steps")
-            let saved = setup["saved"] as? [String: Any] ?? [:]
-            ForEach(current.isEmpty ? records(saved, key: "steps") : current) { item in
-                LabeledContent(item["label"] ?? item.id, value: item["status"] ?? "—")
-            }
-            Button("Aggiorna configurazione") { refresh += 1 }
         }
     }
 
@@ -738,9 +664,6 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
             if page == .connectors {
                 let catalog = try await core.request("/api/connectors/templates")
                 result["templates"] = catalog["templates"]
-            }
-            if page == .system {
-                result["setup"] = try await core.request("/api/setup")
             }
             if page == section, !Task.isCancelled {
                 payload = result

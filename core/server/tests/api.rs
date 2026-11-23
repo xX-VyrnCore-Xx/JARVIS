@@ -532,7 +532,6 @@ fn cloud_context_requires_opt_in_and_stays_with_the_provider() {
             Completed {
                 provider: Provider::Nim,
                 model: "synthetic".into(),
-                fallback: None,
                 answer: Ok(Answer::Text(answer.into())),
             },
             jarvis_core::observability::Timer::start(),
@@ -553,33 +552,26 @@ fn cloud_context_requires_opt_in_and_stays_with_the_provider() {
         .unwrap()
     };
     let standalone = ask(&core, false);
-    assert_eq!(standalone.targets[0].provider.id(), "ollama_cloud");
-    assert!(standalone
-        .targets
-        .iter()
-        .all(|target| target.history.is_empty()));
+    assert_eq!(standalone.target.provider.id(), "ollama_cloud");
+    assert!(standalone.target.history.is_empty());
     let connected = ask(&core, true);
-    assert_eq!(connected.targets[0].provider.id(), "nvidia_nim");
-    let history = &connected.targets[0].history;
+    assert_eq!(connected.target.provider.id(), "nvidia_nim");
+    let history = &connected.target.history;
     assert_eq!(history.len(), 2);
     assert_eq!(history[0].user, "Parliamo di JARVIS");
     assert_eq!(history[1].assistant, "Il Core gestisce gli strumenti.");
-    assert!(connected.targets[1].history.is_empty());
 
     let long = "a".repeat(3000);
     turn(&mut core, "Terzo", &long);
     turn(&mut core, "Quarto", "quarto esito");
     let bounded = ask(&core, true);
-    let history = &bounded.targets[0].history;
+    let history = &bounded.target.history;
     assert_eq!(history.len(), 4);
     assert_eq!(history[0].user, "Parliamo di JARVIS");
     assert_eq!(history[2].assistant, long);
 
     core.chat("che ore sono").unwrap();
-    assert!(ask(&core, true)
-        .targets
-        .iter()
-        .all(|target| target.history.is_empty()));
+    assert!(ask(&core, true).target.history.is_empty());
     drop(core);
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -607,58 +599,36 @@ async fn source_followup_uses_only_the_previous_turn_and_stays_local() {
 }
 
 #[test]
-fn cloud_tool_calls_use_core_policy_before_workspace_changes() {
+fn cloud_tool_calls_cannot_write_to_the_workspace() {
     use jarvis_core::cloud::{Answer, Completed, Failure, Provider};
     use jarvis_core::observability::Timer;
 
     let dir = std::env::temp_dir().join(format!("jarvis-cloud-{}", uuid::Uuid::new_v4().simple()));
     let mut core = test_core(&dir);
-    let turn = |core: &mut Jarvis, arguments: Value| {
-        core.finish_cloud_chat(
+    let refused = core
+        .finish_cloud_chat(
             "Crea un appunto".into(),
             Completed {
                 model: "synthetic".into(),
                 provider: Provider::Nim,
-                fallback: Some((Provider::Ollama, Failure::Unavailable)),
                 answer: Ok(Answer::Call(json!({
-                    "tool": "fs.write", "version": "1.0.0", "arguments": arguments,
+                    "tool": "fs.write", "version": "1.0.0",
+                    "arguments": {"path": "nota.txt", "content": "fixture"},
                 }))),
             },
             Timer::start(),
         )
         .unwrap()
-        .to_json()
-    };
-    let missing = turn(&mut core, json!({"path":"nota.txt"}));
-    assert!(
-        kinds(&missing).contains(&"clarification".into()),
-        "{missing}"
-    );
-    let pending = turn(
-        &mut core,
-        json!({"path":"nota.txt", "content":"verificato"}),
-    );
-    assert_eq!(
-        pending["task"]["state"], "waiting_confirmation",
-        "{pending}"
-    );
-    assert!(kinds(&pending).contains(&"cloud_fallback".into()));
-    assert_eq!(pending["backend"]["name"], "nvidia_nim");
-    let path = dir.join("workspace/nota.txt");
-    assert!(!path.exists());
-    let id = pending["confirmation"]["confirmation_id"].as_str().unwrap();
-    let confirmed = core.confirm(id, true).unwrap().to_json();
-    assert_eq!(confirmed["task"]["state"], "succeeded", "{confirmed}");
-    assert_eq!(confirmed["backend"]["name"], "nvidia_nim");
-    assert_eq!(std::fs::read_to_string(path).unwrap(), "verificato");
-    assert!(core.confirm(id, true).is_err());
+        .to_json();
+    assert_eq!(refused["task"]["state"], "failed", "{refused}");
+    assert!(refused["confirmation"].is_null());
+    assert!(!dir.join("workspace/nota.txt").exists());
     let limited = core
         .finish_cloud_chat(
             "Limite remoto".into(),
             Completed {
                 provider: Provider::Nim,
                 model: "synthetic".into(),
-                fallback: None,
                 answer: Err(Failure::RateLimited(std::time::Duration::from_secs(10))),
             },
             Timer::start(),
@@ -902,4 +872,36 @@ async fn every_task_has_a_w3c_trace_with_agent_policy_and_tool_spans() {
     let (status, _) = e.api("GET", "/api/tasks/inesistente/trace", None).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     let _ = std::fs::remove_dir_all(&e.data);
+}
+
+#[tokio::test]
+async fn cloud_chat_keeps_explicit_workspace_commands_local() {
+    let e = env();
+    let (status, response) = e
+        .api(
+            "POST",
+            "/api/cloud/chat",
+            Some(json!({
+                "provider": "auto", "message": "scrivi fixture.txt: contenuto per la workspace"
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{response}");
+    assert_eq!(response["task"]["state"], "waiting_confirmation");
+    assert_eq!(response["backend"]["location"], "local");
+
+    let (status, response) = e
+        .api(
+            "POST",
+            "/api/cloud/chat",
+            Some(json!({
+                "provider": "auto", "message": "Scrivi una poesia sulla pioggia."
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
+    assert!(response["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("chiave API"));
 }

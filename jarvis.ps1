@@ -3,7 +3,6 @@
 #
 # Uso: .\jarvis.ps1               avvia il Core API su http://localhost:8765
 #      .\jarvis.ps1 desktop       app desktop egui
-#      .\jarvis.ps1 voice-setup   motori vocali locali e modelli (una volta)
 #      .\jarvis.ps1 doctor        controlla i prerequisiti
 #      .\jarvis.ps1 backup        backup cifrato dei dati
 #      .\jarvis.ps1 restore FILE  ripristina un backup (con JARVIS chiuso)
@@ -82,21 +81,8 @@ $env:JARVIS_PYTHON = $VenvPython
 $env:JARVIS_HOME = $Root
 $env:JARVIS_PORT = $Port
 
-$Models = if ($env:JARVIS_MODELS_DIR) { $env:JARVIS_MODELS_DIR } else { Join-Path $Root "data\models" }
-$VoiceName = if ($env:JARVIS_TTS_VOICE_NAME) { $env:JARVIS_TTS_VOICE_NAME } else { "it_IT-paola-medium" }
 if ($Command -eq "voice-setup") {
-    & $VenvPython -m pip install -q --disable-pip-version-check --require-hashes -r (Join-Path $Root "ai\requirements-voice.txt")
-    New-Item -ItemType Directory -Force -Path (Join-Path $Models "piper") | Out-Null
-    $stt = if ($env:JARVIS_STT_MODEL) { $env:JARVIS_STT_MODEL } else { "small" }
-    & $VenvPython -c "import sys; from faster_whisper import WhisperModel; WhisperModel(sys.argv[1], device='cpu', compute_type='int8', download_root=sys.argv[2])" $stt $Models
-    & $VenvPython -m piper.download_voices $VoiceName --download-dir (Join-Path $Models "piper")
-    Ok "Runtime vocale pronto nel Core; i controlli microfono non sono ancora disponibili nel client egui."
-    exit 0
-}
-if (Test-Path $Models) {
-    $env:JARVIS_MODELS_DIR = $Models
-    $voice = Join-Path $Models "piper\$VoiceName.onnx"
-    if (-not $env:JARVIS_TTS_VOICE -and (Test-Path $voice)) { $env:JARVIS_TTS_VOICE = $voice }
+    Fail "La voce richiede un provider audio cloud."
 }
 
 if ($Command -eq "desktop") {

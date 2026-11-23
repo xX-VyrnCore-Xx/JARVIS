@@ -1,13 +1,13 @@
 # Sistema AI e agenti
 
-Il Core gestisce le richieste cloud e gli strumenti. Il worker locale gestisce la voce e i comandi deterministici. La memoria applicativa è indipendente dai provider.
+Il Core gestisce le richieste cloud e gli strumenti. Il worker locale interpreta soltanto comandi deterministici. La voce resta sospesa in attesa di un provider audio cloud. La memoria applicativa è indipendente dai provider.
 
 ## Routing
 
 1. Classificare capacità richieste, dati, connettività e budget di risorse.
 2. Selezionare un modello di Ollama Cloud o NVIDIA NIM. Per i comandi offline il Core usa un agente deterministico a regole.
-3. Verificare l'idoneità dell'esito. Se serve escalation, applicare prima le regole di autorizzazione e minimizzazione per Ollama Cloud.
-4. Restituire esito o motivo della degradazione. Registrare runtime, latenza, fallback ed errore con metadati minimizzati.
+3. Verificare l’esito e mantenere il turno presso il provider iniziale anche in caso di errore.
+4. Restituire l’esito o l’errore e registrare modello, latenza e stato con metadati minimizzati.
 
 ## Agenti previsti
 
@@ -30,7 +30,7 @@ Per aggiornare prompt, agenti e adapter, versionare le modifiche e provarle su c
 
 ## Runtime, contesto e strumenti
 
-Il worker Python usa l’agente deterministico per i comandi offline. Il Core esegue le richieste autorizzate a Ollama Cloud e NVIDIA NIM e convalida le proposte di strumenti con i contratti locali. Il routing distingue risposte rapide, sviluppo, ragionamento e contesto lungo.
+Il worker Python usa l’agente deterministico per i comandi offline. Il Core esegue le richieste autorizzate a Ollama Cloud e NVIDIA NIM e convalida le proposte di strumenti con i contratti locali. Il routing distingue risposte rapide, sviluppo, ragionamento e contesto lungo. L’inferenza può proporre soltanto calcoli isolati. I comandi che accedono a memoria, file e servizi passano dalle policy locali.
 
 Il Core stima i token tenendo conto di sequenze di testo, punteggiatura, sintassi e Unicode. Con continuità attiva include fino a otto scambi testuali consecutivi dello stesso provider entro 16.000 token stimati; conserva il messaggio corrente e accorcia i singoli turni sui confini dei caratteri. Schemi degli strumenti, istruzioni e margine per la risposta sono inclusi nel calcolo del plafond applicativo. La memoria, i segreti rilevati e gli esiti degli strumenti restano sul Core.
 

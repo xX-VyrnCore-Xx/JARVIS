@@ -174,15 +174,6 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
 
     func request(_ path: String, method: String = "GET", body: [String: Any]? = nil,
                  timeout: TimeInterval = 190) async throws -> [String: Any] {
-        let data = try await bytes(path, method: method, body: body, timeout: timeout)
-        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw CoreFailure(message: "Risposta del Core non valida.")
-        }
-        return object
-    }
-
-    func bytes(_ path: String, method: String, body: [String: Any]?, timeout: TimeInterval,
-               contentType: String = "application/json", raw: Data? = nil) async throws -> Data {
         guard process?.isRunning == true, parentPipe != nil else {
             throw CoreFailure(message: "La sessione del Core è chiusa.")
         }
@@ -195,9 +186,6 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
         if let body {
             request.httpBody = try JSONSerialization.data(withJSONObject: body)
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        } else if let raw {
-            request.httpBody = raw
-            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
         let (data, response) = try await urlSession.data(for: request)
         guard let http = response as? HTTPURLResponse else {
@@ -208,7 +196,10 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
             let error = object?["error"] as? [String: Any]
             throw CoreFailure(message: error?["message"] as? String ?? "Il Core ha risposto HTTP \(http.statusCode).")
         }
-        return data
+        guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw CoreFailure(message: "Risposta del Core non valida.")
+        }
+        return object
     }
 }
 

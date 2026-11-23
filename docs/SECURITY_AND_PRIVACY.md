@@ -70,3 +70,10 @@ Documentare insieme ai contratti la classificazione dei dati, i flussi egress, l
 
 
 **Browser (ADR-0043).** Profilo temporaneo cancellato a ogni uso, nessuna estensione o sincronizzazione, nessun cookie del proprietario. Tutte le richieste della pagina sono intercettate e verificate con la policy Web (indirizzi privati vietati anche dopo la risoluzione DNS). Nella conferma di `web.form` i valori dei campi sensibili (password, token, carte, IBAN) sono mascherati.
+
+
+## Conversazioni e inferenza cloud
+
+Il Core invia il messaggio a un unico provider tramite HTTPS. Il provider riceve il testo da elaborare e applica le proprie regole di conservazione. Il contesto cloud pregresso è facoltativo e limitato ai turni dello stesso provider. I dispositivi associati inviano solo il loro messaggio corrente. Il Core non inoltra la memoria, i file o i risultati degli strumenti. Il provider può proporre esclusivamente calcoli senza accesso a file, rete o credenziali.
+
+Il Core cifra messaggi, fonti e documenti dei task con XChaCha20-Poly1305 e una sottochiave della chiave custodita nell’archivio dei segreti. I campi sono autenticati rispetto al loro ruolo, task e data. La prima apertura migra l’archivio attivo e ripulisce il WAL. Copie precedenti, snapshot di rollback, memoria indicizzata, audit e file della workspace richiedono la protezione del disco. Su sistemi senza portachiavi la chiave resta nel file locale con permessi restrittivi. I backup JARVIS sono cifrati con la passphrase scelta dal proprietario.

@@ -1,12 +1,16 @@
 //! Persistenza locale SQLite: memoria del proprietario, task e conversazione (MEMORY_DATA_SYNC.md).
 
 use std::path::Path;
+use std::sync::Arc;
+
+use crate::chat_crypto::ChatCipher;
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::{json, Value};
 
 pub struct Store {
     pub(crate) conn: Connection,
+    chat_cipher: Option<Arc<ChatCipher>>,
 }
 
 pub type StoreResult<T> = Result<T, rusqlite::Error>;
@@ -18,6 +22,14 @@ pub(crate) struct ConversationTurn {
     pub user: String,
     pub assistant: Option<String>,
     pub cloud_provider: Option<String>,
+}
+
+fn crypto_error(message: String) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(message)))
+}
+
+fn message_purpose(role: &str, task: Option<&str>, at: &str) -> String {
+    format!("message:{role}:{}:{at}", task.unwrap_or_default())
 }
 
 impl Store {
@@ -77,7 +89,10 @@ impl Store {
         {
             conn.execute_batch("ALTER TABLE messages ADD COLUMN cloud_provider TEXT;")?;
         }
-        let store = Self { conn };
+        let store = Self {
+            conn,
+            chat_cipher: None,
+        };
         store.memory_migrate()?;
         crate::skills::migrate(&store)?;
         store
@@ -86,6 +101,126 @@ impl Store {
         // Statistiche del pianificatore di query aggiornate solo dove servono (raccomandazione di SQLite).
         store.conn.execute_batch("PRAGMA optimize=0x10002;")?;
         Ok(store)
+    }
+
+    pub(crate) fn protect_chat(&mut self, cipher: Arc<ChatCipher>) -> StoreResult<()> {
+        self.conn.execute_batch(
+            "PRAGMA secure_delete=ON;
+             CREATE TABLE IF NOT EXISTS chat_crypto_migration (stage INTEGER NOT NULL);",
+        )?;
+        let stage = self
+            .conn
+            .query_row("SELECT stage FROM chat_crypto_migration", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .optional()?
+            .unwrap_or(0);
+        if stage == 0 {
+            let tx = self.conn.transaction()?;
+            {
+                let mut select = tx.prepare("SELECT rowid, task_id, doc FROM tasks WHERE rowid > ?1 ORDER BY rowid LIMIT 256")?;
+                let mut last = 0;
+                loop {
+                    let rows = select
+                        .query_map([last], |row| {
+                            Ok((
+                                row.get::<_, i64>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, String>(2)?,
+                            ))
+                        })?
+                        .collect::<Result<Vec<_>, _>>()?;
+                    if rows.is_empty() {
+                        break;
+                    }
+                    for (row, id, text) in rows {
+                        let sealed = cipher
+                            .seal(&format!("task:{id}"), &text)
+                            .map_err(crypto_error)?;
+                        tx.execute(
+                            "UPDATE tasks SET doc=?1 WHERE rowid=?2",
+                            params![sealed, row],
+                        )?;
+                        last = row;
+                    }
+                }
+            }
+            {
+                let mut select = tx.prepare(
+                    "SELECT seq, role, task_id, at, content, sources FROM messages
+                    WHERE seq > ?1 ORDER BY seq LIMIT 256",
+                )?;
+                let mut last = 0;
+                loop {
+                    let rows = select
+                        .query_map([last], |row| {
+                            Ok((
+                                row.get::<_, i64>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, Option<String>>(2)?,
+                                row.get::<_, String>(3)?,
+                                row.get::<_, String>(4)?,
+                                row.get::<_, Option<String>>(5)?,
+                            ))
+                        })?
+                        .collect::<Result<Vec<_>, _>>()?;
+                    if rows.is_empty() {
+                        break;
+                    }
+                    for (seq, role, task, at, content, sources) in rows {
+                        let purpose = message_purpose(&role, task.as_deref(), &at);
+                        let seal = |name: &str, text: &str| {
+                            cipher
+                                .seal(&format!("{purpose}:{name}"), text)
+                                .map_err(crypto_error)
+                        };
+                        let content = seal("content", &content)?;
+                        let sources = sources
+                            .as_deref()
+                            .map(|text| seal("sources", text))
+                            .transpose()?;
+                        tx.execute(
+                            "UPDATE messages SET content=?1, sources=?2 WHERE seq=?3",
+                            params![content, sources, seq],
+                        )?;
+                        last = seq;
+                    }
+                }
+            }
+            tx.execute("INSERT INTO chat_crypto_migration (stage) VALUES (1)", [])?;
+            tx.commit()?;
+        }
+        if stage < 2 {
+            self.conn.execute_batch("VACUUM;")?;
+            let busy = self
+                .conn
+                .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                    row.get::<_, i64>(0)
+                })?;
+            if busy != 0 {
+                return Err(crypto_error(
+                    "Impossibile ripulire il WAL della conversazione".into(),
+                ));
+            }
+            self.conn
+                .execute("UPDATE chat_crypto_migration SET stage=2", [])?;
+        }
+        self.chat_cipher = Some(cipher);
+        Ok(())
+    }
+
+    fn seal_chat(&self, purpose: &str, value: &str) -> StoreResult<String> {
+        self.chat_cipher.as_ref().map_or_else(
+            || Ok(value.to_string()),
+            |cipher| cipher.seal(purpose, value).map_err(crypto_error),
+        )
+    }
+
+    fn open_chat(&self, purpose: &str, value: String) -> StoreResult<String> {
+        match &self.chat_cipher {
+            Some(cipher) => cipher.open(purpose, &value).map_err(crypto_error),
+            None => Ok(value),
+        }
     }
 
     /// Registra una passkey (chiave pubblica non compressa) per un dispositivo (ADR-0042).
@@ -238,7 +373,8 @@ impl Store {
         self.conn.execute(
             "INSERT INTO tasks (task_id, doc, updated_at) VALUES (?1, ?2, ?3)
              ON CONFLICT(task_id) DO UPDATE SET doc = excluded.doc, updated_at = excluded.updated_at",
-            params![doc["task_id"].as_str(), doc.to_string(), at],
+            params![doc["task_id"].as_str(),
+                self.seal_chat(&format!("task:{}", doc["task_id"].as_str().unwrap_or_default()), &doc.to_string())?, at],
         )?;
         Ok(())
     }
@@ -246,10 +382,13 @@ impl Store {
     pub fn tasks_recent(&self, limit: u32) -> StoreResult<Vec<Value>> {
         let mut stmt = self
             .conn
-            .prepare("SELECT doc FROM tasks ORDER BY updated_at DESC LIMIT ?1")?;
-        let rows = stmt.query_map([limit], |r| r.get::<_, String>(0))?;
-        rows.map(|r| r.map(|s| serde_json::from_str(&s).unwrap_or(Value::Null)))
-            .collect()
+            .prepare("SELECT task_id, doc FROM tasks ORDER BY updated_at DESC LIMIT ?1")?;
+        let rows = stmt.query_map([limit], |r| {
+            let id: String = r.get(0)?;
+            let text = self.open_chat(&format!("task:{id}"), r.get(1)?)?;
+            serde_json::from_str(&text).map_err(|e| crypto_error(e.to_string()))
+        })?;
+        rows.collect()
     }
 
     pub fn message_add(
@@ -261,15 +400,18 @@ impl Store {
         sources: Option<&Value>,
         cloud_provider: Option<&str>,
     ) -> StoreResult<()> {
+        let purpose = message_purpose(role, Some(task_id), at);
         self.conn.execute(
             "INSERT INTO messages (role, content, task_id, at, sources, cloud_provider)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 role,
-                content,
+                self.seal_chat(&format!("{purpose}:content"), content)?,
                 task_id,
                 at,
-                sources.map(|s| s.to_string()),
+                sources
+                    .map(|s| self.seal_chat(&format!("{purpose}:sources"), &s.to_string()))
+                    .transpose()?,
                 cloud_provider
             ],
         )?;
@@ -282,10 +424,22 @@ impl Store {
             "SELECT role, content, task_id, at, sources, seq FROM (SELECT * FROM messages ORDER BY seq DESC LIMIT ?1) ORDER BY seq",
         )?;
         let rows = stmt.query_map([limit], |r| {
+            let role: String = r.get(0)?;
+            let task: Option<String> = r.get(2)?;
+            let at: String = r.get(3)?;
+            let purpose = message_purpose(&role, task.as_deref(), &at);
+            let content = self.open_chat(&format!("{purpose}:content"), r.get(1)?)?;
+            let sources = r
+                .get::<_, Option<String>>(4)?
+                .map(|value| {
+                    let text = self.open_chat(&format!("{purpose}:sources"), value)?;
+                    serde_json::from_str::<Value>(&text).map_err(|e| crypto_error(e.to_string()))
+                })
+                .transpose()?
+                .unwrap_or(Value::Array(vec![]));
             Ok(
-                json!({"seq": r.get::<_, i64>(5)?, "role": r.get::<_, String>(0)?, "content": r.get::<_, String>(1)?,
-                      "task_id": r.get::<_, Option<String>>(2)?, "at": r.get::<_, String>(3)?,
-                      "sources": r.get::<_, Option<String>>(4)?.and_then(|s| serde_json::from_str::<Value>(&s).ok()).unwrap_or(Value::Array(vec![]))}),
+                json!({"seq": r.get::<_, i64>(5)?, "role": role, "content": content,
+                "task_id": task, "at": at, "sources": sources}),
             )
         })?;
         rows.collect()
@@ -293,37 +447,49 @@ impl Store {
 
     /// Fonti del turno immediatamente precedente, incluse eventuali risposte dopo conferma.
     pub(crate) fn last_turn_sources(&self) -> StoreResult<Vec<Value>> {
-        let sources: Option<String> = self.conn.query_row(
-            "SELECT sources FROM messages
+        let row = self.conn.query_row(
+            "SELECT task_id, at, sources FROM messages
              WHERE task_id = (SELECT task_id FROM messages WHERE role = 'user' ORDER BY seq DESC LIMIT 1)
                  AND role = 'assistant'
              ORDER BY seq DESC LIMIT 1",
-            [],
-            |r| r.get::<_, Option<String>>(0),
-        ).optional()?.flatten();
-        Ok(sources
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default())
+            [], |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?)),
+        ).optional()?;
+        let Some((task, at, Some(sources))) = row else {
+            return Ok(Vec::new());
+        };
+        let purpose = message_purpose("assistant", task.as_deref(), &at);
+        let text = self.open_chat(&format!("{purpose}:sources"), sources)?;
+        serde_json::from_str(&text).map_err(|e| crypto_error(e.to_string()))
     }
 
     /// Ultimi turni, dal più recente. Solo una risposta cloud testuale ha la provenienza registrata.
     pub(crate) fn recent_cloud_turns(&self) -> StoreResult<Vec<ConversationTurn>> {
         let mut stmt = self.conn.prepare(
-            "SELECT user.content, answer.content, answer.cloud_provider
-             FROM (SELECT seq, task_id, content FROM messages WHERE role = 'user'
+            "SELECT user.content, user.task_id, user.at, answer.content, answer.at, answer.cloud_provider
+             FROM (SELECT seq, task_id, content, at FROM messages WHERE role = 'user'
                    ORDER BY seq DESC LIMIT 8) AS user
              LEFT JOIN messages AS answer ON answer.seq = (
-                 SELECT seq FROM messages
-                 WHERE task_id = user.task_id AND role = 'assistant'
+                 SELECT seq FROM messages WHERE task_id = user.task_id AND role = 'assistant'
                  ORDER BY seq DESC LIMIT 1
              )
              ORDER BY user.seq DESC",
         )?;
         let rows = stmt.query_map([], |r| {
+            let task: Option<String> = r.get(1)?;
+            let at: String = r.get(2)?;
+            let user = message_purpose("user", task.as_deref(), &at);
+            let assistant = r
+                .get::<_, Option<String>>(3)?
+                .zip(r.get::<_, Option<String>>(4)?)
+                .map(|(value, at)| {
+                    let purpose = message_purpose("assistant", task.as_deref(), &at);
+                    self.open_chat(&format!("{purpose}:content"), value)
+                })
+                .transpose()?;
             Ok(ConversationTurn {
-                user: r.get(0)?,
-                assistant: r.get(1)?,
-                cloud_provider: r.get(2)?,
+                user: self.open_chat(&format!("{user}:content"), r.get(0)?)?,
+                assistant,
+                cloud_provider: r.get(5)?,
             })
         })?;
         rows.collect()

@@ -59,7 +59,7 @@
       ],
       "properties": {
         "name": {
-          "enum": ["offline", "ollama"]
+          "const": "offline"
         },
         "model": {
           "type": "string",

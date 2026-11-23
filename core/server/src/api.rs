@@ -22,6 +22,7 @@ pub struct AppState {
     pub token: String,
     pub port: u16,
     pub last_health: Mutex<Value>,
+    cloud_slots: Arc<tokio::sync::Semaphore>,
     /// Host pubblicati da un proxy fidato (es. `tailscale serve`) per i dispositivi associati (RF-11).
     pub remote_hosts: Vec<String>,
     /// Assegnazioni ai nodi esecutori: le loro richieste non passano dal blocco del Core.
@@ -270,6 +271,7 @@ fn device_route_allowed(method: &str, route: &str, scopes: &[&str]) -> bool {
     let chat = [
         ("GET", "/api/conversation"),
         ("POST", "/api/chat"),
+        ("POST", "/api/cloud/chat"),
         ("POST", "/api/chat/stream"),
         ("GET", "/api/tasks"),
         ("GET", "/api/confirmations"),
@@ -482,24 +484,45 @@ async fn configure_cloud(State(state): State<Shared>, Json(body): Json<Value>) -
     reply(with_core(&state, move |j| j.configure_cloud(&body)).await)
 }
 
-async fn cloud_chat(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
-    if let Some(message) = body["message"].as_str().filter(|m| {
-        crate::orchestrator::is_source_followup(m)
-            || crate::orchestrator::is_local_fact_request(m)
-            || crate::desktop::Target::from_request(m).is_some()
-    }) {
-        let message = message.to_string();
-        return match with_core(&state, move |j| j.chat(&message)).await {
-            Ok(out) => Json(out.to_json()).into_response(),
-            Err(error) => error.into_response(),
-        };
+async fn cloud_chat(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Json(mut body): Json<Value>,
+) -> Response {
+    let Some(message) = body["message"].as_str() else {
+        return CoreError::BadRequest("campo 'message' mancante".into()).into_response();
+    };
+    if device.is_some() && crate::desktop::Target::from_request(message).is_some() {
+        return CoreError::Unauthorized("Azione riservata al proprietario.".into()).into_response();
     }
+    if crate::cloud::contains_credentials(message) {
+        return CoreError::BadRequest("Rimuovi le credenziali dalla richiesta.".into())
+            .into_response();
+    }
+    let local = message.to_owned();
+    if device.is_some() {
+        body["provider"] = json!("auto");
+        body["use_context"] = json!(false);
+    }
+    match with_core(&state, move |j| j.local_command(&local)).await {
+        Ok(Some(out)) => return Json(out.to_json()).into_response(),
+        Ok(None) => (),
+        Err(error) => return error.into_response(),
+    }
+    let Ok(permit) = state.cloud_slots.clone().try_acquire_owned() else {
+        return error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "cloud.busy",
+            "JARVIS sta elaborando altre richieste cloud.",
+        );
+    };
     let request = match with_core(&state, move |j| j.prepare_cloud_chat(&body)).await {
         Ok(request) => request,
         Err(error) => return error.into_response(),
     };
     let timer = crate::observability::Timer::start();
     let completed = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
         let completed = request.execute();
         (request.message, completed)
     })
@@ -1476,16 +1499,24 @@ async fn pair_device(State(state): State<Shared>, Json(body): Json<Value>) -> Re
     )
 }
 
+fn simulated_voice_setup() -> bool {
+    std::env::var("JARVIS_SETUP_FAKE").as_deref() == Ok("1")
+}
+
 async fn setup_status(State(state): State<Shared>) -> Json<Value> {
     let setup = state.setup.clone();
-    Json(
-        tokio::task::spawn_blocking(move || setup.status())
-            .await
-            .unwrap_or(Value::Null),
-    )
+    let mut status = tokio::task::spawn_blocking(move || setup.status())
+        .await
+        .unwrap_or_else(|_| json!({}));
+    status["available"] = json!(simulated_voice_setup());
+    Json(status)
 }
 
 async fn setup_start(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    if !simulated_voice_setup() {
+        return CoreError::Unavailable("La voce richiede un provider audio cloud.".into())
+            .into_response();
+    }
     let plan = match crate::setup::Plan::from_json(&body) {
         Ok(p) => p,
         Err(e) => return error(StatusCode::BAD_REQUEST, "bad_request", &e),
@@ -1887,6 +1918,7 @@ pub fn state_with_remote(
         token,
         port,
         last_health: Mutex::new(json!({})),
+        cloud_slots: Arc::new(tokio::sync::Semaphore::new(2)),
         remote_hosts,
         nodes,
         device_db,

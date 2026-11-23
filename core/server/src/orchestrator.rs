@@ -221,6 +221,12 @@ impl Jarvis {
     pub fn new(cfg: Config) -> Result<Self, String> {
         let wait = std::time::Duration::from_secs(3);
         let lock = crate::config::data_lock(&cfg.data_dir, wait)?;
+        match crate::backup::private_dir(&cfg.data_dir) {
+            Ok(()) => (),
+            Err(error)
+                if error.kind() == std::io::ErrorKind::AlreadyExists && cfg.data_dir.is_dir() => {}
+            Err(error) => return Err(format!("cartella dati: {error}")),
+        }
         std::fs::create_dir_all(cfg.workspace()).map_err(|e| format!("workspace: {e}"))?;
         // Compatibilità con le release che usano ancora il blocco interno.
         let legacy_lock = std::fs::OpenOptions::new()
@@ -233,7 +239,7 @@ impl Jarvis {
         // Rollback di release: copia dei dati prima che una versione diversa apra (e migri) il database.
         let upgraded = crate::rollback::prepare(&cfg.data_dir)?;
         std::fs::create_dir_all(cfg.data_dir.join("audit")).map_err(|e| format!("audit: {e}"))?;
-        let store = Store::open(&cfg.data_dir.join("jarvis.sqlite3"))
+        let mut store = Store::open(&cfg.data_dir.join("jarvis.sqlite3"))
             .map_err(|e| format!("database: {e}"))?;
         let audit = AuditLog::open(
             &cfg.data_dir.join("audit/core-security.jsonl"),
@@ -242,6 +248,9 @@ impl Jarvis {
         .map_err(|e| format!("audit: {e}"))?;
         let catalog = Catalog::load()?;
         let secrets = crate::secrets::SecretStore::open(&cfg.data_dir)?;
+        store
+            .protect_chat(secrets.chat_cipher.clone())
+            .map_err(|e| format!("cifratura della conversazione: {e}"))?;
         let push = crate::push::PushSubscriptions::open(&cfg.data_dir.join("jarvis.sqlite3"))?;
         let cfg_logs = cfg.data_dir.join("logs");
         let (cfg_setup_dir, cfg_setup_python, cfg_setup_ai) =
@@ -325,15 +334,21 @@ impl Jarvis {
             crate::hide_console(&mut cmd);
             cmd.args(["-m", "jarvis_ai.worker", "--handler", "assistant"])
                 .current_dir(&self.cfg.ai_dir);
-            if let Some(engine) = &self.cfg.voice_engine {
-                cmd.env("JARVIS_VOICE_ENGINE", engine);
-            }
             for (k, v) in self.setup.worker_env() {
                 cmd.env(k, v);
             }
             for (k, v) in &self.cfg.worker_env {
                 cmd.env(k, v);
             }
+            // L'unico motore vocale del Core ammesso è quello sintetico delle verifiche.
+            cmd.env(
+                "JARVIS_VOICE_ENGINE",
+                if self.cfg.voice_engine.as_deref() == Some("fake") {
+                    "fake"
+                } else {
+                    "off"
+                },
+            );
             cmd.env_remove("JARVIS_TOKEN");
             let spawned = Worker::spawn(cmd).map_err(|e| e.to_contract());
             self.obs.count(if spawned.is_ok() {
@@ -392,6 +407,7 @@ impl Jarvis {
                      "database": {"schema_version": self.store.schema_version().ok()}},
             "web": self.cfg.web.describe(),
             "ai": ai,
+            "inference": {"location": "cloud", "history_default": false, "voice_available": false},
             "audit": {"events": events, "chain_valid": errors.is_empty()},
             "pending_confirmations": self.pending.len(),
             "notifications_unread": self.store.notifications_unread().unwrap_or(0),
@@ -862,13 +878,11 @@ impl Jarvis {
                 targets.push(provider.target(key, message, history, &settings));
             }
         }
-        if targets.is_empty() {
-            return Err(CoreError::BadRequest(
-                "configura la chiave API in Sistema".into(),
-            ));
-        }
-        // In modalità automatica si continua, se possibile, con il provider che ha il contesto.
+        // Il messaggio resta con un solo provider, anche in caso di errore.
         targets.sort_by_key(|target| target.history.is_empty());
+        let target = targets.into_iter().next().ok_or_else(|| {
+            CoreError::BadRequest("Configura la chiave API in Modelli AI.".into())
+        })?;
         let task = Task::new(message, json!({"kind": "owner", "id": "owner"}));
         let allows = self.task_scope(&task);
         let defensive = crate::agents::route(message).filter(|agent| agent.name == "monitoring");
@@ -882,7 +896,7 @@ impl Jarvis {
         Ok(Request {
             message: message.to_string(),
             tools,
-            targets,
+            target,
             limiter: self.cloud_limiter.clone(),
         })
     }
@@ -902,49 +916,44 @@ impl Jarvis {
         let crate::cloud::Completed {
             provider,
             model,
-            fallback,
-            answer: response,
+            answer,
         } = completed;
-        let attempts = fallback
-            .as_ref()
-            .map(|(provider, error)| (*provider, Some(error)))
-            .into_iter()
-            .chain(std::iter::once((provider, response.as_ref().err())));
-        for (attempted, error) in attempts {
-            let mut event = json!({
-                "correlation_id": task.correlation(), "task_id": task.id(),
-                "actor": {"kind": "owner", "id": "owner"}, "node": "core-local",
-                "action": format!("cloud.{}", attempted.id()), "outcome": "succeeded",
-            });
-            if let Some(error) = error {
-                event["outcome"] = json!("failed");
-                event["error_code"] = json!(error.code());
-                event["effect"] = json!("not_applied");
+        let response = match answer {
+            Ok(Answer::Call(call))
+                if !call["tool"]
+                    .as_str()
+                    .is_some_and(|name| crate::cloud::TOOLS.contains(&name)) =>
+            {
+                Err(Failure::InvalidTool)
             }
-            self.audit(event)?;
+            other => other,
+        };
+        let mut event = json!({
+            "correlation_id": task.correlation(), "task_id": task.id(),
+            "actor": {"kind": "owner", "id": "owner"}, "node": "core-local",
+            "action": format!("cloud.{}", provider.id()), "outcome": "succeeded",
+        });
+        if let Err(error) = &response {
+            event["outcome"] = json!("failed");
+            event["error_code"] = json!(error.code());
+            event["effect"] = json!("not_applied");
         }
+        self.audit(event)?;
         self.store
             .message_add("user", &message, &task.id(), &now(), None, None)
             .map_err(internal)?;
         let backend = json!({"name": provider.id(), "location": "cloud", "model": model});
-        let mut out = Outcome {
+        let out = Outcome {
             steps: vec![json!({"kind": "delegation", "backend": backend})],
             backend: Some(backend),
             ..Outcome::default()
         };
-        if let Some((first, _)) = fallback {
-            out.steps.insert(0, json!({"kind": "cloud_fallback", "reason": format!("{} non ha completato la richiesta", first.label()), "backend": out.backend}));
-        }
         let result = match response {
             Ok(Answer::Text(text)) => {
                 task.transition("succeeded", "Risposta del modello");
                 self.finish_reply(task, out, text, Some(provider.id()))
             }
-            Ok(Answer::Call(mut call)) => {
-                if call["tool"] == "agent.delegate" {
-                    call["arguments"]["tools"] =
-                        json!(["fs.list", "fs.search", "code.check_python"]);
-                }
+            Ok(Answer::Call(call)) => {
                 self.save(&task)?;
                 let inputs = json!({
                     "messages": [{"role": "user", "content": message}],
@@ -962,7 +971,7 @@ impl Jarvis {
                 let code = error.code();
                 let (text, retryable) = match error {
                     Failure::InvalidKey => ("Il provider ha rifiutato la chiave o il modello. Controlla la configurazione in Sistema.".to_string(), false),
-                    Failure::InvalidTool => ("Il modello ha proposto una chiamata non valida. Riformula la richiesta o usa i comandi offline.".to_string(), false),
+                    Failure::InvalidTool => ("Il modello ha proposto una chiamata non valida. Riformula la richiesta oppure usa un comando esplicito.".to_string(), false),
                     Failure::RateLimited(wait) => (format!("Limite del provider raggiunto. Riprova tra {} s o scegli un altro provider.", wait.as_secs_f64().ceil() as u64), true),
                     Failure::ModelUnavailable => ("I modelli selezionati non sono disponibili presso il provider. Riprova o scegli un altro provider.".to_string(), true),
                     Failure::Unavailable => ("Il provider non ha completato la richiesta. Controlla la connessione e il modello in Sistema o scegli un altro provider.".to_string(), true),
@@ -1009,6 +1018,43 @@ impl Jarvis {
                 );
             }
         }
+    }
+
+    /// Prova il parser deterministico senza salvare né inviare al cloud i comandi riconosciuti.
+    pub(crate) fn local_command(&mut self, message: &str) -> Result<Option<Outcome>, CoreError> {
+        let message = message.trim();
+        if message.is_empty() || message.chars().count() > MAX_MESSAGE {
+            return Err(CoreError::BadRequest(
+                "messaggio mancante o troppo lungo".into(),
+            ));
+        }
+        if is_source_followup(message)
+            || is_local_fact_request(message)
+            || crate::desktop::Target::from_request(message).is_some()
+        {
+            return self.chat(message).map(Some);
+        }
+        let mut task = Task::new(message, json!({"kind": "owner", "id": "owner"}));
+        let inputs = json!({"messages": [{"role": "user", "content": message}], "memory": []});
+        let proposal = self.call_agent_inner(&task, &inputs).map_err(|_| {
+            CoreError::Unavailable("Il parser dei comandi non è disponibile.".into())
+        })?;
+        if proposal["kind"] != "tool_call" {
+            return Ok(None);
+        }
+        self.expire_pending()?;
+        task.transition("planned", "Comando locale riconosciuto");
+        task.transition("running", "Esecuzione del comando");
+        self.store
+            .message_add("user", message, &task.id(), &now(), None, None)
+            .map_err(internal)?;
+        self.save(&task)?;
+        let out = Outcome {
+            backend: Some(proposal["backend"].clone()),
+            ..Outcome::default()
+        };
+        self.drive(task, inputs, proposal, out, Vec::new())
+            .map(Some)
     }
 
     fn chat_inner(&mut self, message: &str) -> Result<Outcome, CoreError> {
@@ -1839,7 +1885,13 @@ impl Jarvis {
             task.doc["state"].as_str().unwrap_or("unknown"),
             json!({"steps": out.steps.len(), "tools": tools}),
         );
-        self.record_episode(&task, &out);
+        if out
+            .backend
+            .as_ref()
+            .is_none_or(|backend| backend["location"] != "cloud")
+        {
+            self.record_episode(&task, &out);
+        }
         self.store
             .message_add(
                 "assistant",
