@@ -1,4 +1,6 @@
 use std::collections::{HashMap, HashSet};
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use std::io::Read;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -664,6 +666,7 @@ impl JarvisApp {
             json!({"provider": provider, "remove_key": true})
         } else {
             let key = std::mem::take(&mut self.cloud_api_key);
+            let key = key.trim();
             if key.is_empty()
                 || key.len() > 1024
                 || key.bytes().any(|byte| !byte.is_ascii_graphic())
@@ -1883,6 +1886,43 @@ impl JarvisApp {
         }
     }
 
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    fn import_google_credentials(&mut self, id: &str, ctx: &egui::Context) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Seleziona le credenziali OAuth Desktop di Google")
+            .add_filter("Credenziali Google", &["json"])
+            .pick_file()
+        else {
+            return;
+        };
+        self.error = None;
+        self.connector_oauth_notice = None;
+        self.loading = true;
+        let tx = self.tx.clone();
+        let ctx = ctx.clone();
+        let endpoint = format!("/api/connectors/{id}/oauth/import");
+        std::thread::spawn(move || {
+            const MAX_SIZE: u64 = 16 * 1024;
+            let result = (|| {
+                let mut bytes = Vec::new();
+                std::fs::File::open(path)
+                    .and_then(|file| file.take(MAX_SIZE + 1).read_to_end(&mut bytes))
+                    .map_err(|_| "Impossibile leggere il file di credenziali.".to_string())?;
+                if bytes.len() as u64 > MAX_SIZE {
+                    return Err("Il file di credenziali supera 16 KB.".into());
+                }
+                let file: Value = serde_json::from_slice(&bytes)
+                    .map_err(|_| "Il file di credenziali non contiene JSON valido.".to_string())?;
+                client.post(&endpoint, Some(&file))
+            })();
+            let _ = tx.send(Event::ConnectorOAuth(result));
+            ctx.request_repaint();
+        });
+    }
+
     fn show_connectors(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.heading("Connettori");
         if let Some(error) = &self.error {
@@ -1897,6 +1937,25 @@ impl JarvisApp {
         {
             self.refresh(ctx);
         }
+        #[cfg(any(target_os = "macos", target_os = "windows"))]
+        egui::Frame::new()
+            .fill(RAISED)
+            .stroke(egui::Stroke::new(1.0, SELECTED))
+            .corner_radius(10)
+            .inner_margin(14)
+            .show(ui, |ui| {
+                ui.strong(egui::RichText::new("Google Workspace").color(ACCENT));
+                ui.label("Usa lo stesso JSON OAuth Desktop per Gmail e Calendario. Google chiederà il consenso per ciascun servizio.");
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    for (id, label) in [("gmail", "Importa per Gmail"), ("google_calendar", "Importa per Calendario")] {
+                        if ui.add_enabled(!self.loading, egui::Button::new(label)).clicked() {
+                            self.import_google_credentials(id, ctx);
+                        }
+                    }
+                });
+            });
+        ui.add_space(8.0);
         let Some(data) = self.data.clone() else {
             return;
         };
@@ -2033,6 +2092,13 @@ impl JarvisApp {
                         .clicked()
                 {
                     self.act(ctx, format!("/api/connectors/{id}/revoke"), Some(json!({})));
+                }
+                if item["authorized"] != true
+                    && ui
+                        .add_enabled(!self.loading, egui::Button::new("Rimuovi connettore"))
+                        .clicked()
+                {
+                    self.mutate(ctx, Mutation::Delete, format!("/api/connectors/{id}"), None);
                 }
             });
         }

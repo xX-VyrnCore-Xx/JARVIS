@@ -157,11 +157,16 @@ impl Route {
                     || ["scrivi", "correggi", "modifica", "genera", "verifica"]
                         .iter()
                         .any(|term| text.contains(term))));
+        let multiple_steps = ["prima ", "poi ", "infine ", "then ", "finally "]
+            .iter()
+            .filter(|term| text.contains(**term))
+            .count()
+            >= 2;
         if coding_task {
             Self::Coding
         } else if tokens >= 3_200 {
             Self::Long
-        } else if complex {
+        } else if complex || multiple_steps {
             Self::Reasoning
         } else {
             Self::Fast
@@ -197,7 +202,17 @@ pub fn settings(dir: &Path) -> Value {
 
 /// Riconosce formati di segreti comuni e intestazioni di autenticazione.
 pub fn contains_credentials(text: &str) -> bool {
-    const PREFIXES: &[&str] = &["nvapi-", "sk-", "ghp_", "github_pat_", "xoxb-", "AIza"];
+    const PREFIXES: &[&str] = &[
+        "nvapi-",
+        "sk-",
+        "ghp_",
+        "github_pat_",
+        "xoxb-",
+        "AIza",
+        "GOCSPX-",
+        "ya29.",
+        "1//",
+    ];
     text.contains("PRIVATE KEY-----")
         || text.lines().any(|line| {
             let lower = line.trim_start().to_ascii_lowercase();
@@ -207,8 +222,16 @@ pub fn contains_credentials(text: &str) -> bool {
                 || lower.contains("api-key:")
                 || lower.contains(r#""password":"#)
                 || lower.contains(r#""api_key":"#)
+                || ["client_secret", "access_token", "refresh_token"]
+                    .iter()
+                    .any(|field| {
+                        lower.contains(&format!("{field}="))
+                            || lower.contains(&format!("\"{field}\":"))
+                    })
                 || line
-                    .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+                    .split(|c: char| {
+                        !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/'))
+                    })
                     .any(|part| {
                         PREFIXES.iter().any(|prefix| {
                             part.starts_with(prefix) && part.len() >= prefix.len() + 16
@@ -548,6 +571,7 @@ fn payload(
         body["tools"] = json!(tools.iter().map(|tool| &tool.wire).collect::<Vec<_>>());
         if provider == Provider::Nim {
             body["tool_choice"] = json!("auto");
+            body["parallel_tool_calls"] = json!(false);
         }
     }
     body
@@ -672,6 +696,10 @@ mod tests {
             assert_eq!(long.route, Route::Reasoning);
             let design = request("Confronta i due approcci", vec![]);
             assert_eq!(design.model, long.model);
+            assert_eq!(
+                request("Prima fai un riepilogo, poi elenca i rischi.", vec![]).route,
+                Route::Reasoning
+            );
             let coding = request("Analizza questo script Python", vec![]);
             assert_eq!(coding.route, Route::Coding);
             assert_ne!(fast.model, long.model);

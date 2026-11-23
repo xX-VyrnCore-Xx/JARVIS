@@ -91,10 +91,12 @@ impl Flows {
                     .append_pair("prompt", "consent");
             }
         }
+        let connector = manifest["id"].as_str().unwrap_or_default().to_string();
+        self.cancel(&connector);
         self.pending.insert(
             state,
             Pending {
-                connector: manifest["id"].as_str().unwrap_or_default().to_string(),
+                connector,
                 verifier,
                 client_secret,
                 redirect_uri,
@@ -102,6 +104,10 @@ impl Flows {
             },
         );
         Ok(url.to_string())
+    }
+
+    pub fn cancel(&mut self, id: &str) {
+        self.pending.retain(|_, pending| pending.connector != id);
     }
 
     /// Consuma lo `state`: valido una sola volta e solo entro 10 minuti.
@@ -155,22 +161,16 @@ fn token_request(
     )
     .map_err(|e| e.message)?;
     let body: Value = serde_json::from_slice(&data).unwrap_or(Value::Null);
-    if !(200..300).contains(&status) || !body["access_token"].is_string() {
-        let reason = body["error"]
-            .as_str()
-            .unwrap_or("risposta senza access_token");
-        return Err(format!(
-            "il servizio ha rifiutato i token (HTTP {status}: {})",
-            reason.chars().take(100).collect::<String>()
-        ));
+    if !(200..300).contains(&status) || body["access_token"].as_str().is_none_or(str::is_empty) {
+        return Err(format!("il servizio ha rifiutato i token (HTTP {status})"));
     }
     let expires_in = body["expires_in"].as_u64().unwrap_or(3600);
     let now = chrono::Utc::now().timestamp() as u64;
     Ok(json!({
         "access_token": body["access_token"],
         // Alcuni servizi non restituiscono un nuovo refresh token al rinnovo: si conserva il precedente.
-        "refresh_token": body["refresh_token"].as_str().map(Value::from).unwrap_or_else(|| keep["refresh_token"].clone()),
-        "expires_at": now + expires_in,
+        "refresh_token": body["refresh_token"].as_str().filter(|token| !token.is_empty()).map(Value::from).unwrap_or_else(|| keep["refresh_token"].clone()),
+        "expires_at": now.saturating_add(expires_in),
         "client_secret": keep["client_secret"],
         "scope": body["scope"],
     }))
