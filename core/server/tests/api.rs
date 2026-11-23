@@ -905,3 +905,59 @@ async fn cloud_chat_keeps_explicit_workspace_commands_local() {
         .unwrap()
         .contains("chiave API"));
 }
+
+#[tokio::test]
+async fn owner_can_rate_a_cloud_answer_using_fixed_categories() {
+    use jarvis_core::cloud::{Answer, Completed, Provider};
+    use jarvis_core::observability::Timer;
+
+    let data =
+        std::env::temp_dir().join(format!("jarvis-feedback-{}", uuid::Uuid::new_v4().simple()));
+    let mut core = test_core(&data);
+    let response = core
+        .finish_cloud_chat(
+            "Domanda sintetica".into(),
+            Completed {
+                provider: Provider::Ollama,
+                model: "fixture:cloud".into(),
+                answer: Ok(Answer::Text("Risposta sintetica".into())),
+            },
+            Timer::start(),
+        )
+        .unwrap()
+        .to_json();
+    assert_eq!(response["backend"]["feedback_available"], true);
+    let id = &response["task"]["task_id"];
+    let e = Env {
+        app: api::router(api::state(core, TOKEN.into(), PORT)),
+        data,
+    };
+    let path = "/api/cloud/feedback";
+    let rating = json!({"task_id": id, "rating": "precise"});
+    assert_eq!(
+        e.call(
+            "POST",
+            path,
+            Some(rating.clone()),
+            None,
+            &format!("localhost:{PORT}")
+        )
+        .await
+        .0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(e.api("POST", path, Some(rating)).await.0, StatusCode::OK);
+    assert_eq!(
+        e.api(
+            "POST",
+            path,
+            Some(json!({"task_id": id, "rating": "testo arbitrario"}))
+        )
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    let data = e.data.clone();
+    drop(e);
+    std::fs::remove_dir_all(data).unwrap();
+}

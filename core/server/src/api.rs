@@ -306,6 +306,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/n8n/jobs/{id}", delete(n8n_remove))
         .route("/api/cloud", get(cloud_status).post(configure_cloud))
         .route("/api/cloud/chat", post(cloud_chat))
+        .route("/api/cloud/feedback", post(rate_cloud_reply))
         .route("/api/chat/stream", post(chat_stream))
         .route("/api/updates", get(updates_get).post(updates_set))
         .route("/api/updates/check", post(updates_check))
@@ -482,6 +483,10 @@ async fn cloud_status(State(state): State<Shared>) -> Response {
 
 async fn configure_cloud(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
     reply(with_core(&state, move |j| j.configure_cloud(&body)).await)
+}
+
+async fn rate_cloud_reply(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply(with_core(&state, move |j| j.rate_cloud_reply(&body)).await)
 }
 
 async fn cloud_chat(

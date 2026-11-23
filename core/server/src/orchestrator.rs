@@ -820,6 +820,27 @@ impl Jarvis {
         self.cloud_status()
     }
 
+    pub fn rate_cloud_reply(&self, input: &Value) -> Result<Value, CoreError> {
+        let task = input["task_id"]
+            .as_str()
+            .filter(|id| uuid::Uuid::parse_str(id).is_ok())
+            .ok_or_else(|| CoreError::BadRequest("ID della risposta non valido.".into()))?;
+        let rating = input["rating"]
+            .as_str()
+            .filter(|r| matches!(*r, "helpful" | "concise" | "detailed" | "precise"))
+            .ok_or_else(|| CoreError::BadRequest("Valutazione non valida.".into()))?;
+        if !self
+            .store
+            .rate_cloud_reply(task, rating)
+            .map_err(internal)?
+        {
+            return Err(CoreError::NotFound(
+                "Risposta cloud assente o troppo vecchia.".into(),
+            ));
+        }
+        Ok(json!({"saved": true}))
+    }
+
     pub fn prepare_cloud_chat(&self, body: &Value) -> Result<crate::cloud::Request, CoreError> {
         use crate::cloud::{Function, Provider, Request};
 
@@ -893,10 +914,19 @@ impl Jarvis {
             .filter_map(|tool| self.catalog.get(tool))
             .map(Function::from)
             .collect();
+        let preferences = [
+            self.store
+                .cloud_quality(target.provider.id(), &target.model)
+                .map_err(internal)?,
+            self.store
+                .cloud_quality(target.provider.id(), &target.alternative)
+                .map_err(internal)?,
+        ];
         Ok(Request {
             message: message.to_string(),
             tools,
             target,
+            preferences,
             limiter: self.cloud_limiter.clone(),
         })
     }
@@ -951,7 +981,20 @@ impl Jarvis {
         let result = match response {
             Ok(Answer::Text(text)) => {
                 task.transition("succeeded", "Risposta del modello");
-                self.finish_reply(task, out, text, Some(provider.id()))
+                let id = task.id();
+                let mut result = self.finish_reply(task, out, text, Some(provider.id()))?;
+                match self
+                    .store
+                    .cloud_feedback_candidate(&id, provider.id(), &model)
+                {
+                    Ok(()) => {
+                        if let Some(backend) = &mut result.backend {
+                            backend["feedback_available"] = json!(true);
+                        }
+                    }
+                    Err(_) => self.obs.count("cloud.feedback.storage_failed"),
+                }
+                Ok(result)
             }
             Ok(Answer::Call(call)) => {
                 self.save(&task)?;
@@ -974,6 +1017,7 @@ impl Jarvis {
                     Failure::InvalidTool => ("Il modello ha proposto una chiamata non valida. Riformula la richiesta oppure usa un comando esplicito.".to_string(), false),
                     Failure::RateLimited(wait) => (format!("Limite del provider raggiunto. Riprova tra {} s o scegli un altro provider.", wait.as_secs_f64().ceil() as u64), true),
                     Failure::ModelUnavailable => ("I modelli selezionati non sono disponibili presso il provider. Riprova o scegli un altro provider.".to_string(), true),
+                    Failure::Incomplete | Failure::Truncated => ("Il provider ha restituito una risposta incompleta. Prova a suddividere la richiesta.".to_string(), true),
                     Failure::Unavailable => ("Il provider non ha completato la richiesta. Controlla la connessione e il modello in Sistema o scegli un altro provider.".to_string(), true),
                 };
                 task.fail(

@@ -94,6 +94,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var info: String?
     @State private var sending = false
     @State private var lastReply: [String: Any]?
+    @State private var savedFeedback: String?
+    @State private var feedbackSaving = false
     @State private var refresh = 0
     @State private var activeLoad: UUID?
     @State private var outgoingMessage: String?
@@ -455,17 +457,32 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     private var chat: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Avatar(thinking: sending).frame(width: 150).frame(maxWidth: .infinity)
+            HStack(spacing: 15) {
+                Avatar(thinking: sending).frame(width: 76)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("JARVIS").font(.title2.weight(.semibold))
+                    if sending {
+                        Label("Elaborazione in corso", systemImage: "waveform")
+                            .foregroundStyle(.cyan)
+                    } else {
+                        Label("Inferenza cloud", systemImage: "cloud")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+            }
+            .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+            .background(LinearGradient(colors: [panel, base], startPoint: .leading, endPoint: .trailing),
+                        in: RoundedRectangle(cornerRadius: 16))
+            .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(.cyan.opacity(0.20)) }
             let history = records(payload)
             if history.isEmpty, outgoingMessage == nil {
                 Text("Scrivi la tua prima richiesta.").foregroundStyle(.secondary)
             }
             ForEach(history) { item in
-                card(item["role"] == "user" ? "Tu" : "JARVIS",
-                     icon: item["role"] == "user" ? "person" : "waveform") {
-                    Text(item["content"] ?? item["text"] ?? item.title).textSelection(.enabled)
-                }
+                chatBubble(item["content"] ?? item["text"] ?? item.title, user: item["role"] == "user")
             }
+            replyFeedback
             if let sources = lastReply?["sources"] as? [[String: Any]], !sources.isEmpty {
                 card("Fonti dell’ultima risposta", icon: "link") {
                     ForEach(Array(sources.enumerated()), id: \.offset) { _, source in
@@ -480,8 +497,93 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 Button("Esamina l’azione proposta") { pending = Record(confirmation, index: 0) }
             }
             if let outgoingMessage, lastReply == nil {
-                card("Tu", icon: "person") { Text(outgoingMessage).textSelection(.enabled) }
+                chatBubble(outgoingMessage, user: true)
                 ProgressView("JARVIS sta elaborando").controlSize(.small)
+            }
+        }
+    }
+
+    private func chatBubble(_ text: String, user: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(user ? "Tu" : "JARVIS", systemImage: user ? "person" : "waveform")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(user ? iris : .cyan)
+            Text(text).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(maxWidth: 740, alignment: .leading)
+        .background(user ? iris.opacity(0.10) : panel, in: RoundedRectangle(cornerRadius: 14))
+        .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder((user ? iris : .cyan).opacity(0.14)) }
+        .padding(user ? .leading : .trailing, 32)
+        .frame(maxWidth: .infinity, alignment: user ? .trailing : .leading)
+    }
+
+    private var replyTaskID: String? {
+        (lastReply?["task"] as? [String: Any])?["task_id"] as? String
+    }
+
+    @ViewBuilder private var replyFeedback: some View {
+        if let backend = lastReply?["backend"] as? [String: Any],
+           backend["feedback_available"] as? Bool == true,
+           let id = replyTaskID {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    replyModel(backend)
+                    Spacer(minLength: 6)
+                    feedbackControls(id)
+                }
+                VStack(alignment: .leading, spacing: 10) {
+                    replyModel(backend)
+                    feedbackControls(id)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(panel.opacity(0.72), in: RoundedRectangle(cornerRadius: 10))
+        }
+    }
+
+    private func replyModel(_ backend: [String: Any]) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(providerName(backend["name"] as? String ?? "")).font(.subheadline.weight(.semibold))
+            if let model = backend["model"] as? String {
+                Text(model).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func feedbackControls(_ id: String) -> some View {
+        HStack(spacing: 8) {
+            if savedFeedback != nil {
+                Label("Valutazione salvata", systemImage: "checkmark.circle").foregroundStyle(.green)
+            } else {
+                Button("Utile", systemImage: "hand.thumbsup") { rateReply(id, "helpful") }
+            }
+            Menu(savedFeedback == nil ? "Migliora" : "Modifica valutazione", systemImage: "slider.horizontal.3") {
+                Button("Utile") { rateReply(id, "helpful") }
+                Button("Più breve") { rateReply(id, "concise") }
+                Button("Più dettagliata") { rateReply(id, "detailed") }
+                Button("Più precisa") { rateReply(id, "precise") }
+            }
+        }
+        .font(.caption)
+        .disabled(feedbackSaving)
+        .help("JARVIS conserva la categoria e il riferimento alla risposta per adattare questo modello.")
+    }
+
+    private func rateReply(_ id: String, _ rating: String) {
+        guard !feedbackSaving else { return }
+        feedbackSaving = true
+        Task {
+            defer { feedbackSaving = false }
+            do {
+                _ = try await core.request("/api/cloud/feedback", method: "POST",
+                                           body: ["task_id": id, "rating": rating], timeout: 10)
+                if replyTaskID == id { savedFeedback = rating }
+            } catch {
+                if replyTaskID == id { self.error = error.localizedDescription }
             }
         }
     }
@@ -506,6 +608,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         sending = true
         error = nil
         lastReply = nil
+        savedFeedback = nil
         message = ""
         outgoingMessage = text
         Task {
