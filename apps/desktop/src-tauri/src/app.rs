@@ -1096,17 +1096,17 @@ impl JarvisApp {
                 let orbit = egui::pos2(orbit_x, rect.center().y);
                 painter.circle_filled(
                     orbit,
-                    96.0 + pulse * 8.0,
+                    118.0 + pulse * 8.0,
                     egui::Color32::from_rgba_unmultiplied(25, 161, 210, 8),
                 );
                 painter.circle_stroke(
                     orbit,
-                    108.0 + pulse * 4.0,
+                    132.0 + pulse * 4.0,
                     egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(64, 194, 225, 42)),
                 );
                 painter.circle_stroke(
                     orbit,
-                    122.0,
+                    148.0,
                     egui::Stroke::new(0.7, egui::Color32::from_rgba_unmultiplied(64, 194, 225, 22)),
                 );
 
@@ -1117,13 +1117,13 @@ impl JarvisApp {
                     ui.add_space(4.0);
                     self.dashboard_actions(ui, ctx);
                 } else if width >= 900.0 {
-                    ui.set_height(228.0);
-                    let intro_width = (width * 0.49).clamp(280.0, width - 424.0);
-                    let avatar_width = 220.0;
+                    ui.set_height(292.0);
+                    let intro_width = (width * 0.49).clamp(280.0, width - 478.0);
+                    let avatar_width = 280.0;
                     let actions_width = (width - intro_width - avatar_width - 28.0).max(170.0);
                     ui.horizontal_top(|ui| {
                         ui.allocate_ui_with_layout(
-                            egui::vec2(intro_width, 220.0),
+                            egui::vec2(intro_width, 284.0),
                             egui::Layout::top_down(egui::Align::Min),
                             |ui| {
                                 self.dashboard_intro(
@@ -1137,23 +1137,23 @@ impl JarvisApp {
                             },
                         );
                         ui.allocate_ui_with_layout(
-                            egui::vec2(avatar_width, 220.0),
+                            egui::vec2(avatar_width, 284.0),
                             egui::Layout::centered_and_justified(egui::Direction::TopDown),
                             |ui| show_avatar(ui, ctx, self.reduce_motion),
                         );
                         ui.allocate_ui_with_layout(
-                            egui::vec2(actions_width, 220.0),
+                            egui::vec2(actions_width, 284.0),
                             egui::Layout::centered_and_justified(egui::Direction::TopDown),
                             |ui| self.dashboard_actions(ui, ctx),
                         );
                     });
                 } else {
-                    ui.set_height(240.0);
+                    ui.set_height(292.0);
                     let intro_width = width * 0.62;
                     let avatar_width = (width - intro_width - 12.0).max(132.0);
                     ui.horizontal_top(|ui| {
                         ui.allocate_ui_with_layout(
-                            egui::vec2(intro_width, 220.0),
+                            egui::vec2(intro_width, 284.0),
                             egui::Layout::top_down(egui::Align::Min),
                             |ui| {
                                 self.dashboard_intro(
@@ -1167,7 +1167,7 @@ impl JarvisApp {
                             },
                         );
                         ui.allocate_ui_with_layout(
-                            egui::vec2(avatar_width, 220.0),
+                            egui::vec2(avatar_width, 284.0),
                             egui::Layout::centered_and_justified(egui::Direction::TopDown),
                             |ui| show_avatar(ui, ctx, self.reduce_motion),
                         );
@@ -3178,19 +3178,20 @@ fn dashboard_task_state(state: &str) -> (&'static str, egui::Color32) {
 }
 
 fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
-    let side = ui.available_width().clamp(132.0, 236.0);
+    let side = ui.available_width().clamp(132.0, 280.0);
     let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(side), egui::Sense::hover());
     let painter = ui.painter_at(rect);
-    let center = rect.center();
     let time = if reduce_motion {
         0.0
     } else {
         ctx.input(|input| input.time)
     };
+    let bob = (time as f32 * 1.35).sin() * side * 0.012;
+    let center = rect.center() + egui::vec2(0.0, bob);
     let pulse = if reduce_motion {
         0.0
     } else {
-        ((time * 1.15).sin() * 0.5 + 0.5) as f32
+        ((time * 1.7).sin() * 0.5 + 0.5) as f32
     };
     let breath = pulse * 3.0;
     let accent = egui::Color32::from_rgb(35, 198, 244);
@@ -3240,7 +3241,7 @@ fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
     let unit = side / 236.0;
     let ring_radius = side * 0.40;
     let sweep = std::f32::consts::PI * 1.45;
-    let start = time as f32 * 0.28;
+    let start = time as f32 * 0.58;
     let arc = (0..=48)
         .map(|index| {
             let angle = start + sweep * index as f32 / 48.0;
@@ -3249,7 +3250,7 @@ fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
         .collect();
     painter.add(egui::Shape::line(arc, egui::Stroke::new(2.0, accent)));
     for index in 0..3 {
-        let angle = start + time as f32 * 0.7 + index as f32 * std::f32::consts::TAU / 3.0;
+        let angle = start + time as f32 * 0.9 + index as f32 * std::f32::consts::TAU / 3.0;
         let point = center + egui::Vec2::new(angle.cos(), angle.sin()) * ring_radius;
         painter.circle_filled(
             point,
@@ -3380,6 +3381,33 @@ fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
         egui::Color32::from_rgb(16, 40, 56),
         egui::Stroke::new(1.8, egui::Color32::from_rgb(71, 194, 224)),
     ));
+    let eye_y = face_center.y - side * 0.025;
+    let scan = if reduce_motion {
+        0.0
+    } else {
+        ((time as f32 * 0.85).sin() * 0.5 + 0.5) * side * 0.09
+    };
+    let scan_y = eye_y - side * 0.045 + scan;
+    painter.line_segment(
+        [
+            egui::pos2(face_center.x - side * 0.095, scan_y),
+            egui::pos2(face_center.x + side * 0.095, scan_y),
+        ],
+        egui::Stroke::new(
+            3.0 * unit,
+            egui::Color32::from_rgba_unmultiplied(35, 198, 244, 24),
+        ),
+    );
+    painter.line_segment(
+        [
+            egui::pos2(face_center.x - side * 0.095, scan_y),
+            egui::pos2(face_center.x + side * 0.095, scan_y),
+        ],
+        egui::Stroke::new(
+            0.9 * unit,
+            egui::Color32::from_rgba_unmultiplied(115, 236, 255, 90 + (pulse * 90.0) as u8),
+        ),
+    );
     painter.add(egui::Shape::line(
         vec![
             face_center + egui::vec2(-side * 0.095, -side * 0.195),
@@ -3400,7 +3428,6 @@ fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
         egui::Color32::from_rgb(24, 81, 102),
         egui::Stroke::new(0.8, egui::Color32::from_rgb(75, 195, 220)),
     ));
-    let eye_y = face_center.y - side * 0.025;
     for direction in [-1.0, 1.0] {
         painter.line_segment(
             [

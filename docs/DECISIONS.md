@@ -1465,6 +1465,16 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check`, cross-check Windows `cargo check --target x86_64-pc-windows-gnu --locked --tests`, Clippy Windows con `--all-targets -D warnings`, compilazione/link dei test Windows con `cargo test --target x86_64-pc-windows-gnu --locked --no-run` e `git diff --check`, superati. I test unitari Windows non sono stati eseguiti su Linux. Il cross-check macOS è stato tentato ma il compilatore host GCC non supporta i flag Apple e non è installato un SDK Apple; l'host non offre una sessione grafica macOS/Windows. `tests/e2e/ui_smoke.cjs` non è presente nel checkout.
 - **Documenti interessati:** `INTERFACE_AND_DEVICES.md`, ROADMAP.md e `apps/desktop/src-tauri/src/app.rs`.
 
+### ADR-0092 — Avatar più ampio con animazione a livelli
+
+- **Data:** 2026-11-23 · **Stato:** implementata nel checkout; verifica grafica nativa sospesa.
+- **Contesto:** l'avatar vettoriale della Plancia risultava piccolo e il suo movimento, limitato a una pulsazione lieve, non lo rendeva abbastanza presente.
+- **Decisione:** ampliare il ritratto desktop fino a 280 punti e quello Android a 248 dp. Aggiungere fluttuazione, scansione della visiera e orbita luminosa su entrambe le piattaforme, mantenendo il disegno locale senza immagini o dipendenze; «Riduci animazioni» continua a congelare il desktop e Android segue la scala animazioni di sistema.
+- **Motivazione:** rendere l'avatar più riconoscibile e vivo, mantenendo la resa vettoriale, la compatibilità nativa e le preferenze di accessibilità.
+- **Conseguenze:** la Plancia usa più altezza e lo scroll resta nel contenuto centrale; la schermata Android mantiene la barra inferiore fissa e scorre internamente.
+- **Evidenza:** sul cambiamento, fmt Rust, `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-gnu --locked --tests`, Clippy Windows con `--all-targets -D warnings`, compilazione/link test Windows con `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-gnu --locked --no-run` e `git diff --check` superati. `gradle -p apps/android -Pjarvis.coreOnly=true :core-client:test --no-daemon` superato (task aggiornati). La compilazione Compose è stata tentata ma bloccata: Android SDK non configurato. La verifica grafica runtime su macOS/Windows/Android resta sospesa perché non sono disponibili i rispettivi sistemi e display.
+- **Documenti interessati:** `INTERFACE_AND_DEVICES.md`, `ROADMAP.md`, `apps/desktop/src-tauri/src/app.rs` e `apps/android/app/src/main/java/local/jarvis/app/MainActivity.kt`.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

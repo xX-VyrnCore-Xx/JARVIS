@@ -55,6 +55,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -68,6 +69,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -494,7 +496,16 @@ private fun AvatarPortrait() {
     )
     val accent = MaterialTheme.colorScheme.primary
     val face = MaterialTheme.colorScheme.onSurfaceVariant
-    Canvas(Modifier.fillMaxWidth().height(188.dp)) {
+    val orbit by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            tween(5200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart,
+        ),
+        label = "avatar-orbit",
+    )
+    Canvas(Modifier.fillMaxWidth().height(248.dp)) {
         val center = Offset(size.width / 2f, size.height / 2f)
         val unit = size.minDimension / 188.dp.toPx()
         val pulse = phase * 3.dp.toPx()
@@ -521,7 +532,7 @@ private fun AvatarPortrait() {
         )
         drawArc(
             accent.copy(alpha = 0.78f),
-            startAngle = -90f + phase * 18f,
+            startAngle = -90f + orbit * 360f,
             sweepAngle = 220f,
             useCenter = false,
             topLeft = Offset(center.x - size.minDimension * 0.39f, center.y - size.minDimension * 0.39f),
@@ -529,7 +540,7 @@ private fun AvatarPortrait() {
             style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round),
         )
         for (index in 0 until 3) {
-            val angle = phase * 0.8f + index * (2 * Math.PI.toFloat() / 3)
+            val angle = orbit * (2 * Math.PI.toFloat()) + index * (2 * Math.PI.toFloat() / 3)
             drawCircle(
                 accent.copy(alpha = 0.7f),
                 radius = 2.dp.toPx(),
@@ -540,82 +551,103 @@ private fun AvatarPortrait() {
             )
         }
 
-        val head = Path().apply {
-            moveTo(center.x, center.y - 42.dp.toPx())
-            cubicTo(center.x - 26.dp.toPx(), center.y - 42.dp.toPx(), center.x - 33.dp.toPx(), center.y - 22.dp.toPx(), center.x - 31.dp.toPx(), center.y + 2.dp.toPx())
-            cubicTo(center.x - 28.dp.toPx(), center.y + 27.dp.toPx(), center.x - 13.dp.toPx(), center.y + 35.dp.toPx(), center.x, center.y + 38.dp.toPx())
-            cubicTo(center.x + 13.dp.toPx(), center.y + 35.dp.toPx(), center.x + 28.dp.toPx(), center.y + 27.dp.toPx(), center.x + 31.dp.toPx(), center.y + 2.dp.toPx())
-            cubicTo(center.x + 33.dp.toPx(), center.y - 22.dp.toPx(), center.x + 26.dp.toPx(), center.y - 42.dp.toPx(), center.x, center.y - 42.dp.toPx())
-            close()
-        }
-        drawPath(head, Color(0xFF142D40))
-        drawPath(head, accent.copy(alpha = 0.9f), style = Stroke(width = 1.7.dp.toPx(), cap = StrokeCap.Round))
-
-        val shoulders = Path().apply {
-            moveTo(center.x - 55.dp.toPx(), center.y + 73.dp.toPx())
-            quadraticTo(center.x - 48.dp.toPx(), center.y + 37.dp.toPx(), center.x - 17.dp.toPx(), center.y + 31.dp.toPx())
-            lineTo(center.x, center.y + 40.dp.toPx())
-            lineTo(center.x + 17.dp.toPx(), center.y + 31.dp.toPx())
-            quadraticTo(center.x + 48.dp.toPx(), center.y + 37.dp.toPx(), center.x + 55.dp.toPx(), center.y + 73.dp.toPx())
-            close()
-        }
-        drawPath(shoulders, Color(0xFF10283A))
-        drawPath(shoulders, accent.copy(alpha = 0.70f), style = Stroke(width = 1.6.dp.toPx()))
-        drawLine(
-            accent.copy(alpha = 0.45f),
-            Offset(center.x - 39.dp.toPx(), center.y + 52.dp.toPx()),
-            Offset(center.x - 19.dp.toPx(), center.y + 43.dp.toPx()),
-            1.dp.toPx(),
-        )
-        drawLine(
-            accent.copy(alpha = 0.45f),
-            Offset(center.x + 39.dp.toPx(), center.y + 52.dp.toPx()),
-            Offset(center.x + 19.dp.toPx(), center.y + 43.dp.toPx()),
-            1.dp.toPx(),
-        )
-        drawCircle(
-            Color(0xFF0A1B28),
-            radius = 9.dp.toPx(),
-            center = Offset(center.x, center.y + 49.dp.toPx()),
-        )
-        drawCircle(
-            accent.copy(alpha = 0.8f),
-            radius = 9.dp.toPx(),
-            center = Offset(center.x, center.y + 49.dp.toPx()),
-            style = Stroke(width = 1.dp.toPx()),
-        )
-        drawCircle(
-            accent.copy(alpha = 0.75f + phase * 0.2f),
-            radius = 3.dp.toPx() + pulse * 0.15f,
-            center = Offset(center.x, center.y + 49.dp.toPx()),
-        )
-        drawLine(
-            face.copy(alpha = 0.7f),
-            Offset(center.x - 11.dp.toPx(), center.y - 24.dp.toPx()),
-            Offset(center.x, center.y - 30.dp.toPx()),
-            1.dp.toPx(),
-        )
-        drawLine(
-            face.copy(alpha = 0.7f),
-            Offset(center.x, center.y - 30.dp.toPx()),
-            Offset(center.x + 11.dp.toPx(), center.y - 24.dp.toPx()),
-            1.dp.toPx(),
-        )
-        drawLine(accent, Offset(center.x - 19.dp.toPx(), center.y - 7.dp.toPx()), Offset(center.x - 5.dp.toPx(), center.y - 7.dp.toPx()), 2.4.dp.toPx(), StrokeCap.Round)
-        drawLine(accent, Offset(center.x + 5.dp.toPx(), center.y - 7.dp.toPx()), Offset(center.x + 19.dp.toPx(), center.y - 7.dp.toPx()), 2.4.dp.toPx(), StrokeCap.Round)
-        drawLine(face, Offset(center.x, center.y - 1.dp.toPx()), Offset(center.x - 4.dp.toPx(), center.y + 12.dp.toPx()), 1.dp.toPx(), StrokeCap.Round)
-        drawLine(face, Offset(center.x - 10.dp.toPx(), center.y + 21.dp.toPx()), Offset(center.x + 10.dp.toPx(), center.y + 21.dp.toPx()), 1.dp.toPx(), StrokeCap.Round)
-
-        for (index in 0 until 11) {
-            val x = center.x - 25.dp.toPx() + index * 5.dp.toPx()
-            val height = (5f + ((index * 7 + phase * 5).toInt() % 9)) * unit
+        val bob = kotlin.math.sin(phase * Math.PI.toFloat()) * 3.dp.toPx()
+        withTransform({
+            translate(top = bob)
+            scale(scaleX = 1.16f, scaleY = 1.16f, pivot = center)
+        }) {
+            val head = Path().apply {
+                moveTo(center.x, center.y - 42.dp.toPx())
+                cubicTo(center.x - 26.dp.toPx(), center.y - 42.dp.toPx(), center.x - 33.dp.toPx(), center.y - 22.dp.toPx(), center.x - 31.dp.toPx(), center.y + 2.dp.toPx())
+                cubicTo(center.x - 28.dp.toPx(), center.y + 27.dp.toPx(), center.x - 13.dp.toPx(), center.y + 35.dp.toPx(), center.x, center.y + 38.dp.toPx())
+                cubicTo(center.x + 13.dp.toPx(), center.y + 35.dp.toPx(), center.x + 28.dp.toPx(), center.y + 27.dp.toPx(), center.x + 31.dp.toPx(), center.y + 2.dp.toPx())
+                cubicTo(center.x + 33.dp.toPx(), center.y - 22.dp.toPx(), center.x + 26.dp.toPx(), center.y - 42.dp.toPx(), center.x, center.y - 42.dp.toPx())
+                close()
+            }
+            drawPath(head, Color(0xFF142D40))
+            drawPath(head, accent.copy(alpha = 0.9f), style = Stroke(width = 1.7.dp.toPx(), cap = StrokeCap.Round))
+            val scanY = center.y - 22.dp.toPx() + phase * 34.dp.toPx()
             drawLine(
-                accent.copy(alpha = 0.45f + phase * 0.35f),
-                Offset(x, center.y + 77.dp.toPx() - height / 2),
-                Offset(x, center.y + 77.dp.toPx() + height / 2),
-                1.5.dp.toPx(),
+                accent.copy(alpha = 0.18f),
+                Offset(center.x - 19.dp.toPx(), scanY),
+                Offset(center.x + 19.dp.toPx(), scanY),
+                3.dp.toPx(),
                 StrokeCap.Round,
             )
+            drawLine(
+                Color(0xFF9CEFFF).copy(alpha = 0.82f),
+                Offset(center.x - 19.dp.toPx(), scanY),
+                Offset(center.x + 19.dp.toPx(), scanY),
+                0.8.dp.toPx(),
+                StrokeCap.Round,
+            )
+
+            val shoulders = Path().apply {
+                moveTo(center.x - 55.dp.toPx(), center.y + 73.dp.toPx())
+                quadraticTo(center.x - 48.dp.toPx(), center.y + 37.dp.toPx(), center.x - 17.dp.toPx(), center.y + 31.dp.toPx())
+                lineTo(center.x, center.y + 40.dp.toPx())
+                lineTo(center.x + 17.dp.toPx(), center.y + 31.dp.toPx())
+                quadraticTo(center.x + 48.dp.toPx(), center.y + 37.dp.toPx(), center.x + 55.dp.toPx(), center.y + 73.dp.toPx())
+                close()
+            }
+            drawPath(shoulders, Color(0xFF10283A))
+            drawPath(shoulders, accent.copy(alpha = 0.70f), style = Stroke(width = 1.6.dp.toPx()))
+            drawLine(
+                accent.copy(alpha = 0.45f),
+                Offset(center.x - 39.dp.toPx(), center.y + 52.dp.toPx()),
+                Offset(center.x - 19.dp.toPx(), center.y + 43.dp.toPx()),
+                1.dp.toPx(),
+            )
+            drawLine(
+                accent.copy(alpha = 0.45f),
+                Offset(center.x + 39.dp.toPx(), center.y + 52.dp.toPx()),
+                Offset(center.x + 19.dp.toPx(), center.y + 43.dp.toPx()),
+                1.dp.toPx(),
+            )
+            drawCircle(
+                Color(0xFF0A1B28),
+                radius = 9.dp.toPx(),
+                center = Offset(center.x, center.y + 49.dp.toPx()),
+            )
+            drawCircle(
+                accent.copy(alpha = 0.8f),
+                radius = 9.dp.toPx(),
+                center = Offset(center.x, center.y + 49.dp.toPx()),
+                style = Stroke(width = 1.dp.toPx()),
+            )
+            drawCircle(
+                accent.copy(alpha = 0.75f + phase * 0.2f),
+                radius = 3.dp.toPx() + pulse * 0.15f,
+                center = Offset(center.x, center.y + 49.dp.toPx()),
+            )
+            drawLine(
+                face.copy(alpha = 0.7f),
+                Offset(center.x - 11.dp.toPx(), center.y - 24.dp.toPx()),
+                Offset(center.x, center.y - 30.dp.toPx()),
+                1.dp.toPx(),
+            )
+            drawLine(
+                face.copy(alpha = 0.7f),
+                Offset(center.x, center.y - 30.dp.toPx()),
+                Offset(center.x + 11.dp.toPx(), center.y - 24.dp.toPx()),
+                1.dp.toPx(),
+            )
+            drawLine(accent, Offset(center.x - 19.dp.toPx(), center.y - 7.dp.toPx()), Offset(center.x - 5.dp.toPx(), center.y - 7.dp.toPx()), 2.4.dp.toPx(), StrokeCap.Round)
+            drawLine(accent, Offset(center.x + 5.dp.toPx(), center.y - 7.dp.toPx()), Offset(center.x + 19.dp.toPx(), center.y - 7.dp.toPx()), 2.4.dp.toPx(), StrokeCap.Round)
+            drawLine(face, Offset(center.x, center.y - 1.dp.toPx()), Offset(center.x - 4.dp.toPx(), center.y + 12.dp.toPx()), 1.dp.toPx(), StrokeCap.Round)
+            drawLine(face, Offset(center.x - 10.dp.toPx(), center.y + 21.dp.toPx()), Offset(center.x + 10.dp.toPx(), center.y + 21.dp.toPx()), 1.dp.toPx(), StrokeCap.Round)
+
+            for (index in 0 until 11) {
+                val x = center.x - 25.dp.toPx() + index * 5.dp.toPx()
+                val height = (5f + ((index * 7 + phase * 5).toInt() % 9)) * unit
+                drawLine(
+                    accent.copy(alpha = 0.45f + phase * 0.35f),
+                    Offset(x, center.y + 77.dp.toPx() - height / 2),
+                    Offset(x, center.y + 77.dp.toPx() + height / 2),
+                    1.5.dp.toPx(),
+                    StrokeCap.Round,
+                )
+            }
         }
     }
 }
