@@ -423,10 +423,18 @@ impl Store {
 
     /// Ultimi `limit` messaggi in ordine cronologico.
     pub fn messages_recent(&self, limit: u32) -> StoreResult<Vec<Value>> {
+        self.conversation_recent(limit, false)
+    }
+
+    pub(crate) fn conversation_recent(&self, limit: u32, owner: bool) -> StoreResult<Vec<Value>> {
         let mut stmt = self.conn.prepare(
-            "SELECT role, content, task_id, at, sources, seq FROM (SELECT * FROM messages ORDER BY seq DESC LIMIT ?1) ORDER BY seq",
+            "SELECT m.role, m.content, m.task_id, m.at, m.sources, m.seq,
+                    f.provider, f.model, f.rating
+             FROM (SELECT * FROM messages ORDER BY seq DESC LIMIT ?1) AS m
+             LEFT JOIN cloud_feedback AS f ON ?2 AND m.role = 'assistant' AND f.task_id = m.task_id
+             ORDER BY m.seq",
         )?;
-        let rows = stmt.query_map([limit], |r| {
+        let rows = stmt.query_map(params![limit, owner], |r| {
             let role: String = r.get(0)?;
             let task: Option<String> = r.get(2)?;
             let at: String = r.get(3)?;
@@ -440,10 +448,16 @@ impl Store {
                 })
                 .transpose()?
                 .unwrap_or(Value::Array(vec![]));
-            Ok(
-                json!({"seq": r.get::<_, i64>(5)?, "role": role, "content": content,
-                "task_id": task, "at": at, "sources": sources}),
-            )
+            let mut message = json!({"seq": r.get::<_, i64>(5)?, "role": role, "content": content,
+                "task_id": task, "at": at, "sources": sources});
+            if let Some(provider) = r.get::<_, Option<String>>(6)? {
+                message["feedback"] = json!({
+                    "provider": provider,
+                    "model": r.get::<_, String>(7)?,
+                    "rating": r.get::<_, Option<String>>(8)?,
+                });
+            }
+            Ok(message)
         })?;
         rows.collect()
     }
@@ -539,6 +553,37 @@ impl Store {
             params![provider, model],
             |row| Ok(crate::cloud::QualityPreference::from_counts(row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
+    }
+
+    pub(crate) fn cloud_feedback_profiles(&self, provider: &str) -> StoreResult<Vec<Value>> {
+        let mut statement = self.conn.prepare(
+            "WITH recent AS (
+                SELECT model, rating, rated_at,
+                       row_number() OVER (PARTITION BY model ORDER BY rated_at DESC, rowid DESC) AS position
+                FROM cloud_feedback WHERE provider = ?1 AND rating IS NOT NULL
+             )
+             SELECT model, count(*), count(CASE WHEN rating='helpful' THEN 1 END),
+                    count(CASE WHEN rating='concise' THEN 1 END),
+                    count(CASE WHEN rating='detailed' THEN 1 END),
+                    count(CASE WHEN rating='precise' THEN 1 END)
+             FROM recent WHERE position <= 12
+             GROUP BY model ORDER BY max(rated_at) DESC, model",
+        )?;
+        let profiles = statement.query_map([provider], |row| {
+            let preference = crate::cloud::QualityPreference::from_counts(
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+            );
+            Ok(json!({
+                "model": row.get::<_, String>(0)?,
+                "count": row.get::<_, u32>(1)?,
+                "length": preference.length_id(),
+                "precision": preference.emphasizes_precision(),
+            }))
+        })?;
+        profiles.collect()
     }
 
     // ------------------------------------------------------------------ workflow
@@ -879,20 +924,28 @@ mod tests {
         assert!(store.rate_cloud_reply("task", "concise").unwrap());
         assert_eq!(
             store.cloud_quality("provider-a", "model-a").unwrap(),
-            QualityPreference::Concise
+            QualityPreference::from_counts(0, 1, 0, 0)
         );
         assert_eq!(
             store.cloud_quality("provider-a", "model-b").unwrap(),
-            QualityPreference::Standard
+            QualityPreference::default()
         );
         assert_eq!(
             store.cloud_quality("provider-b", "model-a").unwrap(),
-            QualityPreference::Standard
+            QualityPreference::default()
         );
+        assert_eq!(
+            store.cloud_feedback_profiles("provider-a").unwrap(),
+            vec![json!({"model":"model-a", "count":1, "length":"concise", "precision":false})]
+        );
+        assert!(store
+            .cloud_feedback_profiles("provider-b")
+            .unwrap()
+            .is_empty());
         assert!(store.rate_cloud_reply("task", "helpful").unwrap());
         assert_eq!(
             store.cloud_quality("provider-a", "model-a").unwrap(),
-            QualityPreference::Standard
+            QualityPreference::default()
         );
     }
 
