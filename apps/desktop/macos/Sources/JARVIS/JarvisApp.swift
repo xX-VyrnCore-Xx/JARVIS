@@ -128,7 +128,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     var body: some View {
         Group {
-            if core.phase == .ready {
+            if core.phase == .ready && !core.uiLocked {
                 GeometryReader { geometry in
                     if geometry.size.width >= 860 {
                         HStack(spacing: 0) { sidebar.frame(width: 192); Divider(); content }
@@ -142,6 +142,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                         try? await Task.sleep(for: .seconds(12))
                     }
                 }
+                .task { await core.watchNotifications() }
             } else {
                 locked
             }
@@ -149,6 +150,24 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         .background(base)
         .task {
             if NSApplication.shared.isActive { await core.authenticateOnLaunch() }
+        }
+        .onChange(of: core.uiLocked) { _, locked in
+            if locked {
+                useCloudContext = false
+                apiKey = ""
+                credential = ""
+                backupPassword = ""
+                updateToken = ""
+                confirmKeyRemoval = false
+                invite = nil
+                payload = [:]
+                pending = nil
+                memoryEdit = nil
+                connectorAction = nil
+            }
+        }
+        .onChange(of: core.liveTick) { _, _ in
+            if section == .notifications || section == .dashboard || section == .tasks { refresh += 1 }
         }
         .onChange(of: core.phase) { _, phase in
             if phase != .ready {
@@ -250,13 +269,22 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     private var locked: some View {
         VStack(spacing: 18) {
-            Image(systemName: "lock.shield").font(.system(size: 58, weight: .light)).foregroundStyle(.cyan)
-            Text("JARVIS").font(.largeTitle.bold())
-            Text("Accedi con Touch ID o con la password del Mac.")
+            ZStack {
+                Circle().fill(Color.cyan.opacity(0.12)).frame(width: 118, height: 118)
+                Circle().stroke(Color.cyan.opacity(0.35), lineWidth: 1).frame(width: 118, height: 118)
+                Image(systemName: core.uiLocked ? "lock.fill" : "lock.shield")
+                    .font(.system(size: 50, weight: .light)).foregroundStyle(.cyan)
+            }
+            Text("JARVIS").font(.system(size: 36, weight: .bold, design: .rounded))
+            Text(core.uiLocked ? "Interfaccia bloccata." : "Accedi con Touch ID o con la password del Mac.")
                 .foregroundStyle(.secondary)
             if let notice = core.notice { Text(notice).foregroundStyle(.orange).multilineTextAlignment(.center) }
             if core.phase == .starting || core.phase == .authenticating {
                 ProgressView(core.phase == .starting ? "Avvio del Core" : "Autenticazione macOS")
+            } else if core.phase == .ready && core.uiLocked {
+                Text("Il Core continua a lavorare in background.").font(.footnote).foregroundStyle(.secondary)
+                Button("Sblocca JARVIS") { Task { await core.unlockInterface() } }
+                    .buttonStyle(.borderedProminent).controlSize(.large)
             } else {
                 Button("Sblocca JARVIS") { Task { await core.unlock() } }
                     .buttonStyle(.borderedProminent).controlSize(.large)

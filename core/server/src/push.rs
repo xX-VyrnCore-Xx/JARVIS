@@ -5,8 +5,9 @@
 //! includono il contenuto della notifica.
 
 use std::io::Read;
-use std::path::Path;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use base64::Engine as _;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -18,8 +19,19 @@ const FCM_SCOPE: &str = "https://www.googleapis.com/auth/firebase.messaging";
 const FCM_HOST: &str = "https://fcm.googleapis.com/v1/projects";
 const MAX_RESPONSE_BYTES: u64 = 64 * 1024;
 
+/// Registrazioni push al massimo per principal: le più vecchie vengono sostituite (ADR-0098).
+const MAX_PER_OWNER: usize = 5;
+/// Tentativi di consegna per messaggio e attesa massima fra due tentativi.
+const MAX_ATTEMPTS: u32 = 3;
+const MAX_RETRY_WAIT: Duration = Duration::from_secs(30);
+/// Il token OAuth di Google dura un'ora: si riusa per 50 minuti invece di firmarne uno a ogni notifica.
+const BEARER_TTL: Duration = Duration::from_secs(50 * 60);
+
+static BEARER: Mutex<Option<(String, Instant)>> = Mutex::new(None);
+
 pub struct PushSubscriptions {
     conn: Connection,
+    db_path: PathBuf,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -174,6 +186,8 @@ pub fn delivery_config_status() -> &'static str {
 impl PushSubscriptions {
     pub fn open(db_path: &Path) -> Result<Self, String> {
         let conn = Connection::open(db_path).map_err(|_| "database push non disponibile")?;
+        conn.busy_timeout(Duration::from_secs(5))
+            .map_err(|_| "database push non disponibile")?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS push_subscriptions (
                 token_hash TEXT PRIMARY KEY,
@@ -184,7 +198,67 @@ impl PushSubscriptions {
              ON push_subscriptions(owner_id);",
         )
         .map_err(|_| "schema push non disponibile")?;
-        Ok(Self { conn })
+        // Migrazione additiva: data di creazione, ultimo invio riuscito e segnalazione di token non più validi.
+        for (column, definition) in [
+            ("created_at", "TEXT"),
+            ("last_ok_at", "TEXT"),
+            ("invalid_at", "TEXT"),
+        ] {
+            let exists = conn
+                .prepare(&format!("SELECT {column} FROM push_subscriptions LIMIT 0"))
+                .is_ok();
+            if !exists {
+                conn.execute_batch(&format!(
+                    "ALTER TABLE push_subscriptions ADD COLUMN {column} {definition};"
+                ))
+                .map_err(|_| "schema push non disponibile")?;
+            }
+        }
+        Ok(Self {
+            conn,
+            db_path: db_path.to_path_buf(),
+        })
+    }
+
+    /// Elimina le registrazioni che FCM ha dichiarato non più valide, con il loro token cifrato.
+    pub fn purge_invalid(&self, secrets: &crate::secrets::SecretStore) -> usize {
+        let Ok(mut stmt) = self
+            .conn
+            .prepare("SELECT token_hash FROM push_subscriptions WHERE invalid_at IS NOT NULL")
+        else {
+            return 0;
+        };
+        let hashes: Vec<String> = stmt
+            .query_map([], |row| row.get(0))
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default();
+        drop(stmt);
+        for hash in &hashes {
+            let _ = secrets.delete(&format!("push:{hash}"));
+            let _ = self.conn.execute(
+                "DELETE FROM push_subscriptions WHERE token_hash = ?1",
+                [hash],
+            );
+        }
+        hashes.len()
+    }
+
+    /// Stato per il proprietario: nessun token, solo conteggi e ultimo invio riuscito.
+    pub fn status(&self) -> Value {
+        let count = |sql: &str| -> i64 { self.conn.query_row(sql, [], |r| r.get(0)).unwrap_or(0) };
+        let last_ok: Option<String> = self
+            .conn
+            .query_row("SELECT MAX(last_ok_at) FROM push_subscriptions", [], |r| {
+                r.get(0)
+            })
+            .unwrap_or(None);
+        json!({
+            "delivery": delivery_config_status(),
+            "registered": count("SELECT COUNT(*) FROM push_subscriptions WHERE invalid_at IS NULL"),
+            "invalid_pending": count("SELECT COUNT(*) FROM push_subscriptions WHERE invalid_at IS NOT NULL"),
+            "last_ok_at": last_ok,
+            "max_per_device": MAX_PER_OWNER,
+        })
     }
 
     pub fn register(
@@ -218,18 +292,42 @@ impl PushSubscriptions {
         if self
             .conn
             .execute(
-                "INSERT INTO push_subscriptions (token_hash, owner_id, platform)
-                 VALUES (?1, ?2, ?3)
+                "INSERT INTO push_subscriptions (token_hash, owner_id, platform, created_at)
+                 VALUES (?1, ?2, ?3, ?4)
                  ON CONFLICT(token_hash) DO UPDATE SET
-                    owner_id = excluded.owner_id, platform = excluded.platform",
-                params![hash, owner_id, platform.as_str()],
+                    owner_id = excluded.owner_id, platform = excluded.platform, invalid_at = NULL",
+                params![hash, owner_id, platform.as_str(), crate::now()],
             )
             .is_err()
         {
             let _ = secrets.delete(&format!("push:{hash}"));
             return Err("registrazione push non disponibile".into());
         }
+        self.trim_owner(secrets, owner_id);
         Ok(())
+    }
+
+    /// Un principal conserva al massimo `MAX_PER_OWNER` registrazioni: le più vecchie vengono eliminate.
+    /// Un dispositivo che reinstalla l'app o ruota il token non accumula registrazioni morte.
+    fn trim_owner(&self, secrets: &crate::secrets::SecretStore, owner_id: &str) {
+        let Ok(mut stmt) = self.conn.prepare(
+            "SELECT token_hash FROM push_subscriptions WHERE owner_id = ?1
+             ORDER BY COALESCE(created_at, '') DESC, rowid DESC",
+        ) else {
+            return;
+        };
+        let hashes: Vec<String> = stmt
+            .query_map([owner_id], |row| row.get(0))
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default();
+        drop(stmt);
+        for hash in hashes.iter().skip(MAX_PER_OWNER) {
+            let _ = secrets.delete(&format!("push:{hash}"));
+            let _ = self.conn.execute(
+                "DELETE FROM push_subscriptions WHERE token_hash = ?1",
+                [hash],
+            );
+        }
     }
 
     pub fn remove_for_owner(
@@ -263,10 +361,10 @@ impl PushSubscriptions {
     fn registrations(
         &self,
         secrets: &crate::secrets::SecretStore,
-    ) -> Result<(Vec<(String, String)>, usize), String> {
+    ) -> Result<(Vec<(String, String, String)>, usize), String> {
         let mut stmt = self
             .conn
-            .prepare("SELECT token_hash, platform FROM push_subscriptions")
+            .prepare("SELECT token_hash, platform FROM push_subscriptions WHERE invalid_at IS NULL")
             .map_err(|_| "registrazioni push non disponibili")?;
         let rows = stmt
             .query_map([], |row| {
@@ -278,7 +376,7 @@ impl PushSubscriptions {
         for row in rows {
             let (hash, platform) = row.map_err(|_| "registrazioni push non disponibili")?;
             match secrets.get(&format!("push:{hash}")) {
-                Ok(Some(token)) => registrations.push((token, platform)),
+                Ok(Some(token)) => registrations.push((hash, token, platform)),
                 Ok(None) | Err(_) => missing_secrets += 1,
             }
         }
@@ -291,6 +389,10 @@ impl PushSubscriptions {
         notification: &Value,
         obs: std::sync::Arc<crate::observability::Observability>,
     ) {
+        let purged = self.purge_invalid(secrets);
+        if purged > 0 {
+            obs.log("info", "notify.fcm.purged", json!({"count": purged}));
+        }
         let (registrations, missing_secrets) = match self.registrations(secrets) {
             Ok(result) => result,
             Err(_) => {
@@ -314,9 +416,9 @@ impl PushSubscriptions {
         if registrations.is_empty() {
             return;
         }
-        let payloads: Vec<_> = registrations
+        let jobs: Vec<(String, Value)> = registrations
             .into_iter()
-            .map(|(token, _platform)| message_payload(&token, notification))
+            .map(|(hash, token, _platform)| (hash, message_payload(&token, notification)))
             .collect();
         let notification_id = notification["notification_id"]
             .as_str()
@@ -326,58 +428,73 @@ impl PushSubscriptions {
             .as_str()
             .unwrap_or("system")
             .to_string();
-        let worker_notification_id = notification_id.clone();
-        let worker_category = category.clone();
-        let worker_obs = obs.clone();
+        let db_path = self.db_path.clone();
+        let (worker_id, worker_category, worker_obs) =
+            (notification_id.clone(), category, obs.clone());
         if std::thread::Builder::new()
             .name("jarvis-fcm".into())
             .spawn(move || {
                 let account = match load_service_account() {
                     Ok(account) => account,
-                    Err(ConfigError::Missing) => {
-                        worker_obs.count("notify.fcm.configuration_missing");
+                    Err(error) => {
+                        let reason = match error {
+                            ConfigError::Missing => "configuration_missing",
+                            ConfigError::Invalid => "configuration_invalid",
+                        };
+                        worker_obs.count(&format!("notify.fcm.{reason}"));
                         worker_obs.log(
                             "error",
                             "notify.fcm.failed",
-                            json!({"reason": "configuration_missing", "notification_id": worker_notification_id}),
-                        );
-                        return;
-                    }
-                    Err(ConfigError::Invalid) => {
-                        worker_obs.count("notify.fcm.configuration_invalid");
-                        worker_obs.log(
-                            "error",
-                            "notify.fcm.failed",
-                            json!({"reason": "configuration_invalid", "notification_id": worker_notification_id}),
+                            json!({"reason": reason, "notification_id": worker_id}),
                         );
                         return;
                     }
                 };
-                let bearer = match access_token(&account) {
+                let mut bearer = match cached_bearer(&account, false) {
                     Ok(bearer) => bearer,
                     Err(reason) => {
                         worker_obs.count("notify.fcm.failed");
                         worker_obs.log(
                             "error",
                             "notify.fcm.failed",
-                            json!({
-                                "reason": reason,
-                                "notification_id": worker_notification_id,
-                                "failed": payloads.len()
-                            }),
+                            json!({"reason": reason, "notification_id": worker_id, "failed": jobs.len()}),
                         );
                         return;
                     }
                 };
-                let mut sent = 0usize;
-                let mut failed = 0usize;
+                let (mut sent, mut failed, mut removed) = (0usize, 0usize, 0usize);
                 let mut reasons = std::collections::BTreeMap::new();
-                for payload in &payloads {
-                    match send_message(&account, &bearer, payload) {
-                        Ok(()) => sent += 1,
-                        Err(reason) => {
+                let bookkeeping = Connection::open(&db_path).ok();
+                if let Some(conn) = &bookkeeping {
+                    let _ = conn.busy_timeout(Duration::from_secs(5));
+                }
+                for (hash, payload) in &jobs {
+                    let outcome = deliver(&account, &mut bearer, payload);
+                    match outcome {
+                        Outcome::Sent => {
+                            sent += 1;
+                            if let Some(conn) = &bookkeeping {
+                                let _ = conn.execute(
+                                    "UPDATE push_subscriptions SET last_ok_at = ?2 WHERE token_hash = ?1",
+                                    params![hash, crate::now()],
+                                );
+                            }
+                        }
+                        Outcome::Unregistered => {
                             failed += 1;
-                            *reasons.entry(reason).or_insert(0usize) += 1;
+                            removed += 1;
+                            *reasons.entry("fcm_token_unregistered").or_insert(0usize) += 1;
+                            // Il token è morto: lo si segnala e il Core lo elimina al prossimo invio.
+                            if let Some(conn) = &bookkeeping {
+                                let _ = conn.execute(
+                                    "UPDATE push_subscriptions SET invalid_at = ?2 WHERE token_hash = ?1",
+                                    params![hash, crate::now()],
+                                );
+                            }
+                        }
+                        other => {
+                            failed += 1;
+                            *reasons.entry(other.reason()).or_insert(0usize) += 1;
                         }
                     }
                 }
@@ -388,17 +505,11 @@ impl PushSubscriptions {
                     worker_obs.count("notify.fcm.failed");
                 }
                 worker_obs.log(
-                    if failed > 0 { "error" } else { "info" },
-                    if failed > 0 {
-                        "notify.fcm.failed"
-                    } else {
-                        "notify.fcm.sent"
-                    },
+                    if failed > removed { "error" } else { "info" },
+                    if failed > 0 { "notify.fcm.failed" } else { "notify.fcm.sent" },
                     json!({
-                        "notification_id": worker_notification_id,
-                        "category": worker_category,
-                        "sent": sent,
-                        "failed": failed,
+                        "notification_id": worker_id, "category": worker_category,
+                        "sent": sent, "failed": failed, "unregistered": removed,
                         "failure_reasons": reasons
                     }),
                 );
@@ -415,30 +526,112 @@ impl PushSubscriptions {
     }
 }
 
+/// Esito di un tentativo di consegna a FCM.
+#[derive(Debug, PartialEq)]
+enum Outcome {
+    Sent,
+    /// Il token non è più valido (app disinstallata o token ruotato): va eliminato.
+    Unregistered,
+    /// Errore temporaneo: si può riprovare, eventualmente dopo l'attesa indicata dal servizio.
+    Retry(Option<Duration>),
+    /// Credenziale rifiutata: si rinnova il token OAuth e si riprova una volta.
+    Auth,
+    /// Messaggio rifiutato in modo definitivo.
+    Rejected,
+    Transport,
+}
+
+impl Outcome {
+    fn reason(&self) -> &'static str {
+        match self {
+            Self::Sent => "sent",
+            Self::Unregistered => "fcm_token_unregistered",
+            Self::Retry(_) => "fcm_unavailable",
+            Self::Auth => "fcm_auth_error",
+            Self::Rejected => "fcm_http_error",
+            Self::Transport => "fcm_transport_error",
+        }
+    }
+}
+
+/// Interpreta la risposta di FCM v1: 404 (o 400 con `UNREGISTERED`) = token morto; 429 e 5xx = riprova;
+/// 401 e 403 = credenziale da rinnovare; altri 4xx = rifiuto definitivo.
+fn classify(status: u16, body: &str, retry_after: Option<&str>) -> Outcome {
+    match status {
+        200..=299 => Outcome::Sent,
+        404 => Outcome::Unregistered,
+        400 if body.contains("UNREGISTERED") => Outcome::Unregistered,
+        401 | 403 => Outcome::Auth,
+        429 | 500 | 502 | 503 | 504 => Outcome::Retry(
+            retry_after
+                .and_then(|v| v.trim().parse::<u64>().ok())
+                .map(|s| Duration::from_secs(s.max(1)).min(MAX_RETRY_WAIT)),
+        ),
+        _ => Outcome::Rejected,
+    }
+}
+
+/// Consegna un messaggio con al massimo `MAX_ATTEMPTS` tentativi: attesa esponenziale (o `Retry-After`)
+/// per gli errori temporanei, un solo rinnovo della credenziale per 401/403.
+fn deliver(account: &ServiceAccount, bearer: &mut String, payload: &Value) -> Outcome {
+    let mut refreshed = false;
+    let mut last = Outcome::Transport;
+    for attempt in 0..MAX_ATTEMPTS {
+        let outcome = send_once(account, bearer, payload);
+        match outcome {
+            Outcome::Auth if !refreshed => {
+                refreshed = true;
+                match cached_bearer(account, true) {
+                    Ok(fresh) => *bearer = fresh,
+                    Err(_) => return Outcome::Auth,
+                }
+                last = Outcome::Auth;
+            }
+            Outcome::Retry(_) | Outcome::Transport if attempt + 1 < MAX_ATTEMPTS => {
+                let wait = match &outcome {
+                    Outcome::Retry(Some(wait)) => *wait,
+                    _ => Duration::from_secs(1 << attempt),
+                };
+                std::thread::sleep(wait.min(MAX_RETRY_WAIT));
+                last = outcome;
+            }
+            other => return other,
+        }
+    }
+    last
+}
+
+/// Struttura del messaggio: dati generici e nessun contenuto privato. Gli avvisi che richiedono attenzione
+/// hanno priorità alta e durano un giorno; briefing e suggerimenti si sostituiscono a vicenda (`collapse_key`)
+/// e scadono prima, perché un briefing di ieri non serve più.
 fn message_payload(token: &str, notification: &Value) -> Value {
+    let category = notification["category"].as_str().unwrap_or("system");
+    let severity = notification["severity"].as_str().unwrap_or("info");
+    let urgent = matches!(severity, "warning" | "error")
+        || matches!(category, "confirmation" | "security" | "reminder");
+    let mut android = json!({
+        "priority": if urgent { "HIGH" } else { "NORMAL" },
+        "ttl": if urgent { "86400s" } else { "21600s" },
+    });
+    if matches!(category, "briefing" | "suggestion") {
+        android["collapse_key"] = format!("jarvis-{category}").into();
+    }
     json!({
         "message": {
             "token": token,
-            "android": {
-                "priority": "HIGH",
-                "ttl": "86400s"
-            },
+            "android": android,
             "data": {
                 "title": "JARVIS",
                 "body": "Apri JARVIS per i dettagli.",
                 "notification_id": notification["notification_id"].as_str().unwrap_or_default(),
-                "category": notification["category"].as_str().unwrap_or("system"),
-                "severity": notification["severity"].as_str().unwrap_or("info")
+                "category": category,
+                "severity": severity
             }
         }
     })
 }
 
-fn send_message(
-    account: &ServiceAccount,
-    bearer: &str,
-    payload: &Value,
-) -> Result<(), &'static str> {
+fn send_once(account: &ServiceAccount, bearer: &str, payload: &Value) -> Outcome {
     let endpoint = format!("{FCM_HOST}/{}/messages:send", account.project_id);
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(10))
@@ -450,10 +643,30 @@ fn send_message(
         .set("Content-Type", "application/json")
         .send_string(&payload.to_string());
     match response {
-        Ok(_) => Ok(()),
-        Err(ureq::Error::Status(_, _)) => Err("fcm_http_error"),
-        Err(ureq::Error::Transport(_)) => Err("fcm_transport_error"),
+        Ok(_) => Outcome::Sent,
+        Err(ureq::Error::Status(status, response)) => {
+            let retry_after = response.header("Retry-After").map(str::to_string);
+            let mut body = String::new();
+            let _ = response.into_reader().take(4096).read_to_string(&mut body);
+            classify(status, &body, retry_after.as_deref())
+        }
+        Err(ureq::Error::Transport(_)) => Outcome::Transport,
     }
+}
+
+/// Token OAuth riusato fino a 50 minuti; `force` lo rinnova (credenziale rifiutata).
+fn cached_bearer(account: &ServiceAccount, force: bool) -> Result<String, &'static str> {
+    let mut cache = BEARER.lock().unwrap_or_else(|e| e.into_inner());
+    if !force {
+        if let Some((token, at)) = cache.as_ref() {
+            if at.elapsed() < BEARER_TTL {
+                return Ok(token.clone());
+            }
+        }
+    }
+    let token = access_token(account)?;
+    *cache = Some((token.clone(), Instant::now()));
+    Ok(token)
 }
 
 fn access_token(account: &ServiceAccount) -> Result<String, &'static str> {
@@ -597,5 +810,121 @@ mod tests {
         );
         assert!(!serialized.contains("private title"));
         assert!(!serialized.contains("private notification body"));
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "jarvis-push-{tag}-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn fcm_responses_are_classified() {
+        assert_eq!(classify(200, "", None), Outcome::Sent);
+        assert_eq!(
+            classify(404, r#"{"error":{"status":"NOT_FOUND"}}"#, None),
+            Outcome::Unregistered
+        );
+        assert_eq!(
+            classify(
+                400,
+                r#"{"error":{"details":[{"errorCode":"UNREGISTERED"}]}}"#,
+                None
+            ),
+            Outcome::Unregistered
+        );
+        assert_eq!(
+            classify(400, r#"{"error":{"message":"payload non valido"}}"#, None),
+            Outcome::Rejected
+        );
+        assert_eq!(classify(401, "", None), Outcome::Auth);
+        assert_eq!(classify(403, "", None), Outcome::Auth);
+        assert_eq!(classify(503, "", None), Outcome::Retry(None));
+        assert_eq!(
+            classify(429, "", Some("7")),
+            Outcome::Retry(Some(Duration::from_secs(7)))
+        );
+        assert_eq!(
+            classify(429, "", Some("9999")),
+            Outcome::Retry(Some(MAX_RETRY_WAIT)),
+            "l'attesa richiesta dal servizio ha un tetto"
+        );
+        assert_eq!(classify(429, "", Some("domani")), Outcome::Retry(None));
+        assert_eq!(classify(422, "", None), Outcome::Rejected);
+    }
+
+    #[test]
+    fn priority_and_expiry_follow_urgency_and_briefings_collapse() {
+        let urgent = message_payload(
+            "t",
+            &json!({"category": "confirmation", "severity": "info"}),
+        );
+        assert_eq!(urgent["message"]["android"]["priority"], "HIGH");
+        assert_eq!(urgent["message"]["android"]["ttl"], "86400s");
+        assert!(urgent["message"]["android"].get("collapse_key").is_none());
+        let routine = message_payload("t", &json!({"category": "mission", "severity": "info"}));
+        assert_eq!(routine["message"]["android"]["priority"], "NORMAL");
+        assert_eq!(routine["message"]["android"]["ttl"], "21600s");
+        let briefing = message_payload("t", &json!({"category": "briefing", "severity": "info"}));
+        assert_eq!(
+            briefing["message"]["android"]["collapse_key"],
+            "jarvis-briefing"
+        );
+        let failed = message_payload("t", &json!({"category": "system", "severity": "error"}));
+        assert_eq!(failed["message"]["android"]["priority"], "HIGH");
+    }
+
+    #[test]
+    fn registrations_are_capped_migrated_and_purged() {
+        let dir = scratch("registry");
+        let db = dir.join("jarvis.sqlite3");
+        // Database creato prima delle nuove colonne: la migrazione le aggiunge senza perdere righe.
+        {
+            let old = Connection::open(&db).unwrap();
+            old.execute_batch(
+                "CREATE TABLE push_subscriptions (token_hash TEXT PRIMARY KEY, owner_id TEXT NOT NULL,
+                    platform TEXT NOT NULL CHECK (platform IN ('android', 'web')));
+                 INSERT INTO push_subscriptions VALUES ('vecchio', 'device-a', 'android');",
+            )
+            .unwrap();
+        }
+        let push = PushSubscriptions::open(&db).unwrap();
+        PushSubscriptions::open(&db).unwrap();
+        assert_eq!(push.status()["registered"], 1);
+        let secrets = crate::secrets::SecretStore::open_with(&dir, None).unwrap();
+        for i in 0..8 {
+            let token = format!("fcm:token_sintetico_numero_{i:02}_abcdefghij");
+            push.register(&secrets, "device-a", &token, Platform::Android)
+                .unwrap();
+        }
+        let status = push.status();
+        assert_eq!(status["registered"], MAX_PER_OWNER, "{status}");
+        // Un altro principal non è toccato dal tetto.
+        push.register(
+            &secrets,
+            "device-b",
+            "fcm:token_di_un_altro_dispositivo_01",
+            Platform::Android,
+        )
+        .unwrap();
+        assert_eq!(push.status()["registered"], MAX_PER_OWNER + 1);
+        // Un token dichiarato non valido viene eliminato (riga e segreto) al prossimo invio.
+        let hash = token_hash("fcm:token_di_un_altro_dispositivo_01");
+        push.conn
+            .execute(
+                "UPDATE push_subscriptions SET invalid_at = ?2 WHERE token_hash = ?1",
+                params![hash, crate::now()],
+            )
+            .unwrap();
+        assert_eq!(push.status()["invalid_pending"], 1);
+        assert_eq!(push.purge_invalid(&secrets), 1);
+        assert_eq!(push.status()["invalid_pending"], 0);
+        assert_eq!(secrets.get(&format!("push:{hash}")).unwrap(), None);
+        let (live, missing) = push.registrations(&secrets).unwrap();
+        assert_eq!((live.len(), missing), (MAX_PER_OWNER, 0));
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

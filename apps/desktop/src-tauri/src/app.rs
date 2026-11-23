@@ -58,6 +58,8 @@ enum Event {
     CloudTested(Result<Value, String>),
     ChatFinished(Result<Value, String>),
     Notifications(Result<Value, String>),
+    /// Il flusso in tempo reale si è interrotto: serve solo a scoprire che l'app è chiusa.
+    Ping,
 }
 
 struct Connection {
@@ -443,6 +445,7 @@ impl JarvisApp {
                     ctx.request_repaint();
                 }
                 Event::Notifications(Err(error)) => self.notifications_error = Some(error),
+                Event::Ping => {}
             }
         }
     }
@@ -453,10 +456,41 @@ impl JarvisApp {
         ctx.request_repaint();
     }
 
+    /// Notifiche in tempo reale (ADR-0098): il flusso del Core avvisa subito quando ne arriva una e il
+    /// client rilegge l'elenco; il polling resta come rete di sicurezza, rallentato mentre il flusso è attivo.
     fn start_notification_poll(&self, ctx: &egui::Context) {
         let Some(client) = self.client.clone() else {
             return;
         };
+        let live = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (tx, stream_ctx, stream_client, stream_live) =
+            (self.tx.clone(), ctx.clone(), client.clone(), live.clone());
+        std::thread::spawn(move || loop {
+            match stream_client.notification_stream() {
+                Ok(reader) => {
+                    stream_live.store(true, std::sync::atomic::Ordering::Relaxed);
+                    crate::client::read_events(reader, |name, _| {
+                        if matches!(name, "notification" | "resync")
+                            && tx
+                                .send(Event::Notifications(
+                                    stream_client.get("/api/notifications?limit=20"),
+                                ))
+                                .is_err()
+                        {
+                            return false;
+                        }
+                        stream_ctx.request_repaint();
+                        true
+                    });
+                    stream_live.store(false, std::sync::atomic::Ordering::Relaxed);
+                }
+                Err(_) => stream_live.store(false, std::sync::atomic::Ordering::Relaxed),
+            }
+            if tx.send(Event::Ping).is_err() {
+                break;
+            }
+            std::thread::sleep(Duration::from_secs(5));
+        });
         let tx = self.tx.clone();
         let ctx = ctx.clone();
         std::thread::spawn(move || loop {
@@ -469,7 +503,12 @@ impl JarvisApp {
                 break;
             }
             ctx.request_repaint();
-            std::thread::sleep(Duration::from_secs(5));
+            let wait = if live.load(std::sync::atomic::Ordering::Relaxed) {
+                30
+            } else {
+                5
+            };
+            std::thread::sleep(Duration::from_secs(wait));
         });
     }
 

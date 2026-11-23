@@ -734,6 +734,60 @@ async fn loopback_root_only_handles_stateful_oauth_callbacks() {
 }
 
 #[tokio::test]
+async fn notifications_arrive_live_on_the_event_stream() {
+    let e = env();
+    let open = |token: Option<&str>| {
+        let mut b = Request::builder()
+            .uri("/api/notifications/stream")
+            .header("host", format!("localhost:{PORT}"));
+        if let Some(t) = token {
+            b = b.header("x-jarvis-token", t);
+        }
+        b.body(Body::empty()).unwrap()
+    };
+    let anonymous = e.app.clone().oneshot(open(None)).await.unwrap();
+    assert_eq!(anonymous.status(), StatusCode::UNAUTHORIZED);
+
+    let res = e.app.clone().oneshot(open(Some(TOKEN))).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(res.headers()["content-type"], "text/event-stream");
+    assert_eq!(res.headers()["cache-control"], "no-store");
+    let mut body = res.into_body();
+    macro_rules! text {
+        ($frame:expr) => {
+            String::from_utf8($frame.unwrap().unwrap().into_data().unwrap().to_vec()).unwrap()
+        };
+    }
+    let ready = text!(body.frame().await);
+    assert!(ready.contains("event: ready"), "{ready}");
+
+    // Una notifica creata dal Core raggiunge subito il client collegato, senza polling.
+    let (status, _) = e
+        .api("POST", "/api/proactive/briefing", Some(json!({})))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let live = tokio::time::timeout(std::time::Duration::from_secs(5), body.frame())
+        .await
+        .expect("notifica in tempo reale");
+    let live = text!(live);
+    assert!(
+        live.contains("event: notification") && live.contains("\"category\":\"briefing\""),
+        "{live}"
+    );
+    assert!(live.starts_with("id: "));
+    let (_, listed) = e.api("GET", "/api/notifications?limit=5", None).await;
+    assert!(live.contains(listed["items"][0]["notification_id"].as_str().unwrap()));
+
+    let (status, push) = e.api("GET", "/api/push/status", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(push["registered"], 0);
+    assert!(
+        push["delivery"].is_string() && !push.to_string().contains("token\":"),
+        "{push}"
+    );
+}
+
+#[tokio::test]
 async fn conversation_and_tasks_persist_across_restart() {
     let e = env();
     e.chat("ciao").await;

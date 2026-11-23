@@ -369,11 +369,12 @@ private fun ColumnScope.HomeScreen(
         loading = false
     }
 
+    val live = rememberLiveSignal(client, session, appInForeground)
     LaunchedEffect(session, appInForeground) {
         if (!appInForeground) return@LaunchedEffect
         while (isActive) {
             refresh()
-            delay(15_000)
+            live.pause(15_000)
         }
     }
 
@@ -740,11 +741,12 @@ private fun ColumnScope.TasksScreen(
             .onSuccess { tasks.clear(); tasks.addAll(it); status = if (it.isEmpty()) "Nessuna attività." else null }
             .onFailure { if (it is CoreException.Revoked) onRevoked() else status = it.message }
     }
+    val live = rememberLiveSignal(client, session, appInForeground)
     LaunchedEffect(session, appInForeground) {
         if (!appInForeground) return@LaunchedEffect
         while (isActive) {
             refresh()
-            delay(5_000)
+            live.pause(5_000)
         }
     }
     LaunchedEffect(tasks.toList(), selectedTaskId) {
@@ -873,6 +875,7 @@ private fun ColumnScope.NoticesScreen(
         else FirebaseMessaging.getInstance().deleteToken().addOnCompleteListener { unregister() }
     }
 
+    val live = rememberLiveSignal(client, session, appInForeground)
     suspend fun refresh() {
         withContext(Dispatchers.IO) { runCatching { client.notices(session) } }
             .onSuccess { notices = it; status = if (it.items.isEmpty()) "Nessuna notifica." else null }
@@ -886,7 +889,7 @@ private fun ColumnScope.NoticesScreen(
         ) registerToken()
         while (isActive) {
             refresh()
-            delay(5_000)
+            live.pause(5_000)
         }
     }
     LaunchedEffect(notices, focusNotificationId) {

@@ -189,4 +189,42 @@ class CoreClientTest {
         }
         assertEquals(2, t.calls.size)
     }
+
+    @Test
+    fun serverSentEventsAreSplitAndPingsIgnored() {
+        val raw = "retry: 3000\nevent: ready\ndata: {}\n\n: ping\n\nid: 7\nevent: notification\ndata: {\"a\":1}\n\nevent: resync\ndata: {}\n\n"
+        val seen = mutableListOf<String>()
+        readServerSentEvents(raw.reader().buffered(), { true }) { seen += it }
+        assertEquals(listOf("ready", "notification", "resync"), seen)
+        var lines = 0
+        val stopped = mutableListOf<String>()
+        readServerSentEvents(raw.reader().buffered(), { lines++ < 4 }) { stopped += it }
+        assertEquals(listOf("ready"), stopped)
+    }
+
+    @Test
+    fun liveNoticesUseTheDeviceTokenOnTheStreamEndpointOnly() {
+        var openedUrl = ""
+        var sentHeaders = emptyMap<String, String>()
+        val stream = EventStream { url, headers, _, onEvent ->
+            openedUrl = url
+            sentHeaders = headers
+            onEvent("ready")
+            onEvent("notification")
+            onEvent("sconosciuto")
+            onEvent("resync")
+        }
+        val client = CoreClient(Recorder(emptyList()), stream)
+        var ready = 0
+        var changes = 0
+        client.watchNotices(DeviceSession("https://jarvis.example", token, listOf("chat")), { true }, { ready++ }, { changes++ })
+        assertEquals("https://jarvis.example/api/notifications/stream", openedUrl)
+        assertEquals(token, sentHeaders["X-Jarvis-Device"])
+        assertEquals("text/event-stream", sentHeaders["Accept"])
+        assertEquals(1, ready)
+        assertEquals(2, changes)
+        assertThrows(CoreException.InvalidOrigin::class.java) {
+            client.watchNotices(DeviceSession("http://jarvis.example", token, listOf("chat")), { true }, {}, {})
+        }
+    }
 }
