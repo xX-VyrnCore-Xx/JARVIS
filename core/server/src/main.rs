@@ -264,7 +264,11 @@ async fn main() {
         .map(|h| h.trim().to_ascii_lowercase())
         .filter(|h| !h.is_empty())
         .filter(|h| {
-            let ok = h.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') && h.contains('.');
+            let ok = h.len() <= 253 && h.contains('.') && h.split('.').all(|label| {
+                !label.is_empty() && label.len() <= 63
+                    && !label.starts_with('-') && !label.ends_with('-')
+                    && label.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            });
             if !ok {
                 eprintln!("JARVIS_ALLOWED_HOSTS: host ignorato «{h}» (servono nomi completi, senza caratteri jolly)");
             }

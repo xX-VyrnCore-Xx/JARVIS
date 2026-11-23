@@ -172,6 +172,34 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
         else { health = [:] }
     }
 
+    func checkHTTPS(_ origin: String) async throws {
+        guard var endpoint = URLComponents(string: origin), endpoint.scheme == "https",
+              endpoint.host != nil, endpoint.user == nil, endpoint.password == nil,
+              endpoint.query == nil, endpoint.fragment == nil, endpoint.path.isEmpty else {
+            throw CoreFailure(message: "Origine HTTPS non valida.")
+        }
+        endpoint.path = "/api/connectivity"
+        guard let url = endpoint.url else { throw CoreFailure(message: "Origine HTTPS non valida.") }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 8)
+        request.httpShouldHandleCookies = false
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForResource = 10
+        let probeSession = URLSession(configuration: configuration, delegate: DirectSession(), delegateQueue: nil)
+        defer { probeSession.invalidateAndCancel() }
+        let (bytes, response) = try await probeSession.bytes(for: request)
+        let unexpected = CoreFailure(message: "L’indirizzo non restituisce lo stato di connessione di JARVIS.")
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw unexpected }
+        var data = Data()
+        for try await byte in bytes {
+            guard data.count < 4096 else { throw unexpected }
+            data.append(byte)
+        }
+        guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              object["service"] as? String == "jarvis-core", object["protocol"] as? Int == 1 else {
+            throw unexpected
+        }
+    }
+
     func request(_ path: String, method: String = "GET", body: [String: Any]? = nil,
                  timeout: TimeInterval = 190) async throws -> [String: Any] {
         guard process?.isRunning == true, parentPipe != nil else {

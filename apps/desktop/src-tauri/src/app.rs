@@ -54,6 +54,7 @@ enum Event {
     ConnectorOAuth(Result<Value, String>),
     PairingCreated(Result<Value, String>),
     CloudConfigured(Result<Value, String>, bool),
+    CloudTested(Result<Value, String>),
     ChatFinished(Result<Value, String>),
     Notifications(Result<Value, String>),
 }
@@ -363,13 +364,25 @@ impl JarvisApp {
                             self.cloud_action_notice = Some(if removed {
                                 "La chiave del provider è stata rimossa.".into()
                             } else {
-                                "Chiave salvata. Prova il provider dalla Chat; l'inferenza remota può comportare costi.".into()
+                                "Chiave salvata e selezionata per la chat. Usa Testa chiave per verificare il provider.".into()
                             });
                         }
                         Err(error) => {
                             self.cloud_action_notice = None;
                             self.cloud_action_error = Some(error);
                         }
+                    }
+                    ctx.request_repaint();
+                }
+                Event::CloudTested(result) => {
+                    self.cloud_action_busy = false;
+                    match result {
+                        Ok(result) => {
+                            let model = result["model"].as_str().unwrap_or("modello automatico");
+                            self.cloud_action_notice =
+                                Some(format!("Richiesta di prova riuscita · {model}"));
+                        }
+                        Err(error) => self.cloud_action_error = Some(error),
                     }
                     ctx.request_repaint();
                 }
@@ -652,7 +665,7 @@ impl JarvisApp {
                 );
                 return;
             }
-            json!({"provider": provider, "key": key})
+            json!({"provider": provider, "key": key, "use_for_chat": true})
         };
         let tx = self.tx.clone();
         self.cloud_action_busy = true;
@@ -662,6 +675,21 @@ impl JarvisApp {
         std::thread::spawn(move || {
             let result = client.post("/api/cloud", Some(&body));
             let _ = tx.send(Event::CloudConfigured(result, remove_key));
+        });
+        ctx.request_repaint();
+    }
+
+    fn test_cloud_key(&mut self, ctx: &egui::Context) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        let provider = self.cloud_provider.clone();
+        let tx = self.tx.clone();
+        self.cloud_action_busy = true;
+        self.cloud_action_notice = None;
+        self.cloud_action_error = None;
+        std::thread::spawn(move || {
+            let _ = tx.send(Event::CloudTested(client.test_cloud_key(&provider)));
         });
         ctx.request_repaint();
     }
@@ -2162,6 +2190,31 @@ impl JarvisApp {
                 .clicked()
             {
                 self.configure_cloud(ctx, false);
+            }
+
+            if ui
+                .add_enabled(
+                    configured && !self.cloud_action_busy && self.cloud_api_key.trim().is_empty(),
+                    egui::Button::new("Testa chiave"),
+                )
+                .clicked()
+            {
+                self.test_cloud_key(ctx);
+            }
+            if configured
+                && provider.as_ref().is_some_and(|p| p["preferred"] != true)
+                && ui
+                    .add_enabled(
+                        !self.cloud_action_busy,
+                        egui::Button::new("Usa per la chat"),
+                    )
+                    .clicked()
+            {
+                self.act(
+                    ctx,
+                    "/api/cloud".into(),
+                    Some(json!({"provider": self.cloud_provider, "use_for_chat": true})),
+                );
             }
 
             if configured {

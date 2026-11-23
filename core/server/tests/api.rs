@@ -961,3 +961,49 @@ async fn owner_can_rate_a_cloud_answer_using_fixed_categories() {
     drop(e);
     std::fs::remove_dir_all(data).unwrap();
 }
+
+#[test]
+fn the_provider_selected_by_the_owner_is_used_for_chat() {
+    let dir =
+        std::env::temp_dir().join(format!("jarvis-default-provider-{}", uuid::Uuid::new_v4()));
+    let mut core = test_core(&dir);
+    core.configure_cloud(&json!({"provider":"ollama_cloud","key":"fixture-a"}))
+        .unwrap();
+    core.configure_cloud(&json!({"provider":"nvidia_nim","key":"fixture-b","use_for_chat":true}))
+        .unwrap();
+    let request = core
+        .prepare_cloud_chat(&json!({"provider":"auto","message":"Una domanda sintetica"}))
+        .unwrap();
+    assert_eq!(request.target.provider.id(), "nvidia_nim");
+    assert!(request.tools.is_empty());
+    core.configure_cloud(&json!({"provider":"nvidia_nim","remove_key":true}))
+        .unwrap();
+    let request = core
+        .prepare_cloud_chat(&json!({"provider":"auto","message":"Una domanda sintetica"}))
+        .unwrap();
+    assert_eq!(request.target.provider.id(), "ollama_cloud");
+    drop(core);
+    std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[tokio::test]
+async fn testing_a_cloud_key_requires_the_owner_and_a_configured_provider() {
+    let e = env();
+    let body = json!({"provider": "ollama_cloud"});
+    assert_eq!(
+        e.call(
+            "POST",
+            "/api/cloud/test",
+            Some(body.clone()),
+            None,
+            &format!("localhost:{PORT}")
+        )
+        .await
+        .0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        e.api("POST", "/api/cloud/test", Some(body)).await.0,
+        StatusCode::BAD_REQUEST
+    );
+}

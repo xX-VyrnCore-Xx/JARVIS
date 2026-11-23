@@ -112,17 +112,25 @@ impl ApiClient {
     }
 
     pub fn cloud_chat(&self, message: &str, use_context: bool) -> Result<Value, String> {
+        self.cloud_post(
+            "/api/cloud/chat",
+            &json!({
+                "provider": "auto", "message": message, "use_context": use_context,
+            }),
+        )
+    }
+
+    pub fn test_cloud_key(&self, provider: &str) -> Result<Value, String> {
+        self.cloud_post("/api/cloud/test", &json!({"provider": provider}))
+    }
+
+    fn cloud_post(&self, path: &str, body: &Value) -> Result<Value, String> {
         let client = Self::new_with_timeout(
             self.base.as_str(),
             self.auth.clone(),
             Duration::from_secs(125),
         )?;
-        client.post(
-            "/api/cloud/chat",
-            Some(&json!({
-                "provider": "auto", "message": message, "use_context": use_context
-            })),
-        )
+        client.post(path, Some(body))
     }
 }
 

@@ -155,7 +155,25 @@ async fn approvals_from_a_device_with_a_passkey_require_a_fresh_assertion() {
     assert_eq!(status, StatusCode::OK, "{opts}");
     assert_eq!(opts["rp"]["id"], PHONE);
     assert_eq!(opts["pubKeyCredParams"][0]["alg"], -7);
-    let mut key = Authenticator::new(PHONE, &format!("http://{PHONE}"));
+    let insecure = Authenticator::new(PHONE, &format!("http://{PHONE}"));
+    let (cd, att) = insecure.register(opts["challenge"].as_str().unwrap());
+    let (status, response) = e
+        .call(
+            "POST",
+            "/api/passkeys/register",
+            Some(json!({"clientDataJSON": cd, "attestationObject": att})),
+            Some(&phone),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(response["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("origine non ammessa"));
+    let (_, opts) = e
+        .call("POST", "/api/passkeys/register/options", None, Some(&phone))
+        .await;
+    let mut key = Authenticator::new(PHONE, &format!("https://{PHONE}"));
     let (cd, att) = key.register(opts["challenge"].as_str().unwrap());
     let (status, out) = e
         .call(
@@ -233,7 +251,7 @@ async fn approvals_from_a_device_with_a_passkey_require_a_fresh_assertion() {
     assert!(!e.data.join("workspace/altro.txt").exists());
 
     // Una passkey di un altro autenticatore (stesso id, chiave diversa) viene rifiutata.
-    let mut forged = Authenticator::new(PHONE, &format!("http://{PHONE}"));
+    let mut forged = Authenticator::new(PHONE, &format!("https://{PHONE}"));
     forged.credential_id = key.credential_id.clone();
     let fake = e.assertion(&phone, &mut forged, &other).await;
     let (status, _) = e

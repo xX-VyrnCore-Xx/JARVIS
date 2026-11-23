@@ -208,4 +208,8 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Qualità delle risposte e chat macOS (2026-11-23).** Feedback a categorie chiuse per modello e provider, correzione del voto senza duplicati, profilo calcolato su una finestra recente e recupero delle risposte incomplete presso lo stesso provider. Chat con avatar compatto, messaggi differenziati per ruolo e provenienza della risposta. Rimangono il collaudo visivo macOS e la prova qualitativa con i provider reali.
 
+**Diagnostica HTTPS e collegamenti dei dispositivi (2026-11-23).** macOS e Android espongono un controllo dell’origine HTTPS mediante un endpoint privo di dati account o credenziali. L’associazione macOS separa connessione, codice a scadenza e permessi. Il Core convalida gli host remoti e accetta per le passkey soltanto l’origine HTTPS canonica. La prova con il proxy privato dell’utente e il collaudo visivo su dispositivi fisici restano da eseguire.
+
+**Diagnostica e compatibilità cloud (2026-11-23).** Gli identificativi dei modelli usano i cataloghi diretti Ollama Cloud e NVIDIA NIM. Le richieste testuali evitano i parametri degli strumenti quando non servono. Il Core distingue chiave rifiutata, permessi, credito, modello e problemi HTTPS. Il test del provider usa un messaggio sintetico e il trasporto verifica i certificati con le radici del sistema. Il Core riprova i modelli indisponibili dopo un minuto e aggira la sospensione per la verifica manuale della chiave. Rimane la verifica con un account abilitato all’inferenza.
+
 Per ogni ripresa registrare data, revisione, lavoro completato, verifiche eseguite, blocchi, ipotesi e prossimo passo concreto. Conservare il checkpoint con le modifiche alle quali si riferisce.

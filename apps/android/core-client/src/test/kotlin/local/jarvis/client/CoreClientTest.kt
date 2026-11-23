@@ -25,9 +25,26 @@ class CoreClientTest {
     fun originAcceptsOnlyBareHttps() {
         assertEquals("https://jarvis.esempio.ts.net", CoreClient.origin(" https://JARVIS.esempio.ts.net/ "))
         assertEquals("https://host:8443", CoreClient.origin("https://host:8443"))
+        assertEquals("https://host", CoreClient.origin("https://host:443"))
         for (bad in listOf("http://jarvis.example", "https://user:pw@jarvis.example", "https://jarvis.example/api",
+            "https://jarvis.example:0", "https://jarvis.example:65536", "https://jarvis.example:",
             "https://jarvis.example?x=1", "https://jarvis.example#f", "jarvis.example", "")) {
             assertThrows(bad, CoreException.InvalidOrigin::class.java) { CoreClient.origin(bad) }
+        }
+    }
+
+    @Test
+    fun connectivityIsUnauthenticatedAndExpectsTheCoreProtocol() {
+        val transport = Recorder(listOf(HttpReply(200, """{"service":"jarvis-core","protocol":1}""")))
+        CoreClient(transport).checkConnectivity("https://jarvis.example")
+        val (method, url, headers) = transport.calls.single()
+        assertEquals("GET" to "https://jarvis.example/api/connectivity", method to url)
+        assertFalse(headers.containsKey("X-Jarvis-Device"))
+        assertThrows(CoreException.InvalidResponse::class.java) {
+            CoreClient(Recorder(listOf(HttpReply(200, "{}")))).checkConnectivity("https://jarvis.example")
+        }
+        assertThrows(CoreException.InvalidOrigin::class.java) {
+            UrlConnectionTransport.send("GET", "http://jarvis.example", emptyMap(), null)
         }
     }
 

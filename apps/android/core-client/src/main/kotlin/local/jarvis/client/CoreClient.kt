@@ -2,9 +2,7 @@ package local.jarvis.client
 
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.HttpURLConnection
 import java.net.URI
-import java.net.URL
 
 /** Sessione di un dispositivo associato (RF-11): il token resta solo sul telefono e nelle richieste. */
 data class DeviceSession(val origin: String, val token: String, val scopes: List<String>) {
@@ -39,6 +37,7 @@ data class PendingAction(val confirmationId: String, val target: String, val exp
 
 sealed class CoreException(message: String) : Exception(message) {
     class InvalidOrigin : CoreException("Inserisci l'indirizzo HTTPS del Core, ad esempio https://jarvis.example.")
+    class InvalidTLS : CoreException("Il certificato HTTPS del Core non è valido o non è attendibile.")
     class InvalidResponse : CoreException("Il Core ha restituito una risposta inattesa.")
     class Revoked : CoreException("Dispositivo revocato. Genera un nuovo codice per associarlo.")
     class ScopeRequired : CoreException("Questo dispositivo non può confermare azioni.")
@@ -57,22 +56,41 @@ fun interface Transport {
 /** Trasporto reale: nessun redirect (un redirect potrebbe portare il token altrove), niente cache. */
 object UrlConnectionTransport : Transport {
     override fun send(method: String, url: String, headers: Map<String, String>, body: String?): HttpReply {
-        val connection = URL(url).openConnection() as HttpURLConnection
-        connection.instanceFollowRedirects = false
-        connection.useCaches = false
-        connection.connectTimeout = 15_000
-        connection.readTimeout = 150_000
-        connection.requestMethod = method
-        headers.forEach { (k, v) -> connection.setRequestProperty(k, v) }
-        if (body != null) {
-            connection.doOutput = true
-            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+        val endpoint = URI.create(url).toURL()
+        if (!endpoint.protocol.equals("https", ignoreCase = true)) throw CoreException.InvalidOrigin()
+        val connection = endpoint.openConnection() as javax.net.ssl.HttpsURLConnection
+        try {
+            connection.instanceFollowRedirects = false
+            connection.useCaches = false
+            val probe = endpoint.path == "/api/connectivity"
+            connection.connectTimeout = if (probe) 8_000 else 15_000
+            connection.readTimeout = if (probe) 8_000 else 150_000
+            connection.requestMethod = method
+            headers.forEach { (k, v) -> connection.setRequestProperty(k, v) }
+            if (body != null) {
+                connection.doOutput = true
+                connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            }
+            val status = connection.responseCode
+            val stream = if (status in 200..299) connection.inputStream else connection.errorStream
+            val text = stream?.use {
+                val limit = 8 * 1024 * 1024
+                val result = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(8192)
+                while (true) {
+                    val count = it.read(buffer)
+                    if (count == -1) break
+                    if (result.size() + count > limit) throw CoreException.InvalidResponse()
+                    result.write(buffer, 0, count)
+                }
+                result.toString(Charsets.UTF_8.name())
+            } ?: ""
+            return HttpReply(status, text)
+        } catch (e: javax.net.ssl.SSLException) {
+            throw CoreException.InvalidTLS()
+        } finally {
+            connection.disconnect()
         }
-        val status = connection.responseCode
-        val stream = if (status in 200..299) connection.inputStream else connection.errorStream
-        val text = stream?.bufferedReader(Charsets.UTF_8)?.use { it.readText() } ?: ""
-        connection.disconnect()
-        return HttpReply(status, text)
     }
 }
 
@@ -87,11 +105,19 @@ class CoreClient(private val transport: Transport = UrlConnectionTransport) {
             if (uri.scheme?.lowercase() != "https" || host.isNullOrEmpty() || uri.userInfo != null ||
                 uri.query != null || uri.fragment != null || !(uri.path.isNullOrEmpty() || uri.path == "/")
             ) throw CoreException.InvalidOrigin()
-            val port = if (uri.port == -1) "" else ":${uri.port}"
+            if (uri.rawAuthority.endsWith(":") || (uri.port != -1 && uri.port !in 1..65535)) throw CoreException.InvalidOrigin()
+            val port = if (uri.port == -1 || uri.port == 443) "" else ":${uri.port}"
             return "https://${host.lowercase()}$port"
         }
 
         private val HEX_TOKEN = Regex("^[0-9a-f]{64}$")
+    }
+
+    fun checkConnectivity(origin: String) {
+        val result = request(origin, "/api/connectivity", token = null)
+        if (result.optString("service") != "jarvis-core" || result.optInt("protocol") != 1) {
+            throw CoreException.InvalidResponse()
+        }
     }
 
     fun pair(origin: String, code: String, name: String): DeviceSession {

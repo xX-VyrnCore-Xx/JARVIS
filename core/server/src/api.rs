@@ -59,10 +59,12 @@ fn webauthn_site(headers: &axum::http::HeaderMap) -> (String, Vec<String>) {
         .map_or(host.as_str(), |(h, _)| h)
         .trim_matches(['[', ']'])
         .to_string();
-    (
-        rp,
-        vec![format!("https://{host}"), format!("http://{host}")],
-    )
+    let origins = url::Url::parse(&format!("https://{host}"))
+        .ok()
+        .map(|url| url.origin().ascii_serialization())
+        .into_iter()
+        .collect();
+    (rp.to_ascii_lowercase(), origins)
 }
 
 /// Nuova sfida casuale (32 byte) registrata per 5 minuti.
@@ -153,18 +155,19 @@ async fn guard(State(state): State<Shared>, mut req: Request, next: Next) -> Res
         format!("[::1]:{}", state.port),
     ];
     let local = allowed.iter().any(|a| a == host);
-    let host_name = host.rsplit_once(':').map_or(host, |(h, p)| {
-        if p.chars().all(|c| c.is_ascii_digit()) {
-            h
-        } else {
-            host
-        }
-    });
     let remote = !local
-        && state
-            .remote_hosts
-            .iter()
-            .any(|h| h.eq_ignore_ascii_case(host_name));
+        && host
+            .parse::<axum::http::uri::Authority>()
+            .is_ok_and(|authority| {
+                !host.contains('@')
+                    && !host.ends_with(':')
+                    && (authority.as_str() == authority.host()
+                        || authority.port_u16().is_some_and(|port| port != 0))
+                    && state
+                        .remote_hosts
+                        .iter()
+                        .any(|h| h.eq_ignore_ascii_case(authority.host()))
+            });
     if !local && !remote {
         return error(StatusCode::FORBIDDEN, "forbidden_host", "host non ammesso");
     }
@@ -181,6 +184,7 @@ async fn guard(State(state): State<Shared>, mut req: Request, next: Next) -> Res
     if remote {
         // Dispositivo associato (RF-11): token del dispositivo, solo le rotte dei suoi permessi.
         let public = !path.starts_with("/api/")
+            || path == "/api/connectivity"
             || path == "/api/devices/pair"
             || path.starts_with("/api/hooks/")
             || path.starts_with("/api/nodes/");
@@ -220,6 +224,7 @@ async fn guard(State(state): State<Shared>, mut req: Request, next: Next) -> Res
     if local
         && path.starts_with("/api/")
         && path != "/api/health"
+        && path != "/api/connectivity"
         && path != "/api/devices/pair"
         && !path.starts_with("/api/hooks/")
         && !path.starts_with("/api/nodes/")
@@ -299,6 +304,10 @@ fn device_route_allowed(method: &str, route: &str, scopes: &[&str]) -> bool {
 pub fn router(state: Shared) -> Router {
     Router::new()
         .route("/api/health", get(health))
+        .route(
+            "/api/connectivity",
+            get(|| async { Json(json!({"service": "jarvis-core", "protocol": 1})) }),
+        )
         .route("/api/chat", post(chat))
         .route("/api/security", get(security_status))
         .route("/api/n8n", get(n8n_status).post(n8n_runtime))
@@ -306,6 +315,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/n8n/jobs/{id}", delete(n8n_remove))
         .route("/api/cloud", get(cloud_status).post(configure_cloud))
         .route("/api/cloud/chat", post(cloud_chat))
+        .route("/api/cloud/test", post(test_cloud_key))
         .route("/api/cloud/feedback", post(rate_cloud_reply))
         .route("/api/chat/stream", post(chat_stream))
         .route("/api/updates", get(updates_get).post(updates_set))
@@ -483,6 +493,54 @@ async fn cloud_status(State(state): State<Shared>) -> Response {
 
 async fn configure_cloud(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
     reply(with_core(&state, move |j| j.configure_cloud(&body)).await)
+}
+
+async fn test_cloud_key(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let Some(provider) = crate::cloud::Provider::parse(&body["provider"]) else {
+        return CoreError::BadRequest("Seleziona il provider da verificare.".into())
+            .into_response();
+    };
+    let Ok(permit) = state.cloud_slots.clone().try_acquire_owned() else {
+        return error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "cloud.busy",
+            "JARVIS sta elaborando altre richieste cloud.",
+        );
+    };
+    let prepared = with_core(&state, move |j| {
+        j.prepare_cloud_chat(&json!({
+            "provider": provider.id(), "message": "Rispondi soltanto con OK."
+        }))
+    })
+    .await;
+    let request = match prepared {
+        Ok(request) => request,
+        Err(error) => return error.into_response(),
+    };
+    match tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        request.verify()
+    })
+    .await
+    {
+        Ok(completed) => match completed.answer {
+            Ok(crate::cloud::Answer::Text(_)) => Json(json!({
+                "provider": provider.id(), "model": completed.model, "ok": true
+            }))
+            .into_response(),
+            Ok(crate::cloud::Answer::Call(_)) => error(
+                StatusCode::BAD_GATEWAY,
+                "cloud.invalid_tool",
+                "Risposta di prova inattesa dal provider.",
+            ),
+            Err(failure) => error(
+                StatusCode::BAD_GATEWAY,
+                failure.code(),
+                &failure.user_message(provider).0,
+            ),
+        },
+        Err(_) => CoreError::Internal("Verifica cloud interrotta.".into()).into_response(),
+    }
 }
 
 async fn rate_cloud_reply(State(state): State<Shared>, Json(body): Json<Value>) -> Response {

@@ -81,10 +81,19 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
 @MainActor private struct RootView: View {
     @ObservedObject var core: CoreSession
+    @State private var remoteOrigin = ""
+    @State private var connectionProbe: (origin: String, detail: String, verified: Bool)?
+    @State private var checkingHTTPS = false
+    @State private var allowDeviceConfirmations = false
+    @State private var invite: [String: Any]?
+    @State private var changingInvite = false
+
     @State private var section: Section = .dashboard
     @State private var payload: [String: Any] = [:]
     @State private var message = ""
     @State private var memoryQuery = ""
+    @State private var testingCloudKey = false
+    @State private var cloudModel = ""
     @State private var provider = "ollama_cloud"
     @State private var apiKey = ""
     @State private var pending: Record?
@@ -131,6 +140,12 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         .background(base)
         .task {
             if NSApplication.shared.isActive { await core.authenticateOnLaunch() }
+        }
+        .onChange(of: core.phase) { _, phase in
+            if phase != .ready {
+                invite = nil
+                connectionProbe = nil
+            }
         }
         .sheet(item: $pending) { item in confirmationSheet(item) }
         .sheet(item: $memoryEdit) { item in
@@ -362,9 +377,21 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             Text("JARVIS").font(.system(size: 52, weight: .semibold, design: .rounded))
                 .tracking(3).foregroundStyle(.white)
                 .accessibilityAddTraits(.isHeader)
-            Button { select(.chat) } label: { Label("Apri chat", systemImage: "bubble.left") }
-                .buttonStyle(.borderedProminent).controlSize(.large).tint(.cyan)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) { openChat; openConnections }
+                VStack(alignment: .leading, spacing: 8) { openChat; openConnections }
+            }
         }
+    }
+
+    private var openChat: some View {
+        Button { select(.chat) } label: { Label("Apri chat", systemImage: "bubble.left") }
+            .buttonStyle(.borderedProminent).controlSize(.large).tint(.cyan)
+    }
+
+    private var openConnections: some View {
+        Button { select(.devices) } label: { Label("Connessioni", systemImage: "network") }
+            .buttonStyle(.bordered).controlSize(.large)
     }
 
     private func dashboardTile(_ title: String, value: String, icon: String, color: Color,
@@ -644,30 +671,9 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             }
         case .connectors: connectorSetup
         case .devices:
-            card("Associazione", icon: "qrcode") {
-                let urls = payload["pairing_urls"] as? [String] ?? []
-                if urls.isEmpty { Text("Configura un indirizzo HTTPS del Core per associare un dispositivo.") }
-                else { ForEach(urls, id: \.self) { Text($0).textSelection(.enabled) } }
-                Button("Genera codice monouso") {
-                    mutate("/api/devices/pairing", body: ["scopes": ["chat", "confirm"]])
-                }.disabled(urls.isEmpty)
-            }
+            deviceConnection
         case .models:
-            card("Provider cloud", icon: "key") {
-                Picker("Provider", selection: $provider) {
-                    Text("Ollama Cloud").tag("ollama_cloud")
-                    Text("NVIDIA NIM").tag("nvidia_nim")
-                }
-                SecureField("Chiave API", text: $apiKey)
-                Button("Salva chiave") {
-                    let key = apiKey
-                    apiKey = ""
-                    mutate("/api/cloud", body: ["provider": provider, "key": key])
-                }.disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                Button("Rimuovi chiave", role: .destructive) {
-                    mutate("/api/cloud", body: ["provider": provider, "remove_key": true])
-                }
-            }
+            cloudSettings
         case .updates:
             card("Canale stabile", icon: "arrow.down.circle") {
                 Toggle("Controllo automatico", isOn: $automaticUpdates)
@@ -718,6 +724,89 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         }
     }
 
+    private var cloudSettings: some View {
+        card("Provider cloud", icon: "key") {
+            Picker("Provider", selection: $provider) {
+                Text("Ollama Cloud").tag("ollama_cloud")
+                Text("NVIDIA NIM").tag("nvidia_nim")
+            }
+            .disabled(testingCloudKey)
+            .onChange(of: provider) { _, _ in
+                apiKey = ""
+                cloudModel = ""
+                info = nil
+                error = nil
+            }
+            let entry = records(payload, key: "providers").first { $0.id == provider }
+            let configured = entry?.data["configured"] as? Bool == true
+            let preferred = entry?.data["preferred"] as? Bool == true
+            if configured {
+                Label(preferred ? "Usato per la chat" : "Chiave salvata", systemImage: "key.fill")
+                    .foregroundStyle(.cyan)
+            }
+            SecureField("Chiave API", text: $apiKey)
+            if let saved = entry?["model_override"] {
+                LabeledContent("Modello salvato", value: saved)
+            }
+            TextField("Modello personalizzato (facoltativo)", text: $cloudModel)
+            ViewThatFits(in: .horizontal) {
+                HStack { saveCloudSettings(configured: configured); testCloudButton(configured: configured) }
+                VStack(alignment: .leading) { saveCloudSettings(configured: configured); testCloudButton(configured: configured) }
+            }
+            if configured {
+                HStack {
+                    if !preferred {
+                        Button("Usa per la chat") { mutate("/api/cloud", body: ["provider": provider, "use_for_chat": true]) }
+                    }
+                    if entry?["model_override"] != nil {
+                        Button("Ripristina modelli automatici") { mutate("/api/cloud", body: ["provider": provider, "clear_model": true]) }
+                    }
+                    Button("Rimuovi chiave", role: .destructive) {
+                        mutate("/api/cloud", body: ["provider": provider, "remove_key": true])
+                    }
+                }.disabled(testingCloudKey)
+            }
+        }
+    }
+
+    private func saveCloudSettings(configured: Bool) -> some View {
+        let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let model = cloudModel.trimmingCharacters(in: .whitespacesAndNewlines)
+        return Button(key.isEmpty ? "Salva modello" : "Salva chiave") {
+            var body: [String: Any] = ["provider": provider, "use_for_chat": true]
+            if !key.isEmpty { body["key"] = key }
+            if !model.isEmpty { body["model"] = model }
+            apiKey = ""
+            cloudModel = ""
+            mutate("/api/cloud", body: body)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(testingCloudKey || (key.isEmpty && (!configured || model.isEmpty)))
+    }
+
+    private func testCloudButton(configured: Bool) -> some View {
+        Button(testingCloudKey ? "Verifica in corso…" : "Testa chiave", systemImage: "checkmark.shield") {
+            let selected = provider
+            testingCloudKey = true
+            error = nil
+            info = nil
+            Task {
+                defer { testingCloudKey = false }
+                do {
+                    let result = try await core.request("/api/cloud/test", method: "POST",
+                                                        body: ["provider": selected], timeout: 125)
+                    if section == .models {
+                        info = "Richiesta di prova riuscita · \(result["model"] as? String ?? providerName(selected))"
+                    }
+                } catch {
+                    if section == .models { self.error = error.localizedDescription }
+                }
+            }
+        }.disabled(testingCloudKey || !configured ||
+                   !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                   !cloudModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
     private var pageRecords: [Record] {
         switch section {
         case .audit: return records(payload, key: "events")
@@ -751,11 +840,21 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             }
         case .connectors:
             HStack {
-                Text(item.data["authorized"] as? Bool == true ? "Autorizzato" : "Da autorizzare")
+                let authorized = item.data["authorized"] as? Bool == true
+                Label(authorized ? "Autorizzato" : "Da autorizzare",
+                      systemImage: authorized ? "checkmark.circle" : "key")
+                    .foregroundStyle(authorized ? Color.green : .orange)
+                Spacer()
                 Button("Configura") { credential = ""; connectorAction = item }
             }
         case .devices:
-            if item.data["revoked_at"] is NSNull {
+            let revoked = item["revoked_at"] != nil
+            Label(revoked ? "Revocato" : "Associato", systemImage: revoked ? "lock.fill" : "checkmark.circle")
+                .font(.caption.weight(.medium)).foregroundStyle(revoked ? Color.orange : .green)
+            if let scopes = item.data["scopes"] as? [String], !scopes.isEmpty {
+                LabeledContent("Permessi", value: scopes.map { $0 == "confirm" ? "Conferme" : $0.capitalized }.joined(separator: ", "))
+            }
+            if !revoked {
                 Button("Revoca accesso", role: .destructive) {
                     pending = Record(["id": item.id, "tool": "devices.revoke", "target": item.title,
                                       "expected_effect": "Il dispositivo perderà l’accesso a JARVIS.",
@@ -767,6 +866,123 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 mutate("/api/notifications/\(urlSegment(item.id))/read", body: [:])
             }
         default: EmptyView()
+        }
+    }
+
+    private var deviceConnection: some View {
+        VStack(spacing: 14) {
+            card("Connessione HTTPS", icon: "network") {
+                let origins = payload["pairing_urls"] as? [String] ?? []
+                let origin = origins.contains(remoteOrigin) ? remoteOrigin : origins.first ?? ""
+                if origins.isEmpty {
+                    Text("Configura un proxy HTTPS privato e autorizza il suo host in remote-hosts.txt.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Indirizzo del Core", selection: Binding(
+                        get: { origin }, set: { remoteOrigin = $0 }
+                    )) {
+                        ForEach(origins, id: \.self) { Text($0).tag($0) }
+                    }
+                    HStack {
+                        Button("Verifica HTTPS", systemImage: "checkmark.shield") { probe(origin) }
+                            .buttonStyle(.borderedProminent).disabled(checkingHTTPS)
+                        Button("Copia indirizzo", systemImage: "doc.on.doc") { copyConnectionText(origin) }
+                    }
+                    if checkingHTTPS {
+                        ProgressView("Verifica del certificato e del Core").controlSize(.small)
+                    } else if let result = connectionProbe, result.origin == origin {
+                        Label(result.detail, systemImage: result.verified ? "checkmark.seal.fill" : "exclamationmark.triangle")
+                            .font(.callout).foregroundStyle(result.verified ? Color.green : .orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            card("Associa dispositivo", icon: "qrcode") {
+                Text("Il dispositivo riceve accesso alla chat.")
+                    .foregroundStyle(.secondary)
+                Toggle("Consenti anche le conferme", isOn: $allowDeviceConfirmations)
+                    .disabled(changingInvite)
+                HStack {
+                    Button(invite == nil ? "Genera codice" : "Nuovo codice", systemImage: "key") {
+                        updateInvite(cancel: false)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(changingInvite || (payload["pairing_urls"] as? [String] ?? []).isEmpty)
+                    if invite != nil {
+                        Button("Annulla invito", role: .destructive) { updateInvite(cancel: true) }
+                            .disabled(changingInvite)
+                    }
+                }
+                if let code = invite?["code"] as? String, let date = inviteExpiry {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        if context.date < date {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Text(code).font(.title2.monospaced()).tracking(3).textSelection(.enabled)
+                                    Spacer()
+                                    Button("Copia codice", systemImage: "doc.on.doc") { copyConnectionText(code) }
+                                }
+                                LabeledContent("Scadenza") { Text(date, style: .time) }
+                                LabeledContent("Permessi", value:
+                                    (invite?["scopes"] as? [String])?.contains("confirm") == true ? "Chat e conferme" : "Chat")
+                            }
+                            .padding(12)
+                            .background(.cyan.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                        } else {
+                            Label("Codice scaduto", systemImage: "exclamationmark.circle")
+                                .foregroundStyle(.orange)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var inviteExpiry: Date? {
+        guard let value = invite?["expires_at"] as? String else { return nil }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter.date(from: value)
+    }
+
+    private func probe(_ origin: String) {
+        guard !checkingHTTPS else { return }
+        checkingHTTPS = true
+        connectionProbe = nil
+        Task {
+            defer { checkingHTTPS = false }
+            do {
+                try await core.checkHTTPS(origin)
+                connectionProbe = (origin, "Certificato valido · Core raggiungibile", true)
+            } catch {
+                connectionProbe = (origin, error.localizedDescription, false)
+            }
+        }
+    }
+
+    private func updateInvite(cancel: Bool) {
+        guard !changingInvite else { return }
+        changingInvite = true
+        let previous = invite?["code"] as? String
+        var body: [String: Any] = ["scopes": allowDeviceConfirmations ? ["chat", "confirm"] : ["chat"]]
+        if let previous { body[cancel ? "code" : "replace"] = previous }
+        Task {
+            defer { changingInvite = false }
+            do {
+                let path = cancel ? "/api/devices/pairing/cancel" : "/api/devices/pairing"
+                let result = try await core.request(path, method: "POST", body: body, timeout: 10)
+                invite = cancel ? nil : result
+                error = nil
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
+    private func copyConnectionText(_ value: String) {
+        NSPasteboard.general.clearContents()
+        if NSPasteboard.general.setString(value, forType: .string) {
+            info = "Copiato negli appunti."
         }
     }
 
@@ -786,9 +1002,15 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     ForEach(templates) { Text($0.title).tag($0.id) }
                 }
                 if let entry = templates.first(where: { $0.id == selectedTemplate }) {
-                    if entry.data["needs_client_id"] as? Bool == true { TextField("ID client OAuth", text: $clientID) }
-                    Button("Installa") {
-                        mutate("/api/connectors/templates/\(urlSegment(entry.id))", body: ["client_id": clientID])
+                    if records(payload).contains(where: { $0.id == entry.id }) {
+                        Label("Già installato", systemImage: "checkmark.circle").foregroundStyle(.secondary)
+                    } else {
+                        if entry.data["needs_client_id"] as? Bool == true {
+                            TextField("ID client OAuth", text: $clientID)
+                        }
+                        Button("Installa") {
+                            mutate("/api/connectors/templates/\(urlSegment(entry.id))", body: ["client_id": clientID])
+                        }
                     }
                 }
             }
@@ -940,8 +1162,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         Task {
             do {
                 let result = try await core.request(path, method: method, body: body)
-                if let code = result["code"] as? String { info = "Codice di associazione: \(code)" }
-                else { info = result["reply"] as? String ?? "Operazione completata." }
+                info = result["reply"] as? String ?? "Operazione completata."
                 await load(section)
                 await core.refreshHealth()
             } catch { self.error = error.localizedDescription }
