@@ -161,11 +161,7 @@ fn token_request(
     )
     .map_err(|e| e.message)?;
     let body: Value = serde_json::from_slice(&data).unwrap_or(Value::Null);
-    if !(200..300).contains(&status)
-        || !body["access_token"]
-            .as_str()
-            .is_some_and(|token| !token.is_empty())
-    {
+    if !(200..300).contains(&status) || body["access_token"].as_str().is_none_or(str::is_empty) {
         return Err(format!("il servizio ha rifiutato i token (HTTP {status})"));
     }
     let expires_in = body["expires_in"].as_u64().unwrap_or(3600);
