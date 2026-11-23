@@ -13,12 +13,29 @@ mountpoint="$temporary_dir/mount"
 
 cleanup_dmg_work() {
   if hdiutil info | grep -Fq "$mountpoint"; then
-    hdiutil detach "$mountpoint" >/dev/null 2>&1 || true
+    hdiutil detach "$mountpoint" >/dev/null 2>&1 ||
+      hdiutil detach -force "$mountpoint" >/dev/null 2>&1 || true
   fi
   rm -f "$temporary_dmg"
   rmdir "$mountpoint" "$temporary_dir" 2>/dev/null || true
 }
 trap cleanup_dmg_work EXIT
+
+detach_dmg_mount() {
+  local target="$1"
+  local attempt
+  for attempt in 1 2 3; do
+    if hdiutil detach "$target"; then
+      return 0
+    fi
+    if (( attempt < 3 )); then
+      sleep 2
+    fi
+  done
+
+  echo "Espulsione normale non riuscita; forzo lo smontaggio del DMG temporaneo."
+  hdiutil detach -force "$target"
+}
 
 mkdir -p "$contents/MacOS" "$resources"
 cp "$desktop/target/release/jarvis-desktop" "$contents/MacOS/jarvis-desktop"
@@ -145,7 +162,7 @@ on run
   end tell
 end run
 APPLESCRIPT
-hdiutil detach "$mountpoint"
+detach_dmg_mount "$mountpoint"
 echo "Compressione del DMG con il layout Finder di installazione."
 hdiutil convert "$temporary_dmg" -ov -format UDZO -o "$dmg"
 rm "$temporary_dmg"
