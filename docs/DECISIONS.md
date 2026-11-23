@@ -1387,6 +1387,39 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** test Core dalla chat con attività sintetiche scadute e imminenti, controllo che restino aperte dopo la revisione, test AI per instradamento offline e descrizione dei suggerimenti.
 - **Documenti interessati:** AUTONOMY_AND_TOOLS.md, README.md, ROADMAP.md e `contracts/catalog/tools/todo.review.json`.
 
+### ADR-0096 — Missioni autonome
+
+- **Data:** 2026-11-23 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora la proattività di JARVIS e come agente autonomo come nel film»).
+- **Contesto:** fino a qui JARVIS agiva solo se interpellato, un passo alla volta, e l'inferenza cloud era limitata a quattro strumenti di calcolo. Non esisteva un modo per affidargli un obiettivo da perseguire da solo.
+- **Decisione:**
+  - una **missione** ha un obiettivo (8–1000 caratteri, senza credenziali), una ricorrenza facoltativa (da 5 minuti a 7 giorni), un limite di esecuzioni (predefinito 3, o 100 se ricorrente), il consenso esplicito all'uso dei connettori e un diario delle ultime 10 esecuzioni; al massimo 8 missioni aperte (tabella `missions`, schema 9);
+  - lo scheduler avvia al massimo una missione per giro. L'esecuzione prenota la missione per 30 minuti, così un arresto a metà non la duplica. Con una chiave cloud il modello guida l'agente passo per passo (`cloud::AgentRequest`, fino a 5 strumenti e poi il rapporto): ogni richiesta al provider avviene fuori dal blocco del Core, come le chat, quindi chat e automazioni non attendono. Senza chiave la missione usa il worker locale a regole;
+  - ogni strumento rientra nel Core ed è verificato da ambito concesso, policy, blocco delle ripetizioni e audit, con identità `agent:mission`. Gli strumenti concessi sono solo quelli senza conferma, a rischio non alto, in sola lettura più `notes.add` e `todo.add`; esclusi `agent.delegate`, `mission.*`, l'apertura di applicazioni e, salvo consenso dell'obiettivo, i connettori e i nodi. Un'azione che richiederebbe conferma viene descritta nel rapporto, mai tentata;
+  - il rapporto inizia con «COMPLETATA:» o «IN CORSO:». Una missione non ricorrente si chiude al primo rapporto senza «IN CORSO:»; una ricorrente si ripete fino al limite. Tre errori consecutivi la interrompono; ogni esecuzione produce una notifica `mission`. Se il proprietario mette in pausa o annulla durante un'esecuzione, la scelta prevale;
+  - i risultati degli strumenti inviati al modello sono ridotti e, se contengono credenziali, sostituiti da un avviso;
+  - API solo del proprietario: `GET/POST /api/missions`, `POST /api/missions/{id}/{pause|resume|cancel|delete|run}`. Dalla chat: `mission.start` (con conferma), `mission.list`, `mission.cancel`; offline «avvia una missione [ogni N minuti]: …».
+- **Alternative scartate:** missioni che usano tutti gli strumenti con conferma in coda (un'azione approvata ore dopo è difficile da giudicare e allarga la superficie di prompt injection); esecuzione sotto il blocco del Core (bloccherebbe la chat per tutta la durata delle chiamate al modello).
+- **Conseguenze:** JARVIS può lavorare in autonomia su ricerche, controlli e riepiloghi con un perimetro di strumenti ristretto e verificabile. Una missione cloud invia obiettivo e risultati degli strumenti al provider scelto: è una scelta esplicita del proprietario, come per la chat. L'esito dipende dalla qualità del modello e non è garantito.
+- **Evidenza:** `tests/missions.rs` (7 test: esecuzione locale, ricorrenza, pausa/annullamento anche durante l'esecuzione, strumenti con conferma esclusi, avvio dalla chat con conferma, limite di missioni, ciclo guidato dal cloud con strumento eseguito, rifiuto fuori ambito, completamento ed errore del provider); test unitari di `missions.rs` e di `cloud::AgentRequest` (formato dei messaggi Ollama e NIM, scambio HTTP sintetico); smoke API; prova con il Core reale: lo scheduler ha eseguito e completato una missione da solo.
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ACCEPTANCE.md, ROADMAP.md, contratti `delegation` (`steps_left` fino a 8), `notification` (categorie `mission`, `briefing`, `suggestion`) e strumenti `mission.*`.
+
+### ADR-0097 — Iniziative proattive
+
+- **Data:** 2026-11-23 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario.
+- **Contesto:** le notifiche esistenti reagiscono a un evento (scadenza, esito di un'automazione). Mancava un assistente che si faccia avanti con ciò che serve sapere.
+- **Decisione:** il pianificatore valuta ogni minuto regole deterministiche e locali, ciascuna attivabile e con una sola emissione per chiave (tabella `proactive_sent`, pulita dopo 30 giorni):
+  - **briefing** quotidiano all'orario scelto (predefinito 08:00) e solo nelle 6 ore seguenti: cose da fare aperte, in scadenza oggi e in ritardo, conferme in attesa, notifiche non lette, missioni attive, automazioni con errori e la priorità consigliata;
+  - **spazio disco** oltre il 90% su volumi di almeno 1 GB, una volta al giorno per volume;
+  - **conferme dimenticate** da più di 15 minuti, una volta per conferma;
+  - **automazioni** con le ultime 3 esecuzioni fallite, una volta al giorno;
+  - **cose da fare lasciate indietro**: almeno 3 aperte da oltre 7 giorni, una volta alla settimana;
+  - **ore di silenzio** (predefinite 22:00–07:00): nulla viene inviato e le regole riprovano al giro successivo.
+  Impostazioni in `proactive.json` (validate, con fallback ai predefiniti), `GET/PATCH /api/proactive` e `POST /api/proactive/briefing` per un briefing su richiesta. Nuove categorie di notifica `briefing` e `suggestion`.
+- **Privacy:** nessuna regola usa il cloud o la rete; i dati restano nel Core.
+- **Conseguenze:** niente lettura del calendario nel briefing: i connettori restano a richiesta e non vengono interrogati senza che l'obiettivo lo consenta (ricorrono alle missioni con consenso ai connettori). Nessun apprendimento delle abitudini: le regole sono fisse.
+- **Evidenza:** `tests/proactive.rs` (briefing una volta al giorno con lo stato reale, finestra oraria, ore di silenzio e impostazioni, conferma ricordata una sola volta, briefing su richiesta); test unitari di `proactive.rs` (finestra, silenzio a cavallo della mezzanotte, validazione e persistenza, testo, soglie del disco); smoke API.
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ACCEPTANCE.md, ROADMAP.md, contratto `notification`.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.

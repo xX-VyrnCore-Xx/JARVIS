@@ -558,6 +558,105 @@ pub enum Answer {
     Call(Value),
 }
 
+/// Passo già eseguito da un agente autonomo (ADR-0096): chiamata e risultato restituito al modello.
+pub struct AgentStep {
+    pub tool: String,
+    pub arguments: Value,
+    pub output: String,
+}
+
+/// Richiesta di un passo a un agente autonomo: obiettivo, passi già eseguiti e strumenti consentiti. Senza
+/// strumenti il modello deve rispondere. Come le chat, viene eseguita fuori dal blocco del Core.
+pub struct AgentRequest {
+    pub provider: Provider,
+    pub model: String,
+    key: String,
+    pub system: String,
+    pub goal: String,
+    pub steps: Vec<AgentStep>,
+    pub tools: Vec<Function>,
+    limiter: Arc<Mutex<Limiter>>,
+}
+
+impl AgentRequest {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        provider: Provider,
+        model: String,
+        key: String,
+        system: String,
+        goal: String,
+        steps: Vec<AgentStep>,
+        tools: Vec<Function>,
+        limiter: Arc<Mutex<Limiter>>,
+    ) -> Self {
+        Self {
+            provider,
+            model,
+            key,
+            system,
+            goal,
+            steps,
+            tools,
+            limiter,
+        }
+    }
+
+    pub fn payload(&self) -> Value {
+        let mut messages = vec![
+            json!({"role": "system", "content": self.system}),
+            json!({"role": "user", "content": self.goal}),
+        ];
+        for (index, step) in self.steps.iter().enumerate() {
+            let name = step.tool.replace('.', "__");
+            match self.provider {
+                Provider::Ollama => {
+                    messages.push(json!({"role": "assistant", "content": "",
+                        "tool_calls": [{"function": {"name": name, "arguments": step.arguments}}]}));
+                    messages
+                        .push(json!({"role": "tool", "tool_name": name, "content": step.output}));
+                }
+                Provider::Nim => {
+                    let id = format!("call_{index}");
+                    messages.push(json!({"role": "assistant", "content": null,
+                        "tool_calls": [{"id": id, "type": "function",
+                            "function": {"name": name, "arguments": step.arguments.to_string()}}]}));
+                    messages
+                        .push(json!({"role": "tool", "tool_call_id": id, "content": step.output}));
+                }
+            }
+        }
+        let mut body = match self.provider {
+            Provider::Ollama => json!({"model": self.model, "messages": messages, "stream": false,
+                "options": {"num_predict": 2_000}}),
+            Provider::Nim => json!({"model": self.model, "messages": messages, "stream": false,
+                "max_tokens": 2_000, "temperature": 0.2}),
+        };
+        if !self.tools.is_empty() {
+            body["tools"] = json!(self.tools.iter().map(|tool| &tool.wire).collect::<Vec<_>>());
+            if self.provider == Provider::Nim {
+                body["tool_choice"] = json!("auto");
+            }
+        }
+        body
+    }
+
+    pub fn execute(&self) -> Result<Answer, Failure> {
+        self.execute_at(self.provider.endpoint())
+    }
+
+    pub(crate) fn execute_at(&self, endpoint: &str) -> Result<Answer, Failure> {
+        chat_at(
+            endpoint,
+            self.provider,
+            &self.key,
+            self.payload(),
+            &self.tools,
+            &self.limiter,
+        )
+    }
+}
+
 pub struct Turn {
     pub user: String,
     pub assistant: String,
@@ -1336,5 +1435,101 @@ mod tests {
                 Err(Failure::InvalidTool)
             ));
         }
+    }
+}
+
+#[cfg(test)]
+mod agent_tests {
+    use super::*;
+
+    fn request(provider: Provider, with_tools: bool) -> AgentRequest {
+        let tools = if with_tools {
+            let catalog = crate::catalog::Catalog::load().unwrap();
+            vec![Function::from(catalog.get("time.now").unwrap())]
+        } else {
+            Vec::new()
+        };
+        AgentRequest::new(
+            provider,
+            "modello-sintetico".into(),
+            "chiave-sintetica".into(),
+            "sistema".into(),
+            "obiettivo".into(),
+            vec![AgentStep {
+                tool: "time.now".into(),
+                arguments: json!({}),
+                output: "{\"status\":\"succeeded\"}".into(),
+            }],
+            tools,
+            Default::default(),
+        )
+    }
+
+    #[test]
+    fn the_agent_transcript_uses_each_providers_tool_message_format() {
+        let ollama = request(Provider::Ollama, true).payload();
+        let m = ollama["messages"].as_array().unwrap();
+        assert_eq!(
+            (m[0]["role"].as_str(), m[1]["role"].as_str()),
+            (Some("system"), Some("user"))
+        );
+        assert_eq!(m[2]["tool_calls"][0]["function"]["name"], "time__now");
+        assert!(m[2]["tool_calls"][0]["function"]["arguments"].is_object());
+        assert_eq!(
+            (m[3]["role"].as_str(), m[3]["tool_name"].as_str()),
+            (Some("tool"), Some("time__now"))
+        );
+        assert_eq!(ollama["tools"][0]["function"]["name"], "time__now");
+        assert!(ollama.get("tool_choice").is_none());
+
+        let nim = request(Provider::Nim, true).payload();
+        let m = nim["messages"].as_array().unwrap();
+        assert_eq!(m[2]["tool_calls"][0]["id"], m[3]["tool_call_id"]);
+        assert_eq!(m[2]["tool_calls"][0]["type"], "function");
+        assert!(m[2]["tool_calls"][0]["function"]["arguments"].is_string());
+        assert_eq!(nim["tool_choice"], "auto");
+
+        // Senza strumenti (ultimo passo) il modello deve solo rispondere.
+        assert!(request(Provider::Nim, false)
+            .payload()
+            .get("tools")
+            .is_none());
+    }
+
+    #[test]
+    fn an_agent_step_round_trips_through_the_provider() {
+        use std::io::{BufRead, BufReader, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/api/chat", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut length = 0;
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if line == "\r\n" || line.is_empty() {
+                    break;
+                }
+                if let Some((n, v)) = line.trim().split_once(':') {
+                    if n.eq_ignore_ascii_case("content-length") {
+                        length = v.trim().parse().unwrap();
+                    }
+                }
+            }
+            let mut body = vec![0; length];
+            reader.read_exact(&mut body).unwrap();
+            let body: Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(body["messages"].as_array().unwrap().len(), 4);
+            let reply = r#"{"message":{"content":"","tool_calls":[{"function":{"name":"time__now","arguments":{}}}]}}"#;
+            write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}", reply.len()).unwrap();
+        });
+        let answer = request(Provider::Ollama, true)
+            .execute_at(&endpoint)
+            .unwrap();
+        assert!(
+            matches!(&answer, Answer::Call(c) if c["tool"] == "time.now" && c["version"] == "1.0.0")
+        );
+        server.join().unwrap();
     }
 }

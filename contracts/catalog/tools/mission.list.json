@@ -1,0 +1,33 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "mission.list",
+  "version": "1.0.0",
+  "summary": "Elenca le missioni autonome con stato, esecuzioni e ultimo rapporto",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.mission:read"
+  ],
+  "errors": [
+    "mission.invalid",
+    "mission.limit",
+    "mission.not_found",
+    "mission.state",
+    "mission.unavailable"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "none"
+}

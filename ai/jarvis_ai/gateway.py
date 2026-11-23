@@ -120,6 +120,18 @@ def _describe_tool_result(result: dict) -> str:
         return f"Promemoria da rivedere (prossime {hours} ore):\n" + "\n".join(items)
     if tool == "todo.done":
         return f"Fatto! Attività {output.get('id')} completata."
+    if tool == "mission.start":
+        every = f", ogni {output['every_minutes']} minuti" if output.get("every_minutes") else ""
+        return (f"Missione avviata (id {output.get('id')}{every}). La eseguo in background con gli strumenti che non richiedono "
+                f"conferma e ti mando un rapporto: {output.get('goal')}")
+    if tool == "mission.list":
+        missions = output.get("missions", [])
+        if not missions:
+            return "Nessuna missione."
+        return "Missioni:\n" + "\n".join(
+            f"• [{m['id']}] {m['status']} ({m['runs']} esecuzioni): {m['goal'][:100]}" for m in missions)
+    if tool == "mission.cancel":
+        return f"Missione {output.get('id')} annullata."
     if tool == "memory.update":
         return f"Ricordo {output.get('id')} aggiornato: {output.get('text')}"
     if tool in ("web.browse", "web.form"):
@@ -323,6 +335,10 @@ def _form_fields(text: str) -> dict:
 
 
 _RULES: list[tuple[re.Pattern[str], str, Any]] = [
+    (re.compile(r"^\s*(?:avvia|inizia|crea|lancia)\s+(?:una\s+)?missione(?:\s+ogni\s+(\d{1,4})\s+minuti)?\s*:\s*(.+)$", re.I | re.S), "mission.start",
+     lambda m: {"goal": m.group(2).strip()[:1000], **({"every_minutes": int(m.group(1))} if m.group(1) else {})}),
+    (re.compile(r"^\s*(?:le mie missioni|elenca le missioni|mostra(?:mi)? le missioni|missioni)\s*$", re.I), "mission.list", lambda m: {}),
+    (re.compile(r"^\s*(?:annulla|ferma|interrompi)\s+(?:la\s+)?missione\s+([0-9a-f]{8})\s*$", re.I), "mission.cancel", lambda m: {"id": m.group(1)}),
     (re.compile(r"^\s*conta le parole:[ \t]*(.*)$", re.I | re.S), "text.count",
      lambda m: {"text": m.group(1)}),
     (re.compile(r"^\s*(?:valida|verifica) (?:il )?json:[ \t]*(.*)$", re.I | re.S), "code.validate_json",

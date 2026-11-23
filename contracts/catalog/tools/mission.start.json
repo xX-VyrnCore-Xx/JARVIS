@@ -1,0 +1,55 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "mission.start",
+  "version": "1.0.0",
+  "summary": "Avvia una missione autonoma: JARVIS persegue l'obiettivo in background con strumenti senza conferma e invia un rapporto. Con every_minutes la missione si ripete",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "goal"
+    ],
+    "properties": {
+      "goal": {
+        "type": "string",
+        "minLength": 8,
+        "maxLength": 1000
+      },
+      "every_minutes": {
+        "type": "integer",
+        "minimum": 5,
+        "maximum": 10080
+      },
+      "max_runs": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 1000
+      },
+      "connectors": {
+        "type": "boolean"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "write_local",
+  "risk": "medium",
+  "permissions": [
+    "core.mission:write"
+  ],
+  "errors": [
+    "mission.invalid",
+    "mission.limit",
+    "mission.not_found",
+    "mission.state",
+    "mission.unavailable"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "required"
+}

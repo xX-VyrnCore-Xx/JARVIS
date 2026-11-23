@@ -134,6 +134,31 @@ function check(condition, message) {
     const step = result?.steps.find((item) => item.kind === "tool_result" && item.tool === tool);
     check(response.status === 200 && step?.status === "succeeded" && matches.test(result.reply), `strumento offline eseguito: ${message}`);
   }
+
+  // Missioni autonome e iniziative proattive (ADR-0096, ADR-0097).
+  const created = await request("/api/missions", { method: "POST", token: ownerToken, body: { goal: "controlla che ore sono", every_minutes: 60 } });
+  check(created.status === 200 && created.json?.status === "active" && created.json?.every_minutes === 60, "missione ricorrente creata dal proprietario");
+  const refused = await request("/api/missions", { method: "POST", token: ownerToken, body: { goal: "corto" } });
+  check(refused.status === 400, "obiettivo troppo breve rifiutato");
+  const listed = await request("/api/missions", { token: ownerToken });
+  check(listed.json?.items?.some((m) => m.id === created.json.id) && listed.json?.proactive?.briefing === true, "missioni e impostazioni proattive nell'elenco");
+  const paused = await request(`/api/missions/${created.json.id}/pause`, { method: "POST", token: ownerToken, body: {} });
+  check(paused.json?.status === "paused", "missione messa in pausa");
+  const noDelete = await request(`/api/missions/${created.json.id}/delete`, { method: "POST", token: ownerToken, body: {} });
+  check(noDelete.status === 400, "una missione aperta non si elimina");
+  const cancelled = await request(`/api/missions/${created.json.id}/cancel`, { method: "POST", token: ownerToken, body: {} });
+  const deleted = await request(`/api/missions/${created.json.id}/delete`, { method: "POST", token: ownerToken, body: {} });
+  check(cancelled.json?.status === "cancelled" && deleted.json?.deleted === true, "missione annullata ed eliminata");
+  const anon = await request("/api/missions");
+  check(anon.status === 401, "le missioni richiedono il token");
+  const settings = await request("/api/proactive", { method: "PATCH", token: ownerToken, body: { briefing_time: "07:45" } });
+  check(settings.status === 200 && settings.json?.briefing_time === "07:45", "orario del briefing salvato");
+  const badSettings = await request("/api/proactive", { method: "PATCH", token: ownerToken, body: { briefing_time: "7:45" } });
+  check(badSettings.status === 400, "orario non valido rifiutato");
+  const briefing = await request("/api/proactive/briefing", { method: "POST", token: ownerToken, body: {} });
+  check(briefing.status === 200 && /^(Buongiorno|Buon pomeriggio|Buonasera):/.test(briefing.json?.title || ""), "briefing su richiesta");
+  const inbox = await request("/api/notifications?limit=20", { token: ownerToken });
+  check(inbox.json?.items?.some((n) => n.category === "briefing"), "il briefing arriva fra le notifiche");
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

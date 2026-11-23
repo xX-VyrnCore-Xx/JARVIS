@@ -57,6 +57,10 @@ class OfflineBackend(unittest.TestCase):
             "cosa sai di me": ("memory.list", {}),
             "controlla le scadenze": ("todo.review", {}),
             "controlla le scadenze entro 3 giorni": ("todo.review", {"horizon_hours": 72}),
+            "avvia una missione: controlla lo spazio sul disco": ("mission.start", {"goal": "controlla lo spazio sul disco"}),
+            "avvia una missione ogni 30 minuti: riassumi le novità": ("mission.start", {"goal": "riassumi le novità", "every_minutes": 30}),
+            "le mie missioni": ("mission.list", {}),
+            "annulla la missione 1a2b3c4d": ("mission.cancel", {"id": "1a2b3c4d"}),
         }
         for message, (tool, args) in cases.items():
             with self.subTest(message=message):
@@ -132,6 +136,17 @@ class OfflineBackend(unittest.TestCase):
             "upcoming": []}})
         self.assertIn("scaduta", r["text"])
         self.assertIn("Verifica il prossimo passo", r["text"])
+
+    def test_mission_results_are_described(self):
+        r = self.call("x", tool_result={"tool": "mission.start", "status": "succeeded", "output": {
+            "id": "1a2b3c4d", "goal": "controlla i dischi", "every_minutes": 60}})
+        self.assertIn("1a2b3c4d", r["text"])
+        self.assertIn("ogni 60 minuti", r["text"])
+        r = self.call("x", tool_result={"tool": "mission.list", "status": "succeeded", "output": {"missions": [
+            {"id": "1a2b3c4d", "status": "active", "runs": 2, "goal": "controlla i dischi"}]}})
+        self.assertIn("[1a2b3c4d] active (2 esecuzioni)", r["text"])
+        r = self.call("x", tool_result={"tool": "mission.cancel", "status": "succeeded", "output": {"id": "1a2b3c4d"}})
+        self.assertIn("annullata", r["text"])
 
     def test_followup_asks_for_a_reference_and_ignores_unrelated_memory(self):
         answer = self.call("E quello di prima?", memory=["prima di pranzo leggo", "quello è un promemoria"])

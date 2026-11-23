@@ -40,7 +40,10 @@
         "system",
         "security",
         "integration",
-        "reminder"
+        "reminder",
+        "briefing",
+        "mission",
+        "suggestion"
       ]
     },
     "title": {
@@ -88,7 +91,10 @@
             "connectors",
             "system",
             "devices",
-            "dashboard"
+            "dashboard",
+            "missions",
+            "skills",
+            "security"
           ]
         },
         "ref": {

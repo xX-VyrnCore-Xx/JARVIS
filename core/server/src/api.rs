@@ -372,6 +372,10 @@ pub fn router(state: Shared) -> Router {
         .route("/api/nodes/result/{id}", post(node_result))
         .route("/api/devices/{id}/revoke", post(revoke_device))
         .route("/api/connectors", get(connectors).post(install_connector))
+        .route("/api/proactive", get(proactive_get).patch(proactive_put))
+        .route("/api/proactive/briefing", post(proactive_briefing))
+        .route("/api/missions", get(missions_list).post(mission_create))
+        .route("/api/missions/{id}/{action}", post(mission_action))
         .route("/api/skills", get(skills_list).post(skill_create))
         .route(
             "/api/skills/{id}",
@@ -1149,6 +1153,97 @@ async fn passkey_delete(
 }
 
 /// Catalogo dei connettori pronti (ADR-0047).
+async fn proactive_get(State(state): State<Shared>) -> Response {
+    reply(Ok(with_core(&state, |j| j.proactive_settings()).await))
+}
+
+async fn proactive_put(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply(with_core(&state, move |j| j.proactive_update(&body)).await)
+}
+
+async fn proactive_briefing(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.briefing_now()).await)
+}
+
+async fn missions_list(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.missions()).await)
+}
+
+async fn mission_create(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply(with_core(&state, move |j| j.mission_create(&body)).await)
+}
+
+/// `pause`, `resume`, `cancel`, `delete`, `run` (esegue subito, in background).
+async fn mission_action(
+    State(state): State<Shared>,
+    Path((id, action)): Path<(String, String)>,
+) -> Response {
+    let run_now = action == "run";
+    let target = id.clone();
+    let result = with_core(&state, move |j| j.mission_action(&id, &action)).await;
+    if run_now && result.is_ok() {
+        start_mission(&state, &target).await;
+    }
+    reply(result)
+}
+
+/// Prenota la missione e ne avvia l'esecuzione in background (ADR-0096).
+async fn start_mission(state: &Shared, id: &str) {
+    let id = id.to_string();
+    match with_core(state, move |j| j.mission_begin(&id)).await {
+        Ok(Some(run)) => {
+            tokio::spawn(drive_mission(state.clone(), run));
+        }
+        Ok(None) => {}
+        Err(e) => eprintln!("[missioni] avvio non riuscito: {e:?}"),
+    }
+}
+
+/// Esegue una missione. Con un modello cloud ogni richiesta al provider avviene fuori dal blocco del Core,
+/// così chat e automazioni non attendono; ogni strumento rientra nel Core per ambito, policy e audit.
+async fn drive_mission(state: Shared, run: crate::orchestrator::MissionRun) {
+    use crate::orchestrator::Next;
+    let mut run = run;
+    if !run.uses_cloud() {
+        let outcome = with_core(&state, move |j| {
+            let mut run = run;
+            j.mission_run_local(&mut run)
+        })
+        .await;
+        if let Err(e) = outcome {
+            eprintln!("[missioni] esecuzione locale non riuscita: {e:?}");
+        }
+        return;
+    }
+    let mut answer = None;
+    loop {
+        let (back, next) = with_core(&state, move |j| {
+            let next = j.mission_advance(&mut run, answer);
+            (run, next)
+        })
+        .await;
+        run = back;
+        match next {
+            Ok(Next::Ask(request)) => {
+                answer = Some(
+                    tokio::task::spawn_blocking(move || request.execute())
+                        .await
+                        .unwrap_or(Err(crate::cloud::Failure::Unavailable)),
+                );
+            }
+            Ok(Next::Done(_)) => break,
+            Err(e) => {
+                eprintln!("[missioni] passo non riuscito: {e:?}");
+                let _ = with_core(&state, move |j| {
+                    j.mission_end(&mut run, Err("errore interno del Core".into()))
+                })
+                .await;
+                break;
+            }
+        }
+    }
+}
+
 async fn skills_list(State(state): State<Shared>) -> Response {
     reply(with_core(&state, |j| j.skills()).await)
 }
@@ -1946,6 +2041,11 @@ pub fn spawn_scheduler(state: Shared, tick: std::time::Duration) -> tokio::task:
                     Ok(Err(error)) => eprintln!("[n8n] lettura esecuzioni non riuscita: {error}"),
                     Err(error) => eprintln!("[n8n] controllo esecuzioni interrotto: {error}"),
                 }
+            }
+            // Missioni autonome (ADR-0096): una per giro, in background.
+            let due = with_core(&state, |j| j.mission_due(chrono::Utc::now())).await;
+            if let Some(id) = due {
+                start_mission(&state, &id).await;
             }
             // Aggiornamenti (ADR-0034): al massimo ogni ora, con la rete fuori dal blocco.
             if with_core(&state, |j| j.updates_due()).await {
