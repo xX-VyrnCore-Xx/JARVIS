@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -32,6 +33,26 @@ class OfflineBackend(unittest.TestCase):
         result = self.g.respond(delegation(message, **inputs))
         self.assertEqual(validation_errors("agent-result", result), ([], []))
         return result
+
+    @patch("jarvis_ai.gateway._subagent_reply", return_value="Analisi sintetica.")
+    def test_local_model_only_handles_unrecognized_temporary_delegations(self, local_reply):
+        with patch.dict("os.environ", {"JARVIS_SUBAGENT_MODEL": "qwen2.5:3b"}):
+            gateway = Gateway()
+        request = delegation("Elabora una proposta per una serata a tema.")
+        self.assertEqual(gateway.respond(request)["backend"]["name"], "offline")
+        local_reply.assert_not_called()
+        request["delegate"] = {"agent": "temporary", "temporary": True, "role": "Organizzatore"}
+        answer = gateway.respond(request)
+        self.assertEqual(validation_errors("agent-result", answer), ([], []))
+        self.assertEqual(answer["backend"]["model"], "qwen2.5:3b")
+        local_reply.assert_called_once_with("qwen2.5:3b", request)
+        local_reply.reset_mock()
+        direct = delegation("che ore sono")
+        direct["delegate"] = request["delegate"]
+        self.assertEqual(gateway.respond(direct)["tool_call"]["tool"], "time.now")
+        local_reply.assert_not_called()
+        local_reply.return_value = None
+        self.assertEqual(gateway.respond(request)["backend"]["name"], "offline")
 
     def test_intents(self):
         cases = {

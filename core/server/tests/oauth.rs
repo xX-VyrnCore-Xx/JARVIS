@@ -202,6 +202,44 @@ async fn oauth_pkce_flow_authorizes_refreshes_and_revokes() {
     let env = Env {
         app: api::router(api::state(Jarvis::new(cfg).unwrap(), TOKEN.into(), PORT)),
     };
+    let google_file = json!({"installed": {
+        "client_id": "fixture.apps.googleusercontent.com",
+        "client_secret": "synthetic-secret",
+        "auth_uri": "https://example.invalid/authorize",
+        "token_uri": "https://example.invalid/token"
+    }});
+    let gmail = "/api/connectors/gmail/oauth/import";
+    let (status, _) = env
+        .call("POST", gmail, Some(google_file.clone()), false)
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = env
+        .json(
+            "POST",
+            gmail,
+            Some(json!({"web": google_file["installed"]})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    for path in [gmail, "/api/connectors/google_calendar/oauth/import", gmail] {
+        let (status, out) = env.json("POST", path, Some(google_file.clone())).await;
+        assert_eq!(status, StatusCode::OK, "{out}");
+        let url = url::Url::parse(out["authorize_url"].as_str().unwrap()).unwrap();
+        assert_eq!(url.host_str(), Some("accounts.google.com"));
+        let q: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+        assert_eq!(q["client_id"], "fixture.apps.googleusercontent.com");
+        assert_eq!(q["redirect_uri"], format!("http://127.0.0.1:{PORT}"));
+        assert_eq!(q["access_type"], "offline");
+        assert!(!out.to_string().contains("synthetic-secret"));
+    }
+    let (_, list) = env.json("GET", "/api/connectors", None).await;
+    assert!(!list.to_string().contains("synthetic-secret"));
+    for id in ["gmail", "google_calendar"] {
+        let (status, _) = env
+            .json("DELETE", &format!("/api/connectors/{id}"), None)
+            .await;
+        assert_eq!(status, StatusCode::OK);
+    }
     let manifest = json!({
         "contract": "jarvis.connector/1", "id": "profilo", "name": "Profilo", "version": "1.0.0", "description": "Servizio OAuth sintetico",
         "base_url": format!("{server}/api"), "allowed_hosts": ["127.0.0.1"],

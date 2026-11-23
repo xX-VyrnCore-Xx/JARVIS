@@ -370,6 +370,10 @@ pub fn router(state: Shared) -> Router {
         .route("/api/connectors/{id}", delete(uninstall_connector))
         .route("/api/connectors/{id}/authorize", post(authorize_connector))
         .route("/api/connectors/{id}/revoke", post(revoke_connector))
+        .route(
+            "/api/connectors/{id}/oauth/import",
+            post(google_oauth_import).layer(axum::extract::DefaultBodyLimit::max(16 * 1024)),
+        )
         .route("/api/connectors/{id}/oauth/start", post(oauth_start))
         .route("/api/connectors/oauth/callback", get(oauth_callback))
         .route("/", get(oauth_loopback_callback))
@@ -596,6 +600,14 @@ async fn chat_stream(
         axum::body::Body::from_stream(stream),
     )
         .into_response()
+}
+
+async fn google_oauth_import(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    Json(file): Json<Value>,
+) -> Response {
+    reply(with_core(&state, move |j| j.google_oauth_start(&id, &file)).await)
 }
 
 async fn oauth_start(

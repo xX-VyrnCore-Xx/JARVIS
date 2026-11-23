@@ -771,8 +771,13 @@ impl Jarvis {
                         })
                 })
                 .transpose()?;
-            if let Some(key) = body["key"].as_str().filter(|key| !key.is_empty()) {
-                if key.len() > 1024 || key.bytes().any(|b| !b.is_ascii_graphic()) {
+            if let Some(value) = body.get("key") {
+                let key = value
+                    .as_str()
+                    .map(str::trim)
+                    .ok_or_else(|| CoreError::BadRequest("chiave API non valida".into()))?;
+                if key.is_empty() || key.len() > 1024 || key.bytes().any(|b| !b.is_ascii_graphic())
+                {
                     return Err(CoreError::BadRequest("chiave API non valida".into()));
                 }
                 self.secrets
@@ -4064,7 +4069,7 @@ impl Jarvis {
             "id": id, "name": manifest["name"], "version": manifest["version"], "description": manifest["description"],
             "base_url": manifest["base_url"], "auth": manifest["auth"]["type"],
             "installed_at": installed, "authorized_at": authorized, "authorized": authorized.is_some(),
-            "has_credential": has(token_name(id)),
+            "has_credential": has(if manifest["auth"]["type"] == "oauth2" { oauth_name(id) } else { token_name(id) }),
             "webhook": manifest["webhook"]["enabled"] == true, "webhook_path": format!("/api/hooks/{id}"),
             "operations": manifest["operations"].as_array().map(|ops| ops.iter().map(|o| json!({
                 "tool": crate::connectors::tool_name(id, o["name"].as_str().unwrap_or_default()),
@@ -4114,6 +4119,7 @@ impl Jarvis {
             )));
         }
         let at = now();
+        self.oauth.cancel(&id);
         self.catalog.remove_connector(&id);
         self.store
             .connector_put(&normalized, &at)
@@ -4211,6 +4217,7 @@ impl Jarvis {
     /// Con `uninstall` elimina anche manifest e segreto del webhook.
     pub fn revoke_connector(&mut self, id: &str, uninstall: bool) -> Result<Value, CoreError> {
         let (manifest, _) = self.connector_manifest(id)?;
+        self.oauth.cancel(id);
         // OAuth (ADR-0027): prima della cancellazione locale si chiede al servizio di invalidare i token.
         let remote =
             if manifest["auth"]["type"] == "oauth2" && manifest["auth"]["revoke_url"].is_string() {
@@ -4221,8 +4228,12 @@ impl Jarvis {
                     .flatten()
                     .and_then(|s| serde_json::from_str(&s).ok())
                     .unwrap_or(Value::Null);
-                let access = self.secrets.get(&token_name(id)).ok().flatten();
-                let r = crate::oauth::revoke(&manifest, &self.cfg.web, &state, access.as_deref());
+                let r = crate::oauth::revoke(
+                    &manifest,
+                    &self.cfg.web,
+                    &state,
+                    state["access_token"].as_str(),
+                );
                 self.obs.count(if r.is_ok() {
                     "connector.oauth.revoked_remote"
                 } else {
@@ -4269,6 +4280,29 @@ impl Jarvis {
         )
     }
 
+    pub fn google_oauth_start(&mut self, id: &str, file: &Value) -> Result<Value, CoreError> {
+        if !matches!(id, "gmail" | "google_calendar") {
+            return Err(CoreError::BadRequest(
+                "Importazione disponibile per Gmail e Google Calendar.".into(),
+            ));
+        }
+        let (client_id, secret) =
+            crate::connector_catalog::google_credentials(file).map_err(CoreError::BadRequest)?;
+        let manifest = crate::connector_catalog::manifest(id, Some(client_id))
+            .map_err(CoreError::BadRequest)?;
+        let normalized = crate::connectors::validate_manifest(&manifest, &self.cfg.web)
+            .map_err(CoreError::BadRequest)?;
+        match self.connector_manifest(id) {
+            Ok((existing, _)) if existing == normalized => {}
+            Ok(_) => return Err(CoreError::BadRequest(
+                "Il connettore è installato con un altro client OAuth. Rimuovilo prima di sostituirlo.".into(),
+            )),
+            Err(CoreError::NotFound(_)) => { self.install_new_connector(&manifest)?; }
+            Err(error) => return Err(error),
+        }
+        self.oauth_start(id, Some(secret.into()))
+    }
+
     /// Avvia OAuth (ADR-0027): restituisce la pagina di consenso da aprire nel browser del proprietario.
     pub fn oauth_start(
         &mut self,
@@ -4281,7 +4315,22 @@ impl Jarvis {
         }
         let secret = client_secret
             .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty() && s.len() <= 4096 && !s.chars().any(char::is_control));
+            .filter(|s| !s.is_empty());
+        if secret
+            .as_ref()
+            .is_some_and(|s| s.len() > 4096 || !s.bytes().all(|b| b.is_ascii_graphic()))
+        {
+            return Err(CoreError::BadRequest("client secret non valido".into()));
+        }
+        let secret = match secret {
+            Some(secret) => Some(secret),
+            None => self
+                .secrets
+                .get(&oauth_name(id))
+                .map_err(internal)?
+                .and_then(|state| serde_json::from_str::<Value>(&state).ok())
+                .and_then(|state| state["client_secret"].as_str().map(str::to_owned)),
+        };
         let url = self
             .oauth
             .start(&manifest, self.cfg.port, secret)
@@ -4301,12 +4350,11 @@ impl Jarvis {
             CoreError::BadRequest("richiesta scaduta o già usata: riprova da JARVIS".into())
         })?;
         let id = pending.connector.clone();
-        if let Some(reason) = denied {
+        if denied.is_some() {
             self.connector_audit("connector.oauth.denied", &id, "cancelled")?;
-            return Err(CoreError::BadRequest(format!(
-                "il servizio non ha concesso l'accesso ({})",
-                reason.chars().take(60).collect::<String>()
-            )));
+            return Err(CoreError::BadRequest(
+                "il servizio non ha concesso l'accesso".into(),
+            ));
         }
         let code =
             code.ok_or_else(|| CoreError::BadRequest("codice di autorizzazione mancante".into()))?;
@@ -4341,41 +4389,38 @@ impl Jarvis {
 
     fn save_oauth_tokens(&self, id: &str, tokens: &Value) -> Result<(), CoreError> {
         self.secrets
-            .put(
-                &token_name(id),
-                tokens["access_token"].as_str().unwrap_or_default(),
-            )
-            .map_err(CoreError::Internal)?;
-        self.secrets
             .put(&oauth_name(id), &tokens.to_string())
             .map_err(CoreError::Internal)
     }
 
     /// Rinnovo automatico dell'access token a 60 secondi dalla scadenza, o subito con `force` (token
     /// rifiutato dal servizio prima della scadenza dichiarata).
-    fn oauth_refresh_if_needed(
+    fn oauth_access_token(
         &self,
         id: &str,
         manifest: &Value,
         force: bool,
-    ) -> Result<(), String> {
-        let state: Value = self
+    ) -> Result<String, String> {
+        let mut state: Value = self
             .secrets
             .get(&oauth_name(id))?
             .and_then(|s| serde_json::from_str(&s).ok())
             .ok_or("connettore non autorizzato: premi «Accedi»")?;
-        if !force && !crate::oauth::expiring(&state) {
-            return Ok(());
+        if force || crate::oauth::expiring(&state) {
+            let renewed = crate::oauth::refresh(manifest, &self.cfg.web, &state);
+            self.obs.count(if renewed.is_ok() {
+                "connector.oauth.refreshed"
+            } else {
+                "connector.oauth.refresh_failed"
+            });
+            state = renewed?;
+            self.save_oauth_tokens(id, &state)
+                .map_err(|e| format!("{e:?}"))?;
         }
-        let renewed = crate::oauth::refresh(manifest, &self.cfg.web, &state);
-        self.obs.count(if renewed.is_ok() {
-            "connector.oauth.refreshed"
-        } else {
-            "connector.oauth.refresh_failed"
-        });
-        let tokens = renewed?;
-        self.save_oauth_tokens(id, &tokens)
-            .map_err(|e| format!("{e:?}"))
+        state["access_token"]
+            .as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| "access token mancante: autorizza di nuovo il connettore".into())
     }
 
     fn call_connector(
@@ -4409,14 +4454,16 @@ impl Jarvis {
                 "connettore revocato",
             ));
         }
-        if manifest["auth"]["type"] == "oauth2" {
-            self.oauth_refresh_if_needed(id, &manifest, false)
-                .map_err(|e| tool_error("connector.not_authorized", e))?;
-        }
-        let mut secret = self
-            .secrets
-            .get(&token_name(id))
-            .map_err(|e| tool_error("connector.unavailable", e))?;
+        let mut secret = if manifest["auth"]["type"] == "oauth2" {
+            Some(
+                self.oauth_access_token(id, &manifest, false)
+                    .map_err(|e| tool_error("connector.not_authorized", e))?,
+            )
+        } else {
+            self.secrets
+                .get(&token_name(id))
+                .map_err(|e| tool_error("connector.unavailable", e))?
+        };
         let mut renewed = false;
         // Le letture seguono la politica di ripetizione del descrittore (`safe`, 2 tentativi) sugli errori
         // transitori; le scritture non vengono mai ripetute.
@@ -4445,12 +4492,10 @@ impl Jarvis {
                         && manifest["auth"]["type"] == "oauth2" =>
                 {
                     renewed = true;
-                    self.oauth_refresh_if_needed(id, &manifest, true)
-                        .map_err(|e| tool_error("connector.not_authorized", e))?;
-                    secret = self
-                        .secrets
-                        .get(&token_name(id))
-                        .map_err(|e| tool_error("connector.unavailable", e))?;
+                    secret = Some(
+                        self.oauth_access_token(id, &manifest, true)
+                            .map_err(|e| tool_error("connector.not_authorized", e))?,
+                    );
                     attempt -= 1;
                 }
                 Err(e) if attempt < attempts && crate::connectors::transient(e.code) => {

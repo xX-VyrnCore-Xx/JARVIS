@@ -16,23 +16,18 @@ from pathlib import Path
 CONNECTORS = ("gmail", "google_calendar")
 
 
-def load_credentials(path: Path) -> tuple[str, str]:
+def load_credentials(path: Path) -> dict:
     try:
-        config = json.loads(path.read_text(encoding="utf-8"))["installed"]
-        client_id = config["client_id"]
-        client_secret = config["client_secret"]
-    except (OSError, KeyError, TypeError, json.JSONDecodeError) as error:
-        raise ValueError("JSON OAuth desktop non valido o campi client mancanti") from error
-    if (
-        not isinstance(client_id, str)
-        or not client_id.endswith(".apps.googleusercontent.com")
-        or not isinstance(client_secret, str)
-        or not client_secret
-        or len(client_secret) > 4096
-        or any(ord(char) < 32 for char in client_secret)
-    ):
-        raise ValueError("ID client o client secret non validi")
-    return client_id, client_secret
+        with path.open("rb") as file:
+            raw = file.read(16 * 1024 + 1)
+        if len(raw) > 16 * 1024:
+            raise ValueError("Il file di credenziali supera 16 KB")
+        config = json.loads(raw)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("Impossibile leggere il JSON delle credenziali") from error
+    if not isinstance(config, dict) or "installed" not in config:
+        raise ValueError("Seleziona il JSON OAuth Google di tipo App desktop")
+    return config
 
 
 def local_core_url() -> str:
@@ -45,6 +40,14 @@ def local_core_url() -> str:
     return value
 
 
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+CORE_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+
+
 def request(base: str, token: str, path: str, body: dict | None = None) -> dict:
     data = json.dumps(body).encode("utf-8") if body is not None else None
     headers = {"X-Jarvis-Token": token, "Host": urllib.parse.urlsplit(base).netloc}
@@ -52,7 +55,7 @@ def request(base: str, token: str, path: str, body: dict | None = None) -> dict:
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(f"{base}{path}", data=data, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=15) as response:
+        with CORE_OPENER.open(req, timeout=15) as response:
             result = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
         raise RuntimeError(f"Core ha rifiutato {path} (HTTP {error.code})") from None
@@ -77,34 +80,19 @@ def wait_for_authorization(base: str, token: str, connector_id: str) -> None:
     raise TimeoutError(f"Consenso OAuth per {connector_id} non completato entro 5 minuti")
 
 
-def configure(base: str, token: str, client_id: str, client_secret: str) -> None:
+def configure(base: str, token: str, credentials: dict) -> None:
     current = request(base, token, "/api/connectors").get("items", [])
     for connector_id in CONNECTORS:
         existing = next((item for item in current if item.get("id") == connector_id), None)
         if existing and existing.get("authorized") is True:
             print(f"Connettore {connector_id} già autorizzato.")
             continue
-        if existing:
-            raise RuntimeError(
-                f"{connector_id} è già installato ma non autorizzato; rimuovilo dalla sezione "
-                "Connettori prima di ripetere la configurazione."
-            )
-
-        request(
-            base,
-            token,
-            f"/api/connectors/templates/{connector_id}",
-            {"client_id": client_id},
-        )
         started = request(
-            base,
-            token,
-            f"/api/connectors/{connector_id}/oauth/start",
-            {"client_secret": client_secret},
+            base, token, f"/api/connectors/{connector_id}/oauth/import", credentials
         )
         authorize_url = started.get("authorize_url")
         parsed = urllib.parse.urlsplit(authorize_url or "")
-        if parsed.scheme != "https" or parsed.hostname != "accounts.google.com":
+        if parsed.scheme != "https" or parsed.netloc != "accounts.google.com":
             raise RuntimeError(f"URL OAuth inatteso per {connector_id}")
         print(
             f"{connector_id}: si aprirà Google per il consenso agli scope richiesti; "
@@ -125,8 +113,7 @@ def main() -> int:
         return 2
     try:
         base = local_core_url()
-        client_id, client_secret = load_credentials(Path(sys.argv[1]))
-        configure(base, token, client_id, client_secret)
+        configure(base, token, load_credentials(Path(sys.argv[1])))
     except (ValueError, RuntimeError, TimeoutError) as error:
         print(str(error), file=sys.stderr)
         return 1

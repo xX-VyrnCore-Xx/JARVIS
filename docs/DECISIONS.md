@@ -1475,6 +1475,14 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** sul cambiamento, fmt Rust, `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-gnu --locked --tests`, Clippy Windows con `--all-targets -D warnings`, compilazione/link test Windows con `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-pc-windows-gnu --locked --no-run` e `git diff --check` superati. `gradle -p apps/android -Pjarvis.coreOnly=true :core-client:test --no-daemon` superato (task aggiornati). La compilazione Compose è stata tentata ma bloccata: Android SDK non configurato. La verifica grafica runtime su macOS/Windows/Android resta sospesa perché non sono disponibili i rispettivi sistemi e display.
 - **Documenti interessati:** `INTERFACE_AND_DEVICES.md`, `ROADMAP.md`, `apps/desktop/src-tauri/src/app.rs` e `apps/android/app/src/main/java/local/jarvis/app/MainActivity.kt`.
 
+### ADR-0093 — Importazione OAuth Google e modelli per le deleghe
+
+- **Data:** 2026-11-23. **Stato:** implementata.
+- **Decisione:** importare il JSON OAuth Google Desktop dal client locale tramite un endpoint dedicato a Gmail e Calendar. Gli endpoint del provider e gli scope provengono dal catalogo del Core. Un nuovo consenso sostituisce quello pendente dello stesso servizio; revoca e rimozione lo annullano.
+- **Credenziali:** access token, refresh token e secret OAuth condividono una voce cifrata. Gli archivi precedenti contengono già gli stessi campi. Una futura revoca elimina anche l'eventuale voce access token storica.
+- **Inferenza:** dare priorità al profilo di ragionamento per richieste con più passaggi. Un modello Ollama locale facoltativo risponde ai compiti testuali dei temporanei che il motore a regole non riconosce. I comandi riconosciuti continuano a passare per il Core.
+- **Evidenza:** test OAuth con fixture sintetiche, schema dei risultati e test Python del gateway. Il consenso Google effettivo richiede un progetto abilitato e un account autorizzato.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

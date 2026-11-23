@@ -73,6 +73,34 @@ pub fn manifest(id: &str, client_id: Option<&str>) -> Result<Value, String> {
     Ok(m)
 }
 
+/// Interpreta il JSON scaricato da Google Cloud per un client OAuth di tipo Desktop.
+pub fn google_credentials(file: &Value) -> Result<(&str, &str), String> {
+    let installed = &file["installed"];
+    let id = installed["client_id"]
+        .as_str()
+        .filter(|id| {
+            id.len() <= 500
+                && id
+                    .strip_suffix(".apps.googleusercontent.com")
+                    .is_some_and(|prefix| {
+                        !prefix.is_empty()
+                            && prefix
+                                .bytes()
+                                .all(|b| b.is_ascii_alphanumeric() || b == b'-')
+                    })
+        })
+        .ok_or("Seleziona il JSON di un client OAuth Google di tipo App desktop.")?;
+    let secret = installed["client_secret"]
+        .as_str()
+        .filter(|secret| {
+            !secret.is_empty()
+                && secret.len() <= 4096
+                && secret.bytes().all(|b| b.is_ascii_graphic())
+        })
+        .ok_or("Il client secret di Google è mancante o non valido.")?;
+    Ok((id, secret))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
