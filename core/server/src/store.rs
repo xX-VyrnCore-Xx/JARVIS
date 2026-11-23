@@ -16,7 +16,7 @@ pub struct Store {
 pub type StoreResult<T> = Result<T, rusqlite::Error>;
 
 /// Versione dello schema (ADR-0037): 1 = schema fino a 1.3.x con migrazioni additive; 3 = tracce dei task (ADR-0039); 4 = passkey (ADR-0042); 5 = note e cose da fare (ADR-0046).
-pub const SCHEMA_VERSION: i64 = 7;
+pub const SCHEMA_VERSION: i64 = 8;
 
 pub(crate) struct ConversationTurn {
     pub user: String,
@@ -63,6 +63,9 @@ impl Store {
              CREATE TABLE IF NOT EXISTS devices (device_id TEXT PRIMARY KEY, token_sha256 TEXT NOT NULL UNIQUE,
                  doc TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS notify_channels (channel_id TEXT PRIMARY KEY, doc TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS cloud_feedback (task_id TEXT PRIMARY KEY, provider TEXT NOT NULL,
+                 model TEXT NOT NULL, rating TEXT, created_at TEXT NOT NULL, rated_at TEXT);
+             CREATE INDEX IF NOT EXISTS cloud_feedback_by_model ON cloud_feedback (provider, model, rated_at);
              CREATE INDEX IF NOT EXISTS tasks_by_updated ON tasks (updated_at);
              CREATE INDEX IF NOT EXISTS messages_by_task ON messages (task_id);
              CREATE INDEX IF NOT EXISTS workflows_due ON workflows (next_run_at);
@@ -495,6 +498,49 @@ impl Store {
         rows.collect()
     }
 
+    pub(crate) fn cloud_feedback_candidate(
+        &self,
+        task: &str,
+        provider: &str,
+        model: &str,
+    ) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT INTO cloud_feedback(task_id, provider, model, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![task, provider, model, crate::now()],
+        )?;
+        self.conn.execute(
+            "DELETE FROM cloud_feedback WHERE task_id IN
+             (SELECT task_id FROM cloud_feedback ORDER BY coalesce(rated_at, created_at) DESC, rowid DESC LIMIT -1 OFFSET 1024)",
+            [],
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn rate_cloud_reply(&self, task: &str, rating: &str) -> StoreResult<bool> {
+        Ok(self.conn.execute(
+            "UPDATE cloud_feedback SET rating = ?1,
+              rated_at = CASE WHEN rating = ?1 THEN rated_at ELSE ?2 END WHERE task_id = ?3",
+            params![rating, crate::now(), task],
+        )? == 1)
+    }
+
+    pub(crate) fn cloud_quality(
+        &self,
+        provider: &str,
+        model: &str,
+    ) -> StoreResult<crate::cloud::QualityPreference> {
+        self.conn.query_row(
+            "SELECT count(CASE WHEN rating='helpful' THEN 1 END),
+                    count(CASE WHEN rating='concise' THEN 1 END),
+                    count(CASE WHEN rating='detailed' THEN 1 END),
+                    count(CASE WHEN rating='precise' THEN 1 END)
+             FROM (SELECT rating FROM cloud_feedback WHERE provider = ?1 AND model = ?2 AND rating IS NOT NULL
+                   ORDER BY rated_at DESC, rowid DESC LIMIT 12)",
+            params![provider, model],
+            |row| Ok(crate::cloud::QualityPreference::from_counts(row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+    }
+
     // ------------------------------------------------------------------ workflow
 
     pub fn workflow_put(&self, doc: &Value, next_run_at: Option<&str>) -> StoreResult<()> {
@@ -821,6 +867,34 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ratings_are_replaced_and_isolated_by_provider_and_model() {
+        use crate::cloud::QualityPreference;
+        let store = Store::open(Path::new(":memory:")).unwrap();
+        assert!(!store.rate_cloud_reply("missing", "precise").unwrap());
+        store
+            .cloud_feedback_candidate("task", "provider-a", "model-a")
+            .unwrap();
+        assert!(store.rate_cloud_reply("task", "concise").unwrap());
+        assert_eq!(
+            store.cloud_quality("provider-a", "model-a").unwrap(),
+            QualityPreference::Concise
+        );
+        assert_eq!(
+            store.cloud_quality("provider-a", "model-b").unwrap(),
+            QualityPreference::Standard
+        );
+        assert_eq!(
+            store.cloud_quality("provider-b", "model-a").unwrap(),
+            QualityPreference::Standard
+        );
+        assert!(store.rate_cloud_reply("task", "helpful").unwrap());
+        assert_eq!(
+            store.cloud_quality("provider-a", "model-a").unwrap(),
+            QualityPreference::Standard
+        );
+    }
 
     #[test]
     fn history_keeps_the_latest_runs_and_recent_todos() {

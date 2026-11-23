@@ -206,4 +206,6 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Rifinitura della plancia macOS (2026-11-23).** La plancia SwiftUI usa un hero adattivo, scorciatoie per conferme e automazioni, attività recenti con stato esplicito e indicatori derivati dalla configurazione reale dei provider. Durante l’invio, la chat mostra il messaggio in attesa e mantiene il compositore ancorato. I caricamenti superati non sovrascrivono la schermata attiva. Il collaudo dei limiti di scorrimento richiede un Mac con display.
 
+**Qualità delle risposte e chat macOS (2026-11-23).** Feedback a categorie chiuse per modello e provider, correzione del voto senza duplicati, profilo calcolato su una finestra recente e recupero delle risposte incomplete presso lo stesso provider. Chat con avatar compatto, messaggi differenziati per ruolo e provenienza della risposta. Rimangono il collaudo visivo macOS e la prova qualitativa con i provider reali.
+
 Per ogni ripresa registrare data, revisione, lavoro completato, verifiche eseguite, blocchi, ipotesi e prossimo passo concreto. Conservare il checkpoint con le modifiche alle quali si riferisce.

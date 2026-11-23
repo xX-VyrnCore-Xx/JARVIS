@@ -58,3 +58,10 @@ Il worker espone `voice.transcribe` e `voice.synthesize` sul bridge, con faster-
 
 
 **Tool calling robusto (ADR-0045).** Argomenti corretti per tipo prima dell'invio, chiamate scritte nel testo riconosciute, difetti di validazione restituiti all'agente per un nuovo tentativo. Modelli consigliati: `qwen3:4b` (meno di 16 GB di RAM) o `qwen3:8b`.
+
+
+## Adattamento delle risposte
+
+Dopo una risposta testuale riuscita, la chat macOS mostra il provider, il modello e i controlli di valutazione. Il Core conserva soltanto l’ID della risposta, il modello, il provider e la categoria scelta. Usa le ultime dodici valutazioni di quel modello presso quel provider per selezionare un’istruzione predefinita. Puoi correggere il voto dell’ultima risposta senza duplicarlo. La richiesta corrente mantiene la priorità sulle preferenze inferite.
+
+Quando un provider segnala un troncamento, l’orchestratore aumenta gradualmente il budget di risposta per quel modello e tipo di richiesta, entro il limite di contesto. Una risposta completa riporta gradualmente il budget al valore base. Se la risposta è vuota o troncata, l’orchestratore prova una sola volta con il modello alternativo dello stesso provider. Il Core non invia valutazioni, cronologia aggiuntiva o dataset di addestramento. L’adattamento agisce sulle istruzioni dell’app e sulla gestione delle risposte, mentre i pesi restano sotto il controllo del provider.
