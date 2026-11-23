@@ -450,7 +450,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     private var chatScrollAnchor: String? {
         guard section == .chat else { return nil }
-        return outgoingMessage == nil ? records(payload).last?.id : "pending-message"
+        return outgoingMessage != nil && lastReply == nil ? "pending-message" : records(payload).last?.id
     }
 
     private var chat: some View {
@@ -479,7 +479,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             if let confirmation = lastReply?["confirmation"] as? [String: Any] {
                 Button("Esamina l’azione proposta") { pending = Record(confirmation, index: 0) }
             }
-            if let outgoingMessage {
+            if let outgoingMessage, lastReply == nil {
                 card("Tu", icon: "person") { Text(outgoingMessage).textSelection(.enabled) }
                 ProgressView("JARVIS sta elaborando").controlSize(.small)
             }
