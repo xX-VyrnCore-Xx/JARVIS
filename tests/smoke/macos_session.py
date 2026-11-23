@@ -64,6 +64,8 @@ def main() -> None:
             device = pair["token"]
             status, task = action("/api/chat", {"message": "scrivi esempio.txt: fixture"}, token=device, remote=True)
             assert status == 200 and task["confirmation"]["risk"] == "high", task
+            status, snapshot = action("/api/chat/sync", token=device, remote=True)
+            assert status == 200 and snapshot["confirmations"] == [], snapshot
             path = "/api/confirmations/" + task["confirmation"]["confirmation_id"]
             status, result = action(path, {"approve": True}, token=device, remote=True)
             assert status == 403, result

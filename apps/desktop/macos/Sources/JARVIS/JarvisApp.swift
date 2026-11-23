@@ -4,12 +4,17 @@ import UniformTypeIdentifiers
 
 @MainActor final class AppLifecycle: NSObject, NSApplicationDelegate {
     let core = CoreSession()
+    let voice = Voice()
     func applicationDidBecomeActive(_ notification: Notification) {
         Task { await core.authenticateOnLaunch() }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
-    func applicationWillTerminate(_ notification: Notification) { core.stop() }
+    func applicationWillTerminate(_ notification: Notification) {
+        voice.cancelRecording()
+        voice.stopPlayback()
+        core.stop()
+    }
 }
 
 @main struct JarvisApp: App {
@@ -17,7 +22,7 @@ import UniformTypeIdentifiers
 
     var body: some Scene {
         Window("JARVIS", id: "jarvis") {
-            RootView(core: lifecycle.core)
+            RootView(core: lifecycle.core, voice: lifecycle.voice)
                 .frame(minWidth: 580, minHeight: 510)
                 .preferredColorScheme(.dark)
         }
@@ -78,7 +83,7 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
 
 @MainActor private struct RootView: View {
     @ObservedObject var core: CoreSession
-    @StateObject private var voice = Voice()
+    @ObservedObject var voice: Voice
     @State private var section: Section = .dashboard
     @State private var payload: [String: Any] = [:]
     @State private var message = ""

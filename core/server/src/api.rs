@@ -786,14 +786,7 @@ async fn confirmations(
     State(state): State<Shared>,
     device: Option<axum::Extension<DeviceCtx>>,
 ) -> Json<Value> {
-    let mut items = with_core(&state, |j| j.pending_confirmations()).await;
-    if device.is_some() {
-        items.retain(|item| {
-            item["tool"] != crate::desktop::TOOL
-                && !(std::env::var("JARVIS_MACOS_SESSION").as_deref() == Ok("1")
-                    && matches!(item["risk"].as_str(), Some("high" | "critical")))
-        });
-    }
+    let items = with_core(&state, move |j| j.pending_confirmations(device.is_some())).await;
     Json(json!({"items": items}))
 }
 
@@ -1123,10 +1116,7 @@ async fn chat_sync(
 ) -> Response {
     reply(
         with_core(&state, move |j| {
-            let mut confirmations = j.pending_confirmations();
-            if device.is_some() {
-                confirmations.retain(|item| item["tool"] != crate::desktop::TOOL);
-            }
+            let confirmations = j.pending_confirmations(device.is_some());
             Ok(json!({"messages": j.conversation(50)?, "confirmations": confirmations}))
         })
         .await,

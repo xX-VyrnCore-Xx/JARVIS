@@ -1578,12 +1578,16 @@ impl Jarvis {
         }
     }
 
+    fn owner_only_confirmation(pending: &Pending) -> bool {
+        pending.tool == crate::desktop::TOOL
+            || (std::env::var("JARVIS_MACOS_SESSION").as_deref() == Ok("1")
+                && matches!(pending.decision["risk"].as_str(), Some("high" | "critical")))
+    }
+
     pub(crate) fn requires_owner_confirmation(&self, id: &str) -> bool {
-        self.pending.get(id).is_some_and(|pending| {
-            pending.tool == crate::desktop::TOOL
-                || (std::env::var("JARVIS_MACOS_SESSION").as_deref() == Ok("1")
-                    && matches!(pending.decision["risk"].as_str(), Some("high" | "critical")))
-        })
+        self.pending
+            .get(id)
+            .is_some_and(Self::owner_only_confirmation)
     }
 
     pub fn confirm(&mut self, confirmation_id: &str, approve: bool) -> Result<Outcome, CoreError> {
@@ -1702,9 +1706,10 @@ impl Jarvis {
         }
     }
 
-    pub fn pending_confirmations(&self) -> Vec<Value> {
+    pub fn pending_confirmations(&self, remote: bool) -> Vec<Value> {
         self.pending
             .values()
+            .filter(|p| !remote || !Self::owner_only_confirmation(p))
             .map(|p| {
                 let c = &p.decision["confirmation"];
                 json!({"confirmation_id": c["confirmation_id"], "task_id": p.task.id(), "tool": p.tool, "arguments": p.arguments,
