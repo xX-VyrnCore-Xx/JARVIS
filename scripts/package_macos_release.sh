@@ -17,6 +17,7 @@ cleanup_dmg_work() {
       hdiutil detach -force "$mountpoint" >/dev/null 2>&1 || true
   fi
   rm -f "$temporary_dmg"
+  rm -rf -- "$temporary_dir/stage"
   rmdir "$mountpoint" "$temporary_dir" 2>/dev/null || true
 }
 trap cleanup_dmg_work EXIT
@@ -38,7 +39,8 @@ detach_dmg_mount() {
 }
 
 mkdir -p "$contents/MacOS" "$resources"
-cp "$desktop/target/release/jarvis-desktop" "$contents/MacOS/jarvis-desktop"
+swift_bin=$(swift build --package-path apps/desktop/macos -c release --show-bin-path)
+cp "$swift_bin/jarvis-desktop" "$contents/MacOS/jarvis-desktop"
 cp -R "$desktop/resources/." "$resources/"
 cp "$desktop/icons/icon.icns" "$resources/icon.icns"
 sed "s/@VERSION@/$version/g" apps/desktop/installer/macos/Info.plist \
@@ -129,11 +131,13 @@ echo "Firma e verifica dell’app macOS."
 codesign --force --deep --timestamp=none --sign "$signing_identity" "$app"
 codesign --verify --deep --strict --verbose=2 "$app"
 
-stage="$bundle/dmg/JARVIS"
+stage="$temporary_dir/stage"
 mkdir -p "$stage" "$bundle/dmg"
 cp -R "$app" "$stage/JARVIS.app"
 ln -s /Applications "$stage/Applications"
 cp apps/desktop/installer/macos/Installazione.txt "$stage/Installazione.txt"
+mkdir -p "$stage/.background"
+cp apps/desktop/src-tauri/installer/dmg-background.png "$stage/.background/install.png"
 dmg="$bundle/dmg/JARVIS_${version}_aarch64.dmg"
 mkdir -p "$mountpoint"
 echo "Creazione del DMG modificabile per impostare la finestra di installazione."
@@ -149,14 +153,15 @@ on run
     set current view of dmgWindow to icon view
     set toolbar visible of dmgWindow to false
     set statusbar visible of dmgWindow to false
-    set bounds of dmgWindow to {80, 100, 1040, 680}
+    set bounds of dmgWindow to {120, 110, 780, 510}
     set viewOptions to icon view options of dmgWindow
     set arrangement of viewOptions to not arranged
-    set icon size of viewOptions to 128
+    set icon size of viewOptions to 104
     set text size of viewOptions to 14
-    set position of item "JARVIS.app" of dmgWindow to {220, 245}
-    set position of item "Applications" of dmgWindow to {780, 245}
-    set position of item "Installazione.txt" of dmgWindow to {500, 425}
+    set background picture of viewOptions to file ".background:install.png" of dmgFolder
+    set position of item "JARVIS.app" of dmgWindow to {170, 193}
+    set position of item "Applications" of dmgWindow to {490, 193}
+    set position of item "Installazione.txt" of dmgWindow to {330, 267}
     close dmgWindow
     delay 2
   end tell

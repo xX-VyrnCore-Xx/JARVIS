@@ -17,7 +17,9 @@
 	<key>CFBundleVersion</key>
 	<string>@VERSION@</string>
 	<key>LSMinimumSystemVersion</key>
-	<string>11.0</string>
+	<string>14.0</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>JARVIS registra la tua voce quando premi il pulsante microfono.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 </dict>

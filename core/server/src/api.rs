@@ -788,7 +788,11 @@ async fn confirmations(
 ) -> Json<Value> {
     let mut items = with_core(&state, |j| j.pending_confirmations()).await;
     if device.is_some() {
-        items.retain(|item| item["tool"] != crate::desktop::TOOL);
+        items.retain(|item| {
+            item["tool"] != crate::desktop::TOOL
+                && !(std::env::var("JARVIS_MACOS_SESSION").as_deref() == Ok("1")
+                    && matches!(item["risk"].as_str(), Some("high" | "critical")))
+        });
     }
     Json(json!({"items": items}))
 }
@@ -809,7 +813,7 @@ async fn confirm(
     };
     if device.is_some() {
         let id = id.clone();
-        if with_core(&state, move |j| j.is_desktop_confirmation(&id)).await {
+        if with_core(&state, move |j| j.requires_owner_confirmation(&id)).await {
             return error(
                 StatusCode::FORBIDDEN,
                 "owner_only",

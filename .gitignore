@@ -11,3 +11,4 @@ client_secret_*.json
 google-services.json
 GITHUB_ACTIONS_SECRETS_TEMP.txt
 logo.png
+apps/desktop/macos/.build/

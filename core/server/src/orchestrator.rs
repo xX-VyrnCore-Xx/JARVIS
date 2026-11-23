@@ -1577,10 +1577,12 @@ impl Jarvis {
         }
     }
 
-    pub(crate) fn is_desktop_confirmation(&self, id: &str) -> bool {
-        self.pending
-            .get(id)
-            .is_some_and(|pending| pending.tool == crate::desktop::TOOL)
+    pub(crate) fn requires_owner_confirmation(&self, id: &str) -> bool {
+        self.pending.get(id).is_some_and(|pending| {
+            pending.tool == crate::desktop::TOOL
+                || (std::env::var("JARVIS_MACOS_SESSION").as_deref() == Ok("1")
+                    && matches!(pending.decision["risk"].as_str(), Some("high" | "critical")))
+        })
     }
 
     pub fn confirm(&mut self, confirmation_id: &str, approve: bool) -> Result<Outcome, CoreError> {
@@ -1875,6 +1877,7 @@ impl Jarvis {
             .memory_list_kind(Some("procedural"))
             .map_err(internal)?
             .into_iter()
+            .filter(|m| !crate::cloud::contains_credentials(m["text"].as_str().unwrap_or_default()))
             .take(MEMORY_PROCEDURAL)
         {
             seen.insert(m["id"].as_str().unwrap_or_default().to_string());
@@ -1902,6 +1905,9 @@ impl Jarvis {
                 continue;
             }
             let text = m["text"].as_str().unwrap_or_default();
+            if crate::cloud::contains_credentials(text) {
+                continue;
+            }
             out.push(
                 match m["kind"].as_str() {
                     Some("episodic") => format!(
@@ -1938,12 +1944,11 @@ impl Jarvis {
         if touches_memory {
             return;
         }
-        let objective: String = task.doc["objective"]
-            .as_str()
-            .unwrap_or_default()
-            .chars()
-            .take(160)
-            .collect();
+        let full_objective = task.doc["objective"].as_str().unwrap_or_default();
+        if crate::cloud::contains_credentials(full_objective) {
+            return;
+        }
+        let objective: String = full_objective.chars().take(160).collect();
         if objective.trim().is_empty() {
             return;
         }
@@ -2018,6 +2023,11 @@ impl Jarvis {
         if text.is_empty() || text.chars().count() > 1000 {
             return Err(CoreError::BadRequest(
                 "testo vuoto o oltre 1000 caratteri".into(),
+            ));
+        }
+        if crate::cloud::contains_credentials(text) {
+            return Err(CoreError::BadRequest(
+                "La memoria non deve contenere credenziali.".into(),
             ));
         }
         if !self

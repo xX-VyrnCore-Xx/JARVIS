@@ -122,7 +122,11 @@ jobs:
       - name: Compila la GUI nativa
         shell: bash
         run: |
-          cargo build --release --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            swift build --package-path apps/desktop/macos -c release
+          else
+            cargo build --release --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+          fi
       - name: Firma gli eseguibili Windows con il PFX configurato
         if: runner.os == 'Windows' && github.event_name != 'pull_request'
         shell: pwsh
@@ -198,6 +202,7 @@ jobs:
           hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg" "$dmg"
           test -L "$RUNNER_TEMP/dmg/Applications" || { echo "manca il collegamento ad Applicazioni nel .dmg"; exit 1; }
           test -s "$RUNNER_TEMP/dmg/Installazione.txt" || { echo "mancano le istruzioni nel .dmg"; exit 1; }
+          test -s "$RUNNER_TEMP/dmg/.background/install.png"
           test -s "$RUNNER_TEMP/dmg/.DS_Store" || { echo "manca il layout Finder della finestra di installazione"; exit 1; }
           mkdir -p "$RUNNER_TEMP/Applications"
           cp -R "$RUNNER_TEMP/dmg/JARVIS.app" "$RUNNER_TEMP/Applications/"
@@ -205,6 +210,8 @@ jobs:
           app="$RUNNER_TEMP/Applications/JARVIS.app"
           codesign --verify --deep --strict "$app"
           plutil -extract LSMinimumSystemVersion raw "$app/Contents/Info.plist"
+          test -x "$app/Contents/MacOS/jarvis-desktop"
+          otool -L "$app/Contents/MacOS/jarvis-desktop" | grep -F 'SwiftUI.framework'
           res="$app/Contents/Resources"
           test -x "$res/jarvis-core" && test -x "$res/python/bin/python3"
           export JARVIS_TOKEN=jarvise2eownertoken0000000000000000
