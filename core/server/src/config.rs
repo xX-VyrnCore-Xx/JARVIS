@@ -14,7 +14,7 @@ pub struct Config {
     pub delegation_timeout_ms: u64,
     /// Variabili aggiuntive per il worker (es. iniezione di guasti nei test, `JARVIS_FAULT_INJECTION`).
     pub worker_env: Vec<(String, String)>,
-    /// Override di `JARVIS_VOICE_ENGINE` per il worker (`auto`, `local`, `fake`, `off`).
+    /// Motore vocale sintetico per le verifiche. Il runtime di produzione resta disattivato.
     pub voice_engine: Option<String>,
     /// Intervallo del pianificatore in secondi.
     pub scheduler_tick_s: u64,

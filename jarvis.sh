@@ -3,7 +3,6 @@
 #
 # Uso: ./jarvis.sh               avvia il Core API su http://localhost:8765
 #      ./jarvis.sh desktop       app desktop SwiftUI che avvia il Core dopo lo sblocco
-#      ./jarvis.sh voice-setup   installa i motori vocali locali e scarica i modelli (una volta)
 #      ./jarvis.sh doctor        controlla i prerequisiti e spiega cosa manca
 #      ./jarvis.sh backup        backup cifrato dei dati (passphrase richiesta)
 #      ./jarvis.sh restore FILE  ripristina un backup .jbak (con JARVIS chiuso)
@@ -86,24 +85,8 @@ fi
 export JARVIS_PYTHON="$VENV/bin/python"
 export JARVIS_HOME="$ROOT"
 
-MODELS="${JARVIS_MODELS_DIR:-$ROOT/data/models}"
-VOICE_NAME="${JARVIS_TTS_VOICE_NAME:-it_IT-paola-medium}"
 if [ "$CMD" = "voice-setup" ]; then
-  echo "→ Motori vocali locali (faster-whisper, Piper, openWakeWord)"
-  "$VENV/bin/python" -m pip install -q --disable-pip-version-check --require-hashes -r "$ROOT/ai/requirements-voice.txt"
-  mkdir -p "$MODELS/piper"
-  echo "→ Modello di riconoscimento ${JARVIS_STT_MODEL:-small} (download una tantum)"
-  "$VENV/bin/python" -c "import sys; from faster_whisper import WhisperModel; WhisperModel(sys.argv[1], device='cpu', compute_type='int8', download_root=sys.argv[2])" "${JARVIS_STT_MODEL:-small}" "$MODELS"
-  echo "→ Voce di sintesi $VOICE_NAME"
-  "$VENV/bin/python" -m piper.download_voices "$VOICE_NAME" --download-dir "$MODELS/piper"
-  ok "Runtime vocale pronto nel Core."
-  exit 0
-fi
-if [ -d "$MODELS" ]; then
-  export JARVIS_MODELS_DIR="$MODELS"
-  if [ -z "${JARVIS_TTS_VOICE:-}" ] && [ -f "$MODELS/piper/$VOICE_NAME.onnx" ]; then
-    export JARVIS_TTS_VOICE="$MODELS/piper/$VOICE_NAME.onnx"
-  fi
+  fail "La voce richiede un provider audio cloud."
 fi
 
 if [ "$CMD" = "desktop" ]; then

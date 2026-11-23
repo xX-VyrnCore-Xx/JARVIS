@@ -193,7 +193,7 @@ class CoreClient(private val transport: Transport = UrlConnectionTransport) {
     }
 
     fun send(message: String, session: DeviceSession): String? =
-        request(session.origin, "/api/chat", session.token, JSONObject().put("message", message)).optString("reply").ifEmpty { null }
+        request(session.origin, "/api/cloud/chat", session.token, JSONObject().put("message", message).put("provider", "auto")).optString("reply").ifEmpty { null }
 
     fun decide(action: PendingAction, approve: Boolean, session: DeviceSession): String? {
         if (!session.canConfirm) throw CoreException.ScopeRequired()

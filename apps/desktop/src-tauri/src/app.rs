@@ -54,7 +54,6 @@ enum Event {
     ConnectorOAuth(Result<Value, String>),
     PairingCreated(Result<Value, String>),
     CloudConfigured(Result<Value, String>, bool),
-    ChatDelta(String),
     ChatFinished(Result<Value, String>),
     Notifications(Result<Value, String>),
 }
@@ -95,9 +94,7 @@ pub struct JarvisApp {
     chat: Vec<ChatMessage>,
     memory_search: String,
     history_loading: bool,
-    streaming: String,
     chat_busy: bool,
-    chat_cloud: bool,
     chat_cloud_context: bool,
     notifications: Vec<Value>,
     notifications_error: Option<String>,
@@ -199,9 +196,7 @@ impl JarvisApp {
             chat: Vec::new(),
             memory_search: String::new(),
             history_loading: false,
-            streaming: String::new(),
             chat_busy: false,
-            chat_cloud: false,
             chat_cloud_context: false,
             notifications: Vec::new(),
             notifications_error: None,
@@ -378,10 +373,6 @@ impl JarvisApp {
                     }
                     ctx.request_repaint();
                 }
-                Event::ChatDelta(delta) => {
-                    self.streaming.push_str(&delta);
-                    ctx.request_repaint();
-                }
                 Event::ChatFinished(Ok(result)) => {
                     let reply = result["reply"].as_str().unwrap_or("").to_string();
                     if !reply.is_empty() {
@@ -399,13 +390,11 @@ impl JarvisApp {
                     {
                         self.confirmations.push(confirmation.clone());
                     }
-                    self.streaming.clear();
                     self.chat_busy = false;
                     self.load_history();
                     self.refresh(ctx);
                 }
                 Event::ChatFinished(Err(error)) => {
-                    self.streaming.clear();
                     self.chat_busy = false;
                     self.chat.push(ChatMessage {
                         role: "assistant",
@@ -615,23 +604,10 @@ impl JarvisApp {
             text: String::new(),
         });
         self.chat_busy = true;
-        self.streaming.clear();
         let tx = self.tx.clone();
-        let cloud = self.chat_cloud && !self.remote;
-        let use_context = self.chat_cloud_context;
+        let use_context = self.chat_cloud_context && !self.remote;
         std::thread::spawn(move || {
-            let result = if cloud {
-                client.post(
-                    "/api/cloud/chat",
-                    Some(&json!({
-                        "provider": "auto", "message": message, "use_context": use_context,
-                    })),
-                )
-            } else {
-                client.chat_stream(&message, |delta| {
-                    let _ = tx.send(Event::ChatDelta(delta.to_string()));
-                })
-            };
+            let result = client.cloud_chat(&message, use_context);
             let _ = tx.send(Event::ChatFinished(result));
         });
     }
@@ -761,16 +737,8 @@ impl JarvisApp {
 
     fn show_chat(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         if !self.remote {
-            ui.add_enabled_ui(!self.chat_busy, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.selectable_value(&mut self.chat_cloud, false, "Assistente locale");
-                    ui.selectable_value(&mut self.chat_cloud, true, "AI cloud");
-                    if self.chat_cloud {
-                        ui.checkbox(&mut self.chat_cloud_context, "Includi turni cloud recenti")
-                            .on_hover_text("Condivide i turni precedenti dello stesso provider con la richiesta corrente.");
-                    }
-                });
-            });
+            ui.checkbox(&mut self.chat_cloud_context, "Includi turni cloud recenti")
+                .on_hover_text("Condivide i turni precedenti con lo stesso provider.");
         }
         if let Some(error) = &self.error {
             ui.colored_label(egui::Color32::LIGHT_RED, error);
@@ -822,13 +790,9 @@ impl JarvisApp {
                             ui.set_min_width(ui.available_width());
                             ui.label(egui::RichText::new(label).small().strong().color(color));
                             ui.add(
-                                egui::Label::new(if message.text.is_empty() && self.chat_busy {
-                                    self.streaming.as_str()
-                                } else {
-                                    message.text.as_str()
-                                })
-                                .wrap()
-                                .selectable(true),
+                                egui::Label::new(message.text.as_str())
+                                    .wrap()
+                                    .selectable(true),
                             );
                         });
                     ui.add_space(10.0);
@@ -1783,7 +1747,7 @@ impl JarvisApp {
 
     fn show_setup(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.heading("Configurazione di JARVIS");
-        ui.label("La chat è disponibile subito. Configura la voce locale quando ti serve.");
+
         if let Some(error) = &self.error {
             ui.colored_label(egui::Color32::LIGHT_RED, error);
         }
@@ -1796,6 +1760,10 @@ impl JarvisApp {
             }
             return;
         };
+        if data["available"] == false {
+            ui.label("La voce richiede un provider audio cloud.");
+            return;
+        }
         let running = data["running"] == true;
         if let Some(saved_steps) = data["saved"]["steps"].as_array() {
             if saved_steps.iter().all(|step| step["status"] == "done") {

@@ -2,7 +2,7 @@
 
 ## Client macOS SwiftUI
 
-Su macOS 14 o successivo, JARVIS usa un client SwiftUI con autenticazione del proprietario all’apertura. Il Core locale parte dopo la verifica e si arresta quando termina la finestra. Minimizzare la finestra o riattivare il processo mantiene lo stato corrente. Su Windows la build usa egui. La plancia SwiftUI presenta stato e contatori del Core, attività recenti e accesso a chat e conferme. La sintesi del Core usa i suoi visemi; se la sintesi locale di JARVIS è indisponibile, le risposte vengono lette con la voce di sistema. Le registrazioni brevi si avviano dal pulsante microfono e vengono rimosse dopo la trascrizione.
+Su macOS 14 o successivo, JARVIS usa un client SwiftUI con autenticazione del proprietario all’apertura. Il Core locale parte dopo la verifica e si arresta quando termina la finestra. Minimizzare la finestra o riattivare il processo mantiene lo stato corrente. Su Windows la build usa egui. La plancia SwiftUI presenta stato e contatori del Core, attività recenti e accesso a chat e conferme. L’avatar visualizza l’attività del Core. Sintesi e trascrizione sono sospese finché non viene integrato un provider audio cloud.
 
 
 | Superficie | Funzioni |

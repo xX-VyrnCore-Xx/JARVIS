@@ -385,31 +385,8 @@ fn retry_after(raw: Option<&str>, now: chrono::DateTime<chrono::Utc>) -> Duratio
     Duration::from_secs(seconds.unwrap_or(60).clamp(1, 86_400))
 }
 
-pub const TOOLS: &[&str] = &[
-    "date.calc",
-    "math.calc",
-    "text.count",
-    "units.convert",
-    "time.now",
-    "system.info",
-    "system.disks",
-    "process.list",
-    "weather.forecast",
-    "web.search",
-    "todo.list",
-    "todo.review",
-    "notes.list",
-    "fs.list",
-    "fs.read",
-    "fs.search",
-    "fs.write",
-    "memory.list",
-    "memory.search",
-    "security.status",
-    "code.check_python",
-    "code.validate_json",
-    "agent.delegate",
-];
+// Le proposte remote sono limitate a calcoli senza accesso a dati locali o alla rete.
+pub const TOOLS: &[&str] = &["date.calc", "math.calc", "text.count", "units.convert"];
 
 pub struct Function {
     pub name: String,
@@ -455,29 +432,19 @@ pub struct Target {
 pub struct Request {
     pub message: String,
     pub tools: Vec<Function>,
-    pub targets: Vec<Target>,
+    pub target: Target,
     pub limiter: Arc<Mutex<Limiter>>,
 }
 
 pub struct Completed {
     pub provider: Provider,
     pub model: String,
-    pub fallback: Option<(Provider, Failure)>,
     pub answer: Result<Answer, Failure>,
 }
 
 impl Request {
     pub fn execute(&self) -> Completed {
-        let first = &self.targets[0];
-        let mut completed = self.complete(first);
-        if let (Some(second), Err(error)) = (self.targets.get(1), &completed.answer) {
-            if !matches!(error, Failure::InvalidTool) {
-                let fallback = Some((first.provider, error.clone()));
-                completed = self.complete(second);
-                completed.fallback = fallback;
-            }
-        }
-        completed
+        self.complete(&self.target)
     }
 
     fn complete(&self, target: &Target) -> Completed {
@@ -507,7 +474,6 @@ impl Request {
         Completed {
             provider: target.provider,
             model: model.clone(),
-            fallback: None,
             answer,
         }
     }
@@ -642,6 +608,7 @@ fn chat_at(
     // Gli endpoint sono fissi e il bearer token non viene inoltrato su redirect.
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(45))
+        .try_proxy_from_env(false)
         .redirects(0)
         .build();
     let response = agent

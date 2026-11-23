@@ -18,6 +18,7 @@ use sha2::Digest;
 
 pub struct SecretStore {
     cipher: XChaCha20Poly1305,
+    pub(crate) chat_cipher: std::sync::Arc<crate::chat_crypto::ChatCipher>,
     conn: Connection,
     location: &'static str,
 }
@@ -84,13 +85,7 @@ fn key_file(data_dir: &Path) -> PathBuf {
 }
 
 fn write_key_file(path: &Path, key: &[u8]) -> Result<(), String> {
-    fs::write(path, key).map_err(|e| format!("chiave dei segreti: {e}"))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())?;
-    }
-    Ok(())
+    crate::backup::atomic_write(path, key).map_err(|e| format!("chiave dei segreti: {e}"))
 }
 
 fn new_key() -> Result<Vec<u8>, String> {
@@ -176,10 +171,18 @@ impl SecretStore {
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM secrets", [], |r| r.get(0))
             .map_err(|e| e.to_string())?;
-        let (key, location) = load_key(data_dir, vault, count > 0)?;
+        let protected = conn
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = 'chat_crypto_migration')",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .map_err(|e| e.to_string())?;
+        let (key, location) = load_key(data_dir, vault, count > 0 || protected)?;
         let cipher = XChaCha20Poly1305::new_from_slice(&key).map_err(|e| e.to_string())?;
         Ok(Self {
             cipher,
+            chat_cipher: std::sync::Arc::new(crate::chat_crypto::ChatCipher::from_secret(&key)),
             conn,
             location,
         })
@@ -222,6 +225,9 @@ impl SecretStore {
         };
         let nonce = b64().decode(nonce).map_err(|e| e.to_string())?;
         let sealed = b64().decode(value).map_err(|e| e.to_string())?;
+        if nonce.len() != 24 {
+            return Err("nonce del segreto non valido".into());
+        }
         let plain = self
             .cipher
             .decrypt(XNonce::from_slice(&nonce), sealed.as_slice())

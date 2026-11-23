@@ -202,4 +202,8 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **SwiftUI e sessione del proprietario su macOS (2026-11-23).** ADR-0094. Il client macOS avvia il Core dopo l’autenticazione, presenta la plancia adattiva e collega la voce e il microfono all’avatar. Il DMG include la grafica di trascinamento. Restano da collaudare Touch ID, microfono, sessione con un dispositivo associato e resa a due larghezze su un Mac fisico. Le viste macOS di Competenze, Audit e Workspace conservano la consultazione via API; le possibilità di modifica variano secondo la schermata. L’aggregazione di Core secondari del precedente client desktop non è ancora portata su SwiftUI.
 
+**Inferenza solo cloud e conversazioni protette (2026-11-23).** Client macOS, Windows e Android usano la chat cloud per le richieste generative e il Core per i comandi espliciti. Un singolo provider elabora ogni richiesta e può proporre soltanto calcoli isolati. L’archivio attivo migra messaggi, fonti e task verso cifratura autenticata. Il motore vocale di produzione resta disattivato in attesa di un provider audio cloud.
+
+**Rifinitura della plancia macOS (2026-11-23).** La plancia SwiftUI usa un hero adattivo, scorciatoie per conferme e automazioni, attività recenti con stato esplicito e indicatori derivati dalla configurazione reale dei provider. Durante l’invio, la chat mostra il messaggio in attesa e mantiene il compositore ancorato. I caricamenti superati non sovrascrivono la schermata attiva. Il collaudo dei limiti di scorrimento richiede un Mac con display.
+
 Per ogni ripresa registrare data, revisione, lavoro completato, verifiche eseguite, blocchi, ipotesi e prossimo passo concreto. Conservare il checkpoint con le modifiche alle quali si riferisce.

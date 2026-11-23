@@ -1,4 +1,3 @@
-use std::io::{BufRead, BufReader};
 use std::time::Duration;
 
 use serde_json::{json, Value};
@@ -112,42 +111,18 @@ impl ApiClient {
         )
     }
 
-    pub fn chat_stream(&self, message: &str, mut delta: impl FnMut(&str)) -> Result<Value, String> {
-        let mut request = self
-            .agent
-            .post(&self.url("/api/chat/stream"))
-            .set("Accept", "application/x-ndjson")
-            .set("Content-Type", "application/json");
-        if let Some((name, value)) = &self.auth {
-            request = request.set(name, value);
-        }
-        let response = request
-            .send_json(json!({"message": message}))
-            .map_err(read_error)?;
-        let reader = BufReader::new(response.into_reader());
-        for line in reader.lines() {
-            let line = line.map_err(|error| error.to_string())?;
-            if line.trim().is_empty() {
-                continue;
-            }
-            let event: Value = serde_json::from_str(&line).map_err(|error| error.to_string())?;
-            match event["type"].as_str() {
-                Some("delta") => {
-                    if let Some(text) = event["text"].as_str() {
-                        delta(text);
-                    }
-                }
-                Some("done") => return Ok(event["result"].clone()),
-                Some("error") => {
-                    return Err(event["error"]["message"]
-                        .as_str()
-                        .unwrap_or("Errore del Core")
-                        .to_string())
-                }
-                _ => {}
-            }
-        }
-        Err("Risposta interrotta prima della fine".into())
+    pub fn cloud_chat(&self, message: &str, use_context: bool) -> Result<Value, String> {
+        let client = Self::new_with_timeout(
+            self.base.as_str(),
+            self.auth.clone(),
+            Duration::from_secs(125),
+        )?;
+        client.post(
+            "/api/cloud/chat",
+            Some(&json!({
+                "provider": "auto", "message": message, "use_context": use_context
+            })),
+        )
     }
 }
 

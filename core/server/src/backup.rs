@@ -160,9 +160,10 @@ pub fn create(
     // Resta protetta dalla cifratura del backup.
     // Su macOS e Windows la chiave sta nel portachiavi (ADR-0021): il ripristino la riscrive come file e
     // l'apertura successiva la sposta di nuovo nel portachiavi.
-    if let Some(key) = crate::secrets::read_key(data_dir) {
-        files.push(("data/.secrets.key".into(), key));
-    }
+    let secret_key = crate::secrets::read_key(data_dir)
+        .filter(|key| key.len() == 32)
+        .ok_or("Chiave dell'archivio indisponibile. Il backup non è stato creato.")?;
+    files.push(("data/.secrets.key".into(), secret_key));
     for &name in DATA_SETTINGS {
         match fs::read(data_dir.join(name)) {
             Ok(data) => files.push((format!("data/{name}"), data)),
