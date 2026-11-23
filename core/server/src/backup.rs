@@ -85,6 +85,8 @@ pub(crate) fn private_dir(path: &Path) -> std::io::Result<()> {
 
 /// Preferenze e identità da conservare anche attraverso gli aggiornamenti.
 pub(crate) const DATA_SETTINGS: &[&str] = &[
+    ".macos-owner-session",
+    "remote-hosts.txt",
     "setup.json",
     "updates.json",
     "cloud.json",

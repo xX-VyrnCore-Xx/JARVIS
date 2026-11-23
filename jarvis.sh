@@ -2,7 +2,7 @@
 # Avvia JARVIS: prepara l'ambiente Python e avvia il Core.
 #
 # Uso: ./jarvis.sh               avvia il Core API su http://localhost:8765
-#      ./jarvis.sh desktop       app desktop egui che avvia il Core da sola
+#      ./jarvis.sh desktop       app desktop SwiftUI che avvia il Core dopo lo sblocco
 #      ./jarvis.sh voice-setup   installa i motori vocali locali e scarica i modelli (una volta)
 #      ./jarvis.sh doctor        controlla i prerequisiti e spiega cosa manca
 #      ./jarvis.sh backup        backup cifrato dei dati (passphrase richiesta)
@@ -96,7 +96,7 @@ if [ "$CMD" = "voice-setup" ]; then
   "$VENV/bin/python" -c "import sys; from faster_whisper import WhisperModel; WhisperModel(sys.argv[1], device='cpu', compute_type='int8', download_root=sys.argv[2])" "${JARVIS_STT_MODEL:-small}" "$MODELS"
   echo "→ Voce di sintesi $VOICE_NAME"
   "$VENV/bin/python" -m piper.download_voices "$VOICE_NAME" --download-dir "$MODELS/piper"
-  ok "Runtime vocale pronto nel Core; i controlli microfono non sono ancora disponibili nel client egui."
+  ok "Runtime vocale pronto nel Core."
   exit 0
 fi
 if [ -d "$MODELS" ]; then
@@ -110,8 +110,16 @@ if [ "$CMD" = "desktop" ]; then
   shift
   [ "$PREBUILT" = 1 ] && fail "Per la release usa l'app JARVIS installata; per avviare il desktop dai sorgenti"
   echo "→ Compilo l'app desktop (la prima volta richiede alcuni minuti)"
-  (cd "$ROOT/apps/desktop/src-tauri" && cargo build --release --locked)
-  exec "$ROOT/apps/desktop/src-tauri/target/release/jarvis-desktop" "$@"
+  command -v swift >/dev/null || fail "Installa gli strumenti Xcode con xcode-select --install."
+  swift build --package-path "$ROOT/apps/desktop/macos" -c release
+  swift_bin=$(swift build --package-path "$ROOT/apps/desktop/macos" -c release --show-bin-path)
+  dev_app="$ROOT/apps/desktop/macos/.build/JARVIS.app/Contents"
+  mkdir -p "$dev_app/MacOS" "$dev_app/Resources"
+  cp "$swift_bin/jarvis-desktop" "$dev_app/MacOS/jarvis-desktop"
+  cp "$ROOT/apps/desktop/src-tauri/icons/icon.icns" "$dev_app/Resources/icon.icns"
+  sed "s/@VERSION@/1.0.0/g" "$ROOT/apps/desktop/installer/macos/Info.plist" > "$dev_app/Info.plist"
+  codesign --force --sign - "$dev_app/.."
+  JARVIS_CORE_BIN="$ROOT/core/target/release/jarvis" JARVIS_HOME="$ROOT" JARVIS_PYTHON="$VENV/bin/python"     exec "$dev_app/MacOS/jarvis-desktop" "$@"
 fi
 
 echo "→ Per la chat cloud configura un provider tramite POST /api/cloud (vedi docs/AI_SYSTEM.md)."

@@ -1483,6 +1483,14 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Inferenza:** dare priorità al profilo di ragionamento per richieste con più passaggi. Un modello Ollama locale facoltativo risponde ai compiti testuali dei temporanei che il motore a regole non riconosce. I comandi riconosciuti continuano a passare per il Core.
 - **Evidenza:** test OAuth con fixture sintetiche, schema dei risultati e test Python del gateway. Il consenso Google effettivo richiede un progetto abilitato e un account autorizzato.
 
+### ADR-0094 — Client SwiftUI e ciclo di vita della sessione macOS
+
+- **Data:** 2026-11-23.
+- **Decisione:** usare SwiftUI da macOS 14, con autenticazione LocalAuthentication all’avvio e Core figlio della sessione. Un archivio marcato come gestito richiede la sessione del processo padre. Il meccanismo presume che l’account macOS e i suoi file locali siano fidati.
+- **Azione rischiosa:** una sessione macOS gestita riserva al proprietario l’approvazione delle operazioni catalogate ad alto rischio o critiche. Il Core continua a verificare policy e conferme.
+- **Memoria:** i formati riconoscibili di credenziali sono esclusi dalle nuove scritture della memoria, dagli episodi automatici e dal contesto dell’agente anche quando provengono da ricordi storici.
+- **Distribuzione:** il DMG mantiene l’installazione per trascinamento e include uno sfondo Finder con la direzione del trascinamento. La build Windows continua a usare egui.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

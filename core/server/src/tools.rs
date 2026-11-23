@@ -183,6 +183,12 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
         "todo.review" => crate::toolbox::todo_review(ctx.store, args, &crate::now()),
         "todo.done" => crate::toolbox::todo_done(ctx.store, s("id")),
         "memory.update" => {
+            if crate::cloud::contains_credentials(s("text")) {
+                return Err(ToolError::new(
+                    "memory.sensitive",
+                    "La memoria non deve contenere credenziali.",
+                ));
+            }
             let ok = ctx
                 .store
                 .memory_update(s("id"), s("text"), &crate::now())
@@ -265,6 +271,12 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
             Ok(json!({"path": s("path"), "bytes_written": content.len()}))
         }
         "memory.remember" => {
+            if crate::cloud::contains_credentials(s("text")) {
+                return Err(ToolError::new(
+                    "memory.sensitive",
+                    "La memoria non deve contenere credenziali.",
+                ));
+            }
             // Stessa informazione già ricordata: nessun duplicato, si restituisce l'elemento esistente.
             if let Some((id, kind)) = ctx
                 .store

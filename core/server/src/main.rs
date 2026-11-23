@@ -191,6 +191,36 @@ fn maintenance_lock(cfg: &Config) -> Result<std::fs::File, String> {
     Ok(lock)
 }
 
+/// A managed data directory accepts startup through the desktop's inherited pipe.
+#[cfg(target_os = "macos")]
+fn check_desktop_parent(cfg: &Config) -> Result<(), &'static str> {
+    let managed = cfg.data_dir.join(".macos-owner-session").exists();
+    if !managed && std::env::var_os("JARVIS_MACOS_SESSION").is_none() {
+        return Ok(());
+    }
+    if std::env::var("JARVIS_MACOS_SESSION").as_deref() != Ok("1")
+        || std::env::var("JARVIS_EXIT_WITH_PARENT").as_deref() != Ok("stdin")
+        || cfg.token.len() != 64
+    {
+        return Err("Apri e sblocca l'app JARVIS per avviare questo archivio.");
+    }
+    let token = cfg.token.clone();
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        use std::io::Read;
+        let mut proof = [0; 65];
+        let valid = std::io::stdin().lock().read_exact(&mut proof).is_ok()
+            && proof[64] == b'\n'
+            && proof[..64] == *token.as_bytes();
+        let _ = tx.send(valid);
+    });
+    if rx.recv_timeout(std::time::Duration::from_secs(5)) == Ok(true) {
+        Ok(())
+    } else {
+        Err("La sessione dell'app JARVIS non è disponibile.")
+    }
+}
+
 #[tokio::main]
 async fn main() {
     let cfg = match Config::from_env() {
@@ -203,6 +233,11 @@ async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if let Some(code) = maintenance(&cfg, &args) {
         std::process::exit(code);
+    }
+    #[cfg(target_os = "macos")]
+    if let Err(error) = check_desktop_parent(&cfg) {
+        eprintln!("{error}");
+        std::process::exit(2);
     }
     let addr = std::net::SocketAddr::new(cfg.host, cfg.port);
     let (token, port, data_dir, tick) = (

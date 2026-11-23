@@ -115,11 +115,18 @@ jobs:
         working-directory: apps/desktop/src-tauri
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - run: rustup component add rustfmt clippy
-      - run: cargo fmt --check
-      - run: cargo clippy --locked -- -D warnings
-      - run: cargo build --locked
-      - run: cargo test --locked
+      - if: runner.os == 'macOS'
+        run: swift build --package-path ../macos
+      - if: runner.os == 'Windows'
+        run: rustup component add rustfmt clippy
+      - if: runner.os == 'Windows'
+        run: cargo fmt --check
+      - if: runner.os == 'Windows'
+        run: cargo clippy --locked -- -D warnings
+      - if: runner.os == 'Windows'
+        run: cargo build --locked
+      - if: runner.os == 'Windows'
+        run: cargo test --locked
 
 
   audit:

@@ -786,10 +786,10 @@ async fn confirmations(
     State(state): State<Shared>,
     device: Option<axum::Extension<DeviceCtx>>,
 ) -> Json<Value> {
-    let mut items = with_core(&state, |j| j.pending_confirmations()).await;
-    if device.is_some() {
-        items.retain(|item| item["tool"] != crate::desktop::TOOL);
-    }
+    let items = with_core(&state, move |j| {
+        j.pending_confirmations_for(device.is_some())
+    })
+    .await;
     Json(json!({"items": items}))
 }
 
@@ -809,7 +809,7 @@ async fn confirm(
     };
     if device.is_some() {
         let id = id.clone();
-        if with_core(&state, move |j| j.is_desktop_confirmation(&id)).await {
+        if with_core(&state, move |j| j.requires_owner_confirmation(&id)).await {
             return error(
                 StatusCode::FORBIDDEN,
                 "owner_only",
@@ -1119,10 +1119,7 @@ async fn chat_sync(
 ) -> Response {
     reply(
         with_core(&state, move |j| {
-            let mut confirmations = j.pending_confirmations();
-            if device.is_some() {
-                confirmations.retain(|item| item["tool"] != crate::desktop::TOOL);
-            }
+            let confirmations = j.pending_confirmations_for(device.is_some());
             Ok(json!({"messages": j.conversation(50)?, "confirmations": confirmations}))
         })
         .await,
