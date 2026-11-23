@@ -527,7 +527,6 @@ pub fn shell_run(workspace: &Path, command: &str) -> Result<Value, ToolError> {
     }
     let started = std::time::Instant::now();
     let mut child = cmd
-        .env_remove("JARVIS_TOKEN")
         .current_dir(workspace)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())

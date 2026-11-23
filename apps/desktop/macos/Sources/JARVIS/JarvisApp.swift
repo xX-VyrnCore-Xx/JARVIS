@@ -227,14 +227,20 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
             Divider()
             if let error { banner(error, color: .orange) }
             if let info { banner(info, color: .cyan) }
-            ScrollView {
-                VStack(alignment: .leading, spacing: 14) {
-                    switch section {
-                    case .dashboard: dashboard
-                    case .chat: chat
-                    default: tools
-                    }
-                }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+            ScrollViewReader { scroll in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        switch section {
+                        case .dashboard: dashboard
+                        case .chat: chat
+                        default: tools
+                        }
+                        if section == .chat { Color.clear.frame(height: 1).id("latest-message") }
+                    }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .onChange(of: records(payload).last?.id, initial: true) { _, _ in
+                    if section == .chat { scroll.scrollTo("latest-message", anchor: .bottom) }
+                }
             }
             if section == .chat {
                 Divider()
@@ -284,6 +290,22 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
                 card("Automazioni", icon: "bolt") {
                     Text(core.health["automations"].map { "\($0)" } ?? "—").font(.title2.monospacedDigit())
                     Button("Apri automazioni") { select(.workflows) }
+                }
+                card("Motore AI", icon: "brain") {
+                    let status = core.health["ai"] as? [String: Any]
+                    let gateway = status?["gateway"] as? [String: Any]
+                    let backend = gateway?["backend"] as? [String: Any]
+                    Text(backend?["model"] as? String ?? "—").lineLimit(2)
+                    Button("Modelli e chiavi") { select(.models) }
+                }
+                card("Integrità audit", icon: "lock.shield") {
+                    let audit = core.health["audit"] as? [String: Any]
+                    if let valid = audit?["chain_valid"] as? Bool {
+                        Label(valid ? "Catena integra" : "Verifica fallita",
+                              systemImage: valid ? "checkmark.circle" : "exclamationmark.triangle")
+                            .foregroundStyle(valid ? Color.green : Color.orange)
+                    } else { Text("In attesa di stato") }
+                    Button("Apri sicurezza") { select(.security) }
                 }
             }
             card("Attività recenti", icon: "clock") {

@@ -201,7 +201,7 @@ pub(crate) fn replace_data(data: &Path, staging: &Path, aside: &Path) -> Result<
         Ok(info) if info.is_dir() => {
             let marker = ".macos-owner-session";
             if data.join(marker).is_file() && !staging.join(marker).is_file() {
-                crate::backup::private_file(&staging.join(marker))
+                crate::backup::atomic_write(&staging.join(marker), b"")
                     .map_err(|e| format!("conservazione della sessione macOS: {e}"))?;
             }
             fs::rename(data, aside).map_err(|e| format!("spostamento dei dati attuali: {e}"))?;
