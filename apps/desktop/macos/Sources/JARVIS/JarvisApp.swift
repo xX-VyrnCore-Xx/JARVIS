@@ -77,6 +77,7 @@ private enum Section: String, CaseIterable, Identifiable {
 
 private let base = Color(red: 0.025, green: 0.047, blue: 0.083)
 private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
+private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
 @MainActor private struct RootView: View {
     @ObservedObject var core: CoreSession
@@ -94,6 +95,9 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
     @State private var sending = false
     @State private var lastReply: [String: Any]?
     @State private var refresh = 0
+    @State private var activeLoad: UUID?
+    @State private var outgoingMessage: String?
+    @FocusState private var composerFocused: Bool
     @State private var selectedTemplate = ""
     @State private var clientID = ""
     @State private var credential = ""
@@ -147,6 +151,7 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
 
     private func select(_ value: Section) {
         guard section != value else { return }
+        activeLoad = nil
         payload = [:]
         error = nil
         info = nil
@@ -168,6 +173,7 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
                                 .background(section == entry ? Color.cyan.opacity(0.12) : .clear,
                                             in: RoundedRectangle(cornerRadius: 8))
                         }.buttonStyle(.plain)
+                            .accessibilityAddTraits(section == entry ? .isSelected : [])
                     }
                 }
             }
@@ -210,9 +216,19 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
                 Label(section.rawValue, systemImage: section.icon).font(.title2.weight(.semibold))
                 Spacer()
                 Button { select(.notifications) } label: {
-                    Label("\(core.health["notifications_unread"] as? Int ?? 0)", systemImage: "bell")
-                }.help("Notifiche")
-                Button { refresh += 1 } label: { Image(systemName: "arrow.clockwise") }.help("Aggiorna")
+                    if let unread = core.health["notifications_unread"] as? Int, unread > 0 {
+                        Label("\(unread)", systemImage: "bell.badge")
+                    } else {
+                        Image(systemName: "bell")
+                    }
+                }.help("Notifiche").accessibilityLabel("Notifiche")
+                Button { refresh += 1 } label: {
+                    if activeLoad != nil {
+                        ProgressView().controlSize(.small).frame(width: 15, height: 15)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                }.disabled(activeLoad != nil).help("Aggiorna").accessibilityLabel("Aggiorna")
             }.padding(16).background(base)
             Divider()
             if let error { banner(error, color: .orange) }
@@ -228,7 +244,7 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
                         if section == .chat { Color.clear.frame(height: 1).id("latest-message") }
                     }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .onChange(of: records(payload).last?.id, initial: true) { _, _ in
+                .onChange(of: chatScrollAnchor, initial: true) { _, _ in
                     if section == .chat { scroll.scrollTo("latest-message", anchor: .bottom) }
                 }
             }
@@ -257,72 +273,193 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
     }
 
     private var dashboard: some View {
-        VStack(alignment: .leading, spacing: 15) {
+        VStack(alignment: .leading, spacing: 18) {
+            dashboardHero
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 155), spacing: 12, alignment: .top)], spacing: 12) {
+                dashboardTile("Core", value: coreStatus, icon: "cpu", color: coreIsUp ? .green : .orange,
+                              destination: .system)
+                dashboardTile("Conferme", value: count("pending_confirmations"), icon: "checkmark.shield",
+                              color: (core.health["pending_confirmations"] as? Int ?? 0) > 0 ? .orange : .cyan,
+                              destination: .confirmations)
+                dashboardTile("Automazioni attive", value: count("automations"), icon: "bolt",
+                              color: .cyan, destination: .workflows)
+                dashboardTile("Verifica audit", value: auditStatus.0, icon: "lock.shield",
+                              color: auditStatus.1, destination: .security)
+            }
             ViewThatFits(in: .horizontal) {
-                HStack { welcome.frame(minWidth: 220); Avatar(thinking: sending).frame(width: 245) }
-                VStack { Avatar(thinking: sending).frame(width: 170); welcome }
-            }
-            .padding(18)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(LinearGradient(colors: [panel, base], startPoint: .topTrailing, endPoint: .bottomLeading),
-                        in: RoundedRectangle(cornerRadius: 16))
-            .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(.cyan.opacity(0.2)) }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 178), alignment: .top)], alignment: .leading) {
-                card("Core", icon: "cpu") {
-                    let status = core.health["core"] as? [String: Any]
-                    Text(status?["status"] as? String == "up" ? "Operativo" : "In attesa di stato")
-                    if let version = status?["version"] as? String { Text("Versione \(version)").foregroundStyle(.secondary) }
+                HStack(alignment: .top, spacing: 12) {
+                    recentActivity.frame(minWidth: 340)
+                    providerStatus.frame(width: 235)
                 }
-                card("Conferme", icon: "checkmark.shield") {
-                    Text(core.health["pending_confirmations"].map { "\($0)" } ?? "—").font(.title2.monospacedDigit())
-                    Button("Esamina richieste") { select(.confirmations) }
+                VStack(alignment: .leading, spacing: 12) {
+                    recentActivity
+                    providerStatus
                 }
-                card("Automazioni", icon: "bolt") {
-                    Text(core.health["automations"].map { "\($0)" } ?? "—").font(.title2.monospacedDigit())
-                    Button("Apri automazioni") { select(.workflows) }
-                }
-                card("Motore AI", icon: "brain") {
-                    Text(core.health["inference"] == nil ? "In attesa di stato" : "Ollama Cloud / NVIDIA NIM")
-                        .lineLimit(2)
-                    Button("Modelli e chiavi") { select(.models) }
-                }
-                card("Integrità audit", icon: "lock.shield") {
-                    let audit = core.health["audit"] as? [String: Any]
-                    if let valid = audit?["chain_valid"] as? Bool {
-                        Label(valid ? "Catena integra" : "Verifica fallita",
-                              systemImage: valid ? "checkmark.circle" : "exclamationmark.triangle")
-                            .foregroundStyle(valid ? Color.green : Color.orange)
-                    } else { Text("In attesa di stato") }
-                    Button("Apri sicurezza") { select(.security) }
-                }
-            }
-            card("Attività recenti", icon: "clock") {
-                let latest = records(payload).prefix(5)
-                if latest.isEmpty { Text("Nessuna attività recente.").foregroundStyle(.secondary) }
-                ForEach(latest) { item in
-                    LabeledContent { Text(item["state"] ?? "—").foregroundStyle(.secondary) } label: {
-                        Text(item.title).lineLimit(2)
-                    }
-                }
-                Button("Tutte le attività") { select(.tasks) }
             }
         }
     }
 
-    private var welcome: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Sono JARVIS").font(.system(size: 40, weight: .bold)).foregroundStyle(.cyan)
-            Text("Gestisci attività, dispositivi e automazioni dal tuo Mac.").foregroundStyle(.secondary)
-            Button { select(.chat) } label: { Label("Apri chat", systemImage: "bubble.left") }
-                .buttonStyle(.borderedProminent).controlSize(.large)
+    private var coreIsUp: Bool {
+        (core.health["core"] as? [String: Any])?["status"] as? String == "up"
+    }
+
+    private var coreStatus: String {
+        coreIsUp ? "Operativo" : "Non disponibile"
+    }
+
+    private var auditStatus: (String, Color) {
+        let audit = core.health["audit"] as? [String: Any]
+        guard let valid = audit?["chain_valid"] as? Bool else { return ("—", .secondary) }
+        return valid ? ("Integro", .green) : ("Anomalia", .orange)
+    }
+
+    private func count(_ key: String) -> String {
+        (core.health[key] as? Int).map(String.init) ?? "—"
+    }
+
+    private var dashboardHero: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                welcome.frame(minWidth: 255, maxWidth: .infinity, alignment: .leading)
+                Avatar(thinking: sending).frame(width: 244)
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                Avatar(thinking: sending).frame(width: 176).frame(maxWidth: .infinity)
+                welcome
+            }
         }
+        .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            ZStack {
+                LinearGradient(colors: [panel, base], startPoint: .topLeading, endPoint: .bottomTrailing)
+                RadialGradient(colors: [.cyan.opacity(0.16), .clear], center: .trailing,
+                               startRadius: 8, endRadius: 330)
+                Canvas { context, size in
+                    var lines = Path()
+                    for x in stride(from: 0.0, through: size.width, by: 28.0) {
+                        lines.move(to: CGPoint(x: x, y: 0))
+                        lines.addLine(to: CGPoint(x: x, y: size.height))
+                    }
+                    for y in stride(from: 0.0, through: size.height, by: 28.0) {
+                        lines.move(to: CGPoint(x: 0, y: y))
+                        lines.addLine(to: CGPoint(x: size.width, y: y))
+                    }
+                    context.stroke(lines, with: .color(.cyan.opacity(0.06)), lineWidth: 1)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+        }
+        .overlay { RoundedRectangle(cornerRadius: 20).strokeBorder(.cyan.opacity(0.28)) }
+    }
+
+    private var welcome: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Label("Sessione proprietario attiva", systemImage: "lock.shield")
+                .font(.subheadline.weight(.medium)).foregroundStyle(.cyan)
+            Text("JARVIS").font(.system(size: 52, weight: .semibold, design: .rounded))
+                .tracking(3).foregroundStyle(.white)
+                .accessibilityAddTraits(.isHeader)
+            Button { select(.chat) } label: { Label("Apri chat", systemImage: "bubble.left") }
+                .buttonStyle(.borderedProminent).controlSize(.large).tint(.cyan)
+        }
+    }
+
+    private func dashboardTile(_ title: String, value: String, icon: String, color: Color,
+                               destination: Section) -> some View {
+        Button { select(destination) } label: {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Image(systemName: icon).foregroundStyle(color)
+                    Spacer()
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                }
+                Text(value).font(.title3.weight(.semibold)).monospacedDigit()
+                    .lineLimit(1).minimumScaleFactor(0.75)
+                Text(title).font(.caption).foregroundStyle(.secondary)
+            }
+            .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+            .background(panel, in: RoundedRectangle(cornerRadius: 12))
+            .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(color.opacity(0.25)) }
+            .contentShape(Rectangle())
+        }.buttonStyle(.plain)
+        .accessibilityLabel("\(title), \(value)")
+    }
+
+    private var recentActivity: some View {
+        card("Attività recenti", icon: "clock") {
+            let latest = records(payload).prefix(5)
+            if latest.isEmpty {
+                Text(activeLoad != nil ? "Caricamento delle attività…" : "Nessuna attività recente.")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(latest) { item in
+                let state = activityState(item["state"])
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Image(systemName: state.icon).foregroundStyle(state.color)
+                    Text(item.title).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                    Text(state.label).font(.caption.weight(.medium)).foregroundStyle(state.color)
+                        .multilineTextAlignment(.trailing)
+                }
+                .padding(.vertical, 5)
+                .accessibilityElement(children: .combine)
+            }
+            Button("Apri attività", systemImage: "arrow.right") { select(.tasks) }
+        }
+    }
+
+    private var providerStatus: some View {
+        card("Inferenza cloud", icon: "cloud") {
+            let providers = records(payload, key: "providers")
+            if providers.isEmpty {
+                Text("Configurazione da verificare").font(.callout).foregroundStyle(.secondary)
+            }
+            ForEach(providers) { provider in
+                let configured = provider.data["configured"] as? Bool == true
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(providerName(provider.id)).font(.subheadline.weight(.semibold))
+                    Label(configured ? "Chiave configurata" : "Chiave mancante",
+                          systemImage: configured ? "key.fill" : "key")
+                        .font(.caption).foregroundStyle(configured ? iris : Color.secondary)
+                }
+                .accessibilityElement(children: .combine)
+            }
+            Button("Modelli AI", systemImage: "arrow.right") { select(.models) }
+        }
+    }
+
+    private func providerName(_ id: String) -> String {
+        switch id {
+        case "ollama_cloud": return "Ollama Cloud"
+        case "nvidia_nim": return "NVIDIA NIM"
+        default: return id
+        }
+    }
+
+    private func activityState(_ value: String?) -> (label: String, icon: String, color: Color) {
+        switch value {
+        case "succeeded": return ("Completata", "checkmark.circle", .green)
+        case "failed": return ("Fallita", "exclamationmark.circle", .orange)
+        case "cancelled": return ("Annullata", "xmark.circle", .secondary)
+        case "waiting_confirmation": return ("Da confermare", "checkmark.shield", .orange)
+        case "running": return ("In corso", "arrow.clockwise", .cyan)
+        case "planned", "pending": return ("In attesa", "clock", .secondary)
+        default: return (value ?? "Stato sconosciuto", "circle", .secondary)
+        }
+    }
+
+    private var chatScrollAnchor: String? {
+        guard section == .chat else { return nil }
+        return outgoingMessage == nil ? records(payload).last?.id : "pending-message"
     }
 
     private var chat: some View {
         VStack(alignment: .leading, spacing: 14) {
             Avatar(thinking: sending).frame(width: 150).frame(maxWidth: .infinity)
             let history = records(payload)
-            if history.isEmpty { Text("Scrivi la tua prima richiesta.").foregroundStyle(.secondary) }
+            if history.isEmpty, outgoingMessage == nil {
+                Text("Scrivi la tua prima richiesta.").foregroundStyle(.secondary)
+            }
             ForEach(history) { item in
                 card(item["role"] == "user" ? "Tu" : "JARVIS",
                      icon: item["role"] == "user" ? "person" : "waveform") {
@@ -342,7 +479,10 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
             if let confirmation = lastReply?["confirmation"] as? [String: Any] {
                 Button("Esamina l’azione proposta") { pending = Record(confirmation, index: 0) }
             }
-            if sending { ProgressView("JARVIS sta elaborando") }
+            if let outgoingMessage {
+                card("Tu", icon: "person") { Text(outgoingMessage).textSelection(.enabled) }
+                ProgressView("JARVIS sta elaborando").controlSize(.small)
+            }
         }
     }
 
@@ -352,7 +492,7 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
                 .frame(maxWidth: .infinity, alignment: .leading)
             HStack {
                 TextField("Messaggio a JARVIS", text: $message)
-                    .textFieldStyle(.roundedBorder).onSubmit(send)
+                    .textFieldStyle(.roundedBorder).focused($composerFocused).onSubmit(send)
                 Button("Invia", systemImage: "arrow.up") { send() }
                     .buttonStyle(.borderedProminent)
                     .disabled(sending || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -367,17 +507,22 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
         error = nil
         lastReply = nil
         message = ""
+        outgoingMessage = text
         Task {
+            defer {
+                outgoingMessage = nil
+                sending = false
+            }
             do {
                 let result = try await core.request("/api/cloud/chat", method: "POST",
                                                      body: ["message": text, "provider": "auto"])
                 lastReply = result
-                await load(.chat)
-                sending = false
+                if section == .chat { await load(.chat) }
+                await core.refreshHealth()
             } catch {
-                sending = false
                 self.error = error.localizedDescription
                 if message.isEmpty { message = text }
+                if section == .chat { composerFocused = true }
             }
         }
     }
@@ -653,6 +798,12 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
     }
 
     private func load(_ page: Section) async {
+        guard section == page, !Task.isCancelled else { return }
+        let id = UUID()
+        activeLoad = id
+        defer {
+            if activeLoad == id { activeLoad = nil }
+        }
         var path = page.endpoint
         if page == .memory, !memoryQuery.isEmpty {
             var components = URLComponents(string: path)
@@ -661,18 +812,22 @@ private let panel = Color(red: 0.052, green: 0.095, blue: 0.15)
         }
         do {
             var result = try await core.request(path)
+            if page == .dashboard {
+                let status = try? await core.request("/api/cloud", timeout: 3)
+                result["providers"] = status?["providers"]
+            }
             if page == .connectors {
                 let catalog = try await core.request("/api/connectors/templates")
                 result["templates"] = catalog["templates"]
             }
-            if page == section, !Task.isCancelled {
+            if page == section, activeLoad == id, !Task.isCancelled {
                 payload = result
                 if page == .updates {
                     automaticUpdates = result["enabled"] as? Bool ?? false
                 }
             }
         } catch {
-            if page == section, !Task.isCancelled { self.error = error.localizedDescription }
+            if page == section, activeLoad == id, !Task.isCancelled { self.error = error.localizedDescription }
         }
     }
 
