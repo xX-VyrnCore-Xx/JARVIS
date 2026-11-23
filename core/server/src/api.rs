@@ -786,7 +786,10 @@ async fn confirmations(
     State(state): State<Shared>,
     device: Option<axum::Extension<DeviceCtx>>,
 ) -> Json<Value> {
-    let items = with_core(&state, move |j| j.pending_confirmations(device.is_some())).await;
+    let items = with_core(&state, move |j| {
+        j.pending_confirmations_for(device.is_some())
+    })
+    .await;
     Json(json!({"items": items}))
 }
 
@@ -1116,7 +1119,7 @@ async fn chat_sync(
 ) -> Response {
     reply(
         with_core(&state, move |j| {
-            let confirmations = j.pending_confirmations(device.is_some());
+            let confirmations = j.pending_confirmations_for(device.is_some());
             Ok(json!({"messages": j.conversation(50)?, "confirmations": confirmations}))
         })
         .await,

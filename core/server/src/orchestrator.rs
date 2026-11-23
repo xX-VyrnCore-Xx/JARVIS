@@ -1706,7 +1706,11 @@ impl Jarvis {
         }
     }
 
-    pub fn pending_confirmations(&self, remote: bool) -> Vec<Value> {
+    pub fn pending_confirmations(&self) -> Vec<Value> {
+        self.pending_confirmations_for(false)
+    }
+
+    pub(crate) fn pending_confirmations_for(&self, remote: bool) -> Vec<Value> {
         self.pending
             .values()
             .filter(|p| !remote || !Self::owner_only_confirmation(p))
