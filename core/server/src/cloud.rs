@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 
 const NIM_RPM: u64 = 35;
+const MODEL_RECHECK: Duration = Duration::from_secs(60);
 const MAX_RESPONSE_BYTES: u64 = 1_048_576;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -50,14 +51,14 @@ impl Provider {
 
     fn model(self, route: Route) -> &'static str {
         match (self, route) {
-            (Self::Ollama, Route::Fast) => "glm-5.3-flash:cloud",
-            (Self::Ollama, Route::Reasoning) => "deepseek-v4-pro:cloud",
-            (Self::Ollama, Route::Long) => "kimi-k3.1-pro:cloud",
-            (Self::Ollama, Route::Coding) => "kimi-k2.7-code:cloud",
+            (Self::Ollama, Route::Fast) => "glm-5.3-flash",
+            (Self::Ollama, Route::Reasoning) => "deepseek-v4-pro:0813",
+            (Self::Ollama, Route::Long) => "kimi-k3.1-pro",
+            (Self::Ollama, Route::Coding) => "kimi-k2.7-code",
             (Self::Nim, Route::Fast) => "nvidia/nemotron-3.5-lightning-30b-a3b",
             (Self::Nim, Route::Reasoning) => "nvidia/nemotron-3-ultra-550b-a55b",
-            (Self::Nim, Route::Long) => "moonshotai/kimi-k3",
-            (Self::Nim, Route::Coding) => "qwen/qwen3-coder-480b-a35b-instruct",
+            (Self::Nim, Route::Long) => "moonshotai/kimi-k3.1-pro",
+            (Self::Nim, Route::Coding) => "mistralai/mistral-large-4-1t-a52b",
         }
     }
 
@@ -82,15 +83,29 @@ impl Provider {
 
     pub fn target(self, key: String, prompt: &str, history: Vec<Turn>, settings: &Value) -> Target {
         let route = Route::select(prompt, &history);
-        let model = self.model(route);
-        let alternative = settings[self.id()]
+        let default = self.model(route);
+        let configured = settings[self.id()]
             .as_str()
-            .filter(|value| valid_model(value) && *value != model)
-            .unwrap_or_else(|| match (self, route) {
-                (Self::Nim, Route::Reasoning | Route::Long) => "mistralai/mistral-large-4-1t-a52b",
-                (_, Route::Fast | Route::Coding | Route::Long) => self.model(Route::Reasoning),
-                (_, Route::Reasoning) => self.model(Route::Fast),
-            });
+            .filter(|value| valid_model(value));
+        let model = configured
+            .map(|value| {
+                if self == Self::Ollama {
+                    value.strip_suffix(":cloud").unwrap_or(value)
+                } else {
+                    value
+                }
+            })
+            .unwrap_or(default);
+        let alternative = if model != default {
+            default
+        } else if route == Route::Fast {
+            match self {
+                Self::Ollama => "minimax-m3.1-flash",
+                Self::Nim => "minimaxai/minimax-m3.1-flash",
+            }
+        } else {
+            self.model(Route::Fast)
+        };
         Target {
             provider: self,
             model: model.to_string(),
@@ -350,9 +365,33 @@ pub struct Limiter {
     nim_cooldown: Option<Instant>,
     ollama_cooldown: Option<Instant>,
     output_pressure: HashMap<(Provider, String, Route), u8>,
+    unavailable_models: HashMap<(Provider, String), Instant>,
 }
 
 impl Limiter {
+    pub(crate) fn reset_model_availability(&mut self, provider: Provider) {
+        self.unavailable_models.retain(|(id, _), _| *id != provider);
+    }
+
+    fn model_available(&self, provider: Provider, model: &str) -> bool {
+        self.unavailable_models
+            .get(&(provider, model.to_owned()))
+            .is_none_or(|until| *until <= Instant::now())
+    }
+
+    fn observe_model(&mut self, provider: Provider, model: &str, answer: &Result<Answer, Failure>) {
+        let key = (provider, model.to_owned());
+        if matches!(answer, Err(Failure::ModelUnavailable)) {
+            let now = Instant::now();
+            self.unavailable_models.retain(|_, until| *until > now);
+            if self.unavailable_models.len() < 64 {
+                self.unavailable_models.insert(key, now + MODEL_RECHECK);
+            }
+        } else if answer.is_ok() {
+            self.unavailable_models.remove(&key);
+        }
+    }
+
     fn observe_output(&mut self, key: (Provider, String, Route), answer: &Result<Answer, Failure>) {
         if matches!(answer, Err(Failure::Truncated)) {
             if self.output_pressure.len() < 64 || self.output_pressure.contains_key(&key) {
@@ -411,6 +450,10 @@ impl Limiter {
 pub enum Failure {
     RateLimited(Duration),
     InvalidKey,
+    Forbidden,
+    Quota,
+    Rejected(u16),
+    Connection,
     InvalidTool,
     ModelUnavailable,
     Incomplete,
@@ -422,11 +465,31 @@ impl Failure {
     pub fn code(&self) -> &'static str {
         match self {
             Self::InvalidKey => "cloud.credentials",
+            Self::Forbidden => "cloud.permission",
+            Self::Quota => "cloud.quota",
+            Self::Rejected(_) => "cloud.request_rejected",
+            Self::Connection => "cloud.connection",
             Self::InvalidTool => "cloud.invalid_tool",
             Self::RateLimited(_) => "cloud.rate_limited",
             Self::ModelUnavailable => "cloud.model_unavailable",
             Self::Incomplete | Self::Truncated => "cloud.incomplete_response",
             Self::Unavailable => "cloud.unavailable",
+        }
+    }
+
+    pub(crate) fn user_message(&self, provider: Provider) -> (String, bool) {
+        let label = provider.label();
+        match self {
+            Self::InvalidKey => (format!("{label} ha rifiutato la chiave API (HTTP 401). Verificala in Modelli AI."), false),
+            Self::Forbidden => (format!("{label} ha negato l’accesso (HTTP 403). Controlla i permessi o il piano dell’account."), false),
+            Self::Quota => (format!("{label} richiede credito o un piano abilitato (HTTP 402)."), false),
+            Self::Rejected(status) => (format!("{label} ha rifiutato la richiesta (HTTP {status}). Verifica il modello con Testa chiave in Modelli AI."), false),
+            Self::Connection => (format!("Connessione HTTPS a {label} non riuscita. Controlla rete, certificati e proxy."), true),
+            Self::InvalidTool => ("Il modello ha proposto un calcolo non valido. Riformula la richiesta oppure usa un comando esplicito.".into(), false),
+            Self::RateLimited(wait) => (format!("Limite del provider raggiunto. Riprova tra {} s o scegli un altro provider.", wait.as_secs_f64().ceil() as u64), true),
+            Self::ModelUnavailable => (format!("I modelli selezionati non sono disponibili presso {label}. Verifica il modello in Modelli AI."), true),
+            Self::Incomplete | Self::Truncated => (format!("{label} ha restituito una risposta incompleta. Prova a suddividere la richiesta."), true),
+            Self::Unavailable => (format!("{label} non ha completato la richiesta. Riprova o scegli un altro provider."), true),
         }
     }
 }
@@ -504,12 +567,17 @@ pub struct Completed {
 
 impl Request {
     pub fn execute(&self) -> Completed {
-        self.complete(&self.target)
+        self.execute_at(self.target.provider.endpoint(), false)
     }
 
-    fn complete(&self, target: &Target) -> Completed {
+    pub(crate) fn verify(&self) -> Completed {
+        self.execute_at(self.target.provider.endpoint(), true)
+    }
+
+    fn execute_at(&self, endpoint: &str, fresh: bool) -> Completed {
+        let target = &self.target;
         let mut model = &target.model;
-        let ask = |model: &str, preference| {
+        let ask = |model: &str, preference, tools: &[Function]| {
             let key = (target.provider, model.to_owned(), target.route);
             let level = self
                 .limiter
@@ -520,7 +588,7 @@ impl Request {
                 .copied()
                 .unwrap_or_default();
             let answer = chat_at(
-                target.provider.endpoint(),
+                endpoint,
                 target.provider,
                 &target.key,
                 payload(
@@ -528,25 +596,39 @@ impl Request {
                     model,
                     &self.message,
                     &target.history,
-                    &self.tools,
+                    tools,
                     (target.route, preference, level),
                 ),
-                &self.tools,
+                tools,
                 &self.limiter,
             );
-            self.limiter
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .observe_output(key, &answer);
+            let mut limiter = self.limiter.lock().unwrap_or_else(|e| e.into_inner());
+            limiter.observe_output(key, &answer);
+            limiter.observe_model(target.provider, model, &answer);
             answer
         };
-        let mut answer = ask(model, self.preferences[0]);
+        let available = |model: &str| {
+            fresh
+                || self
+                    .limiter
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .model_available(target.provider, model)
+        };
+        let mut answer = if available(model) {
+            ask(model, self.preferences[0], &self.tools)
+        } else {
+            Err(Failure::ModelUnavailable)
+        };
         if matches!(
             answer,
             Err(Failure::ModelUnavailable | Failure::Incomplete | Failure::Truncated)
-        ) {
+        ) && available(&target.alternative)
+        {
             model = &target.alternative;
-            answer = ask(model, self.preferences[1]);
+            answer = ask(model, self.preferences[1], &self.tools);
+        } else if !self.tools.is_empty() && matches!(answer, Err(Failure::Rejected(400 | 422))) {
+            answer = ask(model, self.preferences[0], &[]);
         }
         Completed {
             provider: target.provider,
@@ -615,7 +697,6 @@ fn payload(
         body["tools"] = json!(tools.iter().map(|tool| &tool.wire).collect::<Vec<_>>());
         if provider == Provider::Nim {
             body["tool_choice"] = json!("auto");
-            body["parallel_tool_calls"] = json!(false);
         }
     }
     body
@@ -668,6 +749,64 @@ fn decode(provider: Provider, body: &Value, tools: &[Function]) -> Result<Answer
         .ok_or(Failure::Incomplete)
 }
 
+fn classify_model_rejection(status: u16, reader: impl Read) -> Failure {
+    let mut bytes = Vec::new();
+    let body = reader
+        .take(16_384)
+        .read_to_end(&mut bytes)
+        .ok()
+        .and_then(|_| serde_json::from_slice::<Value>(&bytes).ok())
+        .unwrap_or(Value::Null);
+    let model_error = [
+        body["error"]["code"].as_str(),
+        body["error"]["message"].as_str(),
+        body["error"].as_str(),
+        body["detail"].as_str(),
+        body["message"].as_str(),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|text| {
+        let text = text.to_ascii_lowercase();
+        text.contains("model")
+            && !["tool", "function calling"]
+                .iter()
+                .any(|term| text.contains(term))
+            && [
+                "not found",
+                "does not exist",
+                "not supported",
+                "unavailable",
+                "model_not_found",
+            ]
+            .iter()
+            .any(|term| text.contains(term))
+    });
+    if model_error {
+        Failure::ModelUnavailable
+    } else {
+        Failure::Rejected(status)
+    }
+}
+
+pub(crate) fn may_need_calculation(message: &str) -> bool {
+    let text = message.to_lowercase();
+    text.split(|character: char| !character.is_alphabetic())
+        .any(|word| {
+            matches!(
+                word,
+                "calcola"
+                    | "calcolo"
+                    | "converti"
+                    | "conversione"
+                    | "percentuale"
+                    | "calculate"
+                    | "convert"
+                    | "percentage"
+            )
+        })
+}
+
 fn chat_at(
     endpoint: &str,
     provider: Provider,
@@ -693,7 +832,7 @@ fn chat_at(
     // Gli endpoint sono fissi e il bearer token non viene inoltrato su redirect.
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(45))
-        .try_proxy_from_env(false)
+        .try_proxy_from_env(endpoint.starts_with("https://"))
         .redirects(0)
         .build();
     let response = agent
@@ -712,9 +851,21 @@ fn chat_at(
             return Err(Failure::RateLimited(wait));
         }
         Err(ureq::Error::Status(404, _)) => return Err(Failure::ModelUnavailable),
-        Err(ureq::Error::Status(401 | 403, _)) => return Err(Failure::InvalidKey),
-        Err(_) => return Err(Failure::Unavailable),
+        Err(ureq::Error::Status(401, _)) => return Err(Failure::InvalidKey),
+        Err(ureq::Error::Status(402, _)) => return Err(Failure::Quota),
+        Err(ureq::Error::Status(403, _)) => return Err(Failure::Forbidden),
+        Err(ureq::Error::Status(status @ (400 | 422), response)) => {
+            return Err(classify_model_rejection(status, response.into_reader()));
+        }
+        Err(ureq::Error::Status(status, _)) if status < 500 => {
+            return Err(Failure::Rejected(status))
+        }
+        Err(ureq::Error::Status(_, _)) => return Err(Failure::Unavailable),
+        Err(ureq::Error::Transport(_)) => return Err(Failure::Connection),
     };
+    if !(200..300).contains(&response.status()) {
+        return Err(Failure::Rejected(response.status()));
+    }
     let mut bytes = Vec::new();
     response
         .into_reader()
@@ -731,6 +882,82 @@ fn chat_at(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provider_model_rejection_retries_a_catalog_model_with_the_same_key() {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/api/chat", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            for (expected, status, response) in [
+                (
+                    "legacy",
+                    "400 Bad Request",
+                    r#"{"error":"model legacy not found"}"#,
+                ),
+                (
+                    "glm-5.3-flash",
+                    "200 OK",
+                    r#"{"message":{"content":"Risposta sintetica"}}"#,
+                ),
+                (
+                    "glm-5.3-flash",
+                    "200 OK",
+                    r#"{"message":{"content":"Seconda risposta sintetica"}}"#,
+                ),
+            ] {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut length = 0;
+                let mut authorized = false;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" || line.is_empty() {
+                        break;
+                    }
+                    if let Some((name, value)) = line.trim().split_once(':') {
+                        if name.eq_ignore_ascii_case("content-length") {
+                            length = value.trim().parse().unwrap();
+                        }
+                        if name.eq_ignore_ascii_case("authorization") {
+                            authorized = value.trim() == "Bearer fixture-only";
+                        }
+                    }
+                }
+                assert!(authorized);
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                let body: Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(body["model"], expected);
+                assert!(body.get("tools").is_none());
+                write!(stream, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}", response.len()).unwrap();
+            }
+        });
+        let prompt = "una domanda sintetica";
+        let target = Provider::Ollama.target(
+            "fixture-only".into(),
+            prompt,
+            Vec::new(),
+            &json!({"ollama_cloud":"legacy:cloud"}),
+        );
+        let request = Request {
+            message: prompt.into(),
+            target,
+            tools: vec![],
+            preferences: [QualityPreference::Standard; 2],
+            limiter: Default::default(),
+        };
+        let result = request.execute_at(&endpoint, false);
+        assert_eq!(result.model, "glm-5.3-flash");
+        assert!(matches!(result.answer, Ok(Answer::Text(text)) if text == "Risposta sintetica"));
+        let result = request.execute_at(&endpoint, false);
+        assert_eq!(result.model, "glm-5.3-flash");
+        assert!(
+            matches!(result.answer, Ok(Answer::Text(text)) if text == "Seconda risposta sintetica")
+        );
+        server.join().unwrap();
+    }
 
     #[test]
     fn provider_request_uses_the_configured_bearer_key() {
@@ -767,7 +994,8 @@ mod tests {
                     assert!(
                         headers
                             .lines()
-                            .any(|line| line.eq_ignore_ascii_case("authorization: Bearer fixture-key")),
+                            .any(|line| line
+                                .eq_ignore_ascii_case("authorization: Bearer fixture-key")),
                         "la chiave configurata deve essere inviata solo nell'header Bearer"
                     );
                     break;

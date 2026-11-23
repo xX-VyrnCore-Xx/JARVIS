@@ -175,13 +175,15 @@ private fun PairingScreen(onPaired: (DeviceSession) -> Unit) {
     var name by remember { mutableStateOf(Build.MODEL ?: "Telefono Android") }
     var error by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var checking by remember { mutableStateOf(false) }
+    var verified by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     Column(Modifier.fillMaxSize().imePadding().padding(horizontal = 24.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("JARVIS", style = MaterialTheme.typography.headlineLarge, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                 Text("Il tuo assistente, sul tuo dispositivo", style = MaterialTheme.typography.titleMedium)
-                Text("Connessione HTTPS protetta", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Associazione tramite HTTPS", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Column(
@@ -190,12 +192,31 @@ private fun PairingScreen(onPaired: (DeviceSession) -> Unit) {
         ) {
             Text("Associa questo dispositivo", style = MaterialTheme.typography.titleLarge)
             Text("Sul computer apri Dispositivi, genera un codice monouso e inseriscilo qui. Scade dopo 10 minuti.")
-            OutlinedTextField(origin, { origin = it }, label = { Text("Indirizzo del Core (HTTPS)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(origin, {
+                origin = it
+                verified = false
+                error = null
+            }, enabled = !busy && !checking, label = { Text("Indirizzo del Core (HTTPS)") },
+                singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedButton(enabled = !busy && !checking, onClick = {
+                checking = true
+                error = null
+                verified = false
+                val target = origin
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) { runCatching { client.checkConnectivity(target) } }
+                    checking = false
+                    result.onSuccess { verified = true }.onFailure { error = it.message ?: "Core non raggiungibile" }
+                }
+            }) { Text(if (checking) "Verifica…" else "Verifica HTTPS") }
+            if (verified) {
+                Text("Certificato valido · Core raggiungibile", color = MaterialTheme.colorScheme.primary)
+            }
             OutlinedTextField(code, { code = it.uppercase() }, label = { Text("Codice di associazione") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(name, { name = it }, label = { Text("Nome del dispositivo") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
         }
-        Button(enabled = !busy, onClick = {
+        Button(enabled = !busy && !checking && code.isNotBlank() && name.isNotBlank(), onClick = {
             busy = true
             error = null
             scope.launch {

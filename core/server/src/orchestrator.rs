@@ -757,6 +757,7 @@ impl Jarvis {
 
     pub fn cloud_status(&self) -> Result<Value, CoreError> {
         let limiter = self.cloud_limiter.lock().unwrap_or_else(|e| e.into_inner());
+        let settings = crate::cloud::settings(&self.cfg.data_dir);
         let providers = crate::cloud::Provider::ALL
             .into_iter()
             .map(|provider| {
@@ -765,7 +766,11 @@ impl Jarvis {
                     .get(&provider.secret())
                     .map_err(internal)?
                     .is_some();
-                Ok(provider.view(configured, &limiter))
+                let mut view = provider.view(configured, &limiter);
+                view["model_override"] = settings[provider.id()].clone();
+                view["preferred"] =
+                    json!(configured && settings["default_provider"] == provider.id());
+                Ok(view)
             })
             .collect::<Result<Vec<_>, CoreError>>()?;
         Ok(json!({"providers": providers}))
@@ -801,15 +806,46 @@ impl Jarvis {
                     .put(&provider.secret(), key)
                     .map_err(internal)?;
             }
-            if let Some(model) = model {
+            if body["use_for_chat"] == true
+                && self
+                    .secrets
+                    .get(&provider.secret())
+                    .map_err(internal)?
+                    .is_none()
+            {
+                return Err(CoreError::BadRequest(
+                    "Salva prima la chiave API del provider.".into(),
+                ));
+            }
+            if model.is_some() || body["use_for_chat"] == true || body["clear_model"] == true {
                 let mut settings = crate::cloud::settings(&self.cfg.data_dir);
-                settings[provider.id()] = json!(model);
+                if let Some(model) = model {
+                    settings[provider.id()] = json!(model);
+                } else if body["clear_model"] == true {
+                    settings
+                        .as_object_mut()
+                        .expect("configurazione JSON")
+                        .remove(provider.id());
+                }
+                if body["use_for_chat"] == true {
+                    settings["default_provider"] = json!(provider.id());
+                }
                 crate::backup::atomic_write(
                     &self.cfg.data_dir.join("cloud.json"),
                     settings.to_string().as_bytes(),
                 )
                 .map_err(internal)?;
             }
+        }
+        if body["remove_key"] == true
+            || body.get("key").is_some()
+            || body.get("model").is_some()
+            || body["clear_model"] == true
+        {
+            self.cloud_limiter
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .reset_model_availability(provider);
         }
         let action = if body["remove_key"] == true {
             "cloud.remove_key"
@@ -900,7 +936,12 @@ impl Jarvis {
             }
         }
         // Il messaggio resta con un solo provider, anche in caso di errore.
-        targets.sort_by_key(|target| target.history.is_empty());
+        targets.sort_by_key(|target| {
+            (
+                settings["default_provider"] != target.provider.id(),
+                target.history.is_empty(),
+            )
+        });
         let target = targets.into_iter().next().ok_or_else(|| {
             CoreError::BadRequest("Configura la chiave API in Modelli AI.".into())
         })?;
@@ -909,6 +950,7 @@ impl Jarvis {
         let defensive = crate::agents::route(message).filter(|agent| agent.name == "monitoring");
         let tools = crate::cloud::TOOLS
             .iter()
+            .filter(|_| crate::cloud::may_need_calculation(message))
             .filter(|tool| allows(tool))
             .filter(|tool| defensive.is_none_or(|agent| crate::agents::allows(agent, tool)))
             .filter_map(|tool| self.catalog.get(tool))
@@ -1012,14 +1054,7 @@ impl Jarvis {
             }
             Err(error) => {
                 let code = error.code();
-                let (text, retryable) = match error {
-                    Failure::InvalidKey => ("Il provider ha rifiutato la chiave API. Verifica che provider e chiave corrispondano in Modelli AI.".to_string(), false),
-                    Failure::InvalidTool => ("Il modello ha proposto una chiamata non valida. Riformula la richiesta oppure usa un comando esplicito.".to_string(), false),
-                    Failure::RateLimited(wait) => (format!("Limite del provider raggiunto. Riprova tra {} s o scegli un altro provider.", wait.as_secs_f64().ceil() as u64), true),
-                    Failure::ModelUnavailable => ("I modelli selezionati non sono disponibili presso il provider. Riprova o scegli un altro provider.".to_string(), true),
-                    Failure::Incomplete | Failure::Truncated => ("Il provider ha restituito una risposta incompleta. Prova a suddividere la richiesta.".to_string(), true),
-                    Failure::Unavailable => ("Il provider non ha completato la richiesta. Controlla la connessione e il modello in Modelli AI o scegli un altro provider.".to_string(), true),
-                };
+                let (text, retryable) = error.user_message(provider);
                 task.fail(
                     json!({"code": code, "category": "unavailable", "message": text,
                     "retryable": retryable, "effect": "not_applied"}),

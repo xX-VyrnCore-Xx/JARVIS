@@ -456,3 +456,28 @@ async fn pairing_codes_are_single_use_and_brute_force_is_stopped() {
         StatusCode::UNAUTHORIZED
     );
 }
+
+#[tokio::test]
+async fn connectivity_probe_uses_only_a_valid_configured_authority_and_returns_no_device_data() {
+    let app = app();
+    let (status, data, _) = call(&app, "GET", "/api/connectivity", REMOTE, None, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(data, json!({"service":"jarvis-core","protocol":1}));
+    for host in [
+        format!("{REMOTE}:0"),
+        format!("{REMOTE}:65536"),
+        format!("{REMOTE}:"),
+        format!("user@{REMOTE}"),
+        format!("{REMOTE}.invalid"),
+    ] {
+        assert_eq!(
+            call(&app, "GET", "/api/connectivity", &host, None, None)
+                .await
+                .0,
+            StatusCode::FORBIDDEN,
+            "{host}"
+        );
+    }
+    let (status, _, _) = call(&app, "GET", "/api/conversation", REMOTE, None, None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
