@@ -32,10 +32,11 @@ private enum Section: String, Identifiable {
     case workflows = "Automazioni", memory = "Memoria", workspace = "Workspace", connectors = "Connettori"
     case devices = "Dispositivi", skills = "Competenze", security = "Sicurezza", audit = "Audit"
     case system = "Sistema", models = "Modelli AI", updates = "Aggiornamenti", notifications = "Notifiche"
+    case missions = "Missioni"
 
     static let navigation: [(title: String, entries: [Section])] = [
         ("Assistente", [.dashboard, .chat, .tasks, .models, .notifications]),
-        ("Organizzazione", [.workflows, .workspace, .memory, .skills]),
+        ("Organizzazione", [.missions, .workflows, .workspace, .memory, .skills]),
         ("Collegamenti", [.devices, .connectors]),
         ("Amministrazione", [.confirmations, .security, .audit, .system, .updates])
     ]
@@ -59,6 +60,7 @@ private enum Section: String, Identifiable {
         case .models: "brain"
         case .updates: "arrow.down.circle"
         case .notifications: "bell"
+        case .missions: "scope"
         }
     }
     var endpoint: String {
@@ -78,6 +80,7 @@ private enum Section: String, Identifiable {
         case .models: "/api/cloud"
         case .updates: "/api/updates"
         case .notifications: "/api/notifications"
+        case .missions: "/api/missions"
         }
     }
 }
@@ -123,6 +126,9 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var credential = ""
     @State private var connectorAction: Record?
     @State private var backupPassword = ""
+    @State private var missionGoal = ""
+    @State private var missionEvery = ""
+    @State private var missionConnectors = false
     @State private var updateToken = ""
     @State private var automaticUpdates = false
 
@@ -804,6 +810,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     message = "ricorda che "
                 }
             }
+        case .missions: missionTools
         case .connectors: connectorSetup
         case .devices:
             deviceConnection
@@ -1091,7 +1098,86 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             Button("Segna come letta") {
                 mutate("/api/notifications/\(urlSegment(item.id))/read", body: [:])
             }
+        case .missions:
+            let id = urlSegment(item.id)
+            let status = item["status"] ?? ""
+            let runs = item.data["runs"] as? Int ?? 0
+            let limit = item.data["max_runs"] as? Int ?? 0
+            let label = ["active": "Attiva", "paused": "In pausa", "completed": "Completata",
+                         "failed": "Interrotta", "cancelled": "Annullata"][status] ?? status
+            VStack(alignment: .leading, spacing: 8) {
+                Text("\(label) · \(runs) di \(limit) esecuzioni")
+                    .font(.caption.weight(.medium)).foregroundStyle(.cyan)
+                if let report = item["result"] ?? (item.data["journal"] as? [[String: Any]])?.last?["summary"] as? String {
+                    Text(report).foregroundStyle(.secondary)
+                }
+                HStack {
+                    if status == "active" {
+                        Button("Esegui ora") { mutate("/api/missions/\(id)/run", body: [:]) }
+                        Button("Pausa") { mutate("/api/missions/\(id)/pause", body: [:]) }
+                        Button("Annulla", role: .destructive) { mutate("/api/missions/\(id)/cancel", body: [:]) }
+                    } else if status == "paused" {
+                        Button("Riprendi") { mutate("/api/missions/\(id)/resume", body: [:]) }
+                        Button("Annulla", role: .destructive) { mutate("/api/missions/\(id)/cancel", body: [:]) }
+                    } else {
+                        Button("Elimina", role: .destructive) { mutate("/api/missions/\(id)/delete", body: [:]) }
+                    }
+                }
+            }
         default: EmptyView()
+        }
+    }
+
+    /// Missioni autonome e iniziative proattive (ADR-0096, ADR-0097).
+    private var missionTools: some View {
+        VStack(spacing: 14) {
+            card("Nuova missione", icon: "scope") {
+                Text("JARVIS la porta avanti da solo in background, con strumenti che non chiedono conferma, e ti manda un rapporto a ogni esecuzione.")
+                    .font(.callout).foregroundStyle(.secondary)
+                if payload["cloud"] as? Bool != true {
+                    Label("Nessun modello cloud configurato: userà solo i comandi locali.", systemImage: "exclamationmark.triangle")
+                        .font(.callout).foregroundStyle(.orange)
+                }
+                TextField("Es. Ogni mattina controlla le novità su Rust e riassumile", text: $missionGoal, axis: .vertical)
+                    .textFieldStyle(.roundedBorder).lineLimit(2...4)
+                HStack {
+                    TextField("Ripeti ogni (minuti)", text: $missionEvery).textFieldStyle(.roundedBorder).frame(width: 190)
+                    Toggle("Può usare i connettori", isOn: $missionConnectors)
+                    Spacer()
+                    Button("Avvia missione") {
+                        var body: [String: Any] = ["goal": missionGoal.trimmingCharacters(in: .whitespacesAndNewlines),
+                                                   "connectors": missionConnectors]
+                        if let minutes = Int(missionEvery.trimmingCharacters(in: .whitespaces)) { body["every_minutes"] = minutes }
+                        missionGoal = ""
+                        missionEvery = ""
+                        mutate("/api/missions", body: body)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(missionGoal.trimmingCharacters(in: .whitespacesAndNewlines).count < 8
+                              || (!missionEvery.trimmingCharacters(in: .whitespaces).isEmpty
+                                  && Int(missionEvery.trimmingCharacters(in: .whitespaces)) == nil))
+                }
+            }
+            card("Iniziative proattive", icon: "sparkles") {
+                Text("JARVIS si fa avanti da solo, con regole locali: nulla esce dal Core. Nelle ore di silenzio non invia nulla.")
+                    .font(.callout).foregroundStyle(.secondary)
+                let settings = payload["proactive"] as? [String: Any] ?? [:]
+                let toggles: [(key: String, label: String)] = [
+                    ("enabled", "Iniziative attive"), ("briefing", "Briefing quotidiano"),
+                    ("disk", "Avvisi sullo spazio disco"), ("confirmations", "Promemoria delle conferme in attesa"),
+                    ("workflows", "Automazioni che continuano a fallire"), ("stale_todos", "Cose da fare lasciate indietro")
+                ]
+                ForEach(toggles.indices, id: \.self) { index in
+                    let entry = toggles[index]
+                    Toggle(entry.label, isOn: Binding(
+                        get: { settings[entry.key] as? Bool ?? false },
+                        set: { mutate("/api/proactive", method: "PATCH", body: [entry.key: $0]) }
+                    ))
+                }
+                Text("Briefing alle \(settings["briefing_time"] as? String ?? "08:00"), silenzio dalle \(settings["quiet_from"] as? String ?? "22:00") alle \(settings["quiet_to"] as? String ?? "07:00").")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Button("Briefing adesso") { mutate("/api/proactive/briefing", body: [:]) }
+            }
         }
     }
 

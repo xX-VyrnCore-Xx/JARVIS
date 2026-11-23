@@ -55,3 +55,12 @@ se l'utente forza l'arresto dell'app o nega il permesso.
 
 Le credenziali reali Firebase sono specifiche del proprietario: i test CI validano la compilazione e
 il formato dei messaggi con fixture sintetiche, non l'invio a un telefono reale.
+
+## Comportamento dell'invio (ADR-0098)
+
+- Il Core non usa database Firebase: Firebase serve solo a consegnare le push. I dati restano nel Core.
+- I token che FCM dichiara non più validi (app disinstallata, token ruotato) sono eliminati al prossimo invio; ogni dispositivo conserva al massimo 5 registrazioni.
+- Gli errori temporanei sono ritentati fino a 3 volte; una credenziale rifiutata rinnova il token OAuth una volta.
+- Gli avvisi che richiedono attenzione hanno priorità alta e durano 24 ore; briefing e suggerimenti si sostituiscono fra loro e durano 6 ore.
+- `GET /api/push/status` (solo proprietario) mostra configurazione, registrazioni e ultimo invio riuscito, senza token.
+- Con l'app aperta le notifiche arrivano subito dal flusso in tempo reale del Core (`/api/notifications/stream`), senza passare da Firebase.

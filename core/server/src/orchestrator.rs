@@ -246,6 +246,7 @@ impl Jarvis {
                 if error.kind() == std::io::ErrorKind::AlreadyExists && cfg.data_dir.is_dir() => {}
             Err(error) => return Err(format!("cartella dati: {error}")),
         }
+        crate::backup::tighten_dir(&cfg.data_dir);
         std::fs::create_dir_all(cfg.workspace()).map_err(|e| format!("workspace: {e}"))?;
         // Compatibilità con le release che usano ancora il blocco interno.
         let legacy_lock = std::fs::OpenOptions::new()

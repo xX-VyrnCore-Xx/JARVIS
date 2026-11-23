@@ -1420,6 +1420,62 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `tests/proactive.rs` (briefing una volta al giorno con lo stato reale, finestra oraria, ore di silenzio e impostazioni, conferma ricordata una sola volta, briefing su richiesta); test unitari di `proactive.rs` (finestra, silenzio a cavallo della mezzanotte, validazione e persistenza, testo, soglie del disco); smoke API.
 - **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ACCEPTANCE.md, ROADMAP.md, contratto `notification`.
 
+### ADR-0098 — Notifiche in tempo reale e push FCM robusto
+
+- **Data:** 2026-11-23 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora il database Firebase e le notifiche in tempo reale»).
+- **Contesto:** nel progetto Firebase è usato solo FCM per le push Android; non esiste un database Firebase e i dati restano in SQLite nel Core (scelta local-first, il proprietario ha confermato di migliorare FCM e il tempo reale senza nuovi servizi cloud). Le notifiche arrivavano ai client con un polling ogni 5-15 secondi; l'invio FCM non rimuoveva i token morti, non riprovava dopo un errore e firmava un nuovo token OAuth a ogni notifica.
+- **Decisione:**
+  - **Tempo reale:** `GET /api/notifications/stream` (Server-Sent Events, stessa autenticazione e stessi permessi di `GET /api/notifications`). Ogni notifica creata dal Core è inoltrata subito ai client collegati; un segnale ogni 20 secondi tiene viva la connessione e un evento `resync` dice al client in ritardo di rileggere l'elenco. Al massimo 16 flussi contemporanei. Desktop (egui), Android e macOS ascoltano il flusso e rileggono i dati all'arrivo; il polling resta come rete di sicurezza e rallenta (30-60 secondi) mentre il flusso è attivo. In background restano le push.
+  - **FCM:** i token che FCM dichiara non più validi (404, o 400 `UNREGISTERED`) sono segnalati e il Core li elimina, con il loro segreto cifrato, al prossimo invio; errori temporanei (429, 5xx, rete) sono ritentati fino a 3 volte con attesa esponenziale o `Retry-After` (massimo 30 secondi); una credenziale rifiutata (401/403) rinnova il token OAuth e riprova una volta; il token OAuth è riusato per 50 minuti; ogni principal conserva al massimo 5 registrazioni (le più vecchie sono sostituite); priorità alta e scadenza di 24 ore solo per gli avvisi che richiedono attenzione, priorità normale e 6 ore per il resto, con `collapse_key` per briefing e suggerimenti. Il contenuto privato non viaggia mai: restano il testo generico e l'identificativo.
+  - `GET /api/push/status` (solo proprietario): configurazione, registrazioni valide e da eliminare, ultimo invio riuscito, mai i token.
+- **Alternative scartate:** Firestore o Realtime Database per sincronizzare messaggi e notifiche (sposta dati privati su un servizio cloud, contro il principio local-first); WebSocket (più complesso di SSE per un flusso a una direzione e meno adatto ai proxy HTTPS).
+- **Conseguenze:** le notifiche arrivano in pochi millisecondi con l'app aperta; il registro dei token non cresce con app disinstallate. Un push non è comunque garantito: dipende da Android, dal produttore e dalle credenziali del proprietario.
+- **Evidenza:** test unitari di classificazione delle risposte FCM, priorità e scadenza, tetto delle registrazioni, migrazione e pulizia dei token; `notifications_arrive_live_on_the_event_stream` (flusso autenticato, evento in tempo reale, stato push senza token); test del parser SSE sul desktop e su Android (`CoreClientTest`). L'invio reale a un telefono richiede un progetto Firebase del proprietario.
+- **Documenti interessati:** FIREBASE_SETUP.md, INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
+### ADR-0099 — Indurimento del backend
+
+- **Data:** 2026-11-23 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («più robusto e senza falle o criticità»).
+- **Revisione:** letti il filtro di accesso, il pairing, le rotte nuove e i punti di ingresso; verificata l'assenza di `unwrap` su input esterno nel codice di produzione.
+- **Problemi trovati e correzioni:**
+  1. il token del proprietario era confrontato con `!=`, cioè con uscita al primo byte diverso: ora il confronto è a tempo costante;
+  2. ogni richiesta remota con un token inventato prendeva il blocco del Core per cercarlo nel database, quindi una pioggia di richieste da Internet poteva togliere la parola al proprietario: i token che non sono 64 caratteri esadecimali sono scartati subito e, dopo 30 tentativi falliti in 60 secondi, le richieste remote con token ben formato ma sconosciuto ricevono 429 senza toccare il Core (il canale locale del proprietario non è coinvolto; durante un attacco anche i dispositivi legittimi attendono, al massimo un minuto);
+  3. i flussi in tempo reale potevano essere aperti senza limite: massimo 16;
+  4. una cartella dati creata da una versione precedente poteva essere leggibile da altri utenti del computer: all'avvio viene riportata a `0700` su Unix.
+- **Verificato senza modifiche:** host ammessi contro il DNS rebinding, intestazioni di sicurezza e `no-store` su ogni risposta, limite del corpo delle richieste, rotte nuove (`/api/missions`, `/api/proactive`, `/api/push/status`, competenze, memoria) negate ai dispositivi associati, scritture atomiche con permessi `0600`, token FCM cifrati.
+- **Limiti residui:** nessun limite di tempo sulla lettura delle intestazioni HTTP (il Core ascolta solo su loopback e i dispositivi arrivano da un proxy che lo applica); un attacco alla macchina da un altro utente con gli stessi permessi del proprietario resta fuori dal modello di minaccia. Un audit indipendente non è stato eseguito.
+- **Evidenza:** `tests/hardening.rs` (permessi dei dispositivi sulle rotte nuove, token malformati e sconosciuti con il limite, token esatto del proprietario, limite dei flussi).
+- **Documenti interessati:** SECURITY_AND_PRIVACY.md, ROADMAP.md.
+
+### ADR-0100 — Blocco e identità sull'app macOS
+
+- **Data:** 2026-11-23 · **Stato:** implementata nel checkout; non compilata in questo ambiente (nessun Swift), verifica demandata alla CI macOS · **Fonte:** richiesta del proprietario («migliora il sistema di accesso sul Mac»).
+- **Contesto:** l'app chiedeva Touch ID o la password solo all'avvio; dopo non si bloccava mai e le operazioni sensibili non richiedevano di nuovo l'identità.
+- **Decisione:**
+  - **Blocco dell'interfaccia** dopo 5 minuti senza tastiera, mouse o scorrimento, quando il Mac va in stop, quando lo schermo si blocca. Da bloccata l'app non mostra contenuti, cancella i dati caricati, chiavi e campi sensibili dalla memoria dell'interfaccia e rifiuta qualsiasi richiesta al Core; si sblocca con Touch ID o la password del Mac.
+  - **Il Core continua a lavorare** mentre l'interfaccia è bloccata, così missioni, automazioni, notifiche e dispositivi associati non si interrompono. Conseguenza dichiarata: il token di sessione resta nella memoria del processo, che è anche quello che avvia il Core. Fermare il Core a ogni blocco avrebbe disconnesso telefoni e missioni.
+  - **Identità per le azioni sensibili**: dispositivi (inviti e revoche), chiave cloud, connettori, backup, passkey, aggiornamenti e canali di notifica richiedono Touch ID o la password, valida un minuto dopo l'ultima conferma.
+  - schermata di accesso rifinita (icona con alone, messaggio che distingue blocco e primo accesso) e sezione **Missioni** con le iniziative proattive.
+- **Alternative scartate:** fermare il Core a ogni blocco (perde missioni e dispositivi); conservare le credenziali nel Portachiavi protetto da Touch ID (rimandato: non è stato scelto dal proprietario).
+- **Evidenza:** solo revisione del codice; nessun compilatore Swift né macOS disponibile. Da collaudare su un Mac: blocco per inattività, per stop e per schermo bloccato, ripresa con Touch ID e con la password, richiesta d'identità alla revoca di un dispositivo.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, SECURITY_AND_PRIVACY.md, ROADMAP.md.
+
+### ADR-0101 — Rifiniture grafiche: Android in stile iOS, Windows e macOS
+
+- **Data:** 2026-11-23 · **Stato:** implementata nel checkout; resa visiva non verificata (nessuna cattura grafica né SDK Android in questo ambiente) · **Fonte:** richiesta del proprietario.
+- **Android in stile iOS:** palette di sistema di iOS (sfondo raggruppato grigio chiaro o nero, schede bianche o grigio scuro, blu di sistema, separatori sottili), gerarchia tipografica di iOS (titolo grande 34, titoli 28/22, headline 17, corpo 17, nota 13, didascalia 10), angoli più generosi, barra a schede senza indicatore a pillola con etichette da 10 sp in blu o grigio, fumetti come in iMessage (blu per l'utente, superficie neutra per JARVIS, angolo a coda) e interruttori con traccia verde. L'identità di JARVIS resta nell'avatar.
+- **Windows (egui):** testo più leggibile (corpo 15, titolo 24), finestre e menu con angoli più morbidi, campi di testo più scuri della superficie, bordi discreti, link in tinta.
+- **macOS (SwiftUI):** schermata di accesso e sezione Missioni (vedi ADR-0100).
+- **Conseguenze:** l'aspetto cambia senza modificare flussi o permessi; i valori sono nei file di tema e si regolano in un punto solo. Va verificato su un telefono, su Windows e su un Mac.
+- **Evidenza:** il client Android compila solo in CI (manca l'SDK qui); `cargo clippy` del client egui pulito con le parti specifiche delle piattaforme sostituite temporaneamente.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md, `JarvisTheme.kt`, `app.rs`, `JarvisApp.swift`.
+
+### ADR-0102 — Note di rilascio con APK e verifica
+
+- **Data:** 2026-11-23 · **Stato:** implementata nel checkout.
+- **Decisione:** le note della release elencano anche l'APK Android, indicano la versione minima di macOS (14, come nel pacchetto Swift) e contengono i comandi per verificare impronta, attestazione GitHub e firma Sigstore; le modifiche della versione restano generate da GitHub.
+- **Documenti interessati:** `.github/release-notes.md`.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.

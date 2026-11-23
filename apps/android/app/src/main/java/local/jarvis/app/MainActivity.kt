@@ -25,6 +25,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
@@ -314,15 +316,16 @@ private fun ColumnScope.DeviceScreen(
             }
         }
     }
-    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-    NavigationBar(containerColor = MaterialTheme.colorScheme.surface) {
+    HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
+    NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
         tabs.forEachIndexed { index, (label, symbol) ->
             NavigationBarItem(
                 selected = tab == index,
                 onClick = { tab = index },
                 enabled = !sending,
+                colors = iosTabColors(),
                 icon = { Text(symbol, style = MaterialTheme.typography.titleLarge) },
-                label = { Text(label) },
+                label = { Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1) },
             )
         }
     }
@@ -1094,22 +1097,29 @@ private fun ColumnScope.ChatScreen(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = if (fromUser) Arrangement.End else Arrangement.Start,
             ) {
-                Card(
-                    Modifier.fillMaxWidth(0.9f),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (fromUser) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = if (fromUser) MaterialTheme.colorScheme.onPrimaryContainer
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                // Fumetti come in iMessage: blu di sistema per te, grigio per JARVIS, angolo «a coda» sul lato di chi scrive.
+                Surface(
+                    modifier = Modifier.widthIn(max = 320.dp),
+                    shape = RoundedCornerShape(
+                        topStart = 20.dp,
+                        topEnd = 20.dp,
+                        bottomStart = if (fromUser) 20.dp else 6.dp,
+                        bottomEnd = if (fromUser) 6.dp else 20.dp,
                     ),
+                    color = if (fromUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface,
+                    contentColor = if (fromUser) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
                 ) {
-                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(
-                            if (fromUser) "Tu" else "JARVIS",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary,
-                            fontWeight = FontWeight.SemiBold,
-                        )
+                    Column(
+                        Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        if (!fromUser) {
+                            Text(
+                                "JARVIS",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         Text(m.content, style = MaterialTheme.typography.bodyLarge)
                     }
                 }
@@ -1149,7 +1159,7 @@ private fun ColumnScope.ChatScreen(
             OutlinedTextField(
                 input, { input = it }, enabled = !busy, maxLines = 4,
                 placeholder = { Text("Scrivi a JARVIS…") },
-                shape = MaterialTheme.shapes.large,
+                shape = MaterialTheme.shapes.extraLarge,
                 modifier = Modifier.weight(1f),
             )
             Button(enabled = !busy && input.isNotBlank(), onClick = {

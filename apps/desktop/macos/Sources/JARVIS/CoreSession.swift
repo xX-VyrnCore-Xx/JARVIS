@@ -18,7 +18,7 @@ struct Record: Identifiable {
 
     subscript(_ key: String) -> String? { data[key] as? String }
     var title: String {
-        ["objective", "title", "name", "text", "message", "path", "action", "role"]
+        ["objective", "goal", "title", "name", "text", "message", "path", "action", "role"]
             .compactMap { self[$0] }.first ?? id
     }
 }

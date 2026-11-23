@@ -175,8 +175,27 @@ impl JarvisApp {
         style.visuals.selection.bg_fill = egui::Color32::from_rgb(24, 76, 91);
         style.visuals.selection.stroke = egui::Stroke::new(1.0, ACCENT);
         style.spacing.item_spacing = egui::vec2(12.0, 10.0);
-        style.spacing.button_padding = egui::vec2(12.0, 7.0);
+        style.spacing.button_padding = egui::vec2(14.0, 8.0);
         style.spacing.interact_size = egui::vec2(40.0, 38.0);
+        // Rifiniture in stile Fluent/macOS (ADR-0101): testo leggermente più grande e gerarchia chiara,
+        // finestre e menu con angoli generosi, campi di testo più scuri della superficie, link in tinta.
+        style.text_styles = [
+            (egui::TextStyle::Heading, egui::FontId::proportional(24.0)),
+            (egui::TextStyle::Body, egui::FontId::proportional(15.0)),
+            (egui::TextStyle::Button, egui::FontId::proportional(15.0)),
+            (egui::TextStyle::Small, egui::FontId::proportional(12.5)),
+            (egui::TextStyle::Monospace, egui::FontId::monospace(13.5)),
+        ]
+        .into();
+        style.visuals.window_corner_radius = egui::CornerRadius::same(16);
+        style.visuals.menu_corner_radius = egui::CornerRadius::same(12);
+        style.visuals.widgets.noninteractive.corner_radius = egui::CornerRadius::same(10);
+        style.visuals.widgets.noninteractive.bg_stroke =
+            egui::Stroke::new(1.0, egui::Color32::from_rgb(28, 52, 70));
+        style.visuals.widgets.open.corner_radius = egui::CornerRadius::same(10);
+        style.visuals.extreme_bg_color = egui::Color32::from_rgb(4, 10, 18);
+        style.visuals.faint_bg_color = egui::Color32::from_rgb(9, 21, 34);
+        style.visuals.hyperlink_color = ACCENT;
         cc.egui_ctx.set_style_of(egui::Theme::Dark, style);
 
         let (tx, rx) = mpsc::channel();

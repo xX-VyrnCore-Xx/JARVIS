@@ -37,6 +37,10 @@ Le viste Attività, Automazioni, Memoria, Competenze, Workspace, Connettori, Dis
 
 Configura Firebase seguendo [FIREBASE_SETUP.md](FIREBASE_SETUP.md). Il workflow allega l'APK release firmato (mai debug) alla stessa release degli installer desktop; la verifica reale delle push richiede un progetto Firebase e un dispositivo autorizzati.
 
+Android adotta un aspetto in stile iOS (ADR-0101): palette di sistema, titolo grande, schede arrotondate, barra a schede e fumetti come in iMessage. Con l'app aperta le notifiche arrivano in tempo reale dal Core (ADR-0098); in background restano le push FCM.
+
+Sul Mac l'interfaccia si blocca dopo 5 minuti di inattività, allo stop e al blocco dello schermo, e si riapre con Touch ID o la password; il Core continua a lavorare. Dispositivi, chiavi cloud, connettori, backup, passkey, aggiornamenti e canali di notifica chiedono di nuovo l'identità (ADR-0100). La sezione Missioni (macOS e Windows) permette di affidare obiettivi a JARVIS e di regolare le iniziative proattive.
+
 ## Associazione e sicurezza
 
 Per usare il Mac come host condiviso mantenendo il Core legato a `127.0.0.1:8765`, Tailscale Serve fornisce HTTPS privato all'interno della tailnet:

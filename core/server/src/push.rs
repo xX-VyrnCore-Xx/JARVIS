@@ -29,6 +29,9 @@ const BEARER_TTL: Duration = Duration::from_secs(50 * 60);
 
 static BEARER: Mutex<Option<(String, Instant)>> = Mutex::new(None);
 
+/// Registrazione pronta all'invio: impronta, token in chiaro e piattaforma.
+type Registration = (String, String, String);
+
 pub struct PushSubscriptions {
     conn: Connection,
     db_path: PathBuf,
@@ -361,7 +364,7 @@ impl PushSubscriptions {
     fn registrations(
         &self,
         secrets: &crate::secrets::SecretStore,
-    ) -> Result<(Vec<(String, String, String)>, usize), String> {
+    ) -> Result<(Vec<Registration>, usize), String> {
         let mut stmt = self
             .conn
             .prepare("SELECT token_hash, platform FROM push_subscriptions WHERE invalid_at IS NULL")
