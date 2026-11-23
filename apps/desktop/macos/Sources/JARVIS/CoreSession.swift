@@ -18,7 +18,7 @@ struct Record: Identifiable {
 
     subscript(_ key: String) -> String? { data[key] as? String }
     var title: String {
-        ["objective", "title", "name", "text", "message", "path", "action", "role"]
+        ["objective", "goal", "title", "name", "text", "message", "path", "action", "role"]
             .compactMap { self[$0] }.first ?? id
     }
 }
@@ -40,6 +40,19 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
     @Published private(set) var phase: Phase = .locked
     @Published private(set) var health: [String: Any] = [:]
     @Published var notice: String?
+    /// Interfaccia bloccata (ADR-0100): il Core continua a lavorare, ma contenuti e azioni restano nascosti
+    /// finché il proprietario non conferma la propria identità.
+    @Published private(set) var uiLocked = false
+    /// Incrementato a ogni notifica ricevuta in tempo reale (ADR-0098): le viste ricaricano i dati.
+    @Published private(set) var liveTick = 0
+    private var lastActivity = Date()
+    private var lastIdentity = Date.distantPast
+    private var observers: [NSObjectProtocol] = []
+    private var activityMonitor: Any?
+    private var idleTimer: Timer?
+    /// Inattività dopo cui l'interfaccia si blocca e validità di una conferma d'identità per le azioni sensibili.
+    private static let idleLimit: TimeInterval = 5 * 60
+    private static let identityGrace: TimeInterval = 60
     private var token = UUID().uuidString.replacingOccurrences(of: "-", with: "")
         + UUID().uuidString.replacingOccurrences(of: "-", with: "")
     private var authContext: LAContext?
@@ -52,6 +65,105 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
         configuration.timeoutIntervalForRequest = 190
         return URLSession(configuration: configuration, delegate: DirectSession(), delegateQueue: nil)
     }()
+
+    init() {
+        let workspace = NSWorkspace.shared.notificationCenter
+        for name in [NSWorkspace.willSleepNotification, NSWorkspace.screensDidSleepNotification] {
+            observers.append(workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                Task { @MainActor in self?.lockInterface(reason: "JARVIS si è bloccato perché il Mac è andato in stop.") }
+            })
+        }
+        observers.append(DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name("com.apple.screenIsLocked"), object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.lockInterface(reason: "JARVIS si è bloccato insieme allo schermo del Mac.") }
+        })
+        activityMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.keyDown, .leftMouseDown, .rightMouseDown, .scrollWheel, .mouseMoved]
+        ) { [weak self] event in
+            Task { @MainActor in self?.noteActivity() }
+            return event
+        }
+        idleTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.checkIdle() }
+        }
+    }
+
+    func noteActivity() {
+        if !uiLocked { lastActivity = Date() }
+    }
+
+    private func checkIdle() {
+        guard phase == .ready, !uiLocked, Date().timeIntervalSince(lastActivity) > Self.idleLimit else { return }
+        lockInterface(reason: "JARVIS si è bloccato per inattività.")
+    }
+
+    /// Nasconde contenuti e dati in memoria dell'interfaccia. Il Core resta attivo, così missioni, automazioni
+    /// e dispositivi associati continuano a funzionare.
+    func lockInterface(reason: String) {
+        guard phase == .ready, !uiLocked else { return }
+        uiLocked = true
+        health = [:]
+        lastIdentity = .distantPast
+        notice = reason
+    }
+
+    func unlockInterface() async {
+        guard uiLocked else { return }
+        if await confirmIdentity("Sblocca JARVIS per riprendere la sessione.", force: true) {
+            uiLocked = false
+            notice = nil
+            lastActivity = Date()
+            await refreshHealth()
+        }
+    }
+
+    /// Chiede Touch ID o la password del Mac. Per le azioni sensibili vale per un minuto dopo l'ultima conferma.
+    func confirmIdentity(_ reason: String, force: Bool = false) async -> Bool {
+        if !force, Date().timeIntervalSince(lastIdentity) < Self.identityGrace { return true }
+        let context = LAContext()
+        context.localizedCancelTitle = "Annulla"
+        var failure: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &failure) else {
+            notice = failure?.localizedDescription ?? "Autenticazione macOS non disponibile."
+            return false
+        }
+        do {
+            let approved = try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
+            if approved { lastIdentity = Date() }
+            return approved
+        } catch {
+            return false
+        }
+    }
+
+    /// Notifiche in tempo reale dal Core (ADR-0098). Si ferma con l'interfaccia bloccata o il Core chiuso.
+    func watchNotifications() async {
+        while !Task.isCancelled, phase == .ready, !uiLocked {
+            do {
+                guard let url = URL(string: "http://127.0.0.1:8765/api/notifications/stream") else { return }
+                var request = URLRequest(url: url, timeoutInterval: 60)
+                request.setValue(token, forHTTPHeaderField: "X-Jarvis-Token")
+                request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+                let (bytes, response) = try await urlSession.bytes(for: request)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+                    throw CoreFailure(message: "Flusso notifiche non disponibile.")
+                }
+                // `lines` omette le righe vuote: l'evento si riconosce dalla riga «event:».
+                for try await line in bytes.lines where line.hasPrefix("event:") {
+                    let name = line.dropFirst(6).trimmingCharacters(in: .whitespaces)
+                    if name == "notification" || name == "resync" {
+                        liveTick += 1
+                        await refreshHealth()
+                    }
+                    if uiLocked || phase != .ready { break }
+                }
+            } catch {
+                // Si riprova: il polling di salute resta la rete di sicurezza.
+            }
+            try? await Task.sleep(for: .seconds(3))
+        }
+    }
 
     func authenticateOnLaunch() async {
         guard !startRequested else { return }
@@ -81,6 +193,9 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
             }
             guard authContext === context else { return }
             authContext = nil
+            uiLocked = false
+            lastActivity = Date()
+            lastIdentity = Date()
             phase = .starting
             try launch()
             for _ in 0..<80 {
@@ -160,6 +275,7 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
     }
 
     func stop() {
+        uiLocked = false
         authContext?.invalidate()
         authContext = nil
         try? parentPipe?.fileHandleForWriting.close()
@@ -167,7 +283,7 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
     }
 
     func refreshHealth() async {
-        guard phase == .ready else { return }
+        guard phase == .ready, !uiLocked else { return }
         if let status = try? await request("/api/health", timeout: 2) { health = status }
         else { health = [:] }
     }
@@ -200,6 +316,16 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
         }
     }
 
+    /// Operazioni che cambiano chi può accedere a JARVIS o dove vanno i dati: dispositivi, chiavi cloud,
+    /// connettori, backup, passkey, aggiornamenti e canali di notifica. Chiedono Touch ID o la password del Mac.
+    private static func isSensitive(_ path: String, method: String) -> Bool {
+        guard method != "GET" else { return false }
+        let route = path.split(separator: "?").first.map(String.init) ?? path
+        if route == "/api/cloud" { return true }
+        return ["/api/devices", "/api/connectors", "/api/backup", "/api/passkeys", "/api/updates", "/api/notify/channels"]
+            .contains { route == $0 || route.hasPrefix($0 + "/") }
+    }
+
     func request(_ path: String, method: String = "GET", body: [String: Any]? = nil,
                  timeout: TimeInterval = 190) async throws -> [String: Any] {
         guard process?.isRunning == true, parentPipe != nil else {
@@ -207,6 +333,13 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
         }
         guard path.hasPrefix("/api/"), let url = URL(string: "http://127.0.0.1:8765" + path) else {
             throw CoreFailure(message: "Indirizzo del Core non valido.")
+        }
+        if uiLocked {
+            throw CoreFailure(message: "JARVIS è bloccato: sblocca l’interfaccia per continuare.")
+        }
+        if Self.isSensitive(path, method: method),
+           !(await confirmIdentity("Conferma la tua identità per questa operazione.")) {
+            throw CoreFailure(message: "Operazione annullata: identità non confermata.")
         }
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = method

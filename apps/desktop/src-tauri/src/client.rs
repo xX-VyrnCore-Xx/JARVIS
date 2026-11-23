@@ -82,6 +82,24 @@ impl ApiClient {
         response.into_json().map_err(|error| error.to_string())
     }
 
+    /// Apre il flusso in tempo reale delle notifiche (Server-Sent Events, ADR-0098). Il Core manda un
+    /// segnale ogni 20 secondi: se ne passano 45 senza nulla la connessione è considerata persa.
+    pub fn notification_stream(&self) -> Result<Box<dyn std::io::BufRead + Send>, String> {
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(10))
+            .timeout_read(Duration::from_secs(45))
+            .redirects(0)
+            .build();
+        let mut request = agent
+            .get(&self.url("/api/notifications/stream"))
+            .set("Accept", "text/event-stream");
+        if let Some((name, value)) = &self.auth {
+            request = request.set(name, value);
+        }
+        let response = request.call().map_err(read_error)?;
+        Ok(Box::new(std::io::BufReader::new(response.into_reader())))
+    }
+
     pub fn get(&self, path: &str) -> Result<Value, String> {
         self.request("GET", path, None)
     }
@@ -168,5 +186,71 @@ mod tests {
             client.url("/api/health"),
             "https://core.example.test/api/health"
         );
+    }
+}
+
+/// Legge un flusso Server-Sent Events e chiama `on_event(nome, dati)` per ogni evento completo. Si ferma
+/// quando il flusso termina, in caso di errore di lettura o se `on_event` restituisce `false`.
+pub fn read_events<R: std::io::BufRead>(
+    mut reader: R,
+    mut on_event: impl FnMut(&str, &str) -> bool,
+) {
+    let (mut name, mut data) = (String::new(), String::new());
+    let mut line = String::new();
+    loop {
+        line.clear();
+        // Una riga senza fine non deve crescere senza limite.
+        match std::io::BufRead::read_line(
+            &mut std::io::Read::take(&mut reader, 256 * 1024),
+            &mut line,
+        ) {
+            Ok(0) | Err(_) => return,
+            Ok(_) => {}
+        }
+        let text = line.trim_end_matches(['\r', '\n']);
+        if text.is_empty() {
+            if !name.is_empty() && !on_event(&name, &data) {
+                return;
+            }
+            name.clear();
+            data.clear();
+        } else if let Some(value) = text.strip_prefix("event:") {
+            name = value.trim().to_string();
+        } else if let Some(value) = text.strip_prefix("data:") {
+            if !data.is_empty() {
+                data.push('\n');
+            }
+            data.push_str(value.trim_start());
+        }
+    }
+}
+
+#[cfg(test)]
+mod stream_tests {
+    use super::read_events;
+
+    #[test]
+    fn server_sent_events_are_split_and_comments_ignored() {
+        let raw = "retry: 3000\nevent: ready\ndata: {}\n\n: ping\n\nid: 7\nevent: notification\ndata: {\"a\":1}\n\nevent: resync\ndata: {}\n\n";
+        let mut seen = Vec::new();
+        read_events(std::io::Cursor::new(raw), |name, data| {
+            seen.push((name.to_string(), data.to_string()));
+            true
+        });
+        assert_eq!(
+            seen,
+            [
+                ("ready".to_string(), "{}".to_string()),
+                ("notification".to_string(), "{\"a\":1}".to_string()),
+                ("resync".to_string(), "{}".to_string()),
+            ]
+        );
+        // Il chiamante può fermare la lettura.
+        let mut count = 0;
+        read_events(std::io::Cursor::new(raw), |_, _| {
+            count += 1;
+            false
+        });
+        assert_eq!(count, 1);
     }
 }

@@ -58,6 +58,22 @@ fn private_file(path: &Path) -> std::io::Result<fs::File> {
     options.open(path)
 }
 
+/// Una cartella dati creata da una versione precedente o da un altro programma può essere leggibile da altri
+/// utenti del computer: la si riporta a `0700` (solo su Unix; su Windows valgono i permessi dell'utente).
+pub(crate) fn tighten_dir(path: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = fs::metadata(path) {
+            if meta.permissions().mode() & 0o077 != 0 {
+                let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o700));
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+}
+
 pub(crate) fn atomic_write(path: &Path, data: &[u8]) -> std::io::Result<()> {
     let staging = path.with_file_name(format!(".jarvis-write-{}", uuid::Uuid::new_v4().simple()));
     let result = (|| {

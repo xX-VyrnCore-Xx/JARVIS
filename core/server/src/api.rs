@@ -33,6 +33,47 @@ pub struct AppState {
     n8n: Arc<crate::n8n::Manager>,
     /// Sfide WebAuthn in corso (ADR-0042): sfida -> dispositivo, scopo e scadenza.
     challenges: Mutex<std::collections::HashMap<String, Challenge>>,
+    /// Autenticazioni remote fallite nella finestra corrente (ADR-0099): inizio della finestra e conteggio.
+    remote_failures: Mutex<(std::time::Instant, u32)>,
+    /// Flussi di notifiche aperti contemporaneamente (ADR-0098).
+    live_streams: Arc<std::sync::atomic::AtomicUsize>,
+}
+
+/// Dopo `REMOTE_FAILURE_LIMIT` autenticazioni remote fallite in `REMOTE_FAILURE_WINDOW` le richieste remote con
+/// un token ben formato ma sconosciuto ricevono 429 senza prendere il blocco del Core: una pioggia di token a
+/// caso da Internet non può togliere la parola al proprietario (che usa il canale locale).
+const REMOTE_FAILURE_LIMIT: u32 = 30;
+const REMOTE_FAILURE_WINDOW: std::time::Duration = std::time::Duration::from_secs(60);
+/// Flussi di notifiche aperti al massimo contemporaneamente.
+const MAX_LIVE_STREAMS: usize = 16;
+
+fn note_remote_failure(state: &AppState) {
+    let mut failures = state
+        .remote_failures
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if failures.0.elapsed() >= REMOTE_FAILURE_WINDOW {
+        *failures = (std::time::Instant::now(), 0);
+    }
+    failures.1 = failures.1.saturating_add(1);
+}
+
+fn remote_throttled(state: &AppState) -> bool {
+    let failures = state
+        .remote_failures
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    failures.0.elapsed() < REMOTE_FAILURE_WINDOW && failures.1 >= REMOTE_FAILURE_LIMIT
+}
+
+/// Confronto a tempo costante del token del proprietario.
+fn same_token(given: Option<&str>, expected: &str) -> bool {
+    given.is_some_and(|given| {
+        let (a, b) = (given.as_bytes(), expected.as_bytes());
+        // La lunghezza del token non è segreta; il contenuto si confronta senza uscire al primo byte diverso.
+        a.len() == b.len()
+            && std::hint::black_box(a.iter().zip(b).fold(0u8, |diff, (x, y)| diff | (x ^ y))) == 0
+    })
 }
 
 /// Sfida monouso di una passkey: registrazione o approvazione di una conferma precisa.
@@ -195,8 +236,28 @@ async fn guard(State(state): State<Shared>, mut req: Request, next: Next) -> Res
                 .and_then(|t| t.to_str().ok())
                 .unwrap_or_default()
                 .to_string();
+            // I token dei dispositivi sono 64 caratteri esadecimali: il resto si scarta senza interrogare il Core.
+            if token.len() != 64 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
+                note_remote_failure(&state);
+                return error(
+                    StatusCode::UNAUTHORIZED,
+                    "unauthorized",
+                    "dispositivo non associato o revocato",
+                );
+            }
+            if remote_throttled(&state) {
+                let mut res = error(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "too_many_failures",
+                    "troppi tentativi di accesso falliti: riprova fra poco",
+                );
+                res.headers_mut()
+                    .insert(header::RETRY_AFTER, HeaderValue::from_static("30"));
+                return res;
+            }
             let device = with_core(&state, move |j| j.device_for_token(&token)).await;
             let Ok(Some(device)) = device else {
+                note_remote_failure(&state);
                 return error(
                     StatusCode::UNAUTHORIZED,
                     "unauthorized",
@@ -235,7 +296,7 @@ async fn guard(State(state): State<Shared>, mut req: Request, next: Next) -> Res
             .headers()
             .get("x-jarvis-token")
             .and_then(|t| t.to_str().ok());
-        if token != Some(state.token.as_str()) {
+        if !same_token(token, &state.token) {
             return error(
                 StatusCode::UNAUTHORIZED,
                 "unauthorized",
@@ -282,6 +343,7 @@ fn device_route_allowed(method: &str, route: &str, scopes: &[&str]) -> bool {
         ("GET", "/api/confirmations"),
         ("GET", "/api/chat/sync"),
         ("GET", "/api/notifications"),
+        ("GET", "/api/notifications/stream"),
         ("POST", "/api/notifications/read-all"),
         ("POST", "/api/notifications/{id}/read"),
         ("POST", "/api/voice/transcribe"),
@@ -399,6 +461,8 @@ pub fn router(state: Shared) -> Router {
             post(connector_hook).layer(axum::extract::DefaultBodyLimit::max(256 * 1024)),
         )
         .route("/api/notifications", get(notifications))
+        .route("/api/notifications/stream", get(notifications_stream))
+        .route("/api/push/status", get(push_status))
         .route("/api/notifications/read-all", post(read_all))
         .route("/api/notifications/{id}/read", post(read_one))
         .route("/api/workflows", get(workflows).post(create_workflow))
@@ -1545,6 +1609,74 @@ async fn notifications(
     )
 }
 
+async fn push_status(State(state): State<Shared>) -> Response {
+    reply(Ok(with_core(&state, |j| j.push_status()).await))
+}
+
+/// Posto occupato da un flusso aperto: si libera quando il flusso termina o il client si disconnette.
+struct StreamSlot(Arc<std::sync::atomic::AtomicUsize>);
+
+impl StreamSlot {
+    fn take(counter: &Arc<std::sync::atomic::AtomicUsize>) -> Option<Self> {
+        use std::sync::atomic::Ordering;
+        if counter.fetch_add(1, Ordering::AcqRel) >= MAX_LIVE_STREAMS {
+            counter.fetch_sub(1, Ordering::AcqRel);
+            return None;
+        }
+        Some(Self(counter.clone()))
+    }
+}
+
+impl Drop for StreamSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
+
+/// Flusso in tempo reale delle notifiche (Server-Sent Events, ADR-0098): ogni notifica creata dal Core arriva
+/// subito ai client collegati, senza attendere il giro successivo di polling. Un commento ogni 20 secondi
+/// tiene viva la connessione; se il client resta indietro riceve `resync` e rilegge l'elenco.
+async fn notifications_stream(State(state): State<Shared>) -> Response {
+    let Some(slot) = StreamSlot::take(&state.live_streams) else {
+        return error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "too_many_streams",
+            "troppi flussi in tempo reale aperti",
+        );
+    };
+    let rx = with_core(&state, |j| j.subscribe_notifications()).await;
+    let first = "retry: 3000\nevent: ready\ndata: {}\n\n".to_string();
+    let stream = futures_util::stream::unfold(
+        (rx, Some(first), slot),
+        |(mut rx, pending, slot)| async move {
+            if let Some(chunk) = pending {
+                return Some((Ok::<_, std::convert::Infallible>(chunk), (rx, None, slot)));
+            }
+            let next = tokio::time::timeout(std::time::Duration::from_secs(20), rx.recv()).await;
+            let chunk = match next {
+                Err(_) => ": ping\n\n".to_string(),
+                Ok(Ok(doc)) => format!(
+                    "id: {}\nevent: notification\ndata: {}\n\n",
+                    doc["notification_id"].as_str().unwrap_or_default(),
+                    doc
+                ),
+                Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {
+                    "event: resync\ndata: {}\n\n".to_string()
+                }
+                Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => return None,
+            };
+            Some((Ok(chunk), (rx, None, slot)))
+        },
+    );
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/event-stream")
+        .header(header::CACHE_CONTROL, "no-store")
+        .header("X-Accel-Buffering", "no")
+        .body(axum::body::Body::from_stream(stream))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
 async fn push_subscription_register(
     State(state): State<Shared>,
     device: Option<axum::Extension<DeviceCtx>>,
@@ -2099,5 +2231,7 @@ pub fn state_with_remote(
         setup,
         n8n,
         challenges: Mutex::new(std::collections::HashMap::new()),
+        remote_failures: Mutex::new((std::time::Instant::now(), 0)),
+        live_streams: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
     })
 }

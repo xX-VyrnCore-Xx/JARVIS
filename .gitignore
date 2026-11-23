@@ -12,3 +12,7 @@ google-services.json
 GITHUB_ACTIONS_SECRETS_TEMP.txt
 logo.png
 apps/desktop/macos/.build/
+
+# Dati temporanei dei test di integrazione
+core/server/.*-test-*/
+core/server/..*-test-*.jarvis-lock

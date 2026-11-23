@@ -205,6 +205,8 @@ pub struct Jarvis {
     node_tls: Option<(u16, String)>,
     /// Agenti temporanei in esecuzione (ADR-0040): task figlio → ruolo e strumenti concessi.
     temporary: HashMap<String, TempAgent>,
+    /// Canale delle notifiche appena create, per i client collegati in tempo reale (ADR-0098).
+    events: tokio::sync::broadcast::Sender<Value>,
     /// Ultima valutazione delle iniziative proattive (ADR-0097).
     proactive_checked: Option<std::time::Instant>,
     obs: std::sync::Arc<Observability>,
@@ -244,6 +246,7 @@ impl Jarvis {
                 if error.kind() == std::io::ErrorKind::AlreadyExists && cfg.data_dir.is_dir() => {}
             Err(error) => return Err(format!("cartella dati: {error}")),
         }
+        crate::backup::tighten_dir(&cfg.data_dir);
         std::fs::create_dir_all(cfg.workspace()).map_err(|e| format!("workspace: {e}"))?;
         // Compatibilità con le release che usano ancora il blocco interno.
         let legacy_lock = std::fs::OpenOptions::new()
@@ -285,6 +288,7 @@ impl Jarvis {
             worker: None,
             pending: HashMap::new(),
             temporary: HashMap::new(),
+            events: tokio::sync::broadcast::channel(64).0,
             proactive_checked: None,
             node_tls: None,
             obs: std::sync::Arc::new(Observability::new(Some(&cfg_logs))),
@@ -3003,6 +3007,8 @@ impl Jarvis {
             )));
         }
         self.store.notification_put(&doc, 500).map_err(internal)?;
+        // Nessun client in ascolto non è un errore.
+        let _ = self.events.send(doc.clone());
         self.obs.count(&format!(
             "notification.{}",
             doc["severity"].as_str().unwrap_or("info")
@@ -3011,6 +3017,16 @@ impl Jarvis {
             "task_id": doc["task_id"], "workflow_id": doc["workflow_id"], "correlation_id": doc["correlation_id"]}));
         self.notify_external(&doc);
         Ok(Some(doc))
+    }
+
+    /// Riceve le notifiche appena create (flusso in tempo reale, ADR-0098).
+    pub fn subscribe_notifications(&self) -> tokio::sync::broadcast::Receiver<Value> {
+        self.events.subscribe()
+    }
+
+    /// Stato della consegna push senza token: configurazione, registrazioni e ultimo invio riuscito.
+    pub fn push_status(&self) -> Value {
+        self.push.status()
     }
 
     /// Inoltro ai canali esterni configurati (ADR-0026), in background e fuori dal blocco del Core.

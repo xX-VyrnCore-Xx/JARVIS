@@ -28,7 +28,7 @@ data class NotificationLink(val view: String, val ref: String?)
 
 private val notificationViews = setOf(
     "chat", "tasks", "automations", "audit", "memory",
-    "workspace", "connectors", "system", "devices", "dashboard",
+    "workspace", "connectors", "system", "devices", "dashboard", "missions", "skills",
 )
 
 data class Notices(val unread: Int, val items: List<Notice>)
@@ -94,8 +94,63 @@ object UrlConnectionTransport : Transport {
     }
 }
 
+/**
+ * Flusso Server-Sent Events delle notifiche (ADR-0098), separato dal trasporto per poterlo simulare nei test.
+ * `keepGoing` viene chiamato a ogni riga ricevuta, anche per i segnali di vita del Core, e permette di
+ * interrompere la lettura quando la schermata viene chiusa.
+ */
+fun interface EventStream {
+    fun open(url: String, headers: Map<String, String>, keepGoing: () -> Boolean, onEvent: (String) -> Unit)
+}
+
+/**
+ * Legge un flusso SSE: chiama `onEvent(nome)` per ogni evento completo. Si ferma alla fine del flusso o quando
+ * `keepGoing` restituisce `false`; le righe oltre 256 KB interrompono la lettura.
+ */
+fun readServerSentEvents(reader: java.io.BufferedReader, keepGoing: () -> Boolean, onEvent: (String) -> Unit) {
+    var name = ""
+    while (keepGoing()) {
+        val line = reader.readLine() ?: return
+        if (line.length > 256 * 1024) return
+        when {
+            line.isEmpty() -> {
+                if (name.isNotEmpty()) onEvent(name)
+                name = ""
+            }
+            line.startsWith("event:") -> name = line.removePrefix("event:").trim()
+        }
+    }
+}
+
+/** Trasporto reale del flusso: solo HTTPS, nessun redirect; il Core manda un segnale ogni 20 secondi. */
+object UrlConnectionEventStream : EventStream {
+    override fun open(url: String, headers: Map<String, String>, keepGoing: () -> Boolean, onEvent: (String) -> Unit) {
+        val endpoint = URI.create(url).toURL()
+        if (!endpoint.protocol.equals("https", ignoreCase = true)) throw CoreException.InvalidOrigin()
+        val connection = endpoint.openConnection() as javax.net.ssl.HttpsURLConnection
+        try {
+            connection.instanceFollowRedirects = false
+            connection.useCaches = false
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 45_000
+            headers.forEach { (k, v) -> connection.setRequestProperty(k, v) }
+            val status = connection.responseCode
+            if (status == 401) throw CoreException.Revoked()
+            if (status !in 200..299) throw CoreException.Rejected(status, null)
+            connection.inputStream.bufferedReader(Charsets.UTF_8).use { readServerSentEvents(it, keepGoing, onEvent) }
+        } catch (e: javax.net.ssl.SSLException) {
+            throw CoreException.InvalidTLS()
+        } finally {
+            connection.disconnect()
+        }
+    }
+}
+
 /** Client Android del Core: pairing HTTPS, scope limitati e revoca immediata. */
-class CoreClient(private val transport: Transport = UrlConnectionTransport) {
+class CoreClient(
+    private val transport: Transport = UrlConnectionTransport,
+    private val events: EventStream = UrlConnectionEventStream,
+) {
 
     companion object {
         /** Solo HTTPS, senza credenziali, query, frammenti o percorsi: l'indirizzo è quello del proxy fidato. */
@@ -200,6 +255,21 @@ class CoreClient(private val transport: Transport = UrlConnectionTransport) {
 
     fun markAllRead(session: DeviceSession): Int =
         request(session.origin, "/api/notifications/read-all", session.token, JSONObject()).optInt("unread", 0)
+
+    /**
+     * Resta in ascolto delle notifiche in tempo reale (ADR-0098): `onReady` quando il flusso è aperto,
+     * `onChange` a ogni nuova notifica o quando il client deve rileggere l'elenco. Blocca finché il flusso
+     * dura; lancia `Revoked` se il dispositivo è stato revocato.
+     */
+    fun watchNotices(session: DeviceSession, keepGoing: () -> Boolean, onReady: () -> Unit, onChange: () -> Unit) {
+        val headers = mapOf("Accept" to "text/event-stream", "X-Jarvis-Device" to session.token)
+        events.open(origin(session.origin) + "/api/notifications/stream", headers, keepGoing) { name ->
+            when (name) {
+                "ready" -> onReady()
+                "notification", "resync" -> onChange()
+            }
+        }
+    }
 
     /** Registra il token FCM senza inserirlo nell'URL o nei log. */
     fun registerPush(token: String, session: DeviceSession) {
