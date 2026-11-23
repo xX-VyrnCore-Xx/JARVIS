@@ -733,6 +733,71 @@ mod tests {
     use super::*;
 
     #[test]
+    fn provider_request_uses_the_configured_bearer_key() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            let mut request = Vec::new();
+            loop {
+                let mut chunk = [0; 4096];
+                let read = stream.read(&mut chunk).unwrap();
+                assert_ne!(read, 0, "il provider deve ricevere la richiesta completa");
+                request.extend_from_slice(&chunk[..read]);
+
+                let Some(header_end) = request.windows(4).position(|w| w == b"\r\n\r\n") else {
+                    continue;
+                };
+                let headers = String::from_utf8_lossy(&request[..header_end]);
+                let content_length = headers
+                    .lines()
+                    .find_map(|line| {
+                        line.split_once(':')
+                            .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                            .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+                    })
+                    .expect("richiesta JSON con lunghezza nota");
+                if request.len() >= header_end + 4 + content_length {
+                    assert!(
+                        headers
+                            .lines()
+                            .any(|line| line.eq_ignore_ascii_case("authorization: Bearer fixture-key")),
+                        "la chiave configurata deve essere inviata solo nell'header Bearer"
+                    );
+                    break;
+                }
+            }
+
+            let body = r#"{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .unwrap();
+        });
+
+        let response = chat_at(
+            &format!("http://{address}/chat"),
+            Provider::Nim,
+            "fixture-key",
+            json!({"model":"fixture"}),
+            &[],
+            &Mutex::new(Limiter::default()),
+        )
+        .unwrap();
+        assert!(matches!(response, Answer::Text(text) if text == "ok"));
+        server.join().unwrap();
+    }
+
+    #[test]
     fn incomplete_responses_are_detected_before_text_or_tools_are_used() {
         assert!(matches!(
             decode(

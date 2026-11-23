@@ -1013,12 +1013,12 @@ impl Jarvis {
             Err(error) => {
                 let code = error.code();
                 let (text, retryable) = match error {
-                    Failure::InvalidKey => ("Il provider ha rifiutato la chiave o il modello. Controlla la configurazione in Sistema.".to_string(), false),
+                    Failure::InvalidKey => ("Il provider ha rifiutato la chiave API. Verifica che provider e chiave corrispondano in Modelli AI.".to_string(), false),
                     Failure::InvalidTool => ("Il modello ha proposto una chiamata non valida. Riformula la richiesta oppure usa un comando esplicito.".to_string(), false),
                     Failure::RateLimited(wait) => (format!("Limite del provider raggiunto. Riprova tra {} s o scegli un altro provider.", wait.as_secs_f64().ceil() as u64), true),
                     Failure::ModelUnavailable => ("I modelli selezionati non sono disponibili presso il provider. Riprova o scegli un altro provider.".to_string(), true),
                     Failure::Incomplete | Failure::Truncated => ("Il provider ha restituito una risposta incompleta. Prova a suddividere la richiesta.".to_string(), true),
-                    Failure::Unavailable => ("Il provider non ha completato la richiesta. Controlla la connessione e il modello in Sistema o scegli un altro provider.".to_string(), true),
+                    Failure::Unavailable => ("Il provider non ha completato la richiesta. Controlla la connessione e il modello in Modelli AI o scegli un altro provider.".to_string(), true),
                 };
                 task.fail(
                     json!({"code": code, "category": "unavailable", "message": text,

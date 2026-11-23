@@ -505,6 +505,9 @@ async fn cloud_chat(
             .into_response();
     }
     let local = message.to_owned();
+    let local_only = crate::orchestrator::is_source_followup(message)
+        || crate::orchestrator::is_local_fact_request(message)
+        || crate::desktop::Target::from_request(message).is_some();
     if device.is_some() {
         body["provider"] = json!("auto");
         body["use_context"] = json!(false);
@@ -512,6 +515,14 @@ async fn cloud_chat(
     match with_core(&state, move |j| j.local_command(&local)).await {
         Ok(Some(out)) => return Json(out.to_json()).into_response(),
         Ok(None) => (),
+        Err(CoreError::Unavailable(_)) if !local_only => {
+            state.obs.count("cloud.local_parser_fallback");
+            state.obs.log(
+                "warn",
+                "cloud.local_parser_fallback",
+                json!({"fallback": "provider"}),
+            );
+        }
         Err(error) => return error.into_response(),
     }
     let Ok(permit) = state.cloud_slots.clone().try_acquire_owned() else {
