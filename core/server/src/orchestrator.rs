@@ -770,6 +770,10 @@ impl Jarvis {
                 view["model_override"] = settings[provider.id()].clone();
                 view["preferred"] =
                     json!(configured && settings["default_provider"] == provider.id());
+                view["feedback_profiles"] = json!(self
+                    .store
+                    .cloud_feedback_profiles(provider.id())
+                    .map_err(internal)?);
                 Ok(view)
             })
             .collect::<Result<Vec<_>, CoreError>>()?;
@@ -2132,6 +2136,12 @@ impl Jarvis {
 
     pub fn conversation(&self, limit: u32) -> Result<Vec<Value>, CoreError> {
         self.store.messages_recent(limit).map_err(internal)
+    }
+
+    pub(crate) fn owner_conversation(&self, limit: u32) -> Result<Vec<Value>, CoreError> {
+        self.store
+            .conversation_recent(limit, true)
+            .map_err(internal)
     }
 
     pub fn memory(&self) -> Result<Vec<Value>, CoreError> {

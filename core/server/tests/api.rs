@@ -1031,6 +1031,18 @@ async fn owner_can_rate_a_cloud_answer_using_fixed_categories() {
         StatusCode::UNAUTHORIZED
     );
     assert_eq!(e.api("POST", path, Some(rating)).await.0, StatusCode::OK);
+    let (status, cloud) = e.api("GET", "/api/cloud", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let ollama = cloud["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|provider| provider["id"] == "ollama_cloud")
+        .unwrap();
+    assert_eq!(
+        ollama["feedback_profiles"],
+        json!([{"model":"fixture:cloud", "count":1, "length":"standard", "precision":true}])
+    );
     assert_eq!(
         e.api(
             "POST",
@@ -1041,6 +1053,16 @@ async fn owner_can_rate_a_cloud_answer_using_fixed_categories() {
         .0,
         StatusCode::BAD_REQUEST
     );
+    let (status, history) = e.api("GET", "/api/conversation", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(history["items"][0].get("feedback").is_none());
+    assert_eq!(
+        history["items"][1]["feedback"],
+        json!({"provider":"ollama_cloud", "model":"fixture:cloud", "rating":"precise"})
+    );
+    let (status, sync) = e.api("GET", "/api/chat/sync", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(sync["messages"][1].get("feedback").is_none());
     let data = e.data.clone();
     drop(e);
     std::fs::remove_dir_all(data).unwrap();

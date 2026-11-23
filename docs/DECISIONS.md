@@ -1491,6 +1491,13 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Memoria:** i formati riconoscibili di credenziali sono esclusi dalle nuove scritture della memoria, dagli episodi automatici e dal contesto dell’agente anche quando provengono da ricordi storici.
 - **Distribuzione:** il DMG mantiene l’installazione per trascinamento e include uno sfondo Finder con la direzione del trascinamento. La build Windows continua a usare egui.
 
+### ADR-0095 — Profili di risposta e contesto su richiesta in SwiftUI
+
+- **Data:** 2026-11-23. **Stato:** implementata.
+- **Decisione:** ricavare lunghezza e precisione separatamente da una finestra di dodici valutazioni per coppia provider e modello. Mostrare il risultato aggregato in Modelli AI. La valutazione resta locale e la richiesta prevale sulle preferenze.
+- **Contesto:** il proprietario può includere i turni recenti compatibili per un singolo invio. Restano valide le verifiche del Core su provenienza, credenziali e budget.
+- **Impostazioni:** la scelta del provider è esplicita. I modelli del catalogo possono compilare il campo prima del salvataggio e la rimozione della chiave richiede conferma.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

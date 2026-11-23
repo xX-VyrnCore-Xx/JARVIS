@@ -1228,7 +1228,7 @@ async fn conversation(
     Query(q): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
     let n = limit(&json!(q), 100);
-    match with_core(&state, move |j| j.conversation(n)).await {
+    match with_core(&state, move |j| j.owner_conversation(n)).await {
         Ok(items) => Json(json!({"items": items})).into_response(),
         Err(e) => e.into_response(),
     }

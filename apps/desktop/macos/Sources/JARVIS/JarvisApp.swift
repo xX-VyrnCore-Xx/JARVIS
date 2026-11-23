@@ -27,11 +27,18 @@ import UniformTypeIdentifiers
     }
 }
 
-private enum Section: String, CaseIterable, Identifiable {
+private enum Section: String, Identifiable {
     case dashboard = "Plancia", chat = "Chat", tasks = "Attività", confirmations = "Conferme"
     case workflows = "Automazioni", memory = "Memoria", workspace = "Workspace", connectors = "Connettori"
     case devices = "Dispositivi", skills = "Competenze", security = "Sicurezza", audit = "Audit"
     case system = "Sistema", models = "Modelli AI", updates = "Aggiornamenti", notifications = "Notifiche"
+
+    static let navigation: [(title: String, entries: [Section])] = [
+        ("Assistente", [.dashboard, .chat, .tasks, .models, .notifications]),
+        ("Organizzazione", [.workflows, .workspace, .memory, .skills]),
+        ("Collegamenti", [.devices, .connectors]),
+        ("Amministrazione", [.confirmations, .security, .audit, .system, .updates])
+    ]
 
     var id: Self { self }
     var icon: String {
@@ -93,6 +100,9 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var message = ""
     @State private var memoryQuery = ""
     @State private var testingCloudKey = false
+    @State private var savingCloudSettings = false
+    @State private var confirmKeyRemoval = false
+    @State private var useCloudContext = false
     @State private var cloudModel = ""
     @State private var provider = "ollama_cloud"
     @State private var apiKey = ""
@@ -103,8 +113,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var info: String?
     @State private var sending = false
     @State private var lastReply: [String: Any]?
-    @State private var savedFeedback: String?
-    @State private var feedbackSaving = false
+    @State private var ratingTask: String?
     @State private var refresh = 0
     @State private var activeLoad: UUID?
     @State private var outgoingMessage: String?
@@ -143,6 +152,9 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         }
         .onChange(of: core.phase) { _, phase in
             if phase != .ready {
+                useCloudContext = false
+                apiKey = ""
+                confirmKeyRemoval = false
                 invite = nil
                 connectionProbe = nil
             }
@@ -168,6 +180,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     private func select(_ value: Section) {
         guard section != value else { return }
+        useCloudContext = false
         activeLoad = nil
         payload = [:]
         error = nil
@@ -180,17 +193,32 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             Label("JARVIS", systemImage: "smallcircle.filled.circle")
                 .font(.title2.bold()).foregroundStyle(.cyan).padding(.horizontal, 10).padding(.top, 8)
             ScrollView {
-                VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Section.allCases) { entry in
-                        Button { select(entry) } label: {
-                            Label(entry.rawValue, systemImage: entry.icon)
-                                .foregroundStyle(section == entry ? Color.cyan : Color.primary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(9)
-                                .background(section == entry ? Color.cyan.opacity(0.12) : .clear,
-                                            in: RoundedRectangle(cornerRadius: 8))
-                        }.buttonStyle(.plain)
-                            .accessibilityAddTraits(section == entry ? .isSelected : [])
+                VStack(alignment: .leading, spacing: 17) {
+                    ForEach(Section.navigation.indices, id: \.self) { index in
+                        let group = Section.navigation[index]
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(group.title)
+                                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                .padding(.horizontal, 9).padding(.bottom, 3)
+                            ForEach(group.entries) { entry in
+                                Button { select(entry) } label: {
+                                    HStack {
+                                        Label(entry.rawValue, systemImage: entry.icon)
+                                        Spacer(minLength: 2)
+                                        if section == entry {
+                                            Circle().fill(.cyan).frame(width: 5, height: 5)
+                                        }
+                                    }
+                                    .foregroundStyle(section == entry ? Color.cyan : Color.primary)
+                                    .padding(8)
+                                    .background(section == entry ? Color.cyan.opacity(0.13) : .clear,
+                                                in: RoundedRectangle(cornerRadius: 8))
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityAddTraits(section == entry ? .isSelected : [])
+                            }
+                        }
                     }
                 }
             }
@@ -206,7 +234,16 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             Text("JARVIS").font(.headline).foregroundStyle(.cyan)
             Spacer()
             Menu {
-                ForEach(Section.allCases) { entry in Button(entry.rawValue) { select(entry) } }
+                ForEach(Section.navigation.indices, id: \.self) { index in
+                    let group = Section.navigation[index]
+                    SwiftUI.Section {
+                        ForEach(group.entries) { entry in
+                            Button { select(entry) } label: { Label(entry.rawValue, systemImage: entry.icon) }
+                        }
+                    } header: {
+                        Text(group.title)
+                    }
+                }
             } label: { Label(section.rawValue, systemImage: section.icon) }
         }.padding(14).background(panel)
     }
@@ -246,7 +283,10 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                         Image(systemName: "arrow.clockwise")
                     }
                 }.disabled(activeLoad != nil).help("Aggiorna").accessibilityLabel("Aggiorna")
-            }.padding(16).background(base)
+            }
+            .buttonStyle(.bordered)
+            .padding(.horizontal, 18).padding(.vertical, 13)
+            .background(LinearGradient(colors: [panel, base], startPoint: .leading, endPoint: .trailing))
             Divider()
             if let error { banner(error, color: .orange) }
             if let info { banner(info, color: .cyan) }
@@ -292,6 +332,16 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     private var dashboard: some View {
         VStack(alignment: .leading, spacing: 18) {
             dashboardHero
+            card("Accesso rapido", icon: "square.grid.2x2") {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), alignment: .leading)], alignment: .leading) {
+                    ForEach([Section.models, .memory, .workflows, .connectors]) { destination in
+                        Button { select(destination) } label: {
+                            Label(destination.rawValue, systemImage: destination.icon)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }.buttonStyle(.bordered)
+                    }
+                }
+            }
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 155), spacing: 12, alignment: .top)], spacing: 12) {
                 dashboardTile("Core", value: coreStatus, icon: "cpu", color: coreIsUp ? .green : .orange,
                               destination: .system)
@@ -503,22 +553,21 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                         in: RoundedRectangle(cornerRadius: 16))
             .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(.cyan.opacity(0.20)) }
             let history = records(payload)
-            if history.isEmpty, outgoingMessage == nil {
-                Text("Scrivi la tua prima richiesta.").foregroundStyle(.secondary)
-            }
-            ForEach(history) { item in
-                chatBubble(item["content"] ?? item["text"] ?? item.title, user: item["role"] == "user")
-            }
-            replyFeedback
-            if let sources = lastReply?["sources"] as? [[String: Any]], !sources.isEmpty {
-                card("Fonti dell’ultima risposta", icon: "link") {
-                    ForEach(Array(sources.enumerated()), id: \.offset) { _, source in
-                        if let raw = source["url"] as? String, let url = URL(string: raw),
-                           ["http", "https"].contains(url.scheme ?? "") {
-                            Link(source["title"] as? String ?? raw, destination: url)
-                        }
+            if history.isEmpty, outgoingMessage == nil, activeLoad == nil {
+                card("Inizia una conversazione", icon: "bubble.left.and.bubble.right") {
+                    Text("Scrivi una richiesta o parti da un esempio.").foregroundStyle(.secondary)
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), alignment: .leading)], alignment: .leading) {
+                        promptButton("Organizza una giornata", icon: "calendar",
+                                     prompt: "Aiutami a organizzare la giornata. Chiedimi prima quali sono le mie priorità.")
+                        promptButton("Confronta due opzioni", icon: "arrow.left.arrow.right",
+                                     prompt: "Aiutami a confrontare due opzioni. Chiedimi quali sono e quali criteri contano.")
+                        promptButton("Spiega un concetto", icon: "lightbulb",
+                                     prompt: "Spiegami un concetto con un esempio concreto. Chiedimi quale argomento voglio approfondire.")
                     }
                 }
+            }
+            LazyVStack(alignment: .leading, spacing: 10) {
+                ForEach(history) { item in chatEntry(item) }
             }
             if let confirmation = lastReply?["confirmation"] as? [String: Any] {
                 Button("Esamina l’azione proposta") { pending = Record(confirmation, index: 0) }
@@ -528,6 +577,51 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 ProgressView("JARVIS sta elaborando").controlSize(.small)
             }
         }
+    }
+
+    private func chatEntry(_ item: Record) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            let text = item["content"] ?? item["text"] ?? item.title
+            let user = item["role"] == "user"
+            chatBubble(text, user: user)
+                .contextMenu {
+                    Button("Copia testo", systemImage: "doc.on.doc") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(text, forType: .string)
+                    }
+                    if user {
+                        Button("Riprendi come bozza", systemImage: "square.and.pencil") {
+                            message = text
+                            composerFocused = true
+                        }
+                        .disabled(!message.isEmpty || sending)
+                    }
+                }
+            if let feedback = item.data["feedback"] as? [String: Any], let id = item["task_id"] {
+                replyFeedback(feedback, id: id)
+            }
+            if let sources = item.data["sources"] as? [[String: Any]], !sources.isEmpty {
+                DisclosureGroup("Fonti della risposta") {
+                    ForEach(Array(sources.enumerated()), id: \.offset) { _, source in
+                        if let raw = source["url"] as? String, let url = URL(string: raw),
+                           ["http", "https"].contains(url.scheme ?? "") {
+                            Link(source["title"] as? String ?? raw, destination: url)
+                        }
+                    }
+                }.padding(.horizontal, 12)
+            }
+        }
+    }
+
+    private func promptButton(_ title: String, icon: String, prompt: String) -> some View {
+        Button {
+            message = prompt
+            composerFocused = true
+        } label: {
+            Label(title, systemImage: icon).frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.bordered)
+        .disabled(sending || !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 
     private func chatBubble(_ text: String, user: Bool) -> some View {
@@ -546,34 +640,27 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         .frame(maxWidth: .infinity, alignment: user ? .trailing : .leading)
     }
 
-    private var replyTaskID: String? {
-        (lastReply?["task"] as? [String: Any])?["task_id"] as? String
-    }
-
-    @ViewBuilder private var replyFeedback: some View {
-        if let backend = lastReply?["backend"] as? [String: Any],
-           backend["feedback_available"] as? Bool == true,
-           let id = replyTaskID {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 10) {
-                    replyModel(backend)
-                    Spacer(minLength: 6)
-                    feedbackControls(id)
-                }
-                VStack(alignment: .leading, spacing: 10) {
-                    replyModel(backend)
-                    feedbackControls(id)
-                }
+    private func replyFeedback(_ feedback: [String: Any], id: String) -> some View {
+        let rating = feedback["rating"] as? String
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                replyModel(feedback)
+                Spacer(minLength: 6)
+                feedbackControls(id, rating: rating)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(panel.opacity(0.72), in: RoundedRectangle(cornerRadius: 10))
+            VStack(alignment: .leading, spacing: 8) {
+                replyModel(feedback)
+                feedbackControls(id, rating: rating)
+            }
         }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(panel.opacity(0.72), in: RoundedRectangle(cornerRadius: 10))
     }
 
     private func replyModel(_ backend: [String: Any]) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(providerName(backend["name"] as? String ?? "")).font(.subheadline.weight(.semibold))
+            Text(providerName(backend["provider"] as? String ?? "")).font(.subheadline.weight(.semibold))
             if let model = backend["model"] as? String {
                 Text(model).font(.caption.monospaced()).foregroundStyle(.secondary).lineLimit(1)
             }
@@ -581,14 +668,16 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         .accessibilityElement(children: .combine)
     }
 
-    private func feedbackControls(_ id: String) -> some View {
+    private func feedbackControls(_ id: String, rating: String?) -> some View {
         HStack(spacing: 8) {
-            if savedFeedback != nil {
-                Label("Valutazione salvata", systemImage: "checkmark.circle").foregroundStyle(.green)
+            if ratingTask == id {
+                ProgressView("Salvataggio…").controlSize(.small)
+            } else if let rating {
+                Label(feedbackTitle(rating), systemImage: "checkmark.circle").foregroundStyle(.green)
             } else {
                 Button("Utile", systemImage: "hand.thumbsup") { rateReply(id, "helpful") }
             }
-            Menu(savedFeedback == nil ? "Migliora" : "Modifica valutazione", systemImage: "slider.horizontal.3") {
+            Menu(rating == nil ? "Migliora" : "Modifica valutazione", systemImage: "slider.horizontal.3") {
                 Button("Utile") { rateReply(id, "helpful") }
                 Button("Più breve") { rateReply(id, "concise") }
                 Button("Più dettagliata") { rateReply(id, "detailed") }
@@ -596,33 +685,50 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             }
         }
         .font(.caption)
-        .disabled(feedbackSaving)
+        .disabled(ratingTask != nil || sending)
         .help("JARVIS conserva la categoria e il riferimento alla risposta per adattare questo modello.")
     }
 
+    private func feedbackTitle(_ rating: String?) -> String {
+        switch rating {
+        case "concise": "Più breve"
+        case "detailed": "Più dettagliata"
+        case "precise": "Più precisa"
+        default: "Utile"
+        }
+    }
+
     private func rateReply(_ id: String, _ rating: String) {
-        guard !feedbackSaving else { return }
-        feedbackSaving = true
+        guard ratingTask == nil, !sending else { return }
+        ratingTask = id
+        error = nil
         Task {
-            defer { feedbackSaving = false }
+            defer { ratingTask = nil }
             do {
                 _ = try await core.request("/api/cloud/feedback", method: "POST",
                                            body: ["task_id": id, "rating": rating], timeout: 10)
-                if replyTaskID == id { savedFeedback = rating }
+                if section == .chat { await load(.chat) }
             } catch {
-                if replyTaskID == id { self.error = error.localizedDescription }
+                if section == .chat { self.error = error.localizedDescription }
             }
         }
     }
 
     private var composer: some View {
         VStack(spacing: 8) {
-            Text("Inferenza cloud").font(.caption).foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            HStack {
+                Label("Inferenza cloud", systemImage: "cloud")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Toggle("Includi conversazione recente", isOn: $useCloudContext)
+                    .toggleStyle(.checkbox)
+                    .help("Invia i turni recenti compatibili allo stesso provider per questa richiesta.")
+                    .disabled(sending)
+            }.font(.caption)
             HStack {
                 TextField("Messaggio a JARVIS", text: $message)
                     .textFieldStyle(.roundedBorder).focused($composerFocused).onSubmit(send)
-                Button("Invia", systemImage: "arrow.up") { send() }
+                Button(sending ? "Invio…" : "Invia", systemImage: "arrow.up") { send() }
                     .buttonStyle(.borderedProminent)
                     .disabled(sending || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
@@ -632,10 +738,11 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     private func send() {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !sending else { return }
+        let includeContext = useCloudContext
+        useCloudContext = false
         sending = true
         error = nil
         lastReply = nil
-        savedFeedback = nil
         message = ""
         outgoingMessage = text
         Task {
@@ -645,7 +752,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             }
             do {
                 let result = try await core.request("/api/cloud/chat", method: "POST",
-                                                     body: ["message": text, "provider": "auto"])
+                                                     body: ["message": text, "provider": "auto", "use_context": includeContext])
                 lastReply = result
                 if section == .chat { await load(.chat) }
                 await core.refreshHealth()
@@ -725,19 +832,25 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     }
 
     private var cloudSettings: some View {
+        let entry = records(payload, key: "providers").first { $0.id == provider }
+        return VStack(alignment: .leading, spacing: 14) {
+            providerSettings(entry)
+            adaptationProfiles(entry)
+        }
+    }
+
+    private func providerSettings(_ entry: Record?) -> some View {
         card("Provider cloud", icon: "key") {
             Picker("Provider", selection: $provider) {
                 Text("Ollama Cloud").tag("ollama_cloud")
                 Text("NVIDIA NIM").tag("nvidia_nim")
             }
-            .disabled(testingCloudKey)
             .onChange(of: provider) { _, _ in
                 apiKey = ""
                 cloudModel = ""
                 info = nil
                 error = nil
             }
-            let entry = records(payload, key: "providers").first { $0.id == provider }
             let configured = entry?.data["configured"] as? Bool == true
             let preferred = entry?.data["preferred"] as? Bool == true
             if configured {
@@ -749,22 +862,82 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 LabeledContent("Modello salvato", value: saved)
             }
             TextField("Modello personalizzato (facoltativo)", text: $cloudModel)
+            if let routing = entry?.data["routing"] as? [String: String] {
+                DisclosureGroup("Modelli del catalogo") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        catalogModel("Rapido", id: routing["fast"])
+                        catalogModel("Ragionamento", id: routing["reasoning"])
+                        catalogModel("Codice", id: routing["coding"])
+                        catalogModel("Contesto lungo", id: routing["long"])
+                    }.padding(.top, 6)
+                }
+            }
             ViewThatFits(in: .horizontal) {
                 HStack { saveCloudSettings(configured: configured); testCloudButton(configured: configured) }
                 VStack(alignment: .leading) { saveCloudSettings(configured: configured); testCloudButton(configured: configured) }
             }
             if configured {
-                HStack {
-                    if !preferred {
-                        Button("Usa per la chat") { mutate("/api/cloud", body: ["provider": provider, "use_for_chat": true]) }
+                ViewThatFits(in: .horizontal) {
+                    HStack { providerActions(preferred: preferred, hasOverride: entry?["model_override"] != nil) }
+                    VStack(alignment: .leading) { providerActions(preferred: preferred, hasOverride: entry?["model_override"] != nil) }
+                }
+            }
+        }
+        .disabled(savingCloudSettings || testingCloudKey)
+        .confirmationDialog("Rimuovere la chiave per \(providerName(provider))?",
+                            isPresented: $confirmKeyRemoval, titleVisibility: .visible) {
+            Button("Rimuovi chiave", role: .destructive) { saveCloud(["remove_key": true]) }
+        }
+    }
+
+    @ViewBuilder private func catalogModel(_ title: String, id: String?) -> some View {
+        if let id {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.subheadline.weight(.medium))
+                    Text(id).font(.caption.monospaced()).foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+                Spacer()
+                Button("Seleziona") { cloudModel = id }
+                    .disabled(cloudModel == id)
+                    .accessibilityLabel("Seleziona \(title): \(id)")
+            }
+        }
+    }
+
+    @ViewBuilder private func providerActions(preferred: Bool, hasOverride: Bool) -> some View {
+        if !preferred {
+            Button("Usa per la chat") { saveCloud(["use_for_chat": true]) }
+        }
+        if hasOverride {
+            Button("Ripristina modelli automatici") { saveCloud(["clear_model": true]) }
+        }
+        Button("Rimuovi chiave", role: .destructive) { confirmKeyRemoval = true }
+    }
+
+    private func adaptationProfiles(_ entry: Record?) -> some View {
+        card("Adattamento delle risposte", icon: "slider.horizontal.3") {
+            Text("JARVIS adatta lo stile usando fino a 12 valutazioni recenti per modello. Al provider arriva solo una breve istruzione di stile.")
+                .font(.callout).foregroundStyle(.secondary)
+            let profiles = (entry?.data["feedback_profiles"] as? [[String: Any]]) ?? []
+            if profiles.isEmpty {
+                Label("Valuta una risposta cloud dalla chat per iniziare.", systemImage: "hand.thumbsup")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(Array(profiles.enumerated()), id: \.offset) { _, profile in
+                if let model = profile["model"] as? String {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(model).font(.subheadline.monospaced().weight(.semibold)).textSelection(.enabled)
+                        let count = profile["count"] as? Int ?? 0
+                        let length = profile["length"] as? String ?? "standard"
+                        let style = length == "standard" ? "Stile standard" : feedbackTitle(length)
+                        let precision = profile["precision"] as? Bool == true ? " · Più precisa" : ""
+                        Text("\(count) \(count == 1 ? "valutazione" : "valutazioni") · \(style)\(precision)")
+                            .font(.caption).foregroundStyle(.secondary)
                     }
-                    if entry?["model_override"] != nil {
-                        Button("Ripristina modelli automatici") { mutate("/api/cloud", body: ["provider": provider, "clear_model": true]) }
-                    }
-                    Button("Rimuovi chiave", role: .destructive) {
-                        mutate("/api/cloud", body: ["provider": provider, "remove_key": true])
-                    }
-                }.disabled(testingCloudKey)
+                }
             }
         }
     }
@@ -772,16 +945,41 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     private func saveCloudSettings(configured: Bool) -> some View {
         let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         let model = cloudModel.trimmingCharacters(in: .whitespacesAndNewlines)
-        return Button(key.isEmpty ? "Salva modello" : "Salva chiave") {
-            var body: [String: Any] = ["provider": provider, "use_for_chat": true]
-            if !key.isEmpty { body["key"] = key }
-            if !model.isEmpty { body["model"] = model }
-            apiKey = ""
-            cloudModel = ""
-            mutate("/api/cloud", body: body)
+        let title = key.isEmpty ? "Salva modello" : "Salva chiave"
+        return Button(savingCloudSettings ? "Salvataggio…" : title, systemImage: "checkmark") {
+            var changes: [String: Any] = [:]
+            if !key.isEmpty { changes["key"] = key }
+            if !model.isEmpty { changes["model"] = model }
+            saveCloud(changes, clearFields: true)
         }
         .buttonStyle(.borderedProminent)
-        .disabled(testingCloudKey || (key.isEmpty && (!configured || model.isEmpty)))
+        .disabled(key.isEmpty && (!configured || model.isEmpty))
+    }
+
+    private func saveCloud(_ changes: [String: Any], clearFields: Bool = false) {
+        guard !savingCloudSettings, !testingCloudKey else { return }
+        let selected = provider
+        var body = changes
+        body["provider"] = selected
+        savingCloudSettings = true
+        error = nil
+        info = nil
+        Task {
+            defer { savingCloudSettings = false }
+            do {
+                _ = try await core.request("/api/cloud", method: "POST", body: body)
+                if clearFields && provider == selected {
+                    apiKey = ""
+                    cloudModel = ""
+                }
+                if section == .models {
+                    await load(.models)
+                    if section == .models { info = "Impostazioni cloud salvate." }
+                }
+            } catch {
+                if section == .models { self.error = error.localizedDescription }
+            }
+        }
     }
 
     private func testCloudButton(configured: Bool) -> some View {

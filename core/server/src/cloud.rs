@@ -119,38 +119,59 @@ impl Provider {
 
 /// Scelte esplicite del proprietario. Al provider arrivano solo istruzioni predefinite.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum QualityPreference {
+pub(crate) struct QualityPreference {
+    length: LengthPreference,
+    precision: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum LengthPreference {
     #[default]
     Standard,
     Concise,
     Detailed,
-    Precise,
 }
 
 impl QualityPreference {
     pub(crate) fn from_counts(positive: u32, concise: u32, detailed: u32, precise: u32) -> Self {
-        [
-            (precise, Self::Precise),
-            (detailed, Self::Detailed),
-            (concise, Self::Concise),
-        ]
-        .into_iter()
-        .fold((positive, Self::Standard), |best, candidate| {
-            if candidate.0 > best.0 {
-                candidate
-            } else {
-                best
-            }
-        })
-        .1
+        let length = if concise > detailed.max(positive) {
+            LengthPreference::Concise
+        } else if detailed > concise.max(positive) {
+            LengthPreference::Detailed
+        } else {
+            LengthPreference::Standard
+        };
+        Self {
+            length,
+            precision: precise > positive,
+        }
     }
 
-    fn guidance(self) -> &'static str {
-        match self {
-            Self::Standard => "",
-            Self::Concise => "Se la richiesta non indica un formato, rispondi prima con la conclusione e limita le ripetizioni.",
-            Self::Detailed => "Se la richiesta non indica un formato, aggiungi passaggi verificabili e un esempio quando pertinente.",
-            Self::Precise => "Dichiara le ipotesi decisive e separa ciò che è verificato da ciò che richiede informazioni aggiuntive.",
+    pub(crate) fn length_id(self) -> &'static str {
+        match self.length {
+            LengthPreference::Standard => "standard",
+            LengthPreference::Concise => "concise",
+            LengthPreference::Detailed => "detailed",
+        }
+    }
+
+    pub(crate) fn emphasizes_precision(self) -> bool {
+        self.precision
+    }
+
+    fn length_guidance(self) -> &'static str {
+        match self.length {
+            LengthPreference::Standard => "",
+            LengthPreference::Concise => "Se la richiesta non indica un formato, rispondi prima con la conclusione e limita le ripetizioni. ",
+            LengthPreference::Detailed => "Se la richiesta non indica un formato, aggiungi passaggi verificabili e un esempio quando pertinente. ",
+        }
+    }
+
+    fn precision_guidance(self) -> &'static str {
+        if self.precision {
+            "Dichiara le ipotesi decisive e separa ciò che è verificato da ciò che richiede informazioni aggiuntive."
+        } else {
+            ""
         }
     }
 }
@@ -661,7 +682,7 @@ fn payload(
     let output_tokens = (base_tokens + (base_tokens / 4) * usize::from(level))
         .min(32_000usize.saturating_sub(input_tokens + 1_500).max(256));
     let mut messages = vec![
-        json!({"role": "system", "content": format!("{} {} {}", concat!(
+        json!({"role": "system", "content": format!("{} {} {}{}", concat!(
         "Sei JARVIS, un assistente originale dal tono calmo, competente e cordiale: professionale, conciso, mai servile, con ironia discreta solo quando naturale. ",
         "Rispondi nella lingua dell’utente, inizia dal risultato e approfondisci quanto serve. Il formato e il livello di dettaglio richiesti esplicitamente hanno priorità sulle preferenze di stile. ",
         "Usa i turni precedenti solo se pertinenti. Una correzione esplicita dell’utente aggiorna il requisito corrispondente. ",
@@ -678,7 +699,7 @@ fn payload(
         "Per compiti composti procedi per passi: proponi uno strumento alla volta, controlla il suo esito e continua solo quando serve. ",
         "Non dichiarare di aver completato un’azione senza un esito riuscito; se una capacità o un collegamento non è disponibile, spiega il limite e offri un’alternativa concreta. ",
         "JARVIS compone la risposta dopo la verifica della chiamata."
-    ), route.guidance(), preference.guidance())}),
+    ), route.guidance(), preference.length_guidance(), preference.precision_guidance())}),
     ];
     for turn in history {
         messages.push(json!({"role": "user", "content": turn.user}));
@@ -945,7 +966,7 @@ mod tests {
             message: prompt.into(),
             target,
             tools: vec![],
-            preferences: [QualityPreference::Standard; 2],
+            preferences: [QualityPreference::default(); 2],
             limiter: Default::default(),
         };
         let result = request.execute_at(&endpoint, false);
@@ -1075,7 +1096,7 @@ mod tests {
             "richiesta",
             &[],
             &[],
-            (Route::Fast, QualityPreference::Standard, level),
+            (Route::Fast, QualityPreference::default(), level),
         );
         assert_eq!(body["options"]["num_predict"], 2304);
         for _ in 0..2 {
@@ -1086,7 +1107,7 @@ mod tests {
 
     #[test]
     fn feedback_maps_only_to_a_predefined_model_instruction() {
-        let preference = QualityPreference::from_counts(0, 1, 0, 0);
+        let preference = QualityPreference::from_counts(0, 1, 0, 1);
         let answer = payload(
             Provider::Ollama,
             "fixture",
@@ -1099,9 +1120,17 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("limita le ripetizioni"));
+        assert!(answer["messages"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Dichiara le ipotesi decisive"));
+        assert_eq!(
+            QualityPreference::from_counts(0, 1, 1, 0),
+            QualityPreference::default()
+        );
         assert_eq!(
             QualityPreference::from_counts(1, 1, 0, 0),
-            QualityPreference::Standard
+            QualityPreference::default()
         );
     }
 
@@ -1219,7 +1248,7 @@ mod tests {
                 "E il client?",
                 &history,
                 &[],
-                (Route::Fast, QualityPreference::Standard, 0),
+                (Route::Fast, QualityPreference::default(), 0),
             );
             let messages = body["messages"].as_array().unwrap();
             assert_eq!(messages.len(), 4);
@@ -1244,7 +1273,7 @@ mod tests {
             "Richiesta",
             &[],
             &[],
-            (Route::Fast, QualityPreference::Standard, 0),
+            (Route::Fast, QualityPreference::default(), 0),
         );
         let system = body["messages"][0]["content"].as_str().unwrap();
         for instruction in [
@@ -1270,7 +1299,7 @@ mod tests {
             "Richiesta corrente",
             &[],
             &tools,
-            (Route::Fast, QualityPreference::Standard, 0),
+            (Route::Fast, QualityPreference::default(), 0),
         );
         assert_eq!(body["messages"].as_array().unwrap().len(), 2);
         assert_eq!(body["tools"][0]["function"]["name"], "fs__read");
