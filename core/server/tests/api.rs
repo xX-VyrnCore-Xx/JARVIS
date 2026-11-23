@@ -21,14 +21,30 @@ struct Env {
 }
 
 fn env() -> Env {
+    env_with_worker_env(vec![])
+}
+
+fn env_with_worker_env(worker_env: Vec<(String, String)>) -> Env {
     let data = std::env::temp_dir().join(format!("jarvis-test-{}", uuid::Uuid::new_v4().simple()));
+    env_with_data_and_worker_env(data, worker_env)
+}
+
+fn env_with_data_and_worker_env(data: PathBuf, worker_env: Vec<(String, String)>) -> Env {
     Env {
-        app: api::router(api::state(test_core(&data), TOKEN.into(), PORT)),
+        app: api::router(api::state(
+            test_core_with_worker_env(&data, worker_env),
+            TOKEN.into(),
+            PORT,
+        )),
         data,
     }
 }
 
 fn test_core(data: &std::path::Path) -> Jarvis {
+    test_core_with_worker_env(data, vec![])
+}
+
+fn test_core_with_worker_env(data: &std::path::Path, worker_env: Vec<(String, String)>) -> Jarvis {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
     let cfg = Config {
         host: "127.0.0.1".parse().unwrap(),
@@ -38,7 +54,7 @@ fn test_core(data: &std::path::Path) -> Jarvis {
         ai_dir: root.join("ai"),
         delegation_timeout_ms: 30_000,
         voice_engine: Some("fake".into()),
-        worker_env: vec![],
+        worker_env,
         scheduler_tick_s: 20,
         token: TOKEN.into(),
         web: jarvis_core::web::WebConfig::default(),
@@ -553,6 +569,7 @@ fn cloud_context_requires_opt_in_and_stays_with_the_provider() {
     };
     let standalone = ask(&core, false);
     assert_eq!(standalone.target.provider.id(), "ollama_cloud");
+    assert_eq!(standalone.target.key, "synthetic");
     assert!(standalone.target.history.is_empty());
     let connected = ask(&core, true);
     assert_eq!(connected.target.provider.id(), "nvidia_nim");
@@ -904,6 +921,73 @@ async fn cloud_chat_keeps_explicit_workspace_commands_local() {
         .as_str()
         .unwrap()
         .contains("chiave API"));
+}
+
+#[tokio::test]
+async fn cloud_chat_uses_provider_when_local_command_parser_is_unavailable() {
+    let data = std::env::temp_dir().join(format!(
+        "jarvis-cloud-parser-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let worker_env = vec![
+        ("JARVIS_FAULT_INJECTION".into(), "1".into()),
+        ("JARVIS_FAULT".into(), "crash-once".into()),
+        (
+            "JARVIS_FAULT_MARKER".into(),
+            data.join("fault.marker").to_string_lossy().into_owned(),
+        ),
+    ];
+    let e = env_with_data_and_worker_env(data.clone(), worker_env);
+    let (status, response) = e
+        .api(
+            "POST",
+            "/api/cloud/chat",
+            Some(json!({
+                "provider": "auto", "message": "Raccontami qualcosa di interessante."
+            })),
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{response}");
+    assert!(
+        response["error"]["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("Configura la chiave API"),
+        "la richiesta ha superato il parser locale e raggiunto la configurazione cloud: {response}"
+    );
+    drop(e);
+    let _ = std::fs::remove_dir_all(data);
+}
+
+#[tokio::test]
+async fn cloud_chat_keeps_local_facts_offline_when_the_parser_fails() {
+    let data = std::env::temp_dir().join(format!(
+        "jarvis-cloud-local-{}",
+        uuid::Uuid::new_v4().simple()
+    ));
+    let worker_env = vec![
+        ("JARVIS_FAULT_INJECTION".into(), "1".into()),
+        ("JARVIS_FAULT".into(), "crash-once".into()),
+        (
+            "JARVIS_FAULT_MARKER".into(),
+            data.join("fault.marker").to_string_lossy().into_owned(),
+        ),
+    ];
+    let e = env_with_data_and_worker_env(data.clone(), worker_env);
+    let (status, response) = e
+        .api(
+            "POST",
+            "/api/cloud/chat",
+            Some(json!({"provider":"auto", "message":"che ore sono"})),
+        )
+        .await;
+
+    assert_eq!(status, StatusCode::OK, "{response}");
+    assert_eq!(response["task"]["state"], "failed");
+    assert!(response["backend"].is_null());
+    drop(e);
+    let _ = std::fs::remove_dir_all(data);
 }
 
 #[tokio::test]

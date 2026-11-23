@@ -44,6 +44,8 @@ Queste istruzioni orientano i modelli configurati; non modificano né addestrano
 
 Il Core espone `GET /api/cloud` per lo stato e `POST /api/cloud` per configurare o rimuovere un provider. La richiesta proprietario può includere `provider` (`ollama_cloud` o `nvidia_nim`), `key` e `model`, oppure `remove_key: true`. Le chiavi sono conservate nel secret store del Core; il modello selezionato è salvato nei dati locali. La sezione desktop **Modelli AI**, disponibile solo sul Core locale, configura e rimuove le chiavi usando queste API e non le mostra dopo il salvataggio. In Modelli AI, **Testa chiave** invia un breve messaggio sintetico al provider selezionato. La verifica può consumare una richiesta e non include la conversazione. **Usa per la chat** imposta il provider per i turni automatici. Se configurato, il modello personalizzato ha priorità sui modelli automatici.
 
+La chat cloud tenta prima di riconoscere i comandi locali. Se il parser Python non è disponibile, una richiesta generale prosegue verso il provider configurato; le richieste di fatti locali, i riferimenti alle fonti e le azioni desktop riconosciute dal Core restano locali e riportano l'errore senza inviare il testo al provider.
+
 Il client desktop nativo usa `POST /api/chat/stream` con risposta NDJSON. Il bridge inoltra gli eventuali envelope `delegation.progress` seguiti da un esito `done` o `error`. Il worker a regole risponde in un blocco. I client che leggono un esito completo usano `POST /api/chat`.
 
 ## Voce
