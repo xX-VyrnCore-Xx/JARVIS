@@ -1,0 +1,60 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "biz.breakeven",
+  "version": "1.0.0",
+  "summary": "Calcola il punto di pareggio in unità e ricavi da costi fissi, prezzo e costo variabile (con profitto obiettivo e margine di sicurezza opzionali)",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "fixed_costs",
+      "price",
+      "variable_cost"
+    ],
+    "properties": {
+      "fixed_costs": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1000000000000.0
+      },
+      "price": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "maximum": 1000000000000.0
+      },
+      "variable_cost": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1000000000000.0
+      },
+      "target_profit": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1000000000000.0
+      },
+      "expected_units": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "maximum": 1000000000000.0
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "none",
+  "risk": "low",
+  "permissions": [
+    "core.compute:execute"
+  ],
+  "errors": [
+    "biz.invalid"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

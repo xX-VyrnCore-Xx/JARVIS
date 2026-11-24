@@ -1,0 +1,76 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "biz.priorities",
+  "version": "1.0.0",
+  "summary": "Classifica iniziative con il metodo RICE (portata × impatto × fiducia ÷ impegno) per scegliere le priorità",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "items"
+    ],
+    "properties": {
+      "items": {
+        "type": "array",
+        "minItems": 1,
+        "maxItems": 30,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "name",
+            "reach",
+            "impact",
+            "confidence_percent",
+            "effort"
+          ],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 80
+            },
+            "reach": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000000000000.0
+            },
+            "impact": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1000
+            },
+            "confidence_percent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "effort": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1000000000000.0
+            }
+          }
+        }
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "none",
+  "risk": "low",
+  "permissions": [
+    "core.compute:execute"
+  ],
+  "errors": [
+    "biz.invalid"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

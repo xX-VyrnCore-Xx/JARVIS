@@ -1,0 +1,49 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "biz.npv",
+  "version": "1.0.0",
+  "summary": "Calcola VAN, TIR, payback e indice di profittabilità di un investimento da una serie di flussi di cassa (il primo è l'investimento iniziale)",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "discount_rate_percent",
+      "cashflows"
+    ],
+    "properties": {
+      "discount_rate_percent": {
+        "type": "number",
+        "minimum": -99,
+        "maximum": 1000
+      },
+      "cashflows": {
+        "type": "array",
+        "minItems": 2,
+        "maxItems": 60,
+        "items": {
+          "type": "number",
+          "minimum": -1000000000000.0,
+          "maximum": 1000000000000.0
+        }
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "none",
+  "risk": "low",
+  "permissions": [
+    "core.compute:execute"
+  ],
+  "errors": [
+    "biz.invalid"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

@@ -1,0 +1,56 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "biz.unit_economics",
+  "version": "1.0.0",
+  "summary": "Calcola LTV, rapporto LTV/CAC e payback del costo di acquisizione cliente",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "arpu_monthly",
+      "gross_margin_percent",
+      "monthly_churn_percent",
+      "cac"
+    ],
+    "properties": {
+      "arpu_monthly": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "maximum": 1000000000000.0
+      },
+      "gross_margin_percent": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "maximum": 100
+      },
+      "monthly_churn_percent": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "maximum": 100
+      },
+      "cac": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1000000000000.0
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "none",
+  "risk": "low",
+  "permissions": [
+    "core.compute:execute"
+  ],
+  "errors": [
+    "biz.invalid"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

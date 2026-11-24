@@ -1,0 +1,55 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "biz.cagr",
+  "version": "1.0.0",
+  "summary": "Calcola il tasso di crescita annuo composto tra due valori, con proiezione opzionale",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "start",
+      "end",
+      "years"
+    ],
+    "properties": {
+      "start": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "maximum": 1000000000000.0
+      },
+      "end": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "maximum": 1000000000000.0
+      },
+      "years": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "maximum": 200
+      },
+      "project_years": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 100
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "none",
+  "risk": "low",
+  "permissions": [
+    "core.compute:execute"
+  ],
+  "errors": [
+    "biz.invalid"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

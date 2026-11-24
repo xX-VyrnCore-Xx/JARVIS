@@ -167,6 +167,13 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
         "it.subnet" => crate::expert::subnet(s("cidr")),
         "biz.vat" => crate::expert::vat(args),
         "biz.loan" => crate::expert::loan(args),
+        "biz.margin" => crate::executive::margin(args),
+        "biz.breakeven" => crate::executive::breakeven(args),
+        "biz.npv" => crate::executive::npv(args),
+        "biz.runway" => crate::executive::runway(args),
+        "biz.unit_economics" => crate::executive::unit_economics(args),
+        "biz.priorities" => crate::executive::priorities(args),
+        "biz.cagr" => crate::executive::cagr(args),
         "units.convert" => {
             crate::toolbox::convert(args["value"].as_f64().unwrap_or(0.0), s("from"), s("to"))
         }

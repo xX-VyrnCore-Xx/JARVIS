@@ -128,7 +128,7 @@
           }
         }
       },
-      "description": "Limite portato da 32 a 64 (ADR-0046) e da 64 a 96 (ADR-0121), aggiunte compatibili: il Core ne propone comunque al massimo 64 per richiesta."
+      "description": "Limite portato da 32 a 64 (ADR-0046) e da 64 a 96 (ADR-0121), aggiunte compatibili: il Core ne propone comunque al massimo 80 per richiesta (ADR-0132)."
     },
     "limits": {
       "type": "object",

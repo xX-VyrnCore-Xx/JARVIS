@@ -213,6 +213,39 @@ def _describe_tool_result(result: dict) -> str:
     if tool == "biz.loan":
         return (f"Rata mensile {output.get('monthly_payment'):.2f} € per {output.get('months')} mesi: "
                 f"totale {output.get('total_paid'):.2f} €, di cui interessi {output.get('total_interest'):.2f} €.")
+    if tool == "biz.margin":
+        markup = output.get("markup_percent")
+        return (f"Costo {output.get('cost'):.2f} €, prezzo {output.get('price'):.2f} €: utile {output.get('profit'):.2f} €, "
+                f"margine {output.get('margin_percent'):.2f}%" + (f", ricarico {markup:.2f}%." if markup is not None else "."))
+    if tool == "biz.breakeven":
+        safety = output.get("margin_of_safety_percent")
+        return (f"Pareggio a {output.get('break_even_units')} unità (ricavi {output.get('break_even_revenue'):.2f} €); "
+                f"margine di contribuzione {output.get('contribution_margin'):.2f} € ({output.get('contribution_margin_percent'):.2f}%)"
+                + (f"; margine di sicurezza {safety:.2f}%." if safety is not None else "."))
+    if tool == "biz.npv":
+        irr = output.get("irr_percent")
+        payback = output.get("payback_periods")
+        return (f"VAN {output.get('npv'):.2f}; TIR " + (f"{irr:.2f}%" if irr is not None else "non definito")
+                + "; payback " + (f"{payback} periodi" if payback is not None else "non raggiunto")
+                + f". {output.get('verdict')}")
+    if tool == "biz.runway":
+        months = output.get("runway_months")
+        head = (f"Autonomia di cassa: circa {months} mesi" if months is not None
+                else "Con questi numeri l'azienda è sostenibile entro 10 anni")
+        return f"{head} (consumo netto mensile {output.get('net_burn_monthly'):.2f} €). Stato: {output.get('status')}."
+    if tool == "biz.unit_economics":
+        ratio = output.get("ltv_cac_ratio")
+        return (f"LTV {output.get('ltv'):.2f} € su {output.get('customer_lifetime_months')} mesi di vita cliente"
+                + (f", LTV/CAC {ratio:.2f}, payback del CAC {output.get('cac_payback_months')} mesi" if ratio is not None else "")
+                + f". {output.get('verdict')}")
+    if tool == "biz.priorities":
+        lines = [f"{r['rank']}. {r['name']} — punteggio {r['score']}" for r in output.get("ranking", [])]
+        return "Priorità (RICE):\n" + "\n".join(lines)
+    if tool == "biz.cagr":
+        text = f"Crescita annua composta {output.get('cagr_percent'):.2f}% (crescita totale {output.get('total_growth_percent'):.2f}%)."
+        if output.get("projected_value") is not None:
+            text += f" Proiezione a {output.get('projection_years')} anni: {output.get('projected_value'):.2f}."
+        return text
     if tool == "sandbox.prepare":
         return "Sto costruendo l'immagine della sandbox in background: puoi controllare l'avanzamento con «stato sandbox»."
     if tool == "sandbox.import":
@@ -500,6 +533,22 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
     (re.compile(r"^\s*(?:rata|mutuo|finanziamento)\D{0,20}?(\d[\d.,]*)\s*(?:€|euro)?\s+al\s+(\d+(?:[.,]\d+)?)\s*%\s+(?:in|per)\s+(\d+)\s+(mesi|anni)\s*$", re.I), "biz.loan",
      lambda m: {"principal": _it_number(m[1]), "annual_rate_percent": _it_number(m[2]),
                 "months": int(m[3]) * (12 if m[4].lower() == "anni" else 1)}),
+    # Direzione aziendale (ADR-0132): calcoli di CEO e CFO, sempre da strumento.
+    (re.compile(r"^\s*(?:margine|markup|ricarico)\s+(?:con\s+)?costo\s+(\d[\d.,]*)\s*(?:€|euro)?\s+(?:e\s+)?prezzo\s+(\d[\d.,]*)\s*(?:€|euro)?\s*$", re.I), "biz.margin",
+     lambda m: {"cost": _it_number(m[1]), "price": _it_number(m[2])}),
+    (re.compile(r"^\s*prezzo\s+(?:per\s+)?margine\s+(\d[\d.,]*)\s*%\s+(?:con\s+)?costo\s+(\d[\d.,]*)\s*(?:€|euro)?\s*$", re.I), "biz.margin",
+     lambda m: {"cost": _it_number(m[2]), "target_margin_percent": _it_number(m[1])}),
+    (re.compile(r"^\s*(?:punto di pareggio|break[- ]?even)\s*:?\s*costi fissi\s+(\d[\d.,]*)\s*(?:€|euro)?\s+prezzo\s+(\d[\d.,]*)\s*(?:€|euro)?\s+costo variabile\s+(\d[\d.,]*)\s*(?:€|euro)?\s*$", re.I), "biz.breakeven",
+     lambda m: {"fixed_costs": _it_number(m[1]), "price": _it_number(m[2]), "variable_cost": _it_number(m[3])}),
+    (re.compile(r"^\s*runway\s*:?\s*cassa\s+(\d[\d.,]*)\s*(?:€|euro)?\s+costi\s+(\d[\d.,]*)\s*(?:€|euro)?(?:\s+ricavi\s+(\d[\d.,]*)\s*(?:€|euro)?)?\s*$", re.I), "biz.runway",
+     lambda m: {"cash": _it_number(m[1]), "monthly_costs": _it_number(m[2]), **({"monthly_revenue": _it_number(m[3])} if m[3] else {})}),
+    (re.compile(r"^\s*cagr\s+da\s+(\d[\d.,]*)\s+a\s+(\d[\d.,]*)\s+in\s+(\d[\d.,]*)\s+anni\s*$", re.I), "biz.cagr",
+     lambda m: {"start": _it_number(m[1]), "end": _it_number(m[2]), "years": _it_number(m[3])}),
+    (re.compile(r"^\s*unit economics\s*:?\s*arpu\s+(\d[\d.,]*)\s+margine\s+(\d[\d.,]*)\s*%\s+churn\s+(\d[\d.,]*)\s*%\s+cac\s+(\d[\d.,]*)\s*$", re.I), "biz.unit_economics",
+     lambda m: {"arpu_monthly": _it_number(m[1]), "gross_margin_percent": _it_number(m[2]),
+                "monthly_churn_percent": _it_number(m[3]), "cac": _it_number(m[4])}),
+    (re.compile(r"^\s*(?:van|npv)\s+tasso\s+(\d[\d.,]*)\s*%\s+flussi\s+(-?[\d.,]+(?:\s*;\s*-?[\d.,]+)+)\s*$", re.I), "biz.npv",
+     lambda m: {"discount_rate_percent": _it_number(m[1]), "cashflows": [_it_number(x) for x in m[2].split(";")]}),
     # Terminale sandbox (ADR-0105): isolato, senza conferma per comando.
     (re.compile(r"^\s*(?:esegui\s+(?:nella|in)\s+sandbox|sandbox)\s*:\s*(\S.*)$", re.I | re.S), "sandbox.run",
      lambda m: {"command": m[1].strip()[:4000]}),

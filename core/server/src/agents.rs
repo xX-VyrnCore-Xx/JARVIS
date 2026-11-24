@@ -46,9 +46,9 @@ pub const SPECIALISTS: [Agent; 7] = [
     },
     Agent {
         name: "business",
-        role: "Aziende: calcola con gli strumenti, separa fatti, ipotesi e stime, chiudi con opzioni e prossimi passi. Niente pareri legali, fiscali o contabili vincolanti.",
-        keywords: &[" iva ", "l'iva", "mutuo", "finanziamento", "rata del", "business plan", "analisi aziendale", "piano aziendale", "margine", "kpi", "preventivo", "bilancio", "procedura aziendale", "fornitori"],
-        tools: &["biz.vat", "biz.loan", "math.calc", "date.calc", "notes.add", "notes.list", "notes.search", "todo.add", "todo.list", "fs.read", "fs.list", "fs.search", "web.search"],
+        role: "Direzione aziendale (CEO/CFO): parti dalla decisione, calcola con gli strumenti, confronta opzioni con numeri e rischi, chiudi con raccomandazione e scadenze. Niente pareri legali vincolanti.",
+        keywords: &[" iva ", "l'iva", "mutuo", "finanziamento", "rata del", "business plan", "analisi aziendale", "piano aziendale", "margine", "kpi", "preventivo", "bilancio", "procedura aziendale", "fornitori", "break even", "break-even", "pareggio", "markup", "ricarico", " roi ", " van ", " tir ", "payback", "runway", "burn rate", "unit economics", " cac ", " ltv ", "churn", "cagr", "cash flow", "flusso di cassa", "ebitda", "fatturato", "ricavi", "budget", "pricing", "prezzo di vendita", "strategia aziendale", "piano strategico", "analisi swot", " okr", "investitor", "consiglio di amministrazione", "verbale", "ordine del giorno", "piano commerciale", "forecast", "scenario aziendale"],
+        tools: &["biz.vat", "biz.loan", "biz.margin", "biz.breakeven", "biz.npv", "biz.runway", "biz.unit_economics", "biz.priorities", "biz.cagr", "math.calc", "date.calc", "notes.add", "notes.list", "notes.search", "todo.add", "todo.list", "fs.read", "fs.list", "fs.search", "web.search"],
     },
     Agent {
         name: "coding",

@@ -222,7 +222,10 @@ impl Route {
         ]
         .iter()
         .any(|term| text.contains(term));
+        let business_topic =
+            crate::agents::route(prompt).is_some_and(|agent| agent.name == "business");
         let complex = prompt_tokens >= 420
+            || (business_topic && prompt_tokens >= 80)
             || needs_steps
             || prompt
                 .lines()
@@ -701,7 +704,22 @@ fn retry_after(raw: Option<&str>, now: chrono::DateTime<chrono::Utc>) -> Duratio
 }
 
 // Le proposte remote sono limitate a calcoli senza accesso a dati locali o alla rete.
-pub const TOOLS: &[&str] = &["date.calc", "math.calc", "text.count", "units.convert"];
+pub const TOOLS: &[&str] = &[
+    "date.calc",
+    "math.calc",
+    "text.count",
+    "units.convert",
+    // Calcoli di direzione aziendale (ADR-0132): le cifre devono venire da uno strumento, non dal modello.
+    "biz.vat",
+    "biz.loan",
+    "biz.margin",
+    "biz.breakeven",
+    "biz.npv",
+    "biz.runway",
+    "biz.unit_economics",
+    "biz.priorities",
+    "biz.cagr",
+];
 
 pub struct Function {
     pub name: String,
@@ -1053,7 +1071,7 @@ fn payload(
         "Se una richiesta è vaga ma una lettura è chiaramente la più probabile, rispondi su quella dichiarandola in una riga invece di fare domande a vuoto. ",
         "Per errori e limiti degli strumenti spiega in italiano semplice cosa è successo e cosa fare ora, senza codici tecnici né scuse. ",
         "JARVIS compone la risposta dopo la verifica della chiamata."
-    ), format!("Data e ora locali: {}. {}", chrono::Local::now().format("%d/%m/%Y %H:%M"), crate::persona::current_guidance()), route.guidance(), preference.length_guidance(), preference.precision_guidance())}),
+    ), format!("Data e ora locali: {}. {}", chrono::Local::now().format("%d/%m/%Y %H:%M"), crate::persona::current_guidance()), format!("{}{}", route.guidance(), executive_guidance(prompt)), preference.length_guidance(), preference.precision_guidance())}),
     ];
     for turn in history {
         messages.push(json!({"role": "user", "content": turn.user}));
@@ -1164,6 +1182,16 @@ fn classify_model_rejection(status: u16, reader: impl Read) -> Failure {
     }
 }
 
+/// Istruzioni aggiuntive per le richieste di direzione aziendale (ADR-0132): formato da consulente di direzione
+/// e calcoli sempre tramite strumenti.
+fn executive_guidance(prompt: &str) -> &'static str {
+    if crate::agents::route(prompt).is_some_and(|agent| agent.name == "business") {
+        " Contesto direzionale: rispondi come un consulente di direzione. Apri con la raccomandazione in una riga; poi numeri e ipotesi, le opzioni con vantaggi e svantaggi, i rischi principali e i prossimi passi con responsabile e scadenza. Ogni cifra calcolata passa da uno strumento biz.* o math.calc, mai a memoria. Per aliquote, norme e obblighi dichiara che non è un parere vincolante."
+    } else {
+        ""
+    }
+}
+
 pub(crate) fn may_need_calculation(message: &str) -> bool {
     let text = message.to_lowercase();
     text.split(|character: char| !character.is_alphabetic())
@@ -1178,6 +1206,24 @@ pub(crate) fn may_need_calculation(message: &str) -> bool {
                     | "calculate"
                     | "convert"
                     | "percentage"
+                    | "margine"
+                    | "markup"
+                    | "ricarico"
+                    | "pareggio"
+                    | "breakeven"
+                    | "npv"
+                    | "van"
+                    | "tir"
+                    | "irr"
+                    | "payback"
+                    | "runway"
+                    | "ltv"
+                    | "cac"
+                    | "cagr"
+                    | "iva"
+                    | "mutuo"
+                    | "rata"
+                    | "roi"
             )
         })
 }
@@ -1874,6 +1920,44 @@ mod tests {
                 json!({"role":"assistant","content":"Gestisce i tool."})
             );
             assert_eq!(messages[3], json!({"role":"user","content":"E il client?"}));
+        }
+    }
+
+    #[test]
+    fn business_requests_get_executive_guidance_and_calculation_tools() {
+        let prompt =
+            "Calcola il punto di pareggio: costi fissi 10000, prezzo 50, costo variabile 30";
+        assert!(may_need_calculation(prompt));
+        assert!(may_need_calculation(
+            "Qual è il ROI di questo investimento?"
+        ));
+        assert!(!may_need_calculation("Cos’è una variabile?"));
+        let body = payload(
+            Provider::Ollama,
+            "test",
+            prompt,
+            &[],
+            &[],
+            (Route::Fast, QualityPreference::default(), 0),
+        );
+        let system = body["messages"][0]["content"].as_str().unwrap();
+        assert!(system.contains("consulente di direzione"));
+        let plain = payload(
+            Provider::Ollama,
+            "test",
+            "Cos’è una variabile?",
+            &[],
+            &[],
+            (Route::Fast, QualityPreference::default(), 0),
+        );
+        assert!(!plain["messages"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("consulente di direzione"));
+        // Ogni strumento aziendale esposto al cloud esiste nel catalogo.
+        let catalog = crate::catalog::Catalog::load().unwrap();
+        for tool in TOOLS {
+            assert!(catalog.get(tool).is_some(), "{tool}");
         }
     }
 

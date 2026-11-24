@@ -35,6 +35,8 @@ const CONTEXT_CHARS: usize = 15_000;
 const MEMORY_CHARS: usize = 3000;
 /// Lunghezza massima dei turni più vecchi: la richiesta corrente resta intera.
 const OLD_TURN_CHARS: usize = 1200;
+/// Strumenti proposti al massimo in una delega (il contratto ne ammette 96): 64 non bastavano più dopo ADR-0132.
+const MAX_DELEGATED_TOOLS: usize = 80;
 const MAX_MESSAGE: usize = 8000;
 
 #[derive(Debug)]
@@ -517,7 +519,7 @@ impl Jarvis {
                     && (t.name() != "n8n.create" || self.n8n.enabled())
             })
             .chain(ranked.into_iter().take(16))
-            .take(64)
+            .take(MAX_DELEGATED_TOOLS)
             .collect()
     }
 

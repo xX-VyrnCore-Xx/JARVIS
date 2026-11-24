@@ -80,6 +80,14 @@ class OfflineBackend(unittest.TestCase):
             "iva al 22% su 1.000,50": ("biz.vat", {"amount": 1000.5, "rate": 22.0, "mode": "add"}),
             "iva 10% scorporo da 110": ("biz.vat", {"amount": 110.0, "rate": 10.0, "mode": "remove"}),
             "rata mutuo 100.000 € al 3,5% in 20 anni": ("biz.loan", {"principal": 100000.0, "annual_rate_percent": 3.5, "months": 240}),
+            "margine costo 60 € prezzo 100 €": ("biz.margin", {"cost": 60.0, "price": 100.0}),
+            "prezzo per margine 40% costo 60": ("biz.margin", {"cost": 60.0, "target_margin_percent": 40.0}),
+            "punto di pareggio costi fissi 10.000 € prezzo 50 costo variabile 30": ("biz.breakeven", {"fixed_costs": 10000.0, "price": 50.0, "variable_cost": 30.0}),
+            "runway cassa 120.000 costi 30.000 ricavi 10.000": ("biz.runway", {"cash": 120000.0, "monthly_costs": 30000.0, "monthly_revenue": 10000.0}),
+            "runway cassa 50000 costi 30000": ("biz.runway", {"cash": 50000.0, "monthly_costs": 30000.0}),
+            "cagr da 100 a 200 in 5 anni": ("biz.cagr", {"start": 100.0, "end": 200.0, "years": 5.0}),
+            "unit economics: arpu 100 margine 70% churn 3% cac 500": ("biz.unit_economics", {"arpu_monthly": 100.0, "gross_margin_percent": 70.0, "monthly_churn_percent": 3.0, "cac": 500.0}),
+            "van tasso 10% flussi -1000; 500; 500; 500": ("biz.npv", {"discount_rate_percent": 10.0, "cashflows": [-1000.0, 500.0, 500.0, 500.0]}),
             "prepara la sandbox": ("sandbox.prepare", {}),
             "importa nella sandbox: dati.csv": ("sandbox.import", {"from": "dati.csv"}),
             "importa nella sandbox: dati.csv come in/x.csv": ("sandbox.import", {"from": "dati.csv", "to": "in/x.csv"}),
@@ -207,3 +215,33 @@ class NodeCommandTest(unittest.TestCase):
         self.assertIsNone(g._parse_node_call("nodo altro fs.list", catalog))
         text = g._describe_tool_result({"tool": "node.studio.fs.list", "status": "denied", "output": {"reason": "policy"}})
         self.assertTrue(text.startswith("[nodo studio]"), text)
+
+
+class ExecutiveToolsTextTest(unittest.TestCase):
+    """Il testo mostrato per i calcoli di direzione aziendale (ADR-0132) riporta i numeri dello strumento."""
+
+    def describe(self, tool, output):
+        from jarvis_ai import gateway as g
+        return g._describe_tool_result({"tool": tool, "status": "succeeded", "output": output})
+
+    def test_each_calculation_is_rendered_with_its_numbers(self):
+        cases = {
+            "biz.margin": ({"cost": 60.0, "price": 100.0, "profit": 40.0, "margin_percent": 40.0, "markup_percent": 66.67}, ["40.00%", "66.67%"]),
+            "biz.breakeven": ({"break_even_units": 500, "break_even_revenue": 25000.0, "contribution_margin": 20.0,
+                               "contribution_margin_percent": 40.0, "margin_of_safety_percent": 37.5}, ["500 unità", "37.50%"]),
+            "biz.npv": ({"npv": 243.43, "irr_percent": 23.38, "payback_periods": 2.0, "verdict": "Il VAN è positivo."}, ["243.43", "23.38%", "payback 2.0"]),
+            "biz.runway": ({"runway_months": 6.0, "net_burn_monthly": 20000.0, "status": "attenzione"}, ["6.0 mesi", "attenzione"]),
+            "biz.unit_economics": ({"ltv": 2333.33, "customer_lifetime_months": 33.3, "ltv_cac_ratio": 4.67,
+                                    "cac_payback_months": 7.1, "verdict": "Sostenibile."}, ["2333.33", "4.67"]),
+            "biz.priorities": ({"ranking": [{"rank": 1, "name": "B", "score": 1500.0}, {"rank": 2, "name": "A", "score": 400.0}]}, ["1. B", "2. A"]),
+            "biz.cagr": ({"cagr_percent": 14.87, "total_growth_percent": 100.0, "projected_value": 263.9, "projection_years": 2.0}, ["14.87%", "263.90"]),
+        }
+        for tool, (output, expected) in cases.items():
+            with self.subTest(tool=tool):
+                text = self.describe(tool, output)
+                for fragment in expected:
+                    self.assertIn(fragment, text)
+
+    def test_missing_optional_values_do_not_break_the_text(self):
+        self.assertIn("non definito", self.describe("biz.npv", {"npv": -5.0, "irr_percent": None, "payback_periods": None, "verdict": "x"}))
+        self.assertIn("sostenibile", self.describe("biz.runway", {"runway_months": None, "net_burn_monthly": -100.0, "status": "sostenibile"}))

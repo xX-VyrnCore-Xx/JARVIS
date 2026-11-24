@@ -25,7 +25,7 @@ type Builtin = (
 );
 
 /// Competenze incluse, create al primo avvio e modificabili dal proprietario.
-const BUILTIN: [Builtin; 11] = [
+const BUILTIN: [Builtin; 15] = [
     (
         "briefing",
         "Briefing del mattino",
@@ -125,7 +125,7 @@ const BUILTIN: [Builtin; 11] = [
             "fornitore",
         ],
         "Per richieste aziendali chiarisci prima obiettivo, orizzonte e vincoli; se mancano dati chiave chiedi solo quelli. Separa fatti forniti, ipotesi e stime e dichiara le ipotesi. Ogni calcolo passa da uno strumento (biz.vat, biz.loan, math.calc) e viene mostrato con gli input. Struttura la risposta in situazione, opzioni con pro e contro, raccomandazione e prossimi passi con responsabile e scadenza proposti. Per procedure e checklist usa passi numerati, responsabilità e criteri di completamento. Non fornire consulenza legale, fiscale o contabile vincolante: segnala quando serve un professionista. Non salvare dati personali di clienti o dipendenti nelle note se non richiesto.",
-        &["notes.add", "notes.list", "notes.search", "todo.add", "todo.list", "math.calc", "biz.vat", "biz.loan", "fs.read", "fs.list", "web.search"],
+        &["notes.add", "notes.list", "notes.search", "todo.add", "todo.list", "math.calc", "biz.vat", "biz.loan", "biz.margin", "biz.breakeven", "biz.npv", "biz.runway", "biz.unit_economics", "biz.priorities", "biz.cagr", "fs.read", "fs.list", "web.search"],
     ),
     (
         "it-operazioni",
@@ -174,6 +174,74 @@ const BUILTIN: [Builtin; 11] = [
         ],
         "Fornisci un'analisi di allineamento, non un parere legale: dichiara che per decisioni vincolanti serve il DPO o un professionista. Chiedi settore, dimensione, dati trattati e fornitori coinvolti. Mappa i requisiti pertinenti (basi giuridiche, informative, registro dei trattamenti, misure tecniche e organizzative, gestione dei fornitori, notifica delle violazioni, continuità operativa) e per ognuno indica stato noto, lacuna, priorità e prova da raccogliere. Cita la norma o il controllo solo se ne sei certo e dichiara quando una verifica va fatta sul testo ufficiale aggiornato. Non inventare articoli, scadenze o sanzioni.",
         &["notes.add", "notes.search", "todo.add", "fs.read", "fs.list", "fs.search", "web.search", "web.fetch"],
+    ),
+    (
+        "direzione",
+        "Direzione e decisioni (CEO)",
+        "Decisioni strategiche in formato esecutivo: sintesi, opzioni, rischi, raccomandazione e prossimi passi.",
+        &[
+            "decisione strategica",
+            "strategia",
+            "analisi swot",
+            "swot",
+            "piano strategico",
+            "okr",
+            "obiettivi trimestrali",
+            "scenari",
+            "scelta strategica",
+        ],
+        "Rispondi come un consulente di direzione. Struttura: 1) Decisione da prendere e orizzonte (una riga). 2) Raccomandazione (la tua scelta, subito). 3) Evidenze e numeri a supporto, ottenuti con gli strumenti biz.* o math.calc, mai a memoria. 4) Opzioni alternative con vantaggi, svantaggi e costo di non agire. 5) Rischi principali con probabilità e impatto stimati e come mitigarli. 6) Prossimi passi con responsabile e scadenza. Separa sempre fatti forniti, ipotesi e stime e dichiara le ipotesi decisive. Se un dato chiave manca e cambia la scelta, chiedi solo quello; altrimenti assumi l'ipotesi più probabile, dichiarala e procedi. Per scegliere fra più iniziative usa biz.priorities (RICE). Nessun parere legale, fiscale o contabile vincolante: indica quando serve un professionista.",
+        &["biz.priorities", "biz.npv", "biz.margin", "biz.cagr", "math.calc", "notes.add", "todo.add", "todo.list", "web.search"],
+    ),
+    (
+        "finanza",
+        "Controllo finanziario (CFO)",
+        "Pareggio, VAN e TIR, autonomia di cassa, unit economics e margini con calcoli verificabili.",
+        &[
+            "break even",
+            "punto di pareggio",
+            "van e tir",
+            "payback",
+            "runway",
+            "burn rate",
+            "unit economics",
+            "flusso di cassa",
+            "cash flow",
+            "margine di contribuzione",
+            "prezzo di vendita",
+        ],
+        "Ogni cifra viene da uno strumento: biz.breakeven (pareggio), biz.npv (VAN, TIR, payback), biz.runway (autonomia di cassa), biz.unit_economics (LTV, CAC, payback), biz.margin (margine e ricarico), biz.cagr (crescita composta), biz.loan e biz.vat. Chiedi i soli dati mancanti indispensabili e dichiara unità e periodo (mensile, annuo). Riporta il risultato, poi cosa significa per la decisione (soglie: runway sotto 6 mesi è critico, LTV/CAC sotto 3 è debole), poi la sensibilità: come cambia l'esito se la variabile più incerta peggiora del 20%. Segnala le ipotesi e non presentare stime come fatti.",
+        &["biz.breakeven", "biz.npv", "biz.runway", "biz.unit_economics", "biz.margin", "biz.cagr", "biz.loan", "biz.vat", "math.calc", "notes.add"],
+    ),
+    (
+        "riunioni",
+        "Riunioni e azioni",
+        "Ordine del giorno, verbale e azioni con responsabile e scadenza.",
+        &[
+            "ordine del giorno",
+            "verbale",
+            "prepara la riunione",
+            "riunione",
+            "stand-up",
+            "consiglio di amministrazione",
+        ],
+        "Per preparare una riunione produci: obiettivo, partecipanti, ordine del giorno con tempi e decisioni attese per ogni punto. Per un verbale produci: decisioni prese, azioni (cosa, responsabile, scadenza), questioni aperte e prossima data. Salva le azioni con todo.add solo se il proprietario lo chiede o conferma; usa date.calc per le scadenze relative. Non inventare partecipanti, decisioni o scadenze non forniti: segnala cosa manca.",
+        &["todo.add", "todo.list", "notes.add", "notes.search", "date.calc", "time.now"],
+    ),
+    (
+        "commerciale",
+        "Vendite e offerte",
+        "Preventivi, proposte commerciali e prezzi con margini verificati.",
+        &[
+            "proposta commerciale",
+            "trattativa",
+            "pipeline commerciale",
+            "listino",
+            "sconto",
+            "offerta al cliente",
+        ],
+        "Per un'offerta chiarisci cliente, valore per il cliente, vincoli e margine minimo accettabile. Verifica prezzo, sconto e margine con biz.margin e l'IVA con biz.vat prima di scrivere cifre. Struttura la proposta: problema del cliente, soluzione, prezzo con ciò che include, condizioni, prossimi passi. Per una trattativa indica concessioni possibili in cambio di qualcosa (volume, durata, pagamento) e il prezzo sotto il quale non scendere. Non promettere ciò che i dati forniti non confermano.",
+        &["biz.margin", "biz.vat", "biz.breakeven", "math.calc", "notes.add", "notes.search", "todo.add"],
     ),
 ];
 
