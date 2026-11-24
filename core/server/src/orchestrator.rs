@@ -2287,6 +2287,22 @@ impl Jarvis {
         self.store.memory_graph().map_err(internal)
     }
 
+    /// Riepilogo della memoria (ADR-0124).
+    pub fn memory_stats(&self) -> Result<Value, CoreError> {
+        self.store
+            .memory_stats(&chrono::Utc::now().to_rfc3339())
+            .map_err(internal)
+    }
+
+    /// Coppie di ricordi molto simili, solo da leggere: la scelta di cosa dimenticare resta al proprietario.
+    pub fn memory_duplicates(&self, threshold: f32) -> Result<Value, CoreError> {
+        let pairs = self
+            .store
+            .memory_duplicates(threshold.clamp(0.6, 0.99), 50)
+            .map_err(internal)?;
+        Ok(json!({"threshold": threshold.clamp(0.6, 0.99), "pairs": pairs}))
+    }
+
     /// Ricostruzione degli indici derivati dalla tabella sorgente.
     pub fn memory_reindex(&mut self) -> Result<usize, CoreError> {
         let n = self.store.memory_reindex().map_err(internal)?;

@@ -32,6 +32,11 @@ fn message_purpose(role: &str, task: Option<&str>, at: &str) -> String {
     format!("message:{role}:{}:{at}", task.unwrap_or_default())
 }
 
+/// Vero se conviene compattare: oltre il 25% di pagine libere e almeno 8 MiB recuperabili (ADR-0124).
+pub(crate) fn should_compact(free_pages: i64, total_pages: i64, page_size: i64) -> bool {
+    total_pages > 0 && free_pages * 4 > total_pages && free_pages * page_size >= 8 * 1024 * 1024
+}
+
 impl Store {
     pub fn open(path: &Path) -> StoreResult<Self> {
         let conn = Connection::open(path)?;
@@ -43,6 +48,9 @@ impl Store {
              PRAGMA synchronous=NORMAL;
              PRAGMA foreign_keys=ON;
              PRAGMA temp_store=MEMORY;
+             PRAGMA cache_size=-16384;
+             PRAGMA mmap_size=134217728;
+             PRAGMA journal_size_limit=67108864;
              CREATE TABLE IF NOT EXISTS memory (id TEXT PRIMARY KEY, text TEXT NOT NULL, created_at TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS tasks (task_id TEXT PRIMARY KEY, doc TEXT NOT NULL, updated_at TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS messages (seq INTEGER PRIMARY KEY AUTOINCREMENT, role TEXT NOT NULL,
@@ -413,10 +421,28 @@ impl Store {
         self.conn.query_row("PRAGMA user_version", [], |r| r.get(0))
     }
 
-    /// Manutenzione periodica: statistiche del pianificatore e WAL riportato a dimensione zero.
+    /// Manutenzione periodica: statistiche del pianificatore, WAL riportato a dimensione zero e, se il file ha
+    /// molto spazio libero inutilizzato, compattazione (ADR-0124).
     pub fn maintenance(&self) -> StoreResult<()> {
         self.conn
-            .execute_batch("PRAGMA optimize; PRAGMA wal_checkpoint(TRUNCATE);")
+            .execute_batch("PRAGMA optimize; PRAGMA wal_checkpoint(TRUNCATE);")?;
+        let free: i64 = self
+            .conn
+            .query_row("PRAGMA freelist_count", [], |r| r.get(0))?;
+        let pages: i64 = self.conn.query_row("PRAGMA page_count", [], |r| r.get(0))?;
+        let page_size: i64 = self.conn.query_row("PRAGMA page_size", [], |r| r.get(0))?;
+        if should_compact(free, pages, page_size) {
+            self.conn.execute_batch("VACUUM;")?;
+        }
+        Ok(())
+    }
+
+    /// Elimina le notifiche già lette prima di `before` (conservazione).
+    pub fn notifications_prune(&self, before: &str) -> StoreResult<usize> {
+        self.conn.execute(
+            "DELETE FROM notifications WHERE read_at IS NOT NULL AND created_at < ?1",
+            [before],
+        )
     }
 
     /// Stato del database per la sezione Sistema: integrità rapida, versione dello schema e dimensioni.
@@ -430,9 +456,14 @@ impl Store {
             self.conn
                 .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
         };
+        let free: i64 = self
+            .conn
+            .query_row("PRAGMA freelist_count", [], |r| r.get(0))?;
         Ok(json!({
-            "ok": check == "ok", "check": check, "schema_version": self.schema_version()?,
+            "ok": check == "ok" && self.memory_consistent()?, "check": check, "schema_version": self.schema_version()?,
             "size_bytes": pages * page_size,
+            "free_bytes": free * page_size,
+            "memory_indexes_consistent": self.memory_consistent()?,
             "rows": {"notes": count("notes")?, "todos": count("todos")?, "memory": count("memory")?, "messages": count("messages")?, "tasks": count("tasks")?, "spans": count("task_spans")?,
                      "workflows": count("workflows")?, "notifications": count("notifications")?},
         }))
@@ -1090,5 +1121,34 @@ mod tests {
             .unwrap();
         assert_eq!(todos, 2);
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn compaction_only_when_it_pays_off_and_read_notifications_are_pruned() {
+        assert!(!should_compact(10, 1000, 4096), "poco spazio libero");
+        assert!(
+            !should_compact(300, 1000, 4096),
+            "meno di 8 MiB recuperabili"
+        );
+        assert!(should_compact(3000, 10000, 4096));
+        assert!(!should_compact(0, 0, 4096));
+        let s = Store::open(Path::new(":memory:")).unwrap();
+        s.conn
+            .execute_batch(
+                "INSERT INTO notifications VALUES ('a', '2025-01-01T00:00:00Z', NULL, '2025-01-02T00:00:00Z', '{}');
+                 INSERT INTO notifications VALUES ('b', '2025-01-01T00:00:00Z', NULL, NULL, '{}');
+                 INSERT INTO notifications VALUES ('c', '2026-11-01T00:00:00Z', NULL, '2026-11-02T00:00:00Z', '{}');",
+            )
+            .unwrap();
+        assert_eq!(s.notifications_prune("2026-01-01T00:00:00Z").unwrap(), 1);
+        let left: i64 = s
+            .conn
+            .query_row("SELECT COUNT(*) FROM notifications", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(left, 2, "la non letta e la recente restano");
+        s.maintenance().unwrap();
+        let health = s.health().unwrap();
+        assert_eq!(health["ok"], true);
+        assert_eq!(health["memory_indexes_consistent"], true);
     }
 }

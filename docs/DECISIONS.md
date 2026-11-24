@@ -1675,6 +1675,55 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** test Python (voce maschile e rifiuto di quelle femminili, numeri, intenti, attivazione, testo da leggere, livellamento), test Rust (`speech`, `setup`) e dei contratti.
 - **Documenti interessati:** AUTONOMY_AND_TOOLS.md, INTERFACE_AND_DEVICES.md, ROADMAP.md.
 
+### ADR-0124 — Database e memoria più robusti e veloci
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora il database e la memoria»).
+- **Database:** pragma di prestazioni (cache da 16 MiB, `mmap` da 128 MiB, limite del file di journal a 64 MiB) oltre a WAL, `busy_timeout` e `synchronous=NORMAL` già presenti. La manutenzione periodica ora compatta il file (`VACUUM`) solo quando conviene, cioè oltre il 25% di pagine libere e almeno 8 MiB recuperabili. Conservazione: tracce di esecuzione oltre 60 giorni e notifiche **lette** oltre 120 giorni vengono eliminate (le non lette restano). Lo stato del database riporta spazio libero e coerenza degli indici di memoria.
+- **Memoria, coerenza:** gli indici derivati (ricerca testuale e vettori) sono confrontati con la tabella dei ricordi all'avvio; se dopo un arresto brusco un elemento manca in un indice o ce n'è uno orfano, gli indici vengono ricostruiti dalla sola tabella `memory`. Prima si controllava solo l'assenza dei vettori.
+- **Memoria, ricerca:** il costo non cresce più con il testo di ogni ricordo: il coseno si calcola sui soli vettori e testo e frasi si valutano sui candidati (i 300 più vicini più i risultati della ricerca testuale). I ricordi più recenti passano avanti a parità di pertinenza (mezza vita di un anno, al massimo 0,04): vale solo per l'ordine, mai per la soglia di pertinenza. Con 3000 ricordi la ricerca resta sotto i due secondi nel test.
+- **Nuove letture:** `GET /api/memory/stats` (ricordi per tipo, in scadenza entro 7 giorni, relazioni, più vecchio e più recente, indici coerenti) e `GET /api/memory/duplicates?threshold=` (coppie di ricordi quasi uguali, solo da leggere: decide il proprietario cosa dimenticare). Nessuna eliminazione automatica: due ricordi simili possono avere sfumature diverse.
+- **Limiti:** la ricerca vettoriale resta lineare sul numero di ricordi (adeguata fino a decine di migliaia); gli embedding sono quelli locali già in uso.
+- **Evidenza:** test su indici interrotti e orfani, riepilogo e doppioni senza eliminazioni, 3000 ricordi con ricerca corretta e rapida, ordinamento per recenza senza superare la pertinenza, soglie di compattazione e potatura delle notifiche.
+- **Documenti interessati:** ARCHITECTURE.md non toccato; ROADMAP.md.
+
+### ADR-0125 — Più animazioni e grafica nell'app macOS
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora ancora la grafica macOS con SwiftUI e aggiungi più animazioni»).
+- **Decisione:** nuovo `Motion.swift` con componenti riusabili: `PressableStyle` (il pulsante si abbassa), `PulsingDot` (onda di stato), `TypingIndicator` (tre punti che rimbalzano), `AuroraGlow` (bagliore lento dietro l'intestazione), `StaggeredAppear` e `HoverLift`. Applicati a: barra laterale (evidenziazione che scorre fra le voci con `matchedGeometryEffect`, evidenziazione al passaggio del puntatore, pressione), passaggio fra sezioni (dissolvenza con piccolo scorrimento), Plancia (intestazione con bagliore e punto di stato pulsante, schede e riquadri che entrano in sequenza, riquadri che si sollevano al passaggio del puntatore, valori che cambiano con `numericText`), campanella delle notifiche che rimbalza quando ne arrivano, chat (messaggi che salgono dal basso, indicatore di scrittura al posto della barra di avanzamento) e nuova scheda «Stato della memoria» con contatori animati.
+- **Accessibilità:** con «Riduci movimento» attivo in macOS spariscono scorrimenti, rimbalzi, ingrandimenti e animazioni continue (onda, bagliore, punti): restano dissolvenze brevi. Gli elementi puramente decorativi sono nascosti a VoiceOver.
+- **Non verificato:** la resa a schermo e la fluidità (nessuna schermata vista; SwiftUI si compila solo nella CI). Le animazioni continue usano `TimelineView` a 24–30 fotogrammi al secondo e si fermano con «Riduci movimento».
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
+### ADR-0126 — Plancia macOS ispirata al mock-up e carichi del sistema
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («prendi spunto dalla foto e migliora la qualità dell'app macOS»).
+- **Decisione:** la Plancia riprende la struttura del mock-up: saluto in base all'ora («Buongiorno / Sono JARVIS»), scheda **AI** (modello attivo e stato dell'Orchestratore), avatar con anelli in orbita e onda sonora (`OrbitRings`, `WaveformView`), scheda **Sistema** (CPU, RAM, archiviazione), scheda **Specialisti** (scorciatoie verso una chat già avviata), barra dei comandi «Parla con JARVIS…», sei categorie rapide, «Attività recenti» e «Missioni in corso». La barra laterale mostra il marchio, le voci evidenziate con sfumatura e, in fondo, la scheda «JARVIS Online / Modalità: Operativa». In testata compaiono lettura ad alta voce e ricerca nei ricordi.
+- **Nuova lettura:** `GET /api/system/stats` → `{cpu_percent, memory_percent, disk_percent, cores, os}`. Legge solo `/proc` (Linux), `vm_stat`/`sysctl` (macOS) e lo spazio del volume dei dati; nessun nome di processo, percorso o dato personale. Cache di 3 s, eseguita in `spawn_blocking`; richiede il token come ogni altra API.
+- **Non incluso:** le icone degli agenti del mock-up sono scorciatoie, non agenti separati: il Core resta l'unico orchestratore. Il modello mostrato è quello configurato, non una misura di latenza.
+- **Non verificato:** resa a schermo (SwiftUI si compila solo nella CI macOS); i parser dei carichi sono testati con fixture sintetiche, la lettura reale solo su Linux.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
+### ADR-0127 — Chat, riconoscimento vocale (STT), sintesi (TTS) e parola di attivazione migliori
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora le chat, la wake word ed entrambi i modelli TTS e STT»).
+- **Chat (macOS):** le risposte di JARVIS mostrano markdown (grassetto, corsivo, codice in linea, elenchi) e blocchi di codice con intestazione del linguaggio e pulsante «Copia» (`MessageContent`). I collegamenti si aprono solo se sono `http`/`https`. Il campo di scrittura è una capsula a più righe con pulsante rotondo di invio.
+- **STT:** pre-elaborazione dell'audio (rimozione del livello continuo, guadagno limitato, taglio dei silenzi), soglia sul rapporto di parlato prima della trascrizione, `beam_size=5`, soglie `no_speech`/`log_prob`/compressione, `initial_prompt` con il lessico di JARVIS, filtro delle allucinazioni tipiche («sottotitoli…», «grazie per la visione») e dei segmenti ripetuti.
+- **Wake word:** la decisione combina punteggio del modello e trascrizione (`confirmed_by`: `score`, `transcript`, `score+transcript`) e scarta l'audio con poco parlato (`speech_ratio`), per ridurre falsi positivi con rumore o musica. Contratto `jarvis.voice-transcription/1` esteso in modo compatibile.
+- **TTS:** il testo viene diviso in frasi e sintetizzato frase per frase con pause naturali; Piper usa `SynthesisConfig` esplicita. Restano solo voci **maschili** (decisione ADR-0123).
+- **Privacy:** audio e trascrizioni restano locali; nessun nuovo invio a servizi esterni.
+- **Non verificato:** accuratezza reale su microfono e voce vera (test con segnali sintetici); le soglie vanno tarate sull'hardware del proprietario.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
+### ADR-0128 — Avatar olografico animato su macOS
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («concentrati sull'avatar, fatto bene e molto animato»).
+- **Decisione:** `Avatar.swift` è riscritto come un'unica scena `Canvas` a 30 fps, interamente vettoriale (nessuna immagine). Elementi: alone che respira; onde che si propagano dal centro; anello tratteggiato, archi controrotanti e 72 tacche con onda di luce; 42 scintille in orbita con scintillio individuale; testa con lieve oscillazione, inclinazione e respiro; fascio di scansione ritagliato sul volto; occhi con bagliore, palpebre e sguardo a scatti (cercano avanti e indietro mentre elabora); bocca a sette barre; nucleo sul petto che pulsa e ruota; glitch rapido ogni ~9 s.
+- **Stati:** a riposo, **elabora** (`thinking`: anelli più veloci, arco di scansione, occhi più stretti) e **parla** (`speaking`: sillabe sulla bocca, onde più fitte). I passaggi sono continui (`Animatable`), non a scatto. «Parla» dura quanto la lettura stimata (≈14 caratteri/s), perché il Core non segnala la fine della riproduzione.
+- **Interazione:** al passaggio del puntatore l'avatar si ingrandisce con una molla e guarda in avanti; al clic emette un'onda.
+- **Accessibilità:** con «Riduci movimento» la scena resta ferma e senza glitch; VoiceOver legge lo stato.
+- **Non verificato:** resa e fluidità (nessuna schermata; SwiftUI solo in CI). Costo CPU da misurare su Mac reale: se eccessivo, abbassare i fotogrammi o le scintille.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.

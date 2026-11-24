@@ -13,7 +13,7 @@
 //!
 //! Correzione e cancellazione aggiornano subito tutti i derivati.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use rusqlite::{params, OptionalExtension};
 use serde_json::{json, Value};
@@ -233,13 +233,8 @@ impl Store {
                  relation TEXT NOT NULL, object TEXT NOT NULL);
              CREATE INDEX IF NOT EXISTS memory_edges_by_memory ON memory_edges (memory_id);",
         )?;
-        // Database precedenti: indici derivati mancanti per elementi già presenti.
-        let missing: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM memory WHERE id NOT IN (SELECT id FROM memory_vectors)",
-            [],
-            |r| r.get(0),
-        )?;
-        if missing > 0 {
+        // Database precedenti o indici interrotti da un arresto brusco: si ricostruiscono dalla sola tabella `memory`.
+        if !self.memory_consistent()? {
             self.memory_reindex()?;
         }
         Ok(())
@@ -274,6 +269,99 @@ impl Store {
         self.conn
             .execute("DELETE FROM memory_edges WHERE memory_id = ?1", [id])?;
         Ok(())
+    }
+
+    /// Vero se gli indici derivati (ricerca testuale e vettori) hanno esattamente gli stessi elementi della memoria.
+    pub fn memory_consistent(&self) -> StoreResult<bool> {
+        let count = |sql: &str| -> StoreResult<i64> { self.conn.query_row(sql, [], |r| r.get(0)) };
+        let memory = count("SELECT COUNT(*) FROM memory")?;
+        let fts = count("SELECT COUNT(*) FROM memory_fts")?;
+        let vectors = count("SELECT COUNT(*) FROM memory_vectors")?;
+        let orphans =
+            count("SELECT COUNT(*) FROM memory_vectors WHERE id NOT IN (SELECT id FROM memory)")?;
+        let missing =
+            count("SELECT COUNT(*) FROM memory WHERE id NOT IN (SELECT id FROM memory_vectors)")?;
+        Ok(memory == fts && memory == vectors && orphans == 0 && missing == 0)
+    }
+
+    /// Riepilogo della memoria: elementi per tipo, in scadenza entro 7 giorni, più vecchio e più recente.
+    pub fn memory_stats(&self, now: &str) -> StoreResult<Value> {
+        let mut by_kind = serde_json::Map::new();
+        {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT kind, COUNT(*) FROM memory GROUP BY kind ORDER BY kind")?;
+            let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?;
+            for row in rows {
+                let (kind, n) = row?;
+                by_kind.insert(kind, json!(n));
+            }
+        }
+        let total: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM memory", [], |r| r.get(0))?;
+        let (oldest, newest): (Option<String>, Option<String>) = self.conn.query_row(
+            "SELECT MIN(created_at), MAX(COALESCE(updated_at, created_at)) FROM memory",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )?;
+        let soon = chrono::DateTime::parse_from_rfc3339(now)
+            .map(|t| (t + chrono::Duration::days(7)).to_rfc3339())
+            .unwrap_or_else(|_| now.to_string());
+        let expiring: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM memory WHERE expires_at IS NOT NULL AND expires_at > ?1 AND expires_at <= ?2",
+            params![now, soon],
+            |r| r.get(0),
+        )?;
+        let edges: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM memory_edges", [], |r| r.get(0))?;
+        Ok(json!({
+            "total": total, "by_kind": by_kind, "expiring_within_7_days": expiring,
+            "relations": edges, "oldest": oldest, "newest": newest,
+            "indexes_consistent": self.memory_consistent()?,
+        }))
+    }
+
+    /// Coppie di ricordi molto simili (stesso tipo, coseno almeno `threshold`), per decidere a mano quale dimenticare.
+    /// Non elimina nulla. Al massimo `limit` coppie, le più simili per prime.
+    pub fn memory_duplicates(&self, threshold: f32, limit: usize) -> StoreResult<Vec<Value>> {
+        let rows: Vec<(String, String, String, Vec<f32>)> = {
+            let mut stmt = self.conn.prepare(
+                "SELECT m.id, m.text, m.kind, v.vec FROM memory m JOIN memory_vectors v ON v.id = m.id
+                 ORDER BY m.kind, m.id LIMIT 4000",
+            )?;
+            let rows = stmt.query_map([], |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    from_blob(&r.get::<_, Vec<u8>>(3)?),
+                ))
+            })?;
+            rows.collect::<StoreResult<_>>()?
+        };
+        let mut pairs: Vec<(f32, usize, usize)> = Vec::new();
+        for i in 0..rows.len() {
+            for j in (i + 1)..rows.len() {
+                if rows[i].2 != rows[j].2 {
+                    break;
+                }
+                let similarity = cosine(&rows[i].3, &rows[j].3);
+                if similarity >= threshold {
+                    pairs.push((similarity, i, j));
+                }
+            }
+        }
+        pairs.sort_by(|a, b| b.0.total_cmp(&a.0));
+        Ok(pairs
+            .into_iter()
+            .take(limit)
+            .map(|(s, i, j)| {
+                json!({"similarity": (s * 1000.0).round() / 1000.0, "kind": rows[i].2,
+                       "a": {"id": rows[i].0, "text": rows[i].1}, "b": {"id": rows[j].0, "text": rows[j].1}})
+            })
+            .collect())
     }
 
     /// Ricostruisce tutti gli indici derivati dalla sola tabella `memory`. Restituisce il numero di elementi.
@@ -472,21 +560,58 @@ impl Store {
         let fts = search.join(" OR ");
         let q = embed(query);
         let now = chrono::Utc::now().to_rfc3339();
-        let mut scores = BTreeMap::new();
-        {
+        // Coseno di tutti i ricordi (veloce, solo vettori); testo e frasi si valutano solo sui candidati:
+        // i 300 più vicini e i risultati della ricerca testuale. Così il costo non cresce con il testo di ogni ricordo.
+        let mut near: Vec<(String, f32)> = {
             let mut stmt = self.conn.prepare(
-                "SELECT m.id, m.text, v.vec FROM memory m JOIN memory_vectors v ON v.id = m.id
+                "SELECT m.id, v.vec FROM memory m JOIN memory_vectors v ON v.id = m.id
                  WHERE (?1 IS NULL OR m.kind = ?1) AND (m.expires_at IS NULL OR m.expires_at > ?2)",
             )?;
             let rows = stmt.query_map(params![kind, now], |r| {
-                Ok((
-                    r.get::<_, String>(0)?,
-                    r.get::<_, String>(1)?,
-                    r.get::<_, Vec<u8>>(2)?,
-                ))
+                Ok((r.get::<_, String>(0)?, r.get::<_, Vec<u8>>(1)?))
             })?;
+            let mut all = Vec::new();
             for row in rows {
-                let (id, text, blob) = row?;
+                let (id, blob) = row?;
+                all.push((id, cosine(&q, &from_blob(&blob)).max(0.0)));
+            }
+            all
+        };
+        let cosines: HashMap<String, f32> = near.iter().cloned().collect();
+        near.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        near.truncate(300);
+        let fts_ids: Vec<String> = {
+            let mut stmt = self.conn.prepare(
+                "SELECT memory_fts.id FROM memory_fts JOIN memory m ON m.id = memory_fts.id
+                 WHERE memory_fts MATCH ?1 AND (?2 IS NULL OR m.kind = ?2)
+                 AND (m.expires_at IS NULL OR m.expires_at > ?3)
+                 ORDER BY bm25(memory_fts), m.updated_at DESC, m.id LIMIT 80",
+            )?;
+            let rows = stmt.query_map(params![fts, kind, now], |r| r.get::<_, String>(0))?;
+            rows.collect::<StoreResult<_>>()?
+        };
+        let mut candidates: Vec<String> = near.into_iter().map(|(id, _)| id).collect();
+        for id in &fts_ids {
+            if !candidates.contains(id) {
+                candidates.push(id.clone());
+            }
+        }
+        let mut scores = BTreeMap::new();
+        let mut recency: HashMap<String, f32> = HashMap::new();
+        {
+            let mut stmt = self.conn.prepare(
+                "SELECT text, COALESCE(updated_at, created_at) FROM memory WHERE id = ?1",
+            )?;
+            let today = chrono::Utc::now();
+            for id in candidates {
+                let Some((text, stamp)) = stmt
+                    .query_row([&id], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                    })
+                    .optional()?
+                else {
+                    continue;
+                };
                 let text = normalize(&text);
                 let document_terms: HashSet<_> = terms(&text).into_iter().collect();
                 let coverage = query_terms
@@ -500,23 +625,21 @@ impl Store {
                         .collect::<Vec<_>>()
                         .windows(words.len())
                         .any(|part| part == words);
+                // Ricordi più recenti passano avanti a parità di pertinenza (solo ordinamento, mai la soglia).
+                let age_days = chrono::DateTime::parse_from_rfc3339(&stamp)
+                    .map(|t| (today - t.with_timezone(&chrono::Utc)).num_days().max(0) as f32)
+                    .unwrap_or(0.0);
+                recency.insert(id.clone(), 0.04 * 0.5f32.powf(age_days / 365.0));
                 scores.insert(
-                    id,
-                    0.5 * cosine(&q, &from_blob(&blob)).max(0.0)
+                    id.clone(),
+                    0.5 * cosines.get(&id).copied().unwrap_or(0.0)
                         + 0.3 * coverage
                         + if phrase { 0.2 } else { 0.0 },
                 );
             }
         }
-        let mut stmt = self.conn.prepare(
-            "SELECT memory_fts.id FROM memory_fts JOIN memory m ON m.id = memory_fts.id
-             WHERE memory_fts MATCH ?1 AND (?2 IS NULL OR m.kind = ?2)
-             AND (m.expires_at IS NULL OR m.expires_at > ?3)
-             ORDER BY bm25(memory_fts), m.updated_at DESC, m.id LIMIT 80",
-        )?;
-        let rows = stmt.query_map(params![fts, kind, now], |r| r.get::<_, String>(0))?;
-        for (rank, id) in rows.enumerate() {
-            if let Some(score) = scores.get_mut(&id?) {
+        for (rank, id) in fts_ids.iter().enumerate() {
+            if let Some(score) = scores.get_mut(id) {
                 *score += 0.3 / (1.0 + rank as f32 * 0.08);
             }
         }
@@ -524,7 +647,12 @@ impl Store {
             .into_iter()
             .filter(|(_, score)| *score >= MIN_SCORE)
             .collect();
-        ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        ranked.sort_by(|a, b| {
+            let boost = |id: &String| recency.get(id).copied().unwrap_or(0.0);
+            (b.1 + boost(&b.0))
+                .total_cmp(&(a.1 + boost(&a.0)))
+                .then_with(|| a.0.cmp(&b.0))
+        });
         let sql = format!("SELECT {} FROM memory WHERE id = ?1", Self::COLUMNS);
         let mut out = Vec::new();
         for (id, score) in ranked.into_iter().take(limit) {
@@ -672,5 +800,132 @@ mod tests {
             Some(Some("meeting"))
         );
         assert!(results.iter().any(|item| item["id"] == "unrelated"));
+    }
+
+    #[test]
+    fn broken_indexes_are_detected_and_rebuilt() {
+        let store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        let at = "2026-01-01T00:00:00Z";
+        store
+            .memory_add("a", "il mio cane si chiama Fido", at)
+            .unwrap();
+        store.memory_add("b", "abito a Torino", at).unwrap();
+        assert!(store.memory_consistent().unwrap());
+        // Un arresto brusco può lasciare un indice senza l'elemento: lo si ricostruisce dalla sola tabella.
+        store
+            .conn
+            .execute("DELETE FROM memory_fts WHERE id = 'b'", [])
+            .unwrap();
+        assert!(!store.memory_consistent().unwrap());
+        store.memory_migrate().unwrap();
+        assert!(store.memory_consistent().unwrap());
+        assert_eq!(
+            store.memory_search("Torino", None, 3).unwrap()[0]["id"],
+            "b"
+        );
+        store
+            .conn
+            .execute(
+                "INSERT INTO memory_vectors (id, vec) VALUES ('orfano', x'00')",
+                [],
+            )
+            .unwrap();
+        assert!(!store.memory_consistent().unwrap());
+    }
+
+    #[test]
+    fn stats_and_duplicates_describe_the_memory_without_changing_it() {
+        let store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        let at = "2026-01-01T00:00:00Z";
+        store
+            .memory_add("a", "il mio cane si chiama Fido", at)
+            .unwrap();
+        store
+            .memory_add("b", "il mio cane si chiama Fido ed è un labrador", at)
+            .unwrap();
+        store
+            .memory_add("c", "la riunione di progetto è alle nove", at)
+            .unwrap();
+        let stats = store.memory_stats("2026-01-10T00:00:00Z").unwrap();
+        assert_eq!(stats["total"], 3);
+        assert_eq!(stats["indexes_consistent"], true);
+        assert_eq!(stats["by_kind"]["semantic"], 3);
+        let pairs = store.memory_duplicates(0.8, 10).unwrap();
+        assert_eq!(pairs.len(), 1, "{pairs:?}");
+        let ids = [
+            pairs[0]["a"]["id"].as_str().unwrap(),
+            pairs[0]["b"]["id"].as_str().unwrap(),
+        ];
+        assert!(ids.contains(&"a") && ids.contains(&"b"));
+        assert_eq!(
+            store.memory_list().unwrap().len(),
+            3,
+            "nessuna eliminazione"
+        );
+    }
+
+    #[test]
+    fn search_stays_correct_and_fast_with_thousands_of_memories() {
+        let store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        let at = "2026-01-01T00:00:00Z";
+        let tx = store.conn.unchecked_transaction().unwrap();
+        for n in 0..3000 {
+            store
+                .memory_add(
+                    &format!("m{n}"),
+                    &format!("appunto numero {n} su argomento{} e cose varie", n % 97),
+                    at,
+                )
+                .unwrap();
+        }
+        store
+            .memory_add(
+                "target",
+                "la password del wifi di casa è nel cassetto della scrivania",
+                at,
+            )
+            .unwrap();
+        tx.commit().unwrap();
+        let started = std::time::Instant::now();
+        let found = store
+            .memory_search("wifi di casa cassetto", None, 5)
+            .unwrap();
+        assert_eq!(found[0]["id"], "target");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn newer_memories_win_ties_but_never_beat_relevance() {
+        let store = Store::open(std::path::Path::new(":memory:")).unwrap();
+        store
+            .memory_add(
+                "old",
+                "il codice dell'armadio è in cantina",
+                "2020-01-01T00:00:00Z",
+            )
+            .unwrap();
+        store
+            .memory_add(
+                "new",
+                "il codice dell'armadio è in cantina",
+                &chrono::Utc::now().to_rfc3339(),
+            )
+            .unwrap();
+        store
+            .memory_add(
+                "other",
+                "il garage ha un portone rosso",
+                &chrono::Utc::now().to_rfc3339(),
+            )
+            .unwrap();
+        let found = store
+            .memory_search("codice armadio cantina", None, 5)
+            .unwrap();
+        assert_eq!(found[0]["id"], "new");
+        assert!(found.iter().all(|m| m["id"] != "other"));
     }
 }

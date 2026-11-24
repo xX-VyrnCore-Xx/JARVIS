@@ -78,3 +78,9 @@ La Plancia di desktop e macOS segue un unico flusso: intestazione di stato, «Da
 **Aggiornamento Android (ADR-0112).** La Plancia Android ha la scheda «Aggiornamenti»: controlla, scarica con verifica SHA-256 e passa l'APK all'installatore di sistema, che chiede conferma.
 
 **Voce (ADR-0123).** Impostazione «Leggi le risposte ad alta voce» e pulsante «Fai tacere» in Modelli AI su desktop e macOS; solo voci maschili.
+
+**Animazioni su macOS (ADR-0125).** Evidenziazione scorrevole nella barra laterale, riquadri della Plancia che entrano in sequenza e si sollevano al passaggio del puntatore, indicatore di scrittura nella chat, scheda «Stato della memoria». Rispettano «Riduci movimento».
+
+**Plancia e chat su macOS (ADR-0126, ADR-0127).** Saluto, scheda AI, carichi di CPU/RAM/archiviazione (`/api/system/stats`), specialisti, barra dei comandi, categorie rapide e missioni; barra laterale con scheda «JARVIS Online». Chat con markdown, blocchi di codice copiabili e campo a capsula.
+
+**Avatar su macOS (ADR-0128).** Testa olografica disegnata a vettori con alone, onde, anelli, scintille, scansione, sguardo, bocca a barre e nucleo; stati riposo/elaborazione/parlato; reagisce a puntatore e clic; ferma con «Riduci movimento».

@@ -161,6 +161,13 @@ impl Jarvis {
         if now.hour() == 3 {
             let before = automation::ts(utc - chrono::Duration::days(30));
             let _ = self.store.proactive_prune(&before);
+            // Conservazione (ADR-0124): tracce di esecuzione oltre 60 giorni e notifiche lette oltre 120.
+            let _ = self
+                .store
+                .spans_prune(&automation::ts(utc - chrono::Duration::days(60)));
+            let _ = self
+                .store
+                .notifications_prune(&automation::ts(utc - chrono::Duration::days(120)));
         }
         Ok(fired)
     }

@@ -99,7 +99,14 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var changingInvite = false
 
     @State private var section: Section = .dashboard
+    @Namespace private var navigationNamespace
+    @State private var hoveredEntry: Section?
+    @State private var memoryStats: [String: Any] = [:]
     @State private var speakReplies = false
+    @State private var systemStats: [String: Any] = [:]
+    @State private var missionsPreview: [Record] = []
+    @State private var commandText = ""
+    @State private var avatarSpeaking = false
     @State private var voiceHint = ""
     @State private var payload: [String: Any] = [:]
     @State private var message = ""
@@ -151,6 +158,11 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     }
                 }
                 .task { await core.watchNotifications() }
+                .task {
+                    if let status = try? await core.request("/api/voice/system") {
+                        speakReplies = status["speak_replies"] as? Bool ?? false
+                    }
+                }
             } else {
                 locked
             }
@@ -216,44 +228,86 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     }
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Label("JARVIS", systemImage: "smallcircle.filled.circle")
-                .font(.title2.bold()).foregroundStyle(.cyan).padding(.horizontal, 10).padding(.top, 8)
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle().fill(LinearGradient(colors: [Color.cyan.opacity(0.35), Color.blue.opacity(0.2)],
+                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
+                    Circle().strokeBorder(Color.cyan.opacity(0.6), lineWidth: 1.5)
+                    Image(systemName: "waveform.path.ecg").font(.system(size: 15, weight: .semibold)).foregroundStyle(.cyan)
+                }
+                .frame(width: 34, height: 34)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("JARVIS").font(.system(size: 17, weight: .bold, design: .rounded))
+                    Text("AI Assistant").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 6).padding(.top, 6)
+            .accessibilityElement(children: .combine)
             ScrollView {
-                VStack(alignment: .leading, spacing: 17) {
+                VStack(alignment: .leading, spacing: 16) {
                     ForEach(Section.navigation.indices, id: \.self) { index in
                         let group = Section.navigation[index]
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(group.title)
-                                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                                .padding(.horizontal, 9).padding(.bottom, 3)
+                            Text(group.title.uppercased())
+                                .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                                .padding(.horizontal, 10).padding(.bottom, 2)
                             ForEach(group.entries) { entry in
                                 Button { select(entry) } label: {
-                                    HStack {
-                                        Label(entry.rawValue, systemImage: entry.icon)
+                                    HStack(spacing: 9) {
+                                        Image(systemName: entry.icon).frame(width: 18)
+                                        Text(entry.rawValue).font(.callout.weight(section == entry ? .semibold : .regular))
                                         Spacer(minLength: 2)
-                                        if section == entry {
-                                            Circle().fill(.cyan).frame(width: 5, height: 5)
+                                    }
+                                    .foregroundStyle(section == entry ? Color.white : Color.primary.opacity(0.88))
+                                    .padding(.horizontal, 10).padding(.vertical, 8)
+                                    .background {
+                                        ZStack {
+                                            if section == entry {
+                                                RoundedRectangle(cornerRadius: 10)
+                                                    .fill(LinearGradient(colors: [Color(red: 0.22, green: 0.42, blue: 0.96).opacity(0.92),
+                                                                                  Color(red: 0.32, green: 0.32, blue: 0.86).opacity(0.85)],
+                                                                         startPoint: .leading, endPoint: .trailing))
+                                                    .shadow(color: Color.blue.opacity(0.35), radius: 8, y: 2)
+                                                    .matchedGeometryEffect(id: "navigation-highlight", in: navigationNamespace)
+                                            } else if hoveredEntry == entry {
+                                                RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.07))
+                                            }
                                         }
                                     }
-                                    .foregroundStyle(section == entry ? Color.cyan : Color.primary)
-                                    .padding(8)
-                                    .background(section == entry ? Color.cyan.opacity(0.13) : .clear,
-                                                in: RoundedRectangle(cornerRadius: 8))
                                     .contentShape(Rectangle())
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(PressableStyle())
+                                .onHover { inside in
+                                    if inside { hoveredEntry = entry } else if hoveredEntry == entry { hoveredEntry = nil }
+                                }
                                 .accessibilityAddTraits(section == entry ? .isSelected : [])
                             }
                         }
                     }
                 }
             }
-            Label(core.health.isEmpty ? "Core non raggiungibile" : "Sessione sbloccata",
-                  systemImage: "circle.fill")
-                .font(.caption).foregroundStyle(core.health.isEmpty ? Color.orange : Color.green)
-                .padding(.horizontal, 8)
-        }.padding(12).background(panel.opacity(0.56))
+            sidebarStatus
+        }
+        .padding(12).background(panel.opacity(0.56))
+        .animation(.snappy(duration: 0.28), value: section)
+    }
+
+    /// Scheda di stato in fondo alla barra laterale: «JARVIS Online» con onda sonora.
+    private var sidebarStatus: some View {
+        let online = !core.health.isEmpty
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                PulsingDot(color: online ? .green : .orange, size: 6)
+                Text(online ? "JARVIS Online" : "Core non raggiungibile").font(.caption.weight(.semibold))
+            }
+            Text(online ? "Modalità: Operativa" : "In attesa del Core").font(.caption2).foregroundStyle(.secondary)
+            WaveformView(active: sending, barCount: 18).frame(maxWidth: .infinity).scaleEffect(y: 0.7)
+        }
+        .padding(10)
+        .background(panel, in: RoundedRectangle(cornerRadius: 14))
+        .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(Color.cyan.opacity(0.18)) }
+        .accessibilityElement(children: .combine)
     }
 
     private var compactNavigation: some View {
@@ -305,13 +359,26 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             HStack {
                 Label(section.rawValue, systemImage: section.icon).font(.title2.weight(.semibold))
                 Spacer()
+                Button {
+                    speakReplies.toggle()
+                    let value = speakReplies
+                    Task { _ = try? await core.request("/api/voice/system", method: "PATCH", body: ["speak_replies": value]) }
+                } label: {
+                    Image(systemName: speakReplies ? "speaker.wave.2.fill" : "speaker.slash")
+                }
+                .help(speakReplies ? "JARVIS legge le risposte: tocca per disattivare" : "Leggi le risposte ad alta voce")
+                .accessibilityLabel("Lettura delle risposte ad alta voce")
+                Button { select(.memory) } label: { Image(systemName: "magnifyingglass") }
+                    .help("Cerca nei ricordi").accessibilityLabel("Cerca nei ricordi")
                 Button { select(.notifications) } label: {
                     if let unread = core.health["notifications_unread"] as? Int, unread > 0 {
                         Label("\(unread)", systemImage: "bell.badge")
                     } else {
                         Image(systemName: "bell")
                     }
-                }.help("Notifiche").accessibilityLabel("Notifiche")
+                }
+                .help("Notifiche").accessibilityLabel("Notifiche")
+                .symbolEffect(.bounce, value: core.health["notifications_unread"] as? Int ?? 0)
                 Button { refresh += 1 } label: {
                     if activeLoad != nil {
                         ProgressView().controlSize(.small).frame(width: 15, height: 15)
@@ -335,8 +402,12 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                         default: tools
                         }
                         if section == .chat { Color.clear.frame(height: 1).id("latest-message") }
-                    }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                    .id(section)
+                    .transition(.opacity.combined(with: .offset(y: 10)))
                 }
+                .animation(.easeOut(duration: 0.22), value: section)
                 .onChange(of: chatScrollAnchor, initial: true) { _, _ in
                     if section == .chat { scroll.scrollTo("latest-message", anchor: .bottom) }
                 }
@@ -367,34 +438,318 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     private var dashboard: some View {
         VStack(alignment: .leading, spacing: 18) {
-            dashboardHeader
-            attentionCard
+            dashboardHero.staggeredAppear(0)
+            commandBar.staggeredAppear(1)
+            quickCategories
+            attentionCard.staggeredAppear(3)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 12, alignment: .top)], spacing: 12) {
                 dashboardTile("Core", value: coreStatus, icon: "cpu", color: coreIsUp ? .green : .orange,
-                              destination: .system)
+                              destination: .system, order: 0)
                 dashboardTile("Intelligenza artificiale", value: aiStatus.0, icon: "sparkles", color: aiStatus.1,
-                              destination: .models)
+                              destination: .models, order: 1)
                 dashboardTile("Conferme in attesa", value: count("pending_confirmations"), icon: "checkmark.shield",
                               color: (core.health["pending_confirmations"] as? Int ?? 0) > 0 ? .orange : .green,
-                              destination: .confirmations)
+                              destination: .confirmations, order: 2)
                 dashboardTile("Notifiche da leggere", value: count("notifications_unread"), icon: "bell",
                               color: (core.health["notifications_unread"] as? Int ?? 0) > 0 ? .cyan : .green,
-                              destination: .notifications)
+                              destination: .notifications, order: 3)
                 dashboardTile("Automazioni attive", value: count("automations"), icon: "bolt",
-                              color: .cyan, destination: .workflows)
+                              color: .cyan, destination: .workflows, order: 4)
                 dashboardTile("Verifica audit", value: auditStatus.0, icon: "lock.shield",
-                              color: auditStatus.1, destination: .security)
+                              color: auditStatus.1, destination: .security, order: 5)
             }
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 12) {
                     recentActivity.frame(minWidth: 340)
-                    providerStatus.frame(width: 235)
+                    missionsCard.frame(minWidth: 300)
                 }
                 VStack(alignment: .leading, spacing: 12) {
                     recentActivity
-                    providerStatus
+                    missionsCard
                 }
             }
+            .staggeredAppear(8)
+        }
+    }
+
+    private var timeGreeting: String {
+        switch Calendar.current.component(.hour, from: Date()) {
+        case 5..<13: return "Buongiorno"
+        case 13..<18: return "Buon pomeriggio"
+        case 18..<23: return "Buonasera"
+        default: return "Buonanotte"
+        }
+    }
+
+    private var statusHeadline: String {
+        let urgent = attentionItems.filter { $0.color != .cyan }.count
+        switch urgent {
+        case 0: return "Il tuo assistente personale è operativo."
+        case 1: return "Una cosa richiede la tua attenzione."
+        default: return "\(urgent) cose richiedono la tua attenzione."
+        }
+    }
+
+    /// Intestazione della Plancia: saluto, modello attivo, avatar con anelli e carichi del sistema.
+    private var dashboardHero: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 18) {
+                VStack(alignment: .leading, spacing: 18) { greetingBlock; aiCard }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                heroAvatar(size: 230).frame(width: 290)
+                VStack(alignment: .leading, spacing: 14) { systemCard; agentsCard }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(minWidth: 900)
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .center, spacing: 14) {
+                    greetingBlock.frame(maxWidth: .infinity, alignment: .leading)
+                    heroAvatar(size: 150).frame(width: 190)
+                }
+                aiCard
+                systemCard
+                agentsCard
+            }
+        }
+        .padding(22)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            ZStack {
+                LinearGradient(colors: [panel, base], startPoint: .topLeading, endPoint: .bottomTrailing)
+                AuroraGlow()
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 22))
+        }
+        .overlay { RoundedRectangle(cornerRadius: 22).strokeBorder(.cyan.opacity(0.28)) }
+    }
+
+    private var greetingBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(timeGreeting).font(.title3).foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                Text("Sono").font(.system(size: 38, weight: .bold, design: .rounded)).foregroundStyle(.white)
+                Text("JARVIS").font(.system(size: 38, weight: .bold, design: .rounded))
+                    .foregroundStyle(LinearGradient(colors: [Color.cyan, Color(red: 0.4, green: 0.55, blue: 1)],
+                                                    startPoint: .leading, endPoint: .trailing))
+            }
+            .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
+            Text(statusHeadline).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func heroAvatar(size: CGFloat) -> some View {
+        VStack(spacing: 10) {
+            ZStack {
+                OrbitRings().frame(width: size, height: size)
+                Avatar(thinking: sending, speaking: avatarSpeaking).frame(width: size * 0.78, height: size * 0.78)
+            }
+            .frame(width: size, height: size)
+            WaveformView(active: sending || avatarSpeaking, barCount: 26).frame(maxWidth: size)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    /// Modello attivo: il primo fornitore con chiave configurata, altrimenti un invito a configurarlo.
+    private var activeModel: String {
+        let providers = records(payload, key: "providers")
+        if let configured = providers.first(where: { $0.data["configured"] as? Bool == true }) {
+            let model = configured.data["model"] as? String ?? ""
+            return model.isEmpty ? providerName(configured.id) : model
+        }
+        return "Nessun modello configurato"
+    }
+
+    private var aiCard: some View {
+        card("AI", icon: "brain") {
+            Text("Modello attivo").font(.caption).foregroundStyle(.secondary)
+            Button { select(.models) } label: {
+                HStack(spacing: 8) {
+                    PulsingDot(color: aiStatus.1, size: 5)
+                    Text(activeModel).font(.callout.weight(.medium)).lineLimit(1)
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 10).padding(.vertical, 8)
+                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 9))
+                .overlay { RoundedRectangle(cornerRadius: 9).strokeBorder(Color.cyan.opacity(0.35)) }
+            }
+            .buttonStyle(PressableStyle())
+            HStack {
+                Image(systemName: "gearshape.2").foregroundStyle(.secondary)
+                Text("Orchestratore").font(.callout)
+                Spacer()
+                Text(coreIsUp ? "Attivo" : "Non disponibile").font(.caption.weight(.semibold))
+                    .padding(.horizontal, 9).padding(.vertical, 3)
+                    .background((coreIsUp ? Color.green : Color.orange).opacity(0.18), in: Capsule())
+                    .foregroundStyle(coreIsUp ? Color.green : Color.orange)
+            }
+        }
+    }
+
+    private func usageRow(_ title: String, value: Double?, color: Color) -> some View {
+        HStack(spacing: 10) {
+            Text(title).font(.callout).frame(width: 92, alignment: .leading)
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.white.opacity(0.08))
+                    Capsule().fill(LinearGradient(colors: [color.opacity(0.75), color], startPoint: .leading, endPoint: .trailing))
+                        .frame(width: geometry.size.width * CGFloat(min(max((value ?? 0) / 100, 0), 1)))
+                }
+            }
+            .frame(height: 6)
+            Text(value.map { "\(Int($0.rounded()))%" } ?? "—")
+                .font(.callout.monospacedDigit()).frame(width: 42, alignment: .trailing)
+        }
+        .animation(.snappy, value: value)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var systemCard: some View {
+        let cpu = systemStats["cpu_percent"] as? Double
+        let memory = systemStats["memory_percent"] as? Double
+        let disk = systemStats["disk_percent"] as? Double
+        let busy = [cpu, memory, disk].compactMap { $0 }.contains { $0 >= 90 }
+        return card("Sistema", icon: "desktopcomputer") {
+            Text(busy ? "ATTENZIONE" : "OK").font(.caption2.weight(.bold))
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background((busy ? Color.orange : Color.green).opacity(0.18), in: Capsule())
+                .foregroundStyle(busy ? Color.orange : Color.green)
+            usageRow("CPU", value: cpu, color: .blue)
+            usageRow("RAM", value: memory, color: .purple)
+            usageRow("Archiviazione", value: disk, color: .cyan)
+        }
+        .task {
+            while !Task.isCancelled {
+                if let stats = try? await core.request("/api/system/stats", timeout: 10) { systemStats = stats }
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
+    }
+
+    private func startChat(_ prompt: String) {
+        select(.chat)
+        message = prompt
+        composerFocused = true
+    }
+
+    private var agentsCard: some View {
+        let agents: [(title: String, icon: String, prompt: String)] = [
+            ("Coding", "chevron.left.forwardslash.chevron.right", "Aiutami con il codice: "),
+            ("Sistema", "cpu", "Controlla lo stato del sistema"),
+            ("Ricerca", "magnifyingglass", "Cerca sul web: "),
+            ("Aziende", "briefcase", "Analisi aziendale: "),
+            ("Sicurezza", "shield.lefthalf.filled", "Fai un controllo di sicurezza del sistema"),
+        ]
+        return card("Specialisti", icon: "person.3") {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 64), spacing: 8)], spacing: 10) {
+                ForEach(agents, id: \.title) { agent in
+                    Button { startChat(agent.prompt) } label: {
+                        VStack(spacing: 5) {
+                            Image(systemName: agent.icon).font(.system(size: 17, weight: .medium)).foregroundStyle(.cyan)
+                                .frame(width: 40, height: 40)
+                                .background(Color.cyan.opacity(0.10), in: Circle())
+                                .overlay { Circle().strokeBorder(Color.cyan.opacity(0.35)) }
+                            Text(agent.title).font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                    .buttonStyle(PressableStyle()).hoverLift()
+                    .help("Avvia una chat con lo specialista «\(agent.title)»")
+                }
+            }
+        }
+    }
+
+    /// Barra dei comandi: scrivi e vai direttamente in chat.
+    private var commandBar: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "sparkles").foregroundStyle(.cyan)
+            TextField("Parla con JARVIS…", text: $commandText)
+                .textFieldStyle(.plain).font(.body).onSubmit(sendCommand)
+            Button { sendCommand() } label: { Image(systemName: "paperplane.fill").font(.body.weight(.semibold)) }
+                .buttonStyle(PressableStyle()).foregroundStyle(.cyan)
+                .disabled(sending || commandText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityLabel("Invia")
+        }
+        .padding(.horizontal, 20).padding(.vertical, 14)
+        .background(Capsule().fill(panel))
+        .overlay {
+            Capsule().strokeBorder(LinearGradient(colors: [Color.cyan.opacity(0.55), Color.indigo.opacity(0.5)],
+                                                  startPoint: .leading, endPoint: .trailing), lineWidth: 1.2)
+        }
+        .frame(maxWidth: 760).frame(maxWidth: .infinity)
+    }
+
+    private func sendCommand() {
+        let text = commandText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !sending else { return }
+        commandText = ""
+        select(.chat)
+        message = text
+        send()
+    }
+
+    private func categoryCard(_ title: String, _ subtitle: String, icon: String, color: Color, order: Int,
+                              action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 7) {
+                Image(systemName: icon).font(.system(size: 24, weight: .medium)).foregroundStyle(color)
+                Text(title).font(.subheadline.weight(.semibold))
+                Text(subtitle).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, minHeight: 104).padding(.horizontal, 10).padding(.vertical, 12)
+            .background(panel, in: RoundedRectangle(cornerRadius: 16))
+            .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder(color.opacity(0.28)) }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableStyle()).hoverLift().staggeredAppear(order)
+        .accessibilityLabel("\(title). \(subtitle)")
+    }
+
+    private var quickCategories: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 12)], spacing: 12) {
+            categoryCard("Sviluppo", "Codice, debug, sandbox", icon: "chevron.left.forwardslash.chevron.right",
+                         color: .cyan, order: 2) { startChat("Aiutami con il codice: ") }
+            categoryCard("Sistema", "Controllo e gestione", icon: "desktopcomputer", color: .blue, order: 3) { select(.system) }
+            categoryCard("Automazioni", "Workflow e promemoria", icon: "bolt.fill", color: .yellow, order: 4) { select(.workflows) }
+            categoryCard("Memoria", "Ricordi e relazioni", icon: "brain", color: .purple, order: 5) { select(.memory) }
+            categoryCard("Missioni", "Compiti autonomi", icon: "scope", color: .green, order: 6) { select(.missions) }
+            categoryCard("Altro", "Competenze e connettori", icon: "square.grid.2x2", color: .orange, order: 7) { select(.skills) }
+        }
+    }
+
+    private var missionsCard: some View {
+        card("Missioni in corso", icon: "scope") {
+            if missionsPreview.isEmpty {
+                Text("Nessuna missione attiva. Affida a JARVIS un compito ricorrente.").font(.callout).foregroundStyle(.secondary)
+            }
+            ForEach(missionsPreview.prefix(4)) { mission in
+                let status = mission["status"] ?? "active"
+                HStack(spacing: 10) {
+                    Image(systemName: "scope").foregroundStyle(status == "active" ? Color.green : Color.secondary)
+                    Text(mission["goal"] ?? mission.title).lineLimit(1)
+                    Spacer(minLength: 6)
+                    Text(missionStatusLabel(status)).font(.caption.weight(.medium))
+                        .padding(.horizontal, 8).padding(.vertical, 2)
+                        .background(Color.white.opacity(0.07), in: Capsule())
+                }
+                .padding(.vertical, 3)
+                .accessibilityElement(children: .combine)
+            }
+            Button("Nuova missione", systemImage: "plus") { select(.missions) }
+        }
+        .task(id: refresh) {
+            if let result = try? await core.request("/api/missions") { missionsPreview = records(result) }
+        }
+    }
+
+    private func missionStatusLabel(_ status: String) -> String {
+        switch status {
+        case "active": return "Attiva"
+        case "paused": return "In pausa"
+        case "completed": return "Completata"
+        case "cancelled": return "Annullata"
+        default: return status
         }
     }
 
@@ -480,52 +835,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         }
     }
 
-    private var dashboardHeader: some View {
-        let urgent = attentionItems.filter { $0.color != .cyan }.count
-        let headline = urgent == 0 ? "Tutto in ordine." : (urgent == 1 ? "Una cosa richiede la tua attenzione." : "\(urgent) cose richiedono la tua attenzione.")
-        return ViewThatFits(in: .horizontal) {
-            HStack(alignment: .center, spacing: 18) {
-                headerText(headline).frame(maxWidth: .infinity, alignment: .leading)
-                Avatar(thinking: sending).frame(width: 132, height: 132)
-            }
-            VStack(alignment: .leading, spacing: 12) {
-                Avatar(thinking: sending).frame(width: 110, height: 110).frame(maxWidth: .infinity)
-                headerText(headline)
-            }
-        }
-        .padding(22)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(LinearGradient(colors: [panel, base], startPoint: .topLeading, endPoint: .bottomTrailing),
-                    in: RoundedRectangle(cornerRadius: 20))
-        .overlay { RoundedRectangle(cornerRadius: 20).strokeBorder(.cyan.opacity(0.28)) }
-    }
-
-    private func headerText(_ headline: String) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("JARVIS · Plancia", systemImage: "lock.shield")
-                .font(.subheadline.weight(.medium)).foregroundStyle(.cyan)
-            Text(headline).font(.system(size: 28, weight: .semibold, design: .rounded))
-                .foregroundStyle(.white).accessibilityAddTraits(.isHeader)
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { headerButtons }
-                VStack(alignment: .leading, spacing: 8) { headerButtons }
-            }
-        }
-    }
-
-    @ViewBuilder private var headerButtons: some View {
-        Button { select(.chat) } label: { Label("Nuova chat", systemImage: "bubble.left") }
-            .buttonStyle(.borderedProminent).controlSize(.large).tint(.cyan)
-        Button { select(.missions) } label: { Label("Missioni", systemImage: "scope") }
-            .buttonStyle(.bordered).controlSize(.large)
-        Button { select(.memory) } label: { Label("Memoria", systemImage: "brain") }
-            .buttonStyle(.bordered).controlSize(.large)
-        Button { select(.devices) } label: { Label("Connessioni", systemImage: "network") }
-            .buttonStyle(.bordered).controlSize(.large)
-    }
-
     private func dashboardTile(_ title: String, value: String, icon: String, color: Color,
-                               destination: Section) -> some View {
+                               destination: Section, order: Int = 0) -> some View {
         Button { select(destination) } label: {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
@@ -535,13 +846,18 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 }
                 Text(value).font(.title3.weight(.semibold)).monospacedDigit()
                     .lineLimit(1).minimumScaleFactor(0.75)
+                    .contentTransition(.numericText())
+                    .animation(.snappy, value: value)
                 Text(title).font(.caption).foregroundStyle(.secondary)
             }
             .padding(14).frame(maxWidth: .infinity, alignment: .leading)
             .background(panel, in: RoundedRectangle(cornerRadius: 12))
             .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(color.opacity(0.25)) }
             .contentShape(Rectangle())
-        }.buttonStyle(.plain)
+        }
+        .buttonStyle(PressableStyle())
+        .hoverLift()
+        .staggeredAppear(order)
         .accessibilityLabel("\(title), \(value)")
     }
 
@@ -615,7 +931,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     private var chat: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 15) {
-                Avatar(thinking: sending).frame(width: 76)
+                Avatar(thinking: sending, speaking: avatarSpeaking).frame(width: 76)
                 VStack(alignment: .leading, spacing: 5) {
                     Text("JARVIS").font(.title2.weight(.semibold))
                     if sending {
@@ -647,14 +963,26 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 }
             }
             LazyVStack(alignment: .leading, spacing: 10) {
-                ForEach(history) { item in chatEntry(item) }
+                ForEach(history) { item in
+                    chatEntry(item)
+                        .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
+                                                removal: .opacity))
+                }
             }
+            .animation(.spring(response: 0.4, dampingFraction: 0.85), value: history.count)
             if let confirmation = lastReply?["confirmation"] as? [String: Any] {
                 Button("Esamina l’azione proposta") { pending = Record(confirmation, index: 0) }
             }
             if let outgoingMessage, lastReply == nil {
                 chatBubble(outgoingMessage, user: true)
-                ProgressView("JARVIS sta elaborando").controlSize(.small)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                HStack(spacing: 8) {
+                    TypingIndicator()
+                    Text("JARVIS sta elaborando").font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                .background(panel, in: Capsule())
+                .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
             }
         }
     }
@@ -705,19 +1033,33 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     }
 
     private func chatBubble(_ text: String, user: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(user ? "Tu" : "JARVIS", systemImage: user ? "person" : "waveform")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(user ? iris : .cyan)
-            Text(text).textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
+        HStack(alignment: .top, spacing: 10) {
+            if user { Spacer(minLength: 0) }
+            if !user {
+                Image(systemName: "waveform").font(.system(size: 13, weight: .semibold)).foregroundStyle(.cyan)
+                    .frame(width: 28, height: 28)
+                    .background(Color.cyan.opacity(0.12), in: Circle())
+                    .overlay { Circle().strokeBorder(Color.cyan.opacity(0.35)) }
+                    .accessibilityHidden(true)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text(user ? "Tu" : "JARVIS").font(.caption.weight(.semibold))
+                    .foregroundStyle(user ? iris : .cyan)
+                if user {
+                    Text(text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                } else {
+                    MessageContent(text: text)
+                }
+            }
+            .padding(.horizontal, 14).padding(.vertical, 11)
+            .frame(maxWidth: 720, alignment: .leading)
+            .background(user ? iris.opacity(0.12) : panel, in: RoundedRectangle(cornerRadius: 16))
+            .overlay { RoundedRectangle(cornerRadius: 16).strokeBorder((user ? iris : .cyan).opacity(0.16)) }
+            if !user { Spacer(minLength: 0) }
         }
-        .padding(14)
-        .frame(maxWidth: 740, alignment: .leading)
-        .background(user ? iris.opacity(0.10) : panel, in: RoundedRectangle(cornerRadius: 14))
-        .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder((user ? iris : .cyan).opacity(0.14)) }
         .padding(user ? .leading : .trailing, 32)
         .frame(maxWidth: .infinity, alignment: user ? .trailing : .leading)
+        .accessibilityElement(children: .contain)
     }
 
     private func replyFeedback(_ feedback: [String: Any], id: String) -> some View {
@@ -805,13 +1147,25 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     .help("Invia i turni recenti compatibili allo stesso provider per questa richiesta.")
                     .disabled(sending)
             }.font(.caption)
-            HStack {
-                TextField("Messaggio a JARVIS", text: $message)
-                    .textFieldStyle(.roundedBorder).focused($composerFocused).onSubmit(send)
-                Button(sending ? "Invio…" : "Invia", systemImage: "arrow.up") { send() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(sending || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            HStack(spacing: 10) {
+                TextField("Messaggio a JARVIS", text: $message, axis: .vertical)
+                    .textFieldStyle(.plain).lineLimit(1...5)
+                    .focused($composerFocused).onSubmit(send)
+                Button { send() } label: {
+                    Image(systemName: sending ? "ellipsis" : "arrow.up")
+                        .font(.body.weight(.bold)).foregroundStyle(.white)
+                        .frame(width: 30, height: 30)
+                        .background(Circle().fill(sending || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                                  ? Color.gray.opacity(0.4) : Color.cyan))
+                }
+                .buttonStyle(PressableStyle())
+                .disabled(sending || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityLabel("Invia")
             }
+            .padding(.leading, 18).padding(.trailing, 8).padding(.vertical, 8)
+            .background(Capsule().fill(panel))
+            .overlay { Capsule().strokeBorder(Color.cyan.opacity(composerFocused ? 0.6 : 0.25)) }
+            .animation(.easeOut(duration: 0.15), value: composerFocused)
         }
     }
 
@@ -835,7 +1189,14 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                                                      body: ["message": text, "provider": "auto", "use_context": includeContext])
                 lastReply = result
                 if speakReplies, let reply = result["reply"] as? String, !reply.isEmpty {
-                    Task { _ = try? await core.request("/api/voice/say", method: "POST", body: ["text": reply], timeout: 15) }
+                    // L'avatar «parla» per la durata stimata della lettura (circa 14 caratteri al secondo).
+                    let duration = min(max(Double(reply.count) / 14, 1.5), 45)
+                    Task {
+                        avatarSpeaking = true
+                        _ = try? await core.request("/api/voice/say", method: "POST", body: ["text": reply], timeout: 15)
+                        try? await Task.sleep(for: .seconds(duration))
+                        avatarSpeaking = false
+                    }
                 }
                 if section == .chat { await load(.chat) }
                 await core.refreshHealth()
@@ -844,6 +1205,51 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 if message.isEmpty { message = text }
                 if section == .chat { composerFocused = true }
             }
+        }
+    }
+
+    /// Riepilogo della memoria (ADR-0124): quanti ricordi, di che tipo e se gli indici sono in ordine.
+    private var memoryOverview: some View {
+        card("Stato della memoria", icon: "brain") {
+            let total = memoryStats["total"] as? Int ?? 0
+            let kinds = (memoryStats["by_kind"] as? [String: Any] ?? [:]).sorted { $0.key < $1.key }
+            HStack(alignment: .firstTextBaseline, spacing: 18) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(total)").font(.system(size: 30, weight: .semibold, design: .rounded))
+                        .monospacedDigit().foregroundStyle(.cyan)
+                        .contentTransition(.numericText())
+                    Text("ricordi").font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(kinds, id: \.key) { entry in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(entry.value as? Int ?? 0)").font(.title3.weight(.semibold)).monospacedDigit()
+                            .contentTransition(.numericText())
+                        Text(memoryKindLabel(entry.key)).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+            }
+            .animation(.snappy, value: total)
+            if let expiring = memoryStats["expiring_within_7_days"] as? Int, expiring > 0 {
+                Label("\(expiring) in scadenza entro 7 giorni", systemImage: "hourglass").font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            if memoryStats["indexes_consistent"] as? Bool == false {
+                Label("Gli indici di ricerca non sono allineati: premi Reindicizza", systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+        }
+        .task(id: refresh) {
+            if let stats = try? await core.request("/api/memory/stats") { memoryStats = stats }
+        }
+    }
+
+    private func memoryKindLabel(_ kind: String) -> String {
+        switch kind {
+        case "semantic": return "fatti"
+        case "episodic": return "episodi"
+        case "procedural": return "preferenze"
+        default: return kind
         }
     }
 
@@ -880,6 +1286,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     message = "ricorda che "
                 }
             }
+            memoryOverview
         case .missions: missionTools
         case .connectors: connectorSetup
         case .devices:
