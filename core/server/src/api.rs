@@ -377,6 +377,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/n8n/jobs/{id}", delete(n8n_remove))
         .route("/api/cloud", get(cloud_status).post(configure_cloud))
         .route("/api/cloud/chat", post(cloud_chat))
+        .route("/api/cloud/chat/stream", post(cloud_chat_stream))
         .route("/api/cloud/test", post(test_cloud_key))
         .route("/api/cloud/feedback", post(rate_cloud_reply))
         .route("/api/chat/stream", post(chat_stream))
@@ -647,35 +648,127 @@ async fn rate_cloud_reply(State(state): State<Shared>, Json(body): Json<Value>) 
     reply(with_core(&state, move |j| j.rate_cloud_reply(&body)).await)
 }
 
+/// Errori di una richiesta cloud: quelli del Core e la saturazione delle richieste in corso.
+enum CloudChatError {
+    Core(CoreError),
+    Busy,
+}
+
+impl From<CoreError> for CloudChatError {
+    fn from(error: CoreError) -> Self {
+        Self::Core(error)
+    }
+}
+
+fn core_error_parts(error: CoreError) -> (&'static str, String) {
+    match error {
+        CoreError::BadRequest(m) => ("bad_request", m),
+        CoreError::Unavailable(m) => ("unavailable", m),
+        CoreError::NotFound(m) => ("not_found", m),
+        CoreError::Gone(m) => ("expired", m),
+        CoreError::Unauthorized(m) => ("unauthorized", m),
+        CoreError::Internal(m) => ("internal", m),
+    }
+}
+
+impl CloudChatError {
+    fn into_response(self) -> Response {
+        match self {
+            Self::Core(error) => error.into_response(),
+            Self::Busy => error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "cloud.busy",
+                "JARVIS sta elaborando altre richieste cloud.",
+            ),
+        }
+    }
+
+    fn parts(self) -> (&'static str, String) {
+        match self {
+            Self::Core(error) => core_error_parts(error),
+            Self::Busy => (
+                "cloud.busy",
+                "JARVIS sta elaborando altre richieste cloud.".into(),
+            ),
+        }
+    }
+}
+
 async fn cloud_chat(
     State(state): State<Shared>,
     device: Option<axum::Extension<DeviceCtx>>,
-    Json(mut body): Json<Value>,
+    Json(body): Json<Value>,
 ) -> Response {
+    match run_cloud_chat(&state, device.is_some(), body, None).await {
+        Ok(out) => Json(out).into_response(),
+        Err(error) => error.into_response(),
+    }
+}
+
+/// Chat cloud in streaming (ADR-0131): righe NDJSON `{"type":"delta","text":…}` mentre il modello genera, poi
+/// `{"type":"done","result":…}` (lo stesso oggetto di `/api/cloud/chat`) oppure `{"type":"error",…}`.
+async fn cloud_chat_stream(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Json(body): Json<Value>,
+) -> Response {
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+    let is_device = device.is_some();
+    tokio::spawn(async move {
+        let result = run_cloud_chat(&state, is_device, body, Some(tx.clone())).await;
+        let line = match result {
+            Ok(out) => json!({"type": "done", "result": out}),
+            Err(error) => {
+                let (code, message) = error.parts();
+                json!({"type": "error", "error": {"code": code, "message": message}})
+            }
+        };
+        let _ = tx.send(line.to_string() + "\n");
+    });
+    let stream = futures_util::stream::unfold(rx, |mut rx| async move {
+        rx.recv()
+            .await
+            .map(|line| (Ok::<_, std::convert::Infallible>(line), rx))
+    });
+    (
+        [
+            (header::CONTENT_TYPE, "application/x-ndjson; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        axum::body::Body::from_stream(stream),
+    )
+        .into_response()
+}
+
+async fn run_cloud_chat(
+    state: &Shared,
+    is_device: bool,
+    mut body: Value,
+    deltas: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+) -> Result<Value, CloudChatError> {
     let Some(message) = body["message"].as_str() else {
-        return CoreError::BadRequest("campo 'message' mancante".into()).into_response();
+        return Err(CoreError::BadRequest("campo 'message' mancante".into()).into());
     };
-    if device.is_some()
+    if is_device
         && (crate::desktop::Target::from_request(message).is_some()
             || crate::appcontrol::is_app_request(message))
     {
-        return CoreError::Unauthorized("Azione riservata al proprietario.".into()).into_response();
+        return Err(CoreError::Unauthorized("Azione riservata al proprietario.".into()).into());
     }
     if crate::cloud::contains_credentials(message) {
-        return CoreError::BadRequest("Rimuovi le credenziali dalla richiesta.".into())
-            .into_response();
+        return Err(CoreError::BadRequest("Rimuovi le credenziali dalla richiesta.".into()).into());
     }
     let local = message.to_owned();
     let local_only = crate::orchestrator::is_source_followup(message)
         || crate::orchestrator::is_local_fact_request(message)
         || (crate::desktop::Target::from_request(message).is_some()
             || crate::appcontrol::is_app_request(message));
-    if device.is_some() {
+    if is_device {
         body["provider"] = json!("auto");
         body["use_context"] = json!(false);
     }
-    match with_core(&state, move |j| j.local_command(&local)).await {
-        Ok(Some(out)) => return Json(out.to_json()).into_response(),
+    match with_core(state, move |j| j.local_command(&local)).await {
+        Ok(Some(out)) => return Ok(out.to_json()),
         Ok(None) => (),
         Err(CoreError::Unavailable(_)) if !local_only => {
             state.obs.count("cloud.local_parser_fallback");
@@ -685,37 +778,32 @@ async fn cloud_chat(
                 json!({"fallback": "provider"}),
             );
         }
-        Err(error) => return error.into_response(),
+        Err(error) => return Err(error.into()),
     }
     let Ok(permit) = state.cloud_slots.clone().try_acquire_owned() else {
-        return error(
-            StatusCode::TOO_MANY_REQUESTS,
-            "cloud.busy",
-            "JARVIS sta elaborando altre richieste cloud.",
-        );
+        return Err(CloudChatError::Busy);
     };
-    let request = match with_core(&state, move |j| j.prepare_cloud_chat(&body)).await {
-        Ok(request) => request,
-        Err(error) => return error.into_response(),
-    };
+    let request = with_core(state, move |j| j.prepare_cloud_chat(&body)).await?;
     let timer = crate::observability::Timer::start();
     let completed = tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        let completed = request.execute();
+        let completed = match deltas {
+            Some(deltas) => request.execute_streaming(&mut |piece: &str| {
+                let _ = deltas.send(json!({"type": "delta", "text": piece}).to_string() + "\n");
+            }),
+            None => request.execute(),
+        };
         (request.message, completed)
     })
     .await;
     let Ok((message, completed)) = completed else {
-        return CoreError::Internal("richiesta cloud interrotta".into()).into_response();
+        return Err(CoreError::Internal("richiesta cloud interrotta".into()).into());
     };
-    match with_core(&state, move |j| {
+    let out = with_core(state, move |j| {
         j.finish_cloud_chat(message, completed, timer)
     })
-    .await
-    {
-        Ok(out) => Json(out.to_json()).into_response(),
-        Err(error) => error.into_response(),
-    }
+    .await?;
+    Ok(out.to_json())
 }
 
 async fn chat(
@@ -781,14 +869,7 @@ async fn chat_stream(
         let line = match guard.chat_streaming(&message, sink) {
             Ok(out) => json!({"type": "done", "result": out.to_json()}),
             Err(e) => {
-                let (code, message) = match e {
-                    CoreError::BadRequest(m) => ("bad_request", m),
-                    CoreError::Unavailable(m) => ("unavailable", m),
-                    CoreError::NotFound(m) => ("not_found", m),
-                    CoreError::Gone(m) => ("expired", m),
-                    CoreError::Unauthorized(m) => ("unauthorized", m),
-                    CoreError::Internal(m) => ("internal", m),
-                };
+                let (code, message) = core_error_parts(e);
                 json!({"type": "error", "error": {"code": code, "message": message}})
             }
         };

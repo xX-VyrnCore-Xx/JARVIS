@@ -46,7 +46,7 @@ Il Core espone `GET /api/cloud` per lo stato e `POST /api/cloud` per configurare
 
 La chat cloud tenta prima di riconoscere i comandi locali. Se il parser Python non è disponibile, una richiesta generale prosegue verso il provider configurato; le richieste di fatti locali, i riferimenti alle fonti e le azioni desktop riconosciute dal Core restano locali e riportano l'errore senza inviare il testo al provider.
 
-Il client desktop nativo usa `POST /api/chat/stream` con risposta NDJSON. Il bridge inoltra gli eventuali envelope `delegation.progress` seguiti da un esito `done` o `error`. Il worker a regole risponde in un blocco. I client che leggono un esito completo usano `POST /api/chat`.
+La chat cloud dei client desktop usa `POST /api/cloud/chat/stream` (NDJSON con frammenti `delta` ed esito `done`, ADR-0131): il testo compare mentre il modello lo genera. Il client desktop nativo usa `POST /api/chat/stream` con risposta NDJSON. Il bridge inoltra gli eventuali envelope `delegation.progress` seguiti da un esito `done` o `error`. Il worker a regole risponde in un blocco. I client che leggono un esito completo usano `POST /api/chat`.
 
 ## Voce
 

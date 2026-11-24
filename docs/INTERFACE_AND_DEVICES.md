@@ -86,3 +86,5 @@ La Plancia di desktop e macOS segue un unico flusso: intestazione di stato, «Da
 **Avatar su macOS (ADR-0128).** Testa olografica disegnata a vettori con alone, onde, anelli, scintille, scansione, sguardo, bocca a barre e nucleo; stati riposo/elaborazione/parlato; reagisce a puntatore e clic; ferma con «Riduci movimento».
 
 **Avatar e barre laterali su Windows e Android (ADR-0129).** Stessa testa olografica su egui e Compose, con stati riposo/elaborazione/parlato e onda al clic o al tocco. Windows: sidebar con gruppi, marchio animato, icone disegnate, transizioni e scheda di stato. Android: barra inferiore con icone disegnate, pillola a molla e contatore notifiche. macOS: contatori su Conferme e Notifiche.
+
+**Risposte in streaming (ADR-0131).** Su macOS e Windows il testo della risposta compare mentre il modello lo genera, con cursore; l'avatar «parla» durante il flusso.

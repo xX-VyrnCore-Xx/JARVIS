@@ -862,6 +862,80 @@ impl Request {
         self.execute_at(self.target.provider.endpoint(), false)
     }
 
+    /// Come `execute`, ma per le richieste senza strumenti inoltra il testo a `sink` mentre il modello lo genera
+    /// (ADR-0131). Con strumenti, o se lo streaming fallisce prima del primo frammento, ripiega sul percorso
+    /// completo e consegna il testo in un solo blocco.
+    pub fn execute_streaming(&self, sink: &mut dyn FnMut(&str)) -> Completed {
+        self.execute_streaming_at(self.target.provider.endpoint(), sink)
+    }
+
+    fn execute_streaming_at(&self, endpoint: &str, sink: &mut dyn FnMut(&str)) -> Completed {
+        let target = &self.target;
+        let model = &target.model;
+        let usable = self
+            .limiter
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .model_available(target.provider, model);
+        let finish = |completed: Completed, sink: &mut dyn FnMut(&str)| {
+            if let Ok(Answer::Text(text)) = &completed.answer {
+                sink(text);
+            }
+            completed
+        };
+        if !self.tools.is_empty() || !usable {
+            return finish(self.execute_at(endpoint, false), sink);
+        }
+        let key = (target.provider, model.to_owned(), target.route);
+        let level = self
+            .limiter
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .output_pressure
+            .get(&key)
+            .copied()
+            .unwrap_or_default();
+        let mut body = payload(
+            target.provider,
+            model,
+            &self.message,
+            &target.history,
+            &[],
+            (target.route, self.preferences[0], level),
+        );
+        body["stream"] = json!(true);
+        let mut emitted = false;
+        let answer = stream_at(
+            endpoint,
+            target.provider,
+            &target.key,
+            &body,
+            &self.limiter,
+            if target.route == Route::Fast {
+                FAST_REQUEST_TIMEOUT
+            } else {
+                REQUEST_TIMEOUT
+            },
+            &mut |piece| {
+                emitted = true;
+                sink(piece);
+            },
+        );
+        {
+            let mut limiter = self.limiter.lock().unwrap_or_else(|e| e.into_inner());
+            limiter.observe_output(key, &answer);
+            limiter.observe_model(target.provider, model, &answer);
+        }
+        match answer {
+            Err(_) if !emitted => finish(self.execute_at(endpoint, false), sink),
+            answer => Completed {
+                provider: target.provider,
+                model: model.clone(),
+                answer,
+            },
+        }
+    }
+
     pub(crate) fn verify(&self) -> Completed {
         self.execute_at(self.target.provider.endpoint(), true)
     }
@@ -1154,15 +1228,15 @@ fn chat_at(
     )
 }
 
-fn chat_timed(
+/// Invia la richiesta (pacing, nuovi tentativi di rete, mappatura degli errori HTTP) e restituisce la risposta.
+fn send(
     endpoint: &str,
     provider: Provider,
     key: &str,
-    body: Value,
-    tools: &[Function],
+    body: &Value,
     limiter: &Mutex<Limiter>,
     timeout: Duration,
-) -> Result<Answer, Failure> {
+) -> Result<ureq::Response, Failure> {
     let wait = limiter
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -1225,6 +1299,19 @@ fn chat_timed(
     if !(200..300).contains(&response.status()) {
         return Err(Failure::Rejected(response.status()));
     }
+    Ok(response)
+}
+
+fn chat_timed(
+    endpoint: &str,
+    provider: Provider,
+    key: &str,
+    body: Value,
+    tools: &[Function],
+    limiter: &Mutex<Limiter>,
+    timeout: Duration,
+) -> Result<Answer, Failure> {
+    let response = send(endpoint, provider, key, &body, limiter, timeout)?;
     let mut bytes = Vec::new();
     response
         .into_reader()
@@ -1236,6 +1323,68 @@ fn chat_timed(
     }
     let body = serde_json::from_slice(&bytes).map_err(|_| Failure::Unavailable)?;
     decode(provider, &body, tools)
+}
+
+/// Risposta in streaming (ADR-0131): NDJSON per Ollama, SSE per NVIDIA NIM. Inoltra ogni frammento di testo a `sink`
+/// e ricostruisce lo stesso esito di una risposta completa, con gli stessi controlli (vuota, troncata).
+fn stream_at(
+    endpoint: &str,
+    provider: Provider,
+    key: &str,
+    body: &Value,
+    limiter: &Mutex<Limiter>,
+    timeout: Duration,
+    sink: &mut dyn FnMut(&str),
+) -> Result<Answer, Failure> {
+    use std::io::BufRead;
+    let response = send(endpoint, provider, key, body, limiter, timeout)?;
+    let reader = std::io::BufReader::new(response.into_reader().take(MAX_RESPONSE_BYTES + 1));
+    let mut text = String::new();
+    let mut reason = Value::Null;
+    for line in reader.lines() {
+        let line = line.map_err(|_| Failure::Unavailable)?;
+        let line = line.trim();
+        let data = match provider {
+            Provider::Ollama => line,
+            Provider::Nim => match line.strip_prefix("data:") {
+                Some(data) => data.trim(),
+                None => continue,
+            },
+        };
+        if data.is_empty() {
+            continue;
+        }
+        if data == "[DONE]" {
+            break;
+        }
+        let Ok(chunk) = serde_json::from_str::<Value>(data) else {
+            continue;
+        };
+        let (piece, finish) = match provider {
+            Provider::Ollama => (chunk["message"]["content"].as_str(), &chunk["done_reason"]),
+            Provider::Nim => (
+                chunk["choices"][0]["delta"]["content"].as_str(),
+                &chunk["choices"][0]["finish_reason"],
+            ),
+        };
+        if let Some(piece) = piece.filter(|piece| !piece.is_empty()) {
+            text.push_str(piece);
+            sink(piece);
+        }
+        if !finish.is_null() {
+            reason = finish.clone();
+        }
+    }
+    if text.len() as u64 > MAX_RESPONSE_BYTES {
+        return Err(Failure::Unavailable);
+    }
+    let synthetic = match provider {
+        Provider::Ollama => json!({"message": {"content": text}, "done_reason": reason}),
+        Provider::Nim => {
+            json!({"choices": [{"message": {"content": text}, "finish_reason": reason}]})
+        }
+    };
+    decode(provider, &synthetic, &[])
 }
 
 #[cfg(test)]
@@ -1315,6 +1464,109 @@ mod tests {
         assert!(
             matches!(result.answer, Ok(Answer::Text(text)) if text == "Seconda risposta sintetica")
         );
+        server.join().unwrap();
+    }
+
+    /// Server di prova: per ogni richiesta restituisce `(stream atteso, tipo di contenuto, corpo)`.
+    fn serve(script: Vec<(bool, &'static str, String)>) -> (String, std::thread::JoinHandle<()>) {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/chat", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            for (stream, kind, response) in script {
+                let (mut socket, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(socket.try_clone().unwrap());
+                let mut length = 0;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" || line.is_empty() {
+                        break;
+                    }
+                    if let Some((name, value)) = line.trim().split_once(':') {
+                        if name.eq_ignore_ascii_case("content-length") {
+                            length = value.trim().parse().unwrap();
+                        }
+                    }
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                let body: Value = serde_json::from_slice(&body).unwrap();
+                assert_eq!(body["stream"] == true, stream, "stream atteso: {stream}");
+                write!(socket, "HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}", response.len()).unwrap();
+            }
+        });
+        (endpoint, server)
+    }
+
+    fn fixture_request(provider: Provider) -> Request {
+        let prompt = "una domanda sintetica";
+        Request {
+            message: prompt.into(),
+            target: provider.target("fixture-only".into(), prompt, Vec::new(), &json!({})),
+            tools: vec![],
+            preferences: [QualityPreference::default(); 2],
+            limiter: Default::default(),
+        }
+    }
+
+    #[test]
+    fn streaming_forwards_fragments_for_both_wire_formats() {
+        let ollama = [
+            r#"{"message":{"content":"Ciao "},"done":false}"#,
+            r#"{"message":{"content":"mondo"},"done":false}"#,
+            r#"{"message":{"content":""},"done":true,"done_reason":"stop"}"#,
+        ]
+        .join("\n");
+        let nim = [
+            r#"data: {"choices":[{"delta":{"role":"assistant"}}]}"#,
+            r#"data: {"choices":[{"delta":{"content":"Ciao "},"finish_reason":null}]}"#,
+            r#"data: {"choices":[{"delta":{"content":"mondo"},"finish_reason":null}]}"#,
+            r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+            "data: [DONE]",
+        ]
+        .join("\n\n");
+        for (provider, kind, body) in [
+            (Provider::Ollama, "application/x-ndjson", ollama),
+            (Provider::Nim, "text/event-stream", nim),
+        ] {
+            let (endpoint, server) = serve(vec![(true, kind, body)]);
+            let mut pieces = Vec::new();
+            let result = fixture_request(provider)
+                .execute_streaming_at(&endpoint, &mut |piece| pieces.push(piece.to_string()));
+            assert_eq!(pieces, ["Ciao ", "mondo"], "{}", provider.id());
+            assert!(matches!(result.answer, Ok(Answer::Text(text)) if text == "Ciao mondo"));
+            server.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn a_truncated_stream_keeps_its_error_and_an_empty_one_falls_back_to_the_full_request() {
+        let truncated = [
+            r#"{"message":{"content":"Inizio"},"done":false}"#,
+            r#"{"message":{"content":""},"done":true,"done_reason":"length"}"#,
+        ]
+        .join("\n");
+        let (endpoint, server) = serve(vec![(true, "application/x-ndjson", truncated)]);
+        let mut pieces = Vec::new();
+        let result = fixture_request(Provider::Ollama)
+            .execute_streaming_at(&endpoint, &mut |piece| pieces.push(piece.to_string()));
+        assert_eq!(pieces, ["Inizio"]);
+        assert!(matches!(result.answer, Err(Failure::Truncated)));
+        server.join().unwrap();
+
+        // Nessun frammento: si ripete con la richiesta completa e il testo arriva in un blocco.
+        let empty = r#"{"message":{"content":""},"done":true,"done_reason":"stop"}"#.to_string();
+        let full = r#"{"message":{"content":"Risposta piena"}}"#.to_string();
+        let (endpoint, server) = serve(vec![
+            (true, "application/x-ndjson", empty),
+            (false, "application/json", full),
+        ]);
+        let mut pieces = Vec::new();
+        let result = fixture_request(Provider::Ollama)
+            .execute_streaming_at(&endpoint, &mut |piece| pieces.push(piece.to_string()));
+        assert_eq!(pieces, ["Risposta piena"]);
+        assert!(matches!(result.answer, Ok(Answer::Text(text)) if text == "Risposta piena"));
         server.join().unwrap();
     }
 

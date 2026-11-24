@@ -123,6 +123,16 @@ function check(condition, message) {
     step.kind === "tool_result" && step.tool === "code.validate_json" && step.status === "succeeded"),
     "la chat cloud delega al Core i controlli verificabili in locale senza chiavi API");
 
+  // Chat cloud in streaming (ADR-0131): un comando locale arriva comunque come evento `done`, senza chiavi API.
+  const cloudStream = await request("/api/cloud/chat/stream", {
+    method: "POST", token: ownerToken, body: { provider: "auto", message: "valida il JSON: {}" },
+  });
+  const cloudEvents = cloudStream.text.split("\n").filter(Boolean).map((line) => JSON.parse(line));
+  check(cloudStream.status === 200 && cloudEvents.at(-1)?.type === "done" && cloudEvents.at(-1)?.result?.reply,
+    "la chat cloud in streaming chiude con un esito completo");
+  check((await request("/api/cloud/chat/stream", { method: "POST", body: { message: "ciao" } })).status === 401,
+    "la chat cloud in streaming richiede il token");
+
   const chat = await request("/api/chat/stream", {
     method: "POST",
     token: ownerToken,

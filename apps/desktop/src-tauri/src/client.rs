@@ -129,13 +129,31 @@ impl ApiClient {
         )
     }
 
-    pub fn cloud_chat(&self, message: &str, use_context: bool) -> Result<Value, String> {
-        self.cloud_post(
-            "/api/cloud/chat",
-            &json!({
+    /// Chat cloud in streaming (ADR-0131): chiama `on_delta` per ogni frammento di testo e restituisce l'esito
+    /// finale, lo stesso oggetto di `cloud_chat`. Se il flusso si interrompe prima dell'esito è un errore.
+    pub fn cloud_chat_stream(
+        &self,
+        message: &str,
+        use_context: bool,
+        on_delta: &mut dyn FnMut(&str),
+    ) -> Result<Value, String> {
+        let agent = ureq::AgentBuilder::new()
+            .timeout_connect(Duration::from_secs(10))
+            .timeout_read(Duration::from_secs(125))
+            .redirects(0)
+            .build();
+        let mut request = agent
+            .post(&self.url("/api/cloud/chat/stream"))
+            .set("Accept", "application/x-ndjson");
+        if let Some((name, value)) = &self.auth {
+            request = request.set(name, value);
+        }
+        let response = request
+            .send_json(json!({
                 "provider": "auto", "message": message, "use_context": use_context,
-            }),
-        )
+            }))
+            .map_err(read_error)?;
+        read_chat_stream(std::io::BufReader::new(response.into_reader()), on_delta)
     }
 
     pub fn test_cloud_key(&self, provider: &str) -> Result<Value, String> {
@@ -152,6 +170,31 @@ impl ApiClient {
     }
 }
 
+/// Legge le righe NDJSON della chat in streaming: `delta` (testo), `done` (esito) o `error`.
+fn read_chat_stream(
+    reader: impl std::io::BufRead,
+    on_delta: &mut dyn FnMut(&str),
+) -> Result<Value, String> {
+    for line in reader.lines() {
+        let line = line.map_err(|error| error.to_string())?;
+        let Ok(event) = serde_json::from_str::<Value>(line.trim()) else {
+            continue;
+        };
+        match event["type"].as_str() {
+            Some("delta") => on_delta(event["text"].as_str().unwrap_or_default()),
+            Some("done") => return Ok(event["result"].clone()),
+            Some("error") => {
+                return Err(event["error"]["message"]
+                    .as_str()
+                    .unwrap_or("Errore del Core")
+                    .to_string())
+            }
+            _ => {}
+        }
+    }
+    Err("Il flusso si è interrotto prima della risposta finale.".into())
+}
+
 fn read_error(error: ureq::Error) -> String {
     match error {
         ureq::Error::Status(status, response) => response
@@ -166,6 +209,25 @@ fn read_error(error: ureq::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_chat_stream_delivers_fragments_then_the_final_result() {
+        let raw = "{\"type\":\"delta\",\"text\":\"Ciao \"}\n\nnon json\n{\"type\":\"delta\",\"text\":\"mondo\"}\n{\"type\":\"done\",\"result\":{\"reply\":\"Ciao mondo\"}}\n";
+        let mut pieces = Vec::new();
+        let result = read_chat_stream(std::io::Cursor::new(raw), &mut |piece| {
+            pieces.push(piece.to_string())
+        })
+        .unwrap();
+        assert_eq!(pieces, ["Ciao ", "mondo"]);
+        assert_eq!(result["reply"], "Ciao mondo");
+        let failed = "{\"type\":\"error\",\"error\":{\"message\":\"Chiave non valida\"}}\n";
+        assert_eq!(
+            read_chat_stream(std::io::Cursor::new(failed), &mut |_| {}).unwrap_err(),
+            "Chiave non valida"
+        );
+        let cut = "{\"type\":\"delta\",\"text\":\"x\"}\n";
+        assert!(read_chat_stream(std::io::Cursor::new(cut), &mut |_| {}).is_err());
+    }
 
     #[test]
     fn rejects_unsafe_core_origins() {

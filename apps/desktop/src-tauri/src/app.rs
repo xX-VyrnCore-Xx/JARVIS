@@ -236,6 +236,8 @@ enum Event {
     Persona(Result<Value, String>),
     /// Stato della voce di sistema maschile (ADR-0123).
     VoiceStatus(Result<Value, String>),
+    /// Frammento di testo della risposta in arrivo (ADR-0131).
+    ChatDelta(String),
     ChatFinished(Result<Value, String>),
     Notifications(Result<Value, String>),
     /// Il flusso in tempo reale si è interrotto: serve solo a scoprire che l'app è chiusa.
@@ -651,6 +653,14 @@ impl JarvisApp {
                     }
                     ctx.request_repaint();
                 }
+                Event::ChatDelta(piece) => {
+                    if self.chat_busy {
+                        if let Some(last) = self.chat.last_mut().filter(|m| m.role == "assistant") {
+                            last.text.push_str(&piece);
+                        }
+                    }
+                    ctx.request_repaint();
+                }
                 Event::ChatFinished(Ok(result)) => {
                     let reply = result["reply"].as_str().unwrap_or("").to_string();
                     if self.speak_replies && !self.remote && !reply.is_empty() {
@@ -941,7 +951,10 @@ impl JarvisApp {
         let tx = self.tx.clone();
         let use_context = self.chat_cloud_context && !self.remote;
         std::thread::spawn(move || {
-            let result = client.cloud_chat(&message, use_context);
+            let deltas = tx.clone();
+            let result = client.cloud_chat_stream(&message, use_context, &mut |piece| {
+                let _ = deltas.send(Event::ChatDelta(piece.to_string()));
+            });
             let _ = tx.send(Event::ChatFinished(result));
         });
     }

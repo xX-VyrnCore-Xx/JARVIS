@@ -1746,6 +1746,17 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Non verificato:** latenza e qualità reali (nessuna chiave API nel checkout): servono prove con i provider veri. Verificati con fixture: routing, prompt, contesto predefinito, test del Core.
 - **Documenti interessati:** AI_SYSTEM.md, ROADMAP.md.
 
+### ADR-0131 — Chat cloud in streaming
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («risolvi gli errori di CI e migliora ulteriormente questo software, ancora troppo basico»); seguito di ADR-0130.
+- **Problema:** la chat cloud aspettava la risposta intera prima di mostrare qualcosa: con i modelli lenti l'attesa percepita era di decine di secondi.
+- **Decisione:** nuovo `POST /api/cloud/chat/stream` (NDJSON come `/api/chat/stream`): righe `{"type":"delta","text":…}` mentre il modello genera, poi `{"type":"done","result":…}` (stesso oggetto di `/api/cloud/chat`) oppure `{"type":"error",…}`. Il Core legge NDJSON (Ollama) e SSE (NVIDIA NIM), inoltra i frammenti e ricostruisce lo stesso esito di una risposta completa, con gli stessi controlli (vuota, troncata, limite di byte). La logica è unica per i due endpoint (`run_cloud_chat`): stessi controlli su credenziali, dispositivi, comandi locali, saturazione e registrazione del turno.
+- **Ripiego:** con strumenti proposti dal modello o con il modello segnato non disponibile si usa il percorso completo (il testo arriva in un blocco); se lo streaming fallisce **prima del primo frammento** si ripete con la richiesta completa e il modello alternativo; dopo il primo frammento l'errore è riportato com'è (niente doppie risposte).
+- **Client:** macOS (`CoreSession.stream`) e Windows (`ApiClient::cloud_chat_stream`) mostrano il testo che cresce con cursore; l'avatar «parla» mentre il testo scorre. Android non usa la chat cloud del Core: invariato.
+- **Sicurezza:** richiede il token del proprietario come ogni altra API; per i dispositivi collegati restano validi gli stessi limiti di `/api/cloud/chat` (contesto spento, azioni riservate al proprietario), anche se l'endpoint di streaming non è nell'elenco delle rotte ammesse ai dispositivi.
+- **Non verificato:** comportamento con provider reali (formati verificati con server di prova per entrambi); resa SwiftUI e prova su Windows reale.
+- **Documenti interessati:** AI_SYSTEM.md, INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.
