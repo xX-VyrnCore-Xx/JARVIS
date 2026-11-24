@@ -91,3 +91,5 @@ Trasferimento file (ADR-0106): massimo 8 MiB in ingresso e 1 MiB in uscita, solo
 Container del sandbox (ADR-0115): etichetta `jarvis.sandbox=1`, `--ipc none`, pulizia degli orfani all'avvio.
 
 **Permessi del proprietario (ADR-0116).** Profili Standard, Prudente e Solo lettura e regole `ask`/`deny` per strumento; solo restrizioni, modificabili dal solo computer del Core e mai da chat.
+
+**Controllo delle applicazioni (ADR-0121).** `app.open`, `app.focus`, `app.type`, `app.key` e `app.windows` agiscono sul computer: richiesta diretta del proprietario, conferma solo sua con il testo esatto, valori passati come argomenti e mai dentro uno script, nessuna credenziale digitata, vietati a dispositivi, automazioni, missioni e agenti temporanei.

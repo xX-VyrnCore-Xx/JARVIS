@@ -103,6 +103,10 @@ fn resource_uri(tool: &str, args: &Value) -> String {
             )
         }
         _ if tool == "shell.run" => "jarvis://terminal/workspace".to_string(),
+        _ if tool.starts_with("app.") => format!(
+            "jarvis://desktop/app/{}",
+            clean(args["app"].as_str().unwrap_or("foreground"))
+        ),
         _ if tool.starts_with("sandbox.") => "jarvis://terminal/sandbox".to_string(),
         _ if matches!(tool, "web.fetch" | "web.browse" | "web.form") => {
             let host = args["url"]
@@ -186,6 +190,26 @@ fn expected_effect(tool: &str, args: &Value) -> String {
         "fs.delete" => format!(
             "Eliminare definitivamente «{}» dalla workspace di JARVIS (le cartelle solo se vuote).",
             args["path"].as_str().unwrap_or("?")
+        ),
+        "app.open" => format!(
+            "Aprire l’applicazione «{}» sul computer del proprietario.",
+            args["app"].as_str().unwrap_or("?")
+        ),
+        "app.focus" => format!(
+            "Portare in primo piano «{}».",
+            args["app"].as_str().unwrap_or("?")
+        ),
+        "app.type" => format!(
+            "Scrivere con la tastiera, nell’app in primo piano: «{}».",
+            args["text"].as_str().unwrap_or("?").chars().take(120).collect::<String>()
+        ),
+        "app.key" => format!(
+            "Premere {}{} nell’app in primo piano.",
+            args["modifiers"]
+                .as_array()
+                .map(|m| m.iter().filter_map(Value::as_str).map(|m| format!("{m}+")).collect::<String>())
+                .unwrap_or_default(),
+            args["key"].as_str().unwrap_or("?")
         ),
         crate::desktop::TOOL => format!(
             "Aprire {} sul computer del proprietario.",

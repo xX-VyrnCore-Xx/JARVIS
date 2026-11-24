@@ -248,6 +248,8 @@ impl Jarvis {
         }
         crate::backup::tighten_dir(&cfg.data_dir);
         std::fs::create_dir_all(cfg.workspace()).map_err(|e| format!("workspace: {e}"))?;
+        // Personalità scelta dal proprietario (ADR-0120): attiva dalla prima richiesta ai modelli.
+        crate::persona::set_current(&crate::persona::load(&cfg.data_dir));
         // Compatibilità con le release che usano ancora il blocco interno.
         let legacy_lock = std::fs::OpenOptions::new()
             .create(true)
@@ -601,8 +603,10 @@ impl Jarvis {
             }
         };
         let explicit_desktop = crate::desktop::Target::from_request(&objective).is_some();
+        let explicit_app = crate::appcontrol::is_app_request(&objective);
         move |tool: &str| match &temporary {
             _ if tool == crate::desktop::TOOL => temporary.is_none() && explicit_desktop,
+            _ if crate::appcontrol::is_control_tool(tool) => temporary.is_none() && explicit_app,
             Some(tools) => tools.iter().any(|t| t == tool),
             None => {
                 explicit.as_deref() == Some(tool)
@@ -805,6 +809,7 @@ impl Jarvis {
     pub fn configure_cloud(&mut self, body: &Value) -> Result<Value, CoreError> {
         let provider = crate::cloud::Provider::parse(&body["provider"])
             .ok_or_else(|| CoreError::BadRequest("provider sconosciuto".into()))?;
+        let mut key_hint: Option<&'static str> = None;
         if body["remove_key"] == true {
             self.secrets.delete(&provider.secret()).map_err(internal)?;
         } else {
@@ -820,17 +825,29 @@ impl Jarvis {
                 })
                 .transpose()?;
             if let Some(value) = body.get("key") {
-                let key = value
-                    .as_str()
-                    .map(str::trim)
-                    .ok_or_else(|| CoreError::BadRequest("chiave API non valida".into()))?;
-                if key.is_empty() || key.len() > 1024 || key.bytes().any(|b| !b.is_ascii_graphic())
-                {
-                    return Err(CoreError::BadRequest("chiave API non valida".into()));
-                }
+                let key = crate::cloud::normalize_key(
+                    value
+                        .as_str()
+                        .ok_or_else(|| CoreError::BadRequest("chiave API non valida".into()))?,
+                )
+                .map_err(|reason| CoreError::BadRequest(reason.into()))?;
                 self.secrets
-                    .put(&provider.secret(), key)
+                    .put(&provider.secret(), &key)
                     .map_err(internal)?;
+                // La chiave deve poter essere riletta: un portachiavi che non salva darebbe errori misteriosi alla prima chat.
+                if self
+                    .secrets
+                    .get(&provider.secret())
+                    .map_err(internal)?
+                    .as_deref()
+                    != Some(key.as_str())
+                {
+                    return Err(CoreError::Internal(
+                        "La chiave non è stata salvata: il deposito dei segreti non risponde."
+                            .into(),
+                    ));
+                }
+                key_hint = crate::cloud::key_format_hint(provider, &key);
             }
             if body["use_for_chat"] == true
                 && self
@@ -879,7 +896,11 @@ impl Jarvis {
             "cloud.configure"
         };
         self.record_owner_action(action)?;
-        self.cloud_status()
+        let mut status = self.cloud_status()?;
+        if let Some(hint) = key_hint {
+            status["key_hint"] = json!(hint);
+        }
+        Ok(status)
     }
 
     pub fn rate_cloud_reply(&self, input: &Value) -> Result<Value, CoreError> {
@@ -1773,6 +1794,7 @@ impl Jarvis {
 
     fn owner_only_confirmation(pending: &Pending) -> bool {
         pending.tool == crate::desktop::TOOL
+            || crate::appcontrol::is_control_tool(&pending.tool)
             || (std::env::var("JARVIS_MACOS_SESSION").as_deref() == Ok("1")
                 && matches!(pending.decision["risk"].as_str(), Some("high" | "critical")))
     }
@@ -2451,6 +2473,13 @@ impl Jarvis {
             crate::desktop::TOOL => Err(tool_error(
                 "pc.unavailable",
                 "È richiesta una conferma locale",
+            )),
+            t if crate::appcontrol::is_control_tool(t) && (confirmed || t == "app.windows") => {
+                crate::appcontrol::execute(t, arguments)
+            }
+            t if crate::appcontrol::is_control_tool(t) => Err(tool_error(
+                "app.not_confirmed",
+                "Il controllo delle applicazioni richiede la conferma del proprietario",
             )),
             "code.run_python" if confirmed => {
                 crate::sandbox::run_python(arguments["source"].as_str().unwrap_or_default())
@@ -3139,6 +3168,18 @@ impl Jarvis {
         tools.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
         doc["tools"] = json!(tools);
         doc
+    }
+
+    pub fn persona(&self) -> Value {
+        crate::persona::to_json(&crate::persona::load(&self.cfg.data_dir))
+    }
+
+    pub fn persona_update(&mut self, patch: &Value) -> Result<Value, CoreError> {
+        let doc =
+            crate::persona::update(&self.cfg.data_dir, patch).map_err(CoreError::BadRequest)?;
+        crate::persona::set_current(&crate::persona::load(&self.cfg.data_dir));
+        self.record_owner_action("persona.update")?;
+        Ok(doc)
     }
 
     pub fn permissions_update(&mut self, patch: &Value) -> Result<Value, CoreError> {
@@ -5032,6 +5073,9 @@ fn workflow_tool_restriction(tool: &str) -> Option<&'static str> {
             Some("un'automazione non può gestire altre automazioni")
         }
         crate::desktop::TOOL => Some("le azioni sul PC richiedono una richiesta diretta"),
+        t if crate::appcontrol::is_control_tool(t) => {
+            Some("il controllo delle applicazioni richiede una richiesta diretta")
+        }
         "shell.run" | "code.run_python" | "sandbox.run" | "sandbox.reset" | "sandbox.export"
         | "sandbox.prepare" => {
             Some("i comandi del terminale e del sandbox richiedono una conferma diretta")

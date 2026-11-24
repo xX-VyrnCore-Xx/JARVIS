@@ -59,6 +59,8 @@ enum Event {
     CloudTested(Result<Value, String>),
     /// Esito dell'avvio dell'aggiornamento interno (ADR-0109): se riuscito l'app si chiude.
     UpdateInstalling(Result<Value, String>),
+    /// Personalità corrente di JARVIS (ADR-0120).
+    Persona(Result<Value, String>),
     ChatFinished(Result<Value, String>),
     Notifications(Result<Value, String>),
     /// Il flusso in tempo reale si è interrotto: serve solo a scoprire che l'app è chiusa.
@@ -146,6 +148,9 @@ pub struct JarvisApp {
     github_update_token: String,
     update_remove_confirm: bool,
     update_restarting: bool,
+    persona_loaded: bool,
+    persona_style: String,
+    persona_address: String,
 }
 
 impl JarvisApp {
@@ -273,6 +278,9 @@ impl JarvisApp {
             github_update_token: String::new(),
             update_remove_confirm: false,
             update_restarting: false,
+            persona_loaded: false,
+            persona_style: "film".into(),
+            persona_address: String::new(),
         }
     }
 
@@ -375,6 +383,18 @@ impl JarvisApp {
                     self.last_load = Instant::now() - Duration::from_secs(60);
                     self.refresh(ctx);
                 }
+                Event::Persona(result) => {
+                    self.loading = false;
+                    match result {
+                        Ok(doc) => {
+                            self.persona_style = doc["style"].as_str().unwrap_or("film").to_owned();
+                            self.persona_address =
+                                doc["address"].as_str().unwrap_or_default().to_owned();
+                            self.persona_loaded = true;
+                        }
+                        Err(error) => self.error = Some(error),
+                    }
+                }
                 Event::UpdateInstalling(result) => {
                     self.loading = false;
                     match result {
@@ -400,6 +420,7 @@ impl JarvisApp {
                     self.cloud_remove_confirm = false;
                     match result {
                         Ok(status) => {
+                            let hint = status["key_hint"].as_str().map(str::to_owned);
                             if self.current == "models" {
                                 self.data = Some(status);
                             } else {
@@ -411,7 +432,10 @@ impl JarvisApp {
                             self.cloud_action_notice = Some(if removed {
                                 "La chiave del provider è stata rimossa.".into()
                             } else {
-                                "Chiave salvata e selezionata per la chat. Usa Testa chiave per verificare il provider.".into()
+                                match hint {
+                                    Some(hint) => format!("Chiave salvata. {hint} Usa Testa chiave per verificarla."),
+                                    None => "Chiave salvata e selezionata per la chat. Usa Testa chiave per verificare il provider.".into(),
+                                }
                             });
                         }
                         Err(error) => {
@@ -426,8 +450,12 @@ impl JarvisApp {
                     match result {
                         Ok(result) => {
                             let model = result["model"].as_str().unwrap_or("modello automatico");
+                            let models = result["models_available"]
+                                .as_u64()
+                                .map(|n| format!(" · credenziali valide, {n} modelli disponibili"))
+                                .unwrap_or_default();
                             self.cloud_action_notice =
-                                Some(format!("Richiesta di prova riuscita · {model}"));
+                                Some(format!("Richiesta di prova riuscita · {model}{models}"));
                         }
                         Err(error) => self.cloud_action_error = Some(error),
                     }
@@ -2530,7 +2558,58 @@ impl JarvisApp {
         }
     }
 
+    /// Stile e forma di rivolgersi di JARVIS (ADR-0120).
+    fn show_persona(&mut self, ui: &mut egui::Ui) {
+        if !self.persona_loaded {
+            if let Some(client) = self.client.clone() {
+                self.persona_loaded = true;
+                let tx = self.tx.clone();
+                std::thread::spawn(move || {
+                    let _ = tx.send(Event::Persona(client.get("/api/persona")));
+                });
+            }
+        }
+        ui.heading("Personalità");
+        ui.label("Come JARVIS ti risponde. Non cambia permessi né conferme.");
+        ui.horizontal(|ui| {
+            for (value, label) in [("film", "Come nel film"), ("sober", "Sobria")] {
+                if ui
+                    .selectable_label(self.persona_style == value, label)
+                    .clicked()
+                    && self.persona_style != value
+                {
+                    self.persona_style = value.into();
+                    self.mutate(
+                        &ui.ctx().clone(),
+                        Mutation::Patch,
+                        "/api/persona".into(),
+                        Some(json!({"style": value})),
+                    );
+                }
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.label("Rivolgiti a me con");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.persona_address)
+                    .hint_text("per esempio Signore, Signora o il tuo nome")
+                    .desired_width(240.0),
+            );
+            if ui.button("Salva").clicked() {
+                let address = self.persona_address.trim().to_owned();
+                self.mutate(
+                    &ui.ctx().clone(),
+                    Mutation::Patch,
+                    "/api/persona".into(),
+                    Some(json!({"address": address})),
+                );
+            }
+        });
+        ui.separator();
+    }
+
     fn show_cloud_settings(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        self.show_persona(ui);
         ui.heading("Collega un provider AI");
         ui.label("Le chiavi vengono salvate nel secret store del Core e non sono mostrate dopo il salvataggio.");
         ui.add_space(8.0);

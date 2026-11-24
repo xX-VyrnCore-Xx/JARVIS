@@ -56,6 +56,7 @@ impl Jarvis {
                     && !matches!(t.risk(), "high" | "critical")
                     && name != "agent.delegate"
                     && name != crate::desktop::TOOL
+                    && !crate::appcontrol::is_control_tool(name)
                     && !name.starts_with("mission.")
                     && (connectors
                         || !(name.starts_with("connector.") || name.starts_with("node.")))

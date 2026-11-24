@@ -42,6 +42,14 @@ impl Provider {
         }
     }
 
+    /// Elenco dei modelli accessibili con la chiave: serve a verificare le credenziali senza consumare una richiesta di chat.
+    fn models_endpoint(self) -> &'static str {
+        match self {
+            Self::Ollama => "https://ollama.com/api/tags",
+            Self::Nim => "https://integrate.api.nvidia.com/v1/models",
+        }
+    }
+
     fn endpoint(self) -> &'static str {
         match self {
             Self::Ollama => "https://ollama.com/api/chat",
@@ -369,6 +377,154 @@ pub fn clip_tokens(text: &str, budget: usize) -> String {
             &text[boundaries[boundaries.len() - 1 - low]..]
         )
     }
+}
+
+/// Ripulisce una chiave incollata (ADR-0119): spazi e a capo invisibili, virgolette, `Bearer `, `Authorization:`,
+/// `export NOME=`/`NOME=`. Una chiave con spazi interni o caratteri non ASCII viene rifiutata con il motivo.
+pub fn normalize_key(raw: &str) -> Result<String, &'static str> {
+    let mut text: String = raw
+        .chars()
+        .filter(|c| {
+            !matches!(
+                c,
+                '\u{feff}' | '\u{200b}' | '\u{200c}' | '\u{200d}' | '\u{2060}'
+            )
+        })
+        .collect();
+    text = text.trim().to_string();
+    let lower = text.to_ascii_lowercase();
+    for prefix in ["authorization:", "export "] {
+        if lower.starts_with(prefix) {
+            text = text[prefix.len()..].trim().to_string();
+        }
+    }
+    // NOME_VARIABILE=valore
+    if let Some((name, value)) = text.split_once('=') {
+        if !name.is_empty()
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+        {
+            text = value.trim().to_string();
+        }
+    }
+    text = text
+        .trim_matches(|c| matches!(c, '"' | '\'' | '`' | '\u{201c}' | '\u{201d}'))
+        .trim()
+        .to_string();
+    if text.to_ascii_lowercase().starts_with("bearer ") {
+        text = text[7..].trim().to_string();
+    }
+    if text.is_empty() {
+        return Err("La chiave è vuota.");
+    }
+    if text.chars().any(char::is_whitespace) {
+        return Err(
+            "La chiave contiene spazi o a capo: incolla solo la chiave, senza altro testo.",
+        );
+    }
+    if !text.bytes().all(|b| b.is_ascii_graphic()) {
+        return Err(
+            "La chiave contiene caratteri non validi (accenti o simboli copiati per errore).",
+        );
+    }
+    if text.len() < 8 {
+        return Err("La chiave è troppo corta: controlla di averla copiata per intero.");
+    }
+    if text.len() > 1024 {
+        return Err("La chiave è troppo lunga.");
+    }
+    Ok(text)
+}
+
+/// Avviso, non errore, se la chiave non ha il formato tipico del provider.
+pub fn key_format_hint(provider: Provider, key: &str) -> Option<&'static str> {
+    match provider {
+        Provider::Nim if !key.starts_with("nvapi-") => {
+            Some("Le chiavi NVIDIA iniziano di solito con «nvapi-»: se il test fallisce, rigenerala da build.nvidia.com.")
+        }
+        Provider::Ollama if key.starts_with("nvapi-") || key.starts_with("sk-") => {
+            Some("Questa sembra la chiave di un altro servizio: per Ollama Cloud usa una chiave creata su ollama.com/settings/keys.")
+        }
+        _ => None,
+    }
+}
+
+/// Modelli accessibili con la chiave. Un errore di credenziali o di rete è già classificato come per la chat.
+pub fn list_models(provider: Provider, key: &str) -> Result<Vec<String>, Failure> {
+    list_models_at(provider.models_endpoint(), provider, key)
+}
+
+pub(crate) fn list_models_at(
+    endpoint: &str,
+    provider: Provider,
+    key: &str,
+) -> Result<Vec<String>, Failure> {
+    let agent = crate::net::builder(Duration::from_secs(20))
+        .try_proxy_from_env(endpoint.starts_with("https://"))
+        .build();
+    let mut attempt = 0;
+    let response = loop {
+        let result = agent
+            .get(endpoint)
+            .set("Authorization", &format!("Bearer {key}"))
+            .set("Accept", "application/json")
+            .call();
+        match &result {
+            Err(ureq::Error::Transport(t))
+                if attempt < CONNECT_RETRIES && crate::net::classify(t).transient() =>
+            {
+                std::thread::sleep(Duration::from_millis(400 * 3u64.pow(attempt)));
+                attempt += 1;
+            }
+            _ => break result,
+        }
+    };
+    let response = match response {
+        Ok(response) => response,
+        Err(ureq::Error::Status(401, _)) => return Err(Failure::InvalidKey),
+        Err(ureq::Error::Status(403, _)) => return Err(Failure::Forbidden),
+        Err(ureq::Error::Status(402, _)) => return Err(Failure::Quota),
+        Err(ureq::Error::Status(429, response)) => {
+            return Err(Failure::RateLimited(retry_after(
+                response.header("Retry-After"),
+                chrono::Utc::now(),
+            )))
+        }
+        Err(ureq::Error::Status(status, _)) if status < 500 => {
+            return Err(Failure::Rejected(status))
+        }
+        Err(ureq::Error::Status(_, _)) => return Err(Failure::Unavailable),
+        Err(ureq::Error::Transport(t)) => {
+            return Err(Failure::Connection(crate::net::classify(&t)))
+        }
+    };
+    let mut bytes = Vec::new();
+    response
+        .into_reader()
+        .take(MAX_RESPONSE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| Failure::Unavailable)?;
+    let body: Value = serde_json::from_slice(&bytes).map_err(|_| Failure::Unavailable)?;
+    Ok(parse_models(provider, &body))
+}
+
+fn parse_models(provider: Provider, body: &Value) -> Vec<String> {
+    let (list, field) = match provider {
+        Provider::Ollama => (&body["models"], "name"),
+        Provider::Nim => (&body["data"], "id"),
+    };
+    let mut names: Vec<String> = list
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|m| m[field].as_str().or_else(|| m["model"].as_str()))
+        .map(|name| name.strip_suffix(":cloud").unwrap_or(name).to_string())
+        .filter(|name| valid_model(name))
+        .collect();
+    names.sort();
+    names.dedup();
+    names
 }
 
 pub fn valid_model(model: &str) -> bool {
@@ -801,7 +957,7 @@ fn payload(
         "Se una richiesta è vaga ma una lettura è chiaramente la più probabile, rispondi su quella dichiarandola in una riga invece di fare domande a vuoto. ",
         "Per errori e limiti degli strumenti spiega in italiano semplice cosa è successo e cosa fare ora, senza codici tecnici né scuse. ",
         "JARVIS compone la risposta dopo la verifica della chiamata."
-    ), format!("Data e ora locali: {}.", chrono::Local::now().format("%d/%m/%Y %H:%M")), route.guidance(), preference.length_guidance(), preference.precision_guidance())}),
+    ), format!("Data e ora locali: {}. {}", chrono::Local::now().format("%d/%m/%Y %H:%M"), crate::persona::current_guidance()), route.guidance(), preference.length_guidance(), preference.precision_guidance())}),
     ];
     for turn in history {
         messages.push(json!({"role": "user", "content": turn.user}));
@@ -1402,6 +1558,7 @@ mod tests {
             "controlla il suo esito",
             "Non dichiarare di aver completato un’azione",
             "Data e ora locali:",
+            "maggiordomo digitale",
             "testo semplice e leggibile",
         ] {
             assert!(
@@ -1576,5 +1733,83 @@ mod agent_tests {
         assert!(started.elapsed() >= Duration::from_millis(1500));
         let (text, retryable) = failure.user_message(Provider::Ollama);
         assert!(text.contains("server non accetta") && retryable);
+    }
+
+    #[test]
+    fn pasted_keys_are_cleaned_and_bad_ones_explained() {
+        let good = "nvapi-AbCdEf0123456789xyz";
+        for raw in [
+            good.to_string(),
+            format!("  {good}\n"),
+            format!("\"{good}\""),
+            format!("Bearer {good}"),
+            format!("Authorization: Bearer {good}"),
+            format!("export NVIDIA_API_KEY={good}"),
+            format!("NVIDIA_API_KEY=\"{good}\""),
+            format!("\u{feff}{good}\u{200b}"),
+        ] {
+            assert_eq!(normalize_key(&raw).unwrap(), good, "{raw:?}");
+        }
+        for (raw, needle) in [
+            ("", "vuota"),
+            ("chiave con spazi dentro", "spazi"),
+            ("chiave-con-àccento-12345", "non validi"),
+            ("corta", "corta"),
+        ] {
+            assert!(normalize_key(raw).unwrap_err().contains(needle), "{raw}");
+        }
+        assert!(key_format_hint(Provider::Nim, "abcdefghijkl").is_some());
+        assert!(key_format_hint(Provider::Nim, "nvapi-abcdefghij").is_none());
+        assert!(key_format_hint(Provider::Ollama, "sk-abcdefghijkl").is_some());
+    }
+
+    #[test]
+    fn model_lists_are_read_for_both_providers_and_credentials_errors_are_classified() {
+        use std::io::{BufRead, BufReader, Write};
+        assert_eq!(
+            parse_models(
+                Provider::Ollama,
+                &json!({"models": [{"name": "glm-5.3-flash:cloud"}, {"model": "kimi-k3.1-pro"}]})
+            ),
+            vec!["glm-5.3-flash", "kimi-k3.1-pro"]
+        );
+        assert_eq!(
+            parse_models(
+                Provider::Nim,
+                &json!({"data": [{"id": "b/model"}, {"id": "a/model"}, {"id": "bad id"}]})
+            ),
+            vec!["a/model", "b/model"]
+        );
+        let serve = |status: &'static str, body: &'static str| {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!("http://{}/models", listener.local_addr().unwrap());
+            std::thread::spawn(move || {
+                if let Ok((stream, _)) = listener.accept() {
+                    let mut reader = BufReader::new(stream.try_clone().unwrap());
+                    let mut line = String::new();
+                    while reader.read_line(&mut line).is_ok() && line.trim() != "" {
+                        line.clear();
+                    }
+                    let mut out = stream;
+                    let _ = write!(out, "HTTP/1.1 {status}\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}", body.len());
+                }
+            });
+            url
+        };
+        let ok = serve("200 OK", "{\"data\":[{\"id\":\"a/m\"}]}");
+        assert_eq!(
+            list_models_at(&ok, Provider::Nim, "k").unwrap(),
+            vec!["a/m"]
+        );
+        let denied = serve("401 Unauthorized", "{}");
+        assert!(matches!(
+            list_models_at(&denied, Provider::Nim, "k"),
+            Err(Failure::InvalidKey)
+        ));
+        let forbidden = serve("403 Forbidden", "{}");
+        assert!(matches!(
+            list_models_at(&forbidden, Provider::Nim, "k"),
+            Err(Failure::Forbidden)
+        ));
     }
 }

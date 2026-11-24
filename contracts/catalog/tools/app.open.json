@@ -1,0 +1,46 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "app.open",
+  "version": "1.0.0",
+  "summary": "Apre un'applicazione installata sul computer del proprietario, dopo la sua conferma",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "app"
+    ],
+    "properties": {
+      "app": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 60
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "prerequisites": [
+    "macOS o Windows; su macOS serve il permesso Accessibilità"
+  ],
+  "effects": "write_local",
+  "risk": "medium",
+  "permissions": [
+    "core.desktop:execute"
+  ],
+  "errors": [
+    "app.invalid",
+    "app.unavailable",
+    "app.timeout",
+    "app.not_found",
+    "app.permission",
+    "app.failed"
+  ],
+  "timeout_ms": 15000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "required"
+}

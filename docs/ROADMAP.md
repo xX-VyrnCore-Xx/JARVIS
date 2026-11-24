@@ -238,4 +238,6 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Permessi e competenze (2026-11-24, dopo PR #83).** ADR-0116, ADR-0117, ADR-0118. Profili e regole del proprietario (solo restrizioni), cinque strumenti di competenza, specialista aziendale e quattro competenze. Verifiche: fmt, clippy, `cargo test --locked`, test Python, build e test egui. **Sospeso:** schermata Permessi su macOS e Android.
 
+**Chiave API, personalità e controllo delle app (2026-11-24, base `cd2a07a`).** ADR-0119, ADR-0120, ADR-0121. Normalizzazione e verifica delle credenziali, personalità del film configurabile, apertura e uso delle applicazioni con conferma. Verifiche: fmt, clippy, `cargo test --locked`, test Python, build e test egui. **Sospeso:** prova con chiavi reali, esecuzione sui sistemi reali (macOS Accessibilità, Windows), schermata Swift/Android per personalità e permessi.
+
 Per ogni ripresa registrare data, revisione, lavoro completato, verifiche eseguite, blocchi, ipotesi e prossimo passo concreto. Conservare il checkpoint con le modifiche alle quali si riferisce.
