@@ -29,6 +29,9 @@ futures-util = { version = "0.3", default-features = false }
 ed25519-dalek = "2"
 hmac = "0.12"
 ureq = { version = "2", features = ["native-certs"] }
+# Radici TLS: CA del sistema più quelle incluse (ADR-0108); stesse versioni già usate da ureq.
+rustls-native-certs = "0.7"
+webpki-roots = "0.26"
 # mTLS fra Core e nodi (ADR-0041): stessa versione di rustls usata da ureq, provider ring.
 # Verifica delle firme ES256 delle passkey (ADR-0042), già usata da rustls.
 ring = "0.17"

@@ -56,6 +56,8 @@ enum Event {
     PairingCreated(Result<Value, String>),
     CloudConfigured(Result<Value, String>, bool),
     CloudTested(Result<Value, String>),
+    /// Esito dell'avvio dell'aggiornamento interno (ADR-0109): se riuscito l'app si chiude.
+    UpdateInstalling(Result<Value, String>),
     ChatFinished(Result<Value, String>),
     Notifications(Result<Value, String>),
     /// Il flusso in tempo reale si è interrotto: serve solo a scoprire che l'app è chiusa.
@@ -142,6 +144,7 @@ pub struct JarvisApp {
     cloud_remove_confirm: bool,
     github_update_token: String,
     update_remove_confirm: bool,
+    update_restarting: bool,
 }
 
 impl JarvisApp {
@@ -268,6 +271,7 @@ impl JarvisApp {
             cloud_remove_confirm: false,
             github_update_token: String::new(),
             update_remove_confirm: false,
+            update_restarting: false,
         }
     }
 
@@ -369,6 +373,16 @@ impl JarvisApp {
                     self.data = None;
                     self.last_load = Instant::now() - Duration::from_secs(60);
                     self.refresh(ctx);
+                }
+                Event::UpdateInstalling(result) => {
+                    self.loading = false;
+                    match result {
+                        Ok(_) => {
+                            self.update_restarting = true;
+                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                        }
+                        Err(error) => self.error = Some(error),
+                    }
                 }
                 Event::PairingCreated(result) => {
                     self.invite_creating = false;
@@ -2554,7 +2568,7 @@ impl JarvisApp {
             .filter(|v| !v.is_null());
 
         ui.heading("Aggiornamenti JARVIS");
-        ui.label("Controllo automatico ogni ora; download, verifica della firma e installazione restano manuali.");
+        ui.label("Controllo automatico ogni ora. Scarichi, verifichi e installi la nuova versione da qui, senza passare da GitHub.");
         ui.add_space(8.0);
         ui.checkbox(&mut enabled, "Controlla automaticamente le nuove release");
         egui::ComboBox::from_id_salt("update-channel")
@@ -2640,6 +2654,7 @@ impl JarvisApp {
         if let Some(checked_at) = state.and_then(|state| state["checked_at"].as_str()) {
             ui.small(format!("Ultimo controllo: {checked_at}"));
         }
+        self.show_update_install(ui, ctx);
         if let Some(latest) = latest {
             let tag = latest["tag"].as_str().unwrap_or("versione sconosciuta");
             ui.separator();
@@ -2660,6 +2675,80 @@ impl JarvisApp {
             }
         }
         ui.small("Per i repository privati il Core usa il token solo per leggere le release GitHub; la chiave non viene restituita dall'API né inclusa nelle notifiche.");
+    }
+
+    /// Scarica, verifica e installa l'aggiornamento senza uscire dall'app (ADR-0109).
+    fn show_update_install(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let Some(state) = self.data.clone() else {
+            return;
+        };
+        let available = state["update_available"] == true;
+        let download = &state["download"];
+        let status = download["status"].as_str().unwrap_or("idle");
+        if !available && status == "idle" {
+            return;
+        }
+        ui.separator();
+        ui.heading("Aggiornamento automatico");
+        if download["supported"] != true {
+            ui.label("Su questo sistema l'aggiornamento resta manuale: apri la release e scarica il file.");
+            return;
+        }
+        let version = download["version"].as_str().unwrap_or_default();
+        match status {
+            "downloading" => {
+                let bytes = download["bytes"].as_u64().unwrap_or(0) as f32;
+                let total = download["total"].as_u64().unwrap_or(0) as f32;
+                let fraction = if total > 0.0 { (bytes / total).clamp(0.0, 1.0) } else { 0.0 };
+                ui.add(
+                    egui::ProgressBar::new(fraction)
+                        .show_percentage()
+                        .text(format!("Scarico {version}: {:.0} / {:.0} MB", bytes / 1.0e6, total / 1.0e6)),
+                );
+                ctx.request_repaint_after(Duration::from_secs(1));
+                if self.last_load.elapsed() > Duration::from_secs(1) && !self.loading {
+                    self.refresh(ctx);
+                }
+            }
+            "ready" => {
+                ui.colored_label(
+                    egui::Color32::LIGHT_GREEN,
+                    format!("JARVIS {version} è scaricato e verificato (SHA-256)."),
+                );
+                ui.label("L'app si chiude, installa la nuova versione e si riapre da sola. I tuoi dati restano dove sono.");
+                if self.update_restarting {
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Spinner::new());
+                        ui.label("Installazione in corso…");
+                    });
+                } else if ui
+                    .add_enabled(!self.loading, egui::Button::new("Installa e riavvia"))
+                    .clicked()
+                {
+                    if let Some(client) = self.client.clone() {
+                        let tx = self.tx.clone();
+                        self.loading = true;
+                        std::thread::spawn(move || {
+                            let _ = tx.send(Event::UpdateInstalling(client.post("/api/updates/install", None)));
+                        });
+                    }
+                }
+            }
+            _ => {
+                if status == "failed" {
+                    if let Some(error) = download["error"].as_str() {
+                        ui.colored_label(egui::Color32::LIGHT_RED, format!("Download non riuscito: {error}"));
+                    }
+                }
+                if available
+                    && ui
+                        .add_enabled(!self.loading, egui::Button::new("Scarica aggiornamento"))
+                        .clicked()
+                {
+                    self.act(ctx, "/api/updates/download".into(), None);
+                }
+            }
+        }
     }
 
     fn show_device_invite(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {

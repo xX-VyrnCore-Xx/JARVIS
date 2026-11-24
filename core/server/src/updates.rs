@@ -61,7 +61,15 @@ pub fn latest(releases: &[Value], channel: &str) -> Option<Value> {
                 std::cmp::Ordering::Equal
             }
         })
-        .map(|r| json!({"tag": r["tag_name"], "url": r["html_url"], "published_at": r["published_at"], "prerelease": r["prerelease"] == true}))
+        .map(|r| {
+            let assets: Vec<Value> = r["assets"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|a| json!({"name": a["name"], "size": a["size"], "api_url": a["url"], "download_url": a["browser_download_url"]}))
+                .collect();
+            json!({"tag": r["tag_name"], "url": r["html_url"], "published_at": r["published_at"], "prerelease": r["prerelease"] == true, "assets": assets})
+        })
 }
 
 /// Impostazioni e ultimo esito, salvati in `<dati>/updates.json`.
@@ -150,11 +158,7 @@ impl Updates {
         if token.is_some() {
             validate_private_endpoint(&self.url)?;
         }
-        let agent = ureq::AgentBuilder::new()
-            .timeout(Duration::from_secs(10))
-            .redirects(0)
-            .user_agent(concat!("JARVIS/", env!("CARGO_PKG_VERSION")))
-            .build();
+        let agent = crate::net::builder(Duration::from_secs(10)).build();
         let mut request = agent
             .get(&self.url)
             .set("Accept", "application/vnd.github+json");

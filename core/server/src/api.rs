@@ -382,6 +382,8 @@ pub fn router(state: Shared) -> Router {
         .route("/api/chat/stream", post(chat_stream))
         .route("/api/updates", get(updates_get).post(updates_set))
         .route("/api/updates/check", post(updates_check))
+        .route("/api/updates/download", post(updates_download))
+        .route("/api/updates/install", post(updates_install))
         .route("/api/notify/channels", get(channels_list).post(channel_add))
         .route("/api/notify/channels/{id}", delete(channel_delete))
         .route("/api/notify/channels/{id}/test", post(channel_test))
@@ -892,6 +894,46 @@ async fn updates_set(State(state): State<Shared>, Json(body): Json<Value>) -> Re
 async fn updates_check(State(state): State<Shared>) -> Response {
     let fetched = fetch_releases(&state).await;
     reply(with_core(&state, move |j| j.updates_record(fetched)).await)
+}
+
+/// Scarica in background l'installatore della versione trovata: solo il proprietario dal computer del Core.
+async fn updates_download(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+) -> Response {
+    if device.is_some() {
+        return error(
+            StatusCode::FORBIDDEN,
+            "owner_only",
+            "operazione disponibile solo dal computer del proprietario",
+        );
+    }
+    let planned = with_core(&state, |j| j.updates_download_plan()).await;
+    match planned {
+        Ok((plan, token, dir)) => {
+            match crate::selfupdate::start_download(&dir, plan, token) {
+                Ok(()) => {}
+                Err(message) => return error(StatusCode::CONFLICT, "conflict", &message),
+            }
+            reply(with_core(&state, |j| j.updates_state()).await)
+        }
+        Err(e) => reply(Err(e)),
+    }
+}
+
+/// Applica l'aggiornamento verificato e riavvia l'app: solo il proprietario dal computer del Core.
+async fn updates_install(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+) -> Response {
+    if device.is_some() {
+        return error(
+            StatusCode::FORBIDDEN,
+            "owner_only",
+            "operazione disponibile solo dal computer del proprietario",
+        );
+    }
+    reply(with_core(&state, |j| j.updates_install()).await)
 }
 
 async fn fetch_releases(state: &Shared) -> Result<Vec<Value>, String> {

@@ -21,6 +21,7 @@ mod container_runtime;
 pub mod memory;
 pub mod missions;
 pub mod n8n;
+pub mod net;
 pub mod node_agent;
 pub mod nodes;
 pub mod oauth;
@@ -32,6 +33,7 @@ pub mod proactive;
 pub mod push;
 pub mod rollback;
 pub mod secrets;
+pub mod selfupdate;
 pub mod setup;
 pub mod skills;
 

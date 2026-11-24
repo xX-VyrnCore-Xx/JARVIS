@@ -228,4 +228,6 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Sandbox: file e avviso (2026-11-24, base `24e9e25`).** ADR-0106 e ADR-0107. `sandbox.import`/`sandbox.export` (esportazione con conferma, nessun link simbolico seguito) e iniziativa proattiva per sessioni quasi piene. Verifiche: fmt, clippy, `cargo test --locked`, unittest AI e contratti, build egui. **Sospeso:** esecuzione reale nel container e resa Swift (solo CI).
 
+**Rete HTTPS, aggiornamenti interni e risposte (2026-11-24, base `5cb0f98`).** ADR-0108, ADR-0109, ADR-0110. Radici TLS di sistema più incluse, timeout e retry, diagnosi della causa; scarico, verifica SHA-256 e installazione dell'aggiornamento dall'app (Windows e macOS Apple Silicon); prompt più chiaro. Verifiche: fmt, clippy, `cargo test --locked`, build egui. **Sospeso:** installazione reale su Windows/macOS, rete con proxy aziendali, aggiornamento Android. Prossimo passo: rifare la dashboard.
+
 Per ogni ripresa registrare data, revisione, lavoro completato, verifiche eseguite, blocchi, ipotesi e prossimo passo concreto. Conservare il checkpoint con le modifiche alle quali si riferisce.

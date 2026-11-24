@@ -654,10 +654,7 @@ fn message_payload(token: &str, notification: &Value) -> Value {
 
 fn send_once(account: &ServiceAccount, bearer: &str, payload: &Value) -> Outcome {
     let endpoint = format!("{FCM_HOST}/{}/messages:send", account.project_id);
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(10))
-        .redirects(0)
-        .build();
+    let agent = crate::net::builder(Duration::from_secs(10)).build();
     let response = agent
         .post(&endpoint)
         .set("Authorization", &format!("Bearer {bearer}"))
@@ -729,10 +726,7 @@ fn access_token(account: &ServiceAccount) -> Result<String, &'static str> {
     let body = format!(
         "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion={assertion}"
     );
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(10))
-        .redirects(0)
-        .build();
+    let agent = crate::net::builder(Duration::from_secs(10)).build();
     let response = agent
         .post(TOKEN_URI)
         .set("Content-Type", "application/x-www-form-urlencoded")

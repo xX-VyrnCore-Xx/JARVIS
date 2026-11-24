@@ -830,6 +830,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     Button("Controlla ora") { mutate("/api/updates/check", body: [:]) }
                 }
             }
+            updateInstaller
         case .system:
             card("Backup cifrato", icon: "lock.doc") {
                 SecureField("Passphrase del backup", text: $backupPassword)
@@ -1465,6 +1466,53 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             }
         } catch {
             if page == section, activeLoad == id, !Task.isCancelled { self.error = error.localizedDescription }
+        }
+    }
+
+    /// Scarica, verifica (SHA-256) e installa l'aggiornamento senza uscire dall'app (ADR-0109).
+    @ViewBuilder private var updateInstaller: some View {
+        let download = payload["download"] as? [String: Any] ?? [:]
+        let status = download["status"] as? String ?? "idle"
+        let available = payload["update_available"] as? Bool ?? false
+        let version = download["version"] as? String ?? ""
+        if available || status != "idle" {
+            card("Aggiornamento automatico", icon: "square.and.arrow.down") {
+                if download["supported"] as? Bool != true {
+                    Text("Su questo sistema l'aggiornamento resta manuale: scarica la release da GitHub.")
+                        .foregroundStyle(.secondary)
+                } else if status == "downloading" {
+                    let bytes = Double(download["bytes"] as? Int ?? 0)
+                    let total = Double(download["total"] as? Int ?? 0)
+                    ProgressView(value: total > 0 ? min(bytes / total, 1) : 0) {
+                        Text("Scarico \(version): \(Int(bytes / 1_000_000)) / \(Int(total / 1_000_000)) MB")
+                    }
+                    .task(id: status) {
+                        while !Task.isCancelled {
+                            try? await Task.sleep(nanoseconds: 1_000_000_000)
+                            await load(.updates)
+                        }
+                    }
+                } else if status == "ready" {
+                    Text("JARVIS \(version) è scaricato e verificato (SHA-256).")
+                    Text("L'app si chiude, installa la nuova versione e si riapre da sola. I dati restano dove sono.")
+                        .foregroundStyle(.secondary)
+                    Button("Installa e riavvia") {
+                        Task {
+                            do {
+                                _ = try await core.request("/api/updates/install", method: "POST", body: [:])
+                                NSApplication.shared.terminate(nil)
+                            } catch { self.error = error.localizedDescription }
+                        }
+                    }
+                } else {
+                    if status == "failed", let message = download["error"] as? String {
+                        Text("Download non riuscito: \(message)").foregroundStyle(.red)
+                    }
+                    if available {
+                        Button("Scarica aggiornamento") { mutate("/api/updates/download", body: [:]) }
+                    }
+                }
+            }
         }
     }
 

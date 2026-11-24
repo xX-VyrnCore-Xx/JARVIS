@@ -1526,6 +1526,33 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Non verificato:** resa dell'interruttore nella schermata Swift (compilata solo in CI).
 - **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ROADMAP.md.
 
+### ADR-0108 — Rete HTTPS affidabile verso modelli e servizi
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («molti problemi nel collegamento HTTPS per i modelli AI»).
+- **Causa individuata:** `ureq` con la sola funzione `native-certs` si fida **soltanto** dell'archivio di certificati del sistema, senza ripiego: con un archivio incompleto o illeggibile (Windows che installa le radici su richiesta, Linux senza `ca-certificates`) ogni connessione falliva, e l'unico messaggio era «Connessione HTTPS non riuscita». Inoltre il tempo massimo di 45 s interrompeva i modelli di ragionamento e veniva descritto come errore di connessione, e un errore DNS o di connessione momentaneo non veniva ritentato.
+- **Decisione:** nuovo modulo `net.rs`: configurazione TLS condivisa con radici del sistema **più** radici incluse (`webpki-roots`), provider `ring`; agente base con connessione a 10 s, nessun reindirizzamento e User-Agent esplicito. Usato da modelli, notifiche push, canali, aggiornamenti e Web. Per i modelli: tempo massimo 90 s, fino a due nuovi tentativi (0,4 s e 1,2 s) solo per cause transitorie (DNS, connessione rifiutata o interrotta), mai dopo un timeout in lettura.
+- **Diagnosi:** `Failure::Connection(Cause)` distingue DNS, connessione rifiutata, timeout, interruzione, certificato, proxy; il messaggio dice la causa e la correzione più probabile (data e ora del computer, antivirus che ispezionano il traffico, `HTTPS_PROXY`). Certificato e proxy non vengono proposti come ritentabili.
+- **Limiti:** un proxy aziendale che ispeziona il traffico richiede che la sua CA sia nell'archivio di sistema; le app aperte da Finder o dal menu Start non ereditano `HTTPS_PROXY` dalla shell.
+- **Evidenza:** test della classificazione, delle radici incluse, di una connessione rifiutata e dei due tentativi con attesa.
+- **Documenti interessati:** ROADMAP.md.
+
+### ADR-0109 — Aggiornamento dall'interno dell'app
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («gli aggiornamenti direttamente all'interno»). Supera la regola «nessuna installazione automatica» di ADR-0034.
+- **Decisione:** `selfupdate.rs`. Dopo il controllo, il proprietario preme «Scarica aggiornamento»: il Core scarica in background l'installatore della piattaforma (`JARVIS_<v>_x64-setup.exe` su Windows, `JARVIS_<v>_aarch64.dmg` su macOS Apple Silicon) e il file `SHA256SUMS` della stessa release, verifica il SHA-256 e solo allora lo rende disponibile. «Installa e riavvia» riverifica il file e avvia uno script staccato che attende la chiusura dell'app, installa e riapre: Windows `setup /S` (installazione per utente, stessa cartella), macOS copia di `JARVIS.app` dal `.dmg` con sostituzione atomica (`.new` → `.old`). I dati non si toccano; il backup prima dell'aggiornamento resta quello di ADR-0028.
+- **Sicurezza:** solo dal computer del Core (mai da dispositivi, 403 `owner_only`); su macOS richiede Touch ID/password come le altre operazioni sensibili; solo HTTPS verso `api.github.com`, `github.com` e `*.githubusercontent.com`, reindirizzamenti seguiti a mano e riconvalidati, token GitHub inviato solo ad `api.github.com`; massimo 400 MB; file `.part` rinominato dopo la verifica; percorsi con caratteri di shell rifiutati; audit `updates.download` e `updates.install`.
+- **Limiti:** la verifica protegge da file corrotti o scambiati lungo la strada, non da un repository compromesso: restano le firme Sigstore di ADR-0020 da controllare a mano. Linux e Windows ARM restano manuali. L'APK Android non si aggiorna da qui (richiede il consenso di sistema all'installazione): è un lavoro a parte.
+- **Non verificato:** installazione reale su Windows e macOS (script solo testati come testo; il flusso di download è provato con un server locale); l'avvio dell'installer dipende dai permessi dell'utente.
+- **Evidenza:** test del piano degli asset, di `SHA256SUMS`, degli host ammessi, del percorso dell'app, degli script, di un file manomesso e di un download completo da server locale con checksum corretto e sbagliato; build egui.
+- **Documenti interessati:** ROADMAP.md, DEVOPS_QA_OBSERVABILITY.md.
+
+### ADR-0110 — Risposte più chiare dei modelli
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout.
+- **Decisione:** il prompt di sistema aggiunge la data e l'ora locali (i modelli non le conoscono), chiede testo semplice adatto a una finestra di chat (niente tabelle Markdown né intestazioni decorative, codice in blocchi), una lettura dichiarata invece di domande a vuoto quando una richiesta vaga ha un'interpretazione chiaramente più probabile, e spiegazioni in italiano semplice per errori e limiti degli strumenti. I messaggi di errore di rete ora dicono la causa (ADR-0108).
+- **Evidenza:** test del prompt di sistema.
+- **Documenti interessati:** ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.

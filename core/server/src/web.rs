@@ -237,6 +237,7 @@ fn get(cfg: &WebConfig, start: Url, trusted_endpoint: bool) -> Result<Fetched, T
         let addrs = resolve_checked(&url, cfg.allow_private || (trusted_endpoint && hop == 0))?;
         let pinned = addrs.clone();
         let agent = ureq::AgentBuilder::new()
+            .tls_config(crate::net::tls_config())
             .timeout(cfg.timeout)
             .redirects(0)
             .user_agent(concat!(
@@ -329,6 +330,7 @@ pub fn request(
     })?;
     let pinned = resolve_checked(url, cfg.allow_private)?;
     let agent = ureq::AgentBuilder::new()
+        .tls_config(crate::net::tls_config())
         .timeout(cfg.timeout)
         .redirects(0)
         .user_agent(concat!("JARVIS/", env!("CARGO_PKG_VERSION")))
