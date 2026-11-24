@@ -49,6 +49,7 @@ pub mod setup;
 pub mod skills;
 pub mod speech;
 pub mod sysstats;
+pub mod tailscale;
 
 /// Su Windows i processi figli (worker Python, pip) non devono aprire una finestra di console quando il
 /// Core è avviato dall'app desktop. Altrove non fa nulla.

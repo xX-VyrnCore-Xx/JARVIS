@@ -1875,6 +1875,7 @@ impl JarvisApp {
                 let toggles = [
                     ("enabled", "Iniziative attive"),
                     ("briefing", "Briefing quotidiano"),
+                    ("weekly_briefing", "Briefing settimanale della direzione (lunedì)"),
                     ("disk", "Avvisi sullo spazio disco"),
                     ("confirmations", "Promemoria delle conferme in attesa"),
                     ("workflows", "Automazioni che continuano a fallire"),
@@ -1913,6 +1914,9 @@ impl JarvisApp {
                     }
                     if ui.button("Briefing adesso").clicked() {
                         self.act(ctx, "/api/proactive/briefing".into(), Some(json!({})));
+                    }
+                    if ui.button("Briefing settimanale adesso").clicked() {
+                        self.act(ctx, "/api/proactive/weekly".into(), Some(json!({})));
                     }
                 });
                 if !valid {
@@ -3687,6 +3691,16 @@ impl JarvisApp {
             if !pairing_url.is_empty() {
                 ui.label(format!("Indirizzo del Core: {pairing_url}"));
             } else {
+                ui.label("Con Tailscale installato e connesso su questo computer basta un tocco:");
+                if ui.button("Collega con Tailscale").clicked() {
+                    self.act(ctx, "/api/tailscale/connect".into(), None);
+                }
+                ui.small(
+                    egui::RichText::new(
+                        "Rende JARVIS raggiungibile solo dai tuoi dispositivi Tailscale (mai pubblico) e autorizza l'indirizzo da solo.",
+                    )
+                    .weak(),
+                );
                 ui.colored_label(
                     egui::Color32::from_rgb(255, 197, 108),
                     "Inserisci qui l'indirizzo HTTPS con cui il Core è raggiungibile (per esempio quello di Tailscale): si salva da solo, senza file né riavvii.",

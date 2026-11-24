@@ -1796,6 +1796,24 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** fmt, Clippy Windows (`x86_64-pc-windows-gnu`, `--all-targets -D warnings`) e Clippy Linux con stub superati; 5 test di `wake` con trasporto simulato e audio sintetico (silenzio mai inviato, comando consegnato, altro parlato ignorato, «stop» zittisce la voce, ricampionamento 48 kHz stereo → 16 kHz mono). Il link dei test Windows non è stato eseguibile qui.
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
 
+### ADR-0141 — Collegamento dei dispositivi con Tailscale in un gesto
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** scelta del proprietario («il collegamento tramite Tailscale va benissimo»), al posto della scoperta in LAN con QR (che avrebbe richiesto un listener TLS fuori da `127.0.0.1`).
+- **Decisione:** il Core resta su `127.0.0.1`; Tailscale Serve lo pubblica con HTTPS privato nella rete del proprietario. `tailscale.rs` interroga il client installato (`status --json`, `serve status`) con argomenti fissi e timeout di 15 s: `GET /api/tailscale` restituisce installato, stato, nome della macchina, indirizzo HTTPS, se il Core è già pubblicato e se l'indirizzo è autorizzato. `POST /api/tailscale/connect` esegue `tailscale serve --bg <porta>`, legge il nome della macchina e lo aggiunge agli indirizzi ammessi (ADR-0137) senza file né riavvii; da lì gli inviti portano già il collegamento `jarvis://pair?…`.
+- **Sicurezza:** solo proprietario (i dispositivi associati ricevono 403 come per ogni rotta non in elenco); leggere lo stato non autorizza nulla; **mai Funnel** (pubblico); l'host deve passare `valid_remote_host`; la pubblicazione è un gesto esplicito («Collega con Tailscale» in app macOS e Windows); un errore di Tailscale è mostrato com'è, senza cambiare gli indirizzi.
+- **Non incluso:** installazione o accesso a Tailscale (restano dell'utente); scoperta automatica in LAN e QR.
+- **Evidenza:** 2 test unitari (lettura del nome e dello stato da JSON sintetico, riconoscimento della porta pubblicata), test API (stato senza autorizzazioni), smoke E2E; Clippy e `cargo test --locked` verdi. Prova con Tailscale reale non eseguita (non installato qui).
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, README.md, ROADMAP.md.
+
+### ADR-0142 — Briefing settimanale della direzione
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** scelta del proprietario («implementa il briefing settimanale»).
+- **Decisione:** nuova iniziativa proattiva (ADR-0097) `weekly_briefing` (attiva di default), giorno `weekly_day` (0 = lunedì … 6 = domenica) e orario `weekly_time` (08:30), con la stessa finestra di sei ore, le ore di silenzio e la deduplica per settimana ISO. Il testo è deterministico e locale, con tre parti: *Settimana trascorsa* (cose da fare completate/nuove/aperte, missioni concluse e in corso, esecuzioni di automazioni e fallimenti, ricordi aggiunti), *Richiede la tua attenzione* (ritardi, conferme in attesa, automazioni fallite, notifiche) e *Settimana in arrivo* (fino a cinque scadenze dei sette giorni successivi). Chiude rimandando ai calcoli aziendali (RICE, runway, margine). `POST /api/proactive/weekly` lo genera su richiesta.
+- **Controlli:** nessun dato lascia il computer e non interroga i connettori; è una notifica di categoria `briefing`; `weekly_day` è validato (0–6) e `PATCH /api/proactive` rifiuta valori fuori formato.
+- **Conseguenze:** il lunedì il briefing quotidiano e quello settimanale sono due notifiche distinte; il settimanale si disattiva dalle iniziative.
+- **Evidenza:** test unitari del testo e della validazione, test di integrazione con orologio simulato (non scatta prima dell'orario, una sola volta a settimana, non negli altri giorni, giorno scelto, su richiesta), smoke E2E; Clippy e `cargo test --locked` verdi.
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ROADMAP.md.
+
 ### ADR-0135 — Correttore dei messaggi scritti
 
 - **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora il correttore grammaticale di prompt»).

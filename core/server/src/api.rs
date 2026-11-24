@@ -458,6 +458,8 @@ pub fn router(state: Shared) -> Router {
                 .put(devices_access_put)
                 .post(devices_access_put),
         )
+        .route("/api/tailscale", get(tailscale_status))
+        .route("/api/tailscale/connect", post(tailscale_connect))
         .route("/api/devices/pairing/cancel", post(cancel_pairing))
         .route("/api/devices/pair", post(pair_device))
         .route("/api/devices/me", get(device_me))
@@ -470,6 +472,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/connectors", get(connectors).post(install_connector))
         .route("/api/proactive", get(proactive_get).patch(proactive_put))
         .route("/api/proactive/briefing", post(proactive_briefing))
+        .route("/api/proactive/weekly", post(proactive_weekly))
         .route("/api/sandbox", get(sandbox_get).patch(sandbox_put))
         .route(
             "/api/permissions",
@@ -1586,6 +1589,10 @@ async fn proactive_briefing(State(state): State<Shared>) -> Response {
     reply(with_core(&state, |j| j.briefing_now()).await)
 }
 
+async fn proactive_weekly(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.weekly_briefing_now()).await)
+}
+
 async fn missions_list(State(state): State<Shared>) -> Response {
     reply(with_core(&state, |j| j.missions()).await)
 }
@@ -2290,6 +2297,77 @@ async fn devices_access_put(State(state): State<Shared>, Json(body): Json<Value>
     let current = hosts.clone();
     drop(hosts);
     Json(json!({"hosts": current, "pairing_urls": pairing_urls(&state)})).into_response()
+}
+
+/// Salva l'elenco degli indirizzi pubblici (ADR-0137) e lo rende subito attivo.
+fn add_remote_host(state: &Shared, dir: &std::path::Path, host: &str) -> Result<(), String> {
+    let mut hosts = state
+        .remote_hosts
+        .write()
+        .unwrap_or_else(|e| e.into_inner());
+    if !hosts.iter().any(|h| h == host) {
+        hosts.push(host.to_string());
+    }
+    hosts.sort_unstable();
+    hosts.dedup();
+    std::fs::write(dir.join("remote-hosts.txt"), hosts.join("\n"))
+        .map_err(|_| "impossibile salvare gli indirizzi".to_string())
+}
+
+fn tailscale_view(state: &Shared, mut status: Value) -> Value {
+    let allowed = status["host"].as_str().is_some_and(|host| {
+        state
+            .remote_hosts
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|h| h == host)
+    });
+    status["allowed"] = json!(allowed);
+    status["pairing_urls"] = json!(pairing_urls(state));
+    status
+}
+
+/// Stato del collegamento con Tailscale (ADR-0141); solo per il proprietario.
+async fn tailscale_status(State(state): State<Shared>) -> Response {
+    let port = state.port;
+    let status = tokio::task::spawn_blocking(move || crate::tailscale::status(port))
+        .await
+        .unwrap_or_else(|_| json!({"installed": false, "message": "controllo non riuscito"}));
+    Json(tailscale_view(&state, status)).into_response()
+}
+
+/// Pubblica il Core nella rete privata Tailscale e ne autorizza l'indirizzo: un solo gesto, nessun file.
+async fn tailscale_connect(State(state): State<Shared>) -> Response {
+    let port = state.port;
+    let outcome = tokio::task::spawn_blocking(move || {
+        crate::tailscale::publish(port).map(|note| (note, crate::tailscale::status(port)))
+    })
+    .await
+    .unwrap_or_else(|_| Err("operazione interrotta".into()));
+    let (note, status) = match outcome {
+        Ok(done) => done,
+        Err(message) => {
+            return CoreError::BadRequest(message).into_response();
+        }
+    };
+    let Some(host) = status["host"]
+        .as_str()
+        .filter(|host| valid_remote_host(host))
+        .map(str::to_string)
+    else {
+        return CoreError::BadRequest(
+            "Tailscale non mostra un nome valido per questo computer: abilita MagicDNS e HTTPS nella console di Tailscale.".into(),
+        )
+        .into_response();
+    };
+    let dir = with_core(&state, |j| j.data_dir()).await;
+    if let Err(message) = add_remote_host(&state, &dir, &host) {
+        return CoreError::Internal(message).into_response();
+    }
+    let mut view = tailscale_view(&state, status);
+    view["note"] = json!(note);
+    Json(view).into_response()
 }
 
 async fn devices(State(state): State<Shared>) -> Response {

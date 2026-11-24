@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::proactive::{self, Facts};
-use chrono::{Local, Timelike};
+use chrono::{Datelike, Local, Timelike};
 
 /// Intervallo minimo fra due valutazioni nel pianificatore.
 const CHECK_EVERY: Duration = Duration::from_secs(60);
@@ -57,6 +57,17 @@ impl Jarvis {
         {
             self.send_briefing(now, &format!("briefing:{date}"))?;
             fired.push("briefing");
+        }
+
+        if s["weekly_briefing"] == true
+            && now.weekday().num_days_from_monday() as u64 == s["weekly_day"].as_u64().unwrap_or(0)
+            && proactive::briefing_window(t, time("weekly_time", "08:30"))
+        {
+            let key = format!("weekly:{}", proactive::week_key(date));
+            if self.proactive_once(&key, &now) {
+                self.send_weekly(now, &key)?;
+                fired.push("weekly");
+            }
         }
 
         if s["disk"] == true {
@@ -255,6 +266,92 @@ impl Jarvis {
             "link": {"view": "chat"},
         }))?;
         Ok(json!({"title": title, "body": body, "notification": doc}))
+    }
+
+    fn weekly_facts(&self, now: chrono::DateTime<Local>) -> proactive::WeekFacts {
+        let utc = now.with_timezone(&chrono::Utc);
+        let since = automation::ts(utc - chrono::Duration::days(7));
+        let until = automation::ts(utc + chrono::Duration::days(7));
+        let count = |sql: &str, params: &[&dyn rusqlite::ToSql]| -> u64 {
+            self.store
+                .conn
+                .query_row(sql, params, |r| r.get::<_, i64>(0))
+                .map_or(0, |n| n.max(0) as u64)
+        };
+        let today = automation::ts(utc);
+        let mut f = proactive::WeekFacts {
+            week: now.date_naive().iso_week().week(),
+            ..Default::default()
+        };
+        f.done = count("SELECT COUNT(*) FROM todos WHERE done_at >= ?1", &[&since]);
+        f.opened = count(
+            "SELECT COUNT(*) FROM todos WHERE created_at >= ?1",
+            &[&since],
+        );
+        f.open_todos = count("SELECT COUNT(*) FROM todos WHERE done_at IS NULL", &[]);
+        f.overdue = count(
+            "SELECT COUNT(*) FROM todos WHERE done_at IS NULL AND due_at < ?1",
+            &[&today],
+        );
+        f.missions_active = count("SELECT COUNT(*) FROM missions WHERE status = 'active'", &[]);
+        f.missions_completed = count(
+            "SELECT COUNT(*) FROM missions WHERE status = 'completed' AND updated_at >= ?1",
+            &[&since],
+        );
+        f.memories = count(
+            "SELECT COUNT(*) FROM memory WHERE created_at >= ?1",
+            &[&since],
+        );
+        f.runs = count(
+            "SELECT COUNT(*) FROM workflow_runs WHERE started_at >= ?1",
+            &[&since],
+        );
+        f.runs_failed = count(
+            "SELECT COUNT(*) FROM workflow_runs WHERE started_at >= ?1 AND doc LIKE '%\"status\":\"failed\"%'",
+            &[&since],
+        );
+        f.confirmations = self.pending.len();
+        f.unread = self
+            .store
+            .notifications_unread()
+            .map(u64::from)
+            .unwrap_or(0);
+        if let Ok(mut statement) = self.store.conn.prepare(
+            "SELECT text, due_at FROM todos WHERE done_at IS NULL AND due_at >= ?1 AND due_at < ?2
+             ORDER BY (priority = 'alta') DESC, due_at LIMIT 5",
+        ) {
+            if let Ok(rows) = statement.query_map([&today, &until], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            }) {
+                f.upcoming = rows
+                    .flatten()
+                    .map(|(text, due)| {
+                        format!(
+                            "{} — entro il {}",
+                            clip(&text, 100),
+                            &due[..10.min(due.len())]
+                        )
+                    })
+                    .collect();
+            }
+        }
+        f
+    }
+
+    fn send_weekly(&mut self, now: chrono::DateTime<Local>, key: &str) -> Result<Value, CoreError> {
+        let (title, body) = proactive::compose_weekly(&self.weekly_facts(now));
+        let doc = self.notify(json!({
+            "severity": "info", "category": "briefing", "title": title, "body": body,
+            "source": {"kind": "module", "id": "proactive"}, "dedupe_key": key,
+            "link": {"view": "chat"},
+        }))?;
+        Ok(json!({"title": title, "body": body, "notification": doc}))
+    }
+
+    /// Briefing settimanale su richiesta del proprietario, anche fuori giorno.
+    pub fn weekly_briefing_now(&mut self) -> Result<Value, CoreError> {
+        let key = format!("weekly:now:{}", uuid::Uuid::new_v4().simple());
+        self.send_weekly(chrono::Local::now(), &key)
     }
 
     /// Briefing su richiesta del proprietario, anche fuori orario e più volte al giorno.

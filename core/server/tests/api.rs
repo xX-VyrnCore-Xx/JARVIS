@@ -600,6 +600,20 @@ fn cloud_context_requires_opt_in_and_stays_with_the_provider() {
 }
 
 #[tokio::test]
+async fn tailscale_status_is_reported_without_authorising_anything() {
+    let e = env();
+    let (status, view) = e.api("GET", "/api/tailscale", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(view["installed"].is_boolean());
+    assert!(view["message"].as_str().is_some_and(|m| !m.is_empty()));
+    // Leggere lo stato non autorizza alcun indirizzo: serve il gesto esplicito del proprietario.
+    assert_eq!(view["allowed"], false);
+    assert_eq!(view["pairing_urls"], json!([]));
+    let (_, access) = e.api("GET", "/api/devices/access", None).await;
+    assert_eq!(access["hosts"], json!([]));
+}
+
+#[tokio::test]
 async fn public_addresses_are_managed_from_the_app_and_invites_carry_a_link() {
     let e = env();
     let (status, none) = e.api("GET", "/api/devices/access", None).await;

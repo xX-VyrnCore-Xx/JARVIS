@@ -1735,6 +1735,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 let settings = payload["proactive"] as? [String: Any] ?? [:]
                 let toggles: [(key: String, label: String)] = [
                     ("enabled", "Iniziative attive"), ("briefing", "Briefing quotidiano"),
+                    ("weekly_briefing", "Briefing settimanale della direzione (lunedì)"),
                     ("disk", "Avvisi sullo spazio disco"), ("confirmations", "Promemoria delle conferme in attesa"),
                     ("workflows", "Automazioni che continuano a fallire"), ("stale_todos", "Cose da fare lasciate indietro"), ("sandbox", "Sandbox quasi piena")
                 ]
@@ -1747,7 +1748,10 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 }
                 Text("Briefing alle \(settings["briefing_time"] as? String ?? "08:00"), silenzio dalle \(settings["quiet_from"] as? String ?? "22:00") alle \(settings["quiet_to"] as? String ?? "07:00").")
                     .font(.footnote).foregroundStyle(.secondary)
-                Button("Briefing adesso") { mutate("/api/proactive/briefing", body: [:]) }
+                HStack {
+                    Button("Briefing adesso") { mutate("/api/proactive/briefing", body: [:]) }
+                    Button("Briefing settimanale adesso") { mutate("/api/proactive/weekly", body: [:]) }
+                }
             }
         }
     }
@@ -1757,6 +1761,13 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             card("Connessione HTTPS", icon: "network") {
                 let origins = payload["pairing_urls"] as? [String] ?? []
                 let origin = origins.contains(remoteOrigin) ? remoteOrigin : origins.first ?? ""
+                if origins.isEmpty {
+                    Button("Collega con Tailscale", systemImage: "point.3.connected.trianglepath.dotted") {
+                        mutate("/api/tailscale/connect", body: [:])
+                    }.buttonStyle(.borderedProminent)
+                    Text("Con Tailscale installato e connesso basta un tocco: JARVIS diventa raggiungibile solo dai tuoi dispositivi (mai pubblico) e l'indirizzo si autorizza da solo.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
                 HStack {
                     TextField("Indirizzo pubblico (es. casa.tailnet.ts.net)", text: $publicHost)
                         .textFieldStyle(.roundedBorder).onSubmit(addPublicHost)

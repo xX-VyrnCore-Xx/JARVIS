@@ -193,8 +193,14 @@ function check(condition, message) {
   check(badSettings.status === 400, "orario non valido rifiutato");
   const briefing = await request("/api/proactive/briefing", { method: "POST", token: ownerToken, body: {} });
   check(briefing.status === 200 && /^(Buongiorno|Buon pomeriggio|Buonasera):/.test(briefing.json?.title || ""), "briefing su richiesta");
+  const weekly = await request("/api/proactive/weekly", { method: "POST", token: ownerToken, body: {} });
+  check(weekly.status === 200 && /Briefing settimanale/.test(weekly.json?.title || "") && /Settimana in arrivo/.test(weekly.json?.body || ""), "briefing settimanale su richiesta");
+  const badDay = await request("/api/proactive", { method: "PATCH", token: ownerToken, body: { weekly_day: 9 } });
+  check(badDay.status === 400, "giorno del briefing settimanale non valido rifiutato");
   const inbox = await request("/api/notifications?limit=20", { token: ownerToken });
   check(inbox.json?.items?.some((n) => n.category === "briefing"), "il briefing arriva fra le notifiche");
+  const tailscale = await request("/api/tailscale", { token: ownerToken });
+  check(tailscale.status === 200 && typeof tailscale.json?.installed === "boolean" && tailscale.json?.allowed === false, "stato di Tailscale senza autorizzare indirizzi");
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;
