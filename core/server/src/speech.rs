@@ -231,25 +231,39 @@ pub fn speak(text: &str) -> Result<Value, ToolError> {
     Ok(json!({"speaking": true, "chars": spoken.chars().count(), "gender": "male"}))
 }
 
-/// Stato e impostazione «leggi le risposte ad alta voce» (`<dati>/voice.json`).
+/// Impostazioni vocali (`<dati>/voice.json`): lettura delle risposte e ascolto «hey Jarvis» (ADR-0134).
+/// L'ascolto è attivo per impostazione predefinita: in quello stato i client analizzano il microfono solo per
+/// riconoscere la parola di attivazione e scartano tutto il resto.
 pub fn settings(dir: &Path) -> Value {
     let saved: Value = std::fs::read(dir.join("voice.json"))
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
         .unwrap_or(Value::Null);
-    json!({"speak_replies": saved["speak_replies"].as_bool().unwrap_or(false)})
+    json!({
+        "speak_replies": saved["speak_replies"].as_bool().unwrap_or(false),
+        "wake_listening": saved["wake_listening"].as_bool().unwrap_or(true),
+    })
 }
 
 pub fn update(dir: &Path, patch: &Value) -> Result<Value, String> {
-    let on = patch["speak_replies"]
-        .as_bool()
-        .ok_or("campo «speak_replies» booleano richiesto")?;
-    std::fs::write(
-        dir.join("voice.json"),
-        json!({"speak_replies": on}).to_string(),
-    )
-    .map_err(|e| e.to_string())?;
-    if !on {
+    let mut doc = settings(dir);
+    let mut changed = false;
+    for key in ["speak_replies", "wake_listening"] {
+        match patch.get(key) {
+            None => {}
+            Some(value) => {
+                doc[key] = json!(value
+                    .as_bool()
+                    .ok_or(format!("campo «{key}» booleano richiesto"))?);
+                changed = true;
+            }
+        }
+    }
+    if !changed {
+        return Err("indica «speak_replies» o «wake_listening»".into());
+    }
+    std::fs::write(dir.join("voice.json"), doc.to_string()).map_err(|e| e.to_string())?;
+    if doc["speak_replies"] == false {
         stop();
     }
     Ok(settings(dir))
@@ -342,6 +356,15 @@ mod tests {
             true
         );
         assert!(update(&d, &json!({"speak_replies": "sì"})).is_err());
+        // L'ascolto «hey Jarvis» è attivo di default e si disattiva senza toccare la lettura delle risposte.
+        assert_eq!(settings(&d)["wake_listening"], true);
+        let off = update(&d, &json!({"wake_listening": false})).unwrap();
+        assert_eq!(
+            (off["wake_listening"].clone(), off["speak_replies"].clone()),
+            (json!(false), json!(true))
+        );
+        assert!(update(&d, &json!({})).is_err());
+        assert!(update(&d, &json!({"wake_listening": 1})).is_err());
         assert_eq!(status(&d)["gender"], "male");
         let _ = std::fs::remove_dir_all(&d);
     }

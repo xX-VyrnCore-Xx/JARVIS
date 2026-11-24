@@ -32,10 +32,10 @@ private enum Section: String, Identifiable {
     case workflows = "Automazioni", memory = "Memoria", workspace = "Workspace", connectors = "Connettori"
     case devices = "Dispositivi", skills = "Competenze", security = "Sicurezza", audit = "Audit"
     case system = "Sistema", models = "Modelli AI", updates = "Aggiornamenti", notifications = "Notifiche"
-    case missions = "Missioni"
+    case missions = "Missioni", profile = "Profilo"
 
     static let navigation: [(title: String, entries: [Section])] = [
-        ("Assistente", [.dashboard, .chat, .tasks, .models, .notifications]),
+        ("Assistente", [.dashboard, .chat, .tasks, .models, .notifications, .profile]),
         ("Organizzazione", [.missions, .workflows, .workspace, .memory, .skills]),
         ("Collegamenti", [.devices, .connectors]),
         ("Amministrazione", [.confirmations, .security, .audit, .system, .updates])
@@ -61,6 +61,7 @@ private enum Section: String, Identifiable {
         case .updates: "arrow.down.circle"
         case .notifications: "bell"
         case .missions: "scope"
+        case .profile: "person.crop.circle"
         }
     }
     var endpoint: String {
@@ -81,6 +82,7 @@ private enum Section: String, Identifiable {
         case .updates: "/api/updates"
         case .notifications: "/api/notifications"
         case .missions: "/api/missions"
+        case .profile: "/api/profile"
         }
     }
 }
@@ -96,6 +98,10 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var checkingHTTPS = false
     @State private var allowDeviceConfirmations = false
     @State private var invite: [String: Any]?
+    @State private var publicHost = ""
+    /// Profilo del proprietario (ADR-0133): bozza modificabile dei campi.
+    @State private var profileDraft: [String: String] = [:]
+    @State private var profileShare = true
     @State private var changingInvite = false
 
     @State private var section: Section = .dashboard
@@ -107,6 +113,9 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var missionsPreview: [Record] = []
     @State private var commandText = ""
     @State private var avatarSpeaking = false
+    /// Ascolto «Hey Jarvis» (ADR-0134): microfono analizzato solo per la parola di attivazione.
+    @StateObject private var wake = WakeListener()
+    @State private var wakeListening = true
     /// Testo della risposta che sta arrivando in streaming (ADR-0131).
     @State private var streamingReply = ""
     @State private var voiceHint = ""
@@ -161,9 +170,19 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     }
                 }
                 .task { await core.watchNotifications() }
+                .task(id: wakeShouldRun) {
+                    if wakeShouldRun {
+                        wake.onCommand = { text in handleVoiceCommand(text) }
+                        wake.start(core: core)
+                    } else {
+                        wake.stop()
+                    }
+                }
+                .onChange(of: avatarSpeaking || sending) { _, busy in wake.suspended = busy }
                 .task {
                     if let status = try? await core.request("/api/voice/system") {
                         speakReplies = status["speak_replies"] as? Bool ?? false
+                        wakeListening = status["wake_listening"] as? Bool ?? true
                     }
                 }
             } else {
@@ -216,6 +235,19 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             }.padding(24).frame(width: 430)
         }
         .sheet(item: $connectorAction) { item in connectorSheet(item) }
+    }
+
+    private var wakeShouldRun: Bool { core.phase == .ready && !core.uiLocked && wakeListening }
+
+    private var wakeStatusText: String {
+        switch wake.phase {
+        case .off: return wakeListening ? "Avvio dell'ascolto…" : "Ascolto spento"
+        case .denied: return "Microfono non consentito"
+        case .unavailable: return "Microfono non disponibile"
+        case .waiting: return wake.detail.isEmpty ? "In ascolto: «Hey Jarvis»" : "Voce non disponibile"
+        case .capturing: return "Ti ascolto…"
+        case .working: return "Elaboro il comando…"
+        }
     }
 
     private func select(_ value: Section) {
@@ -322,8 +354,15 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 PulsingDot(color: online ? .green : .orange, size: 6)
                 Text(online ? "JARVIS Online" : "Core non raggiungibile").font(.caption.weight(.semibold))
             }
-            Text(online ? "Modalità: Operativa" : "In attesa del Core").font(.caption2).foregroundStyle(.secondary)
-            WaveformView(active: sending, barCount: 18).frame(maxWidth: .infinity).scaleEffect(y: 0.7)
+            if wakeShouldRun {
+                Label(wakeStatusText, systemImage: wake.phase == .capturing ? "mic.fill" : "mic")
+                    .font(.caption2)
+                    .foregroundStyle(wake.phase == .capturing ? Color.cyan : Color.secondary)
+                    .symbolEffect(.pulse, isActive: wake.phase == .capturing)
+            } else {
+                Text(online ? "Modalità: Operativa" : "In attesa del Core").font(.caption2).foregroundStyle(.secondary)
+            }
+            WaveformView(active: sending || wake.phase == .capturing, barCount: 18).frame(maxWidth: .infinity).scaleEffect(y: 0.7)
         }
         .padding(10)
         .background(panel, in: RoundedRectangle(cornerRadius: 14))
@@ -565,7 +604,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         VStack(spacing: 10) {
             ZStack {
                 OrbitRings().frame(width: size, height: size)
-                Avatar(thinking: sending && streamingReply.isEmpty, speaking: avatarSpeaking || !streamingReply.isEmpty).frame(width: size * 0.78, height: size * 0.78)
+                Avatar(thinking: sending && streamingReply.isEmpty, speaking: avatarSpeaking || !streamingReply.isEmpty,
+                       listening: wake.phase == .capturing, level: wake.level).frame(width: size * 0.78, height: size * 0.78)
             }
             .frame(width: size, height: size)
             WaveformView(active: sending || avatarSpeaking, barCount: 26).frame(maxWidth: size)
@@ -955,7 +995,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     private var chat: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 15) {
-                Avatar(thinking: sending && streamingReply.isEmpty, speaking: avatarSpeaking || !streamingReply.isEmpty).frame(width: 76)
+                Avatar(thinking: sending && streamingReply.isEmpty, speaking: avatarSpeaking || !streamingReply.isEmpty,
+                       listening: wake.phase == .capturing, level: wake.level).frame(width: 76)
                 VStack(alignment: .leading, spacing: 5) {
                     Text("JARVIS").font(.title2.weight(.semibold))
                     if sending {
@@ -1197,7 +1238,17 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         }
     }
 
-    private func send() {
+    private func send() { sendMessage(spoken: false) }
+
+    /// Comando pronunciato dopo «Hey Jarvis»: la risposta viene letta ad alta voce anche se la lettura è spenta.
+    private func handleVoiceCommand(_ text: String) {
+        guard !sending else { return }
+        select(.chat)
+        message = text
+        sendMessage(spoken: true)
+    }
+
+    private func sendMessage(spoken: Bool) {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !sending else { return }
         let includeContext = useCloudContext
@@ -1219,7 +1270,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     streamingReply += piece
                 }
                 lastReply = result
-                if speakReplies, let reply = result["reply"] as? String, !reply.isEmpty {
+                if speakReplies || spoken, let reply = result["reply"] as? String, !reply.isEmpty {
                     // L'avatar «parla» per la durata stimata della lettura (circa 14 caratteri al secondo).
                     let duration = min(max(Double(reply.count) / 14, 1.5), 45)
                     Task {
@@ -1291,6 +1342,15 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 .onChange(of: speakReplies) { _, value in
                     Task { _ = try? await core.request("/api/voice/system", method: "PATCH", body: ["speak_replies": value]) }
                 }
+            Toggle("Ascolto sempre attivo («Hey Jarvis»)", isOn: $wakeListening)
+                .onChange(of: wakeListening) { _, value in
+                    Task { _ = try? await core.request("/api/voice/system", method: "PATCH", body: ["wake_listening": value]) }
+                }
+            Text(wakeListening
+                 ? "Il microfono serve solo a riconoscere «Hey Jarvis»: senza quella parola nulla viene trascritto né salvato. Dopo il comando JARVIS torna ad ascoltare soltanto la parola di attivazione."
+                 : "Ascolto spento: il microfono non è in uso.")
+                .font(.caption).foregroundStyle(.secondary)
+            if wakeListening, wake.phase != .off { Text(wakeStatusText + (wake.detail.isEmpty ? "" : " — " + wake.detail)).font(.caption).foregroundStyle(.cyan) }
             Text("JARVIS parla solo con una voce maschile (Luca).").font(.caption).foregroundStyle(.secondary)
             if !voiceHint.isEmpty { Text(voiceHint).font(.caption).foregroundStyle(.secondary) }
             Button("Fai tacere") {
@@ -1319,6 +1379,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             }
             memoryOverview
         case .missions: missionTools
+        case .profile: profileEditor
         case .connectors: connectorSetup
         case .devices:
             deviceConnection
@@ -1358,7 +1419,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         if items.isEmpty {
             if [.security, .system, .updates].contains(section), !payload.isEmpty {
                 card(section.rawValue, icon: section.icon) { details(payload) }
-            } else if !payload.isEmpty {
+            } else if !payload.isEmpty, section != .profile {
                 Text("Nessun elemento.").foregroundStyle(.secondary)
             }
         } else {
@@ -1696,9 +1757,15 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             card("Connessione HTTPS", icon: "network") {
                 let origins = payload["pairing_urls"] as? [String] ?? []
                 let origin = origins.contains(remoteOrigin) ? remoteOrigin : origins.first ?? ""
+                HStack {
+                    TextField("Indirizzo pubblico (es. casa.tailnet.ts.net)", text: $publicHost)
+                        .textFieldStyle(.roundedBorder).onSubmit(addPublicHost)
+                    Button("Aggiungi", systemImage: "plus", action: addPublicHost)
+                        .disabled(publicHost.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
                 if origins.isEmpty {
-                    Text("Configura un proxy HTTPS privato e autorizza il suo host in remote-hosts.txt.")
-                        .foregroundStyle(.secondary)
+                    Text("Inserisci qui l'indirizzo HTTPS con cui il Core è raggiungibile (per esempio quello di Tailscale): si salva da solo, senza file da modificare né riavvii.")
+                        .font(.callout).foregroundStyle(.secondary)
                 } else {
                     Picker("Indirizzo del Core", selection: Binding(
                         get: { origin }, set: { remoteOrigin = $0 }
@@ -1709,6 +1776,9 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                         Button("Verifica HTTPS", systemImage: "checkmark.shield") { probe(origin) }
                             .buttonStyle(.borderedProminent).disabled(checkingHTTPS)
                         Button("Copia indirizzo", systemImage: "doc.on.doc") { copyConnectionText(origin) }
+                        Button("Rimuovi", systemImage: "trash", role: .destructive) {
+                            mutate("/api/devices/access", method: "PUT", body: ["remove": origin.replacingOccurrences(of: "https://", with: "")])
+                        }
                     }
                     if checkingHTTPS {
                         ProgressView("Verifica del certificato e del Core").controlSize(.small)
@@ -1744,6 +1814,14 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                                     Spacer()
                                     Button("Copia codice", systemImage: "doc.on.doc") { copyConnectionText(code) }
                                 }
+                                if let link = invite?["link"] as? String, let url = URL(string: link) {
+                                    HStack {
+                                        ShareLink(item: url) { Label("Condividi collegamento", systemImage: "square.and.arrow.up") }
+                                        Button("Copia collegamento", systemImage: "link") { copyConnectionText(link) }
+                                    }
+                                    Text("Aprilo sul telefono: indirizzo e codice si compilano da soli.")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
                                 LabeledContent("Scadenza") { Text(date, style: .time) }
                                 LabeledContent("Permessi", value:
                                     (invite?["scopes"] as? [String])?.contains("confirm") == true ? "Chat e conferme" : "Chat")
@@ -1758,6 +1836,70 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 }
             }
         }
+    }
+
+    private func applyProfile(_ doc: [String: Any]) {
+        var draft: [String: String] = [:]
+        for key in ["role", "company", "sector", "expertise", "interests", "goals", "language", "tone", "level"] {
+            draft[key] = doc[key] as? String ?? ""
+        }
+        profileDraft = draft
+        profileShare = doc["share_with_cloud"] as? Bool ?? true
+    }
+
+    private func profileField(_ title: String, _ key: String, _ prompt: String) -> some View {
+        TextField(title, text: Binding(get: { profileDraft[key] ?? "" }, set: { profileDraft[key] = $0 }), prompt: Text(prompt))
+            .textFieldStyle(.roundedBorder)
+    }
+
+    private func profileChoice(_ title: String, _ key: String, labels: [String: String]) -> some View {
+        let choices = (payload["choices"] as? [String: Any])?[key] as? [String] ?? ["auto"]
+        return Picker(title, selection: Binding(get: { profileDraft[key] ?? "auto" }, set: { profileDraft[key] = $0 })) {
+            ForEach(choices, id: \.self) { Text(labels[$0] ?? $0.capitalized).tag($0) }
+        }
+    }
+
+    /// Il profilo aiuta JARVIS a rispondere nel tuo contesto (tono, livello, lavoro): niente recapiti, tutto facoltativo.
+    private var profileEditor: some View {
+        VStack(spacing: 14) {
+            card("Il tuo profilo", icon: "person.crop.circle") {
+                let percent = payload["completion_percent"] as? Int ?? 0
+                HStack {
+                    ProgressView(value: Double(percent), total: 100).tint(.cyan)
+                    Text("\(percent)%").font(.callout.monospacedDigit()).foregroundStyle(.secondary)
+                }
+                if let missing = payload["missing"] as? [String], !missing.isEmpty {
+                    Text("Per risposte più mirate aggiungi: " + missing.prefix(3).joined(separator: ", ") + ".")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                profileField("Ruolo", "role", "Direttore operativo")
+                profileField("Azienda", "company", "Nome dell'azienda")
+                profileField("Settore", "sector", "Manifattura, sanità, software…")
+                profileField("Competenze", "expertise", "Cosa conosci bene")
+                profileField("Interessi", "interests", "Argomenti che ti interessano")
+                profileField("Obiettivi", "goals", "Cosa vuoi ottenere")
+            }
+            card("Come preferisci le risposte", icon: "text.bubble") {
+                profileChoice("Lingua", "language", labels: ["auto": "Automatica", "it": "Italiano", "en": "Inglese"])
+                profileChoice("Tono", "tone", labels: ["auto": "Automatico", "formale": "Formale", "cordiale": "Cordiale", "diretto": "Diretto"])
+                profileChoice("Livello tecnico", "level", labels: ["auto": "Automatico", "principiante": "Principiante", "intermedio": "Intermedio", "esperto": "Esperto"])
+                Toggle("Usa il profilo nelle richieste ai modelli cloud", isOn: $profileShare)
+                Text("Nel profilo non vanno email, telefoni o password: JARVIS li rifiuta. Se disattivi l'opzione, il profilo resta qui e non esce dal computer.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button("Salva profilo", systemImage: "checkmark") {
+                    var body: [String: Any] = profileDraft.reduce(into: [:]) { $0[$1.key] = $1.value }
+                    body["share_with_cloud"] = profileShare
+                    mutate("/api/profile", method: "PATCH", body: body)
+                }.buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private func addPublicHost() {
+        let host = publicHost.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !host.isEmpty else { return }
+        publicHost = ""
+        mutate("/api/devices/access", method: "PUT", body: ["add": host])
     }
 
     private var inviteExpiry: Date? {
@@ -1972,6 +2114,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 if page == .updates {
                     automaticUpdates = result["enabled"] as? Bool ?? false
                 }
+                if page == .profile { applyProfile(result) }
             }
         } catch {
             if page == section, activeLoad == id, !Task.isCancelled { self.error = error.localizedDescription }

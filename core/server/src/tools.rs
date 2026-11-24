@@ -161,6 +161,13 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
                 }
             },
         ),
+        "text.correct" => {
+            let text = s("text");
+            let fixed = crate::promptfix::fix(text);
+            let mut out = fixed.to_json();
+            out["changed"] = json!(fixed.changed(text));
+            Ok(out)
+        }
         "math.calc" => crate::toolbox::calc(s("expression")),
         "security.cvss" => crate::expert::cvss(s("vector")),
         "security.hash" => crate::expert::hash_file(ctx.workspace, args),

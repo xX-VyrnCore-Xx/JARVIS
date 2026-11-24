@@ -649,6 +649,31 @@ class VoiceService:
             result["intent"] = intent
         return result
 
+    def wake_only(self, audio_b64: str) -> dict:
+        """Solo la parola di attivazione (ADR-0134): un sì o un no.
+
+        Non restituisce testo, non conserva audio e, se c'è il modello openWakeWord, non trascrive nulla. Senza modello
+        trascrive soltanto un breve blocco con voce e ne tiene solo l'esito del confronto con «hey Jarvis»: il testo
+        non esce mai da questa funzione.
+        """
+        if not (self.wake or self.stt):
+            raise VoiceError("voice.unavailable", "; ".join(self.reasons) or "rilevamento della parola di attivazione non disponibile")
+        try:
+            data = base64.b64decode(audio_b64, validate=True)
+        except ValueError as exc:
+            raise VoiceError("voice.invalid_audio", "audio non in base64") from exc
+        samples, rate, _ = read_wav(data)
+        speech = speech_ratio(samples, rate)
+        if speech < 0.08:
+            return {"detected": False, "engine": self.wake.name if self.wake else "trascrizione", "speech": round(speech, 3)}
+        if self.wake:
+            score = self.wake.score(samples, rate)
+            detected, _ = wake_decision(score, self.wake.threshold, False, speech)
+            return {"detected": detected, "engine": self.wake.name, "score": round(min(max(score, 0.0), 1.0), 3), "speech": round(speech, 3)}
+        matched = bool(WAKE_RE.match(correct_transcript(self.stt.transcribe(data, self.language).strip()[:200], self.language)))
+        detected, _ = wake_decision(None, 0.5, matched, speech)
+        return {"detected": detected, "engine": "trascrizione", "speech": round(speech, 3)}
+
     def _render(self, spoken: str, sentences: list[tuple[str, float]]) -> tuple[bytes, list[int], int]:
         """Audio del testo: frase per frase con pause naturali se è lungo, in un solo passaggio altrimenti."""
         if len(sentences) < 2:

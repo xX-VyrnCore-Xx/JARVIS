@@ -39,6 +39,25 @@ const OLD_TURN_CHARS: usize = 1200;
 const MAX_DELEGATED_TOOLS: usize = 80;
 const MAX_MESSAGE: usize = 8000;
 
+/// Strumenti ammessi via MCP: calcolo, conversioni, data e ora e informazioni di sistema. Niente file, memoria,
+/// note, schermo, applicazioni, terminale, rete, connettori o nodi: restano dentro JARVIS.
+fn mcp_exposed(name: &str) -> bool {
+    name.starts_with("biz.")
+        || matches!(
+            name,
+            "time.now"
+                | "date.calc"
+                | "math.calc"
+                | "units.convert"
+                | "text.count"
+                | "code.validate_json"
+                | "security.cvss"
+                | "it.subnet"
+                | "system.info"
+                | "system.disks"
+        )
+}
+
 #[derive(Debug)]
 pub enum CoreError {
     BadRequest(String),
@@ -254,6 +273,7 @@ impl Jarvis {
         crate::screen::purge(&cfg.data_dir);
         // Personalità scelta dal proprietario (ADR-0120): attiva dalla prima richiesta ai modelli.
         crate::persona::set_current(&crate::persona::load(&cfg.data_dir));
+        crate::profile::set_current(&crate::profile::load(&cfg.data_dir));
         // Compatibilità con le release che usano ancora il blocco interno.
         let legacy_lock = std::fs::OpenOptions::new()
             .create(true)
@@ -3208,6 +3228,114 @@ impl Jarvis {
         Ok(doc)
     }
 
+    /// Strumenti offerti via MCP (ADR-0138): solo calcolo e sola lettura senza dati personali.
+    pub fn mcp_tools(&self) -> Vec<Value> {
+        self.catalog
+            .iter()
+            .filter(|tool| mcp_exposed(tool.name()))
+            .map(|tool| {
+                json!({
+                    "name": crate::mcp::wire_name(tool.name()),
+                    "description": tool.descriptor["summary"],
+                    "inputSchema": tool.descriptor["input_schema"],
+                    "annotations": {
+                        "readOnlyHint": true, "destructiveHint": false,
+                        "idempotentHint": true, "openWorldHint": false,
+                    },
+                })
+            })
+            .collect()
+    }
+
+    /// Esegue uno strumento chiesto via MCP: stessa policy, stessi permessi del proprietario e stesso audit
+    /// dell'agente interno. Restituisce il testo dell'esito e se è un errore.
+    pub fn mcp_call(&mut self, tool: &str, arguments: &Value) -> Result<(String, bool), CoreError> {
+        let Some(version) = self
+            .catalog
+            .get(tool)
+            .filter(|entry| mcp_exposed(entry.name()))
+            .map(|entry| entry.version().to_string())
+        else {
+            return Ok(("Strumento non disponibile via MCP.".into(), true));
+        };
+        let mut task = Task::new(
+            &format!("Chiamata MCP: {tool}"),
+            json!({"kind": "owner", "id": "owner"}),
+        );
+        task.transition("planned", "Richiesta MCP");
+        task.transition("running", "Esecuzione dello strumento");
+        self.save(&task)?;
+        let digest =
+            canonical_digest(&json!({"tool": tool, "version": version, "arguments": arguments}));
+        let (id, corr) = (task.id(), task.correlation());
+        let decision = policy::decide(
+            &self.catalog,
+            &self.cfg.web,
+            &policy::Request {
+                subject: json!({"kind": "agent", "id": "mcp"}),
+                task_id: &id,
+                correlation_id: &corr,
+                tool,
+                version: &version,
+                arguments,
+                digest: &digest,
+                perms: &crate::permissions::Rules::load(&self.cfg.data_dir),
+            },
+        );
+        let allowed = decision["decision"] == "allow";
+        self.audit(json!({
+            "correlation_id": corr, "task_id": id, "actor": {"kind": "agent", "id": "mcp"}, "node": "core-local",
+            "action": decision["request"]["action"]["tool"], "decision_id": decision["decision_id"],
+            "outcome": if allowed { "allowed" } else { "denied" },
+        }))?;
+        let mut out = Outcome::default();
+        let (status, output) = if allowed {
+            self.run_tool(&task, tool, arguments, false, &mut out)?
+        } else {
+            let code = decision["reasons"][0].as_str().unwrap_or("policy.denied");
+            (
+                "denied",
+                json!({"code": code, "message": policy::explain(code)}),
+            )
+        };
+        if status == "succeeded" {
+            task.transition("succeeded", "Strumento eseguito");
+        } else {
+            task.fail(
+                json!({
+                    "code": output["code"].as_str().unwrap_or("tool.failed"),
+                    "category": if status == "denied" { "policy_denied" } else { "unavailable" },
+                    "message": clip(output["message"].as_str().unwrap_or("Strumento non eseguito"), 2000),
+                    "retryable": false, "effect": "not_applied",
+                }),
+                "Strumento non eseguito",
+            );
+        }
+        self.save(&task)?;
+        let text = if status == "succeeded" {
+            serde_json::to_string_pretty(&output).unwrap_or_default()
+        } else {
+            output["message"]
+                .as_str()
+                .unwrap_or("Strumento non eseguito")
+                .to_string()
+        };
+        Ok((text, status != "succeeded"))
+    }
+
+    /// Profilo del proprietario (ADR-0133).
+    pub fn profile(&self) -> Value {
+        crate::profile::to_json(&crate::profile::load(&self.cfg.data_dir))
+    }
+
+    pub fn profile_update(&mut self, patch: &Value) -> Result<Value, CoreError> {
+        let doc =
+            crate::profile::update(&self.cfg.data_dir, patch).map_err(CoreError::BadRequest)?;
+        crate::profile::set_current(&crate::profile::load(&self.cfg.data_dir));
+        self.record_owner_action("profile.update")?;
+        Ok(doc)
+    }
+
     pub fn permissions_update(&mut self, patch: &Value) -> Result<Value, CoreError> {
         // Le regole devono riferirsi a strumenti del catalogo (o a un loro prefisso).
         for pattern in patch["rules"]
@@ -3772,6 +3900,24 @@ impl Jarvis {
             return Err(CoreError::Internal("trascrizione non conforme".into()));
         }
         Ok(out)
+    }
+
+    /// Ascolto sempre attivo (ADR-0134): dice solo se nel blocco c'è «hey Jarvis». Dal worker passano soltanto
+    /// l'esito, il motore e il punteggio: nessun testo, nessun audio conservato.
+    pub fn voice_wake(&mut self, wav: &[u8]) -> Result<Value, CoreError> {
+        use base64::Engine as _;
+        if wav.is_empty() || wav.len() > 2 * 1024 * 1024 {
+            return Err(CoreError::BadRequest("audio vuoto o troppo lungo".into()));
+        }
+        let out = self.voice_call(
+            "voice.wake",
+            json!({"audio_b64": base64::engine::general_purpose::STANDARD.encode(wav)}),
+        )?;
+        Ok(json!({
+            "detected": out["detected"].as_bool().unwrap_or(false),
+            "engine": out["engine"].as_str().unwrap_or("sconosciuto"),
+            "score": out["score"],
+        }))
     }
 
     /// Sintetizza un testo; restituisce l'audio WAV e i metadati (senza audio).

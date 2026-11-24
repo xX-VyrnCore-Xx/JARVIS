@@ -169,12 +169,16 @@ def handle_line(line: str, handler: Callable[..., dict], write: Callable[[dict],
         err = HandlerError("bridge.invalid_envelope", "validation", "Envelope non conforme", False).error
         err["details"] = {"violations": (schema + semantic)[:10]}
         return _reply(None, "failed", {}, err)
-    if request["type"] in ("voice.transcribe", "voice.synthesize"):
+    if request["type"] in ("voice.transcribe", "voice.synthesize", "voice.wake"):
         from jarvis_ai.contracts import validation_errors as _check
         from jarvis_ai.voice import VoiceError
 
         payload = request["payload"]
         try:
+            if request["type"] == "voice.wake":
+                reply = _reply(request, "succeeded", voice_service().wake_only(str(payload.get("audio_b64", ""))))
+                reply["type"] = "voice.result"
+                return reply
             if request["type"] == "voice.transcribe":
                 result = voice_service().transcribe(str(payload.get("audio_b64", "")), "wake_word" if payload.get("mode") == "wake_word" else "push_to_talk")
                 contract = "voice-transcription"

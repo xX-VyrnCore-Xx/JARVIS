@@ -63,6 +63,20 @@ function check(condition, message) {
   check(stats.status === 200 && ["cpu_percent", "memory_percent", "disk_percent"].every((key) => stats.json?.[key] == null || (stats.json[key] >= 0 && stats.json[key] <= 100)),
     "carichi del sistema entro 0–100");
   check((await request("/api/system/stats")).status === 401, "carichi del sistema protetti dal token");
+  // Profilo, correttore, MCP e indirizzi pubblici (ADR-0133, 0135, 0137, 0138).
+  const profile = await request("/api/profile", { token: ownerToken });
+  check(profile.status === 200 && profile.json?.completion_percent === 0, "profilo del proprietario vuoto all'inizio");
+  const profileRefused = await request("/api/profile", { method: "PATCH", token: ownerToken, body: { goals: "scrivimi a x@example.org" } });
+  check(profileRefused.status === 400, "il profilo rifiuta email e recapiti");
+  const checked = await request("/api/prompt/check", { method: "POST", token: ownerToken, body: { text: "perche e' gia tardi,vero?" } });
+  check(checked.json?.text === "Perché è già tardi, vero?", "correttore dei messaggi scritti");
+  const mcp = await request("/api/mcp", { method: "POST", token: ownerToken, body: { jsonrpc: "2.0", id: 1, method: "tools/list" } });
+  const mcpNames = (mcp.json?.result?.tools ?? []).map((tool) => tool.name);
+  check(mcpNames.includes("biz__margin") && !mcpNames.includes("shell__run") && !mcpNames.includes("fs__write"),
+    "MCP espone solo strumenti di calcolo e sola lettura");
+  check((await request("/api/mcp", { method: "POST", body: { jsonrpc: "2.0", id: 1, method: "ping" } })).status === 401, "MCP richiede il token");
+  const access = await request("/api/devices/access", { token: ownerToken });
+  check(access.status === 200 && Array.isArray(access.json?.hosts), "indirizzi pubblici gestiti dall'app");
   const notifications = await request("/api/notifications?limit=5", { token: ownerToken });
   check(notifications.status === 200 && Array.isArray(notifications.json?.items), "notifiche accessibili con il token proprietario");
 

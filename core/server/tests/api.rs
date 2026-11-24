@@ -600,6 +600,247 @@ fn cloud_context_requires_opt_in_and_stays_with_the_provider() {
 }
 
 #[tokio::test]
+async fn public_addresses_are_managed_from_the_app_and_invites_carry_a_link() {
+    let e = env();
+    let (status, none) = e.api("GET", "/api/devices/access", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(none["hosts"], json!([]));
+    // Senza indirizzo pubblico un invito non ha collegamenti da condividere.
+    let (_, bad) = e
+        .api(
+            "PUT",
+            "/api/devices/access",
+            Some(json!({"add": "casa tailnet"})),
+        )
+        .await;
+    assert_eq!(bad["error"]["code"], "bad_request");
+    let (status, added) = e
+        .api(
+            "PUT",
+            "/api/devices/access",
+            Some(json!({"add": "https://Casa.Tailnet.ts.net/"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(added["hosts"], json!(["casa.tailnet.ts.net"]));
+    assert_eq!(
+        added["pairing_urls"],
+        json!(["https://casa.tailnet.ts.net"])
+    );
+    let (_, invite) = e
+        .api(
+            "POST",
+            "/api/devices/pairing",
+            Some(json!({"scopes": ["chat"]})),
+        )
+        .await;
+    let code = invite["code"].as_str().unwrap();
+    assert_eq!(
+        invite["link"],
+        format!("jarvis://pair?origin=https%3A%2F%2Fcasa.tailnet.ts.net&code={code}")
+    );
+    let (_, removed) = e
+        .api(
+            "PUT",
+            "/api/devices/access",
+            Some(json!({"remove": "casa.tailnet.ts.net"})),
+        )
+        .await;
+    assert_eq!(removed["hosts"], json!([]));
+    assert_eq!(
+        jarvis_core::api::pairing_link("https://a.b.c", "AB12"),
+        "jarvis://pair?origin=https%3A%2F%2Fa.b.c&code=AB12"
+    );
+}
+
+#[tokio::test]
+async fn mcp_exposes_only_safe_tools_through_policy_and_audit() {
+    let e = env();
+    let call = |id: u64, method: &str, params: Value| json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
+    let (status, init) = e
+        .api("POST", "/api/mcp", Some(call(1, "initialize", json!({}))))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(init["result"]["serverInfo"]["name"], "jarvis");
+    let (_, list) = e
+        .api("POST", "/api/mcp", Some(call(2, "tools/list", json!({}))))
+        .await;
+    let names: Vec<&str> = list["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|tool| tool["name"].as_str().unwrap())
+        .collect();
+    for wanted in ["biz__margin", "biz__npv", "time__now", "math__calc"] {
+        assert!(names.contains(&wanted), "{wanted} in {names:?}");
+    }
+    for hidden in [
+        "fs__write",
+        "shell__run",
+        "screen__read",
+        "memory__search",
+        "sandbox__run",
+        "app__open",
+    ] {
+        assert!(!names.contains(&hidden), "{hidden} non deve essere esposto");
+    }
+    assert!(list["result"]["tools"][0]["inputSchema"]["type"] == "object");
+    // Una chiamata riuscita restituisce il calcolo del Core.
+    let (_, ok) = e
+        .api(
+            "POST",
+            "/api/mcp",
+            Some(call(
+                3,
+                "tools/call",
+                json!({"name": "biz__margin", "arguments": {"cost": 60, "price": 100}}),
+            )),
+        )
+        .await;
+    assert_eq!(ok["result"]["isError"], false, "{ok}");
+    assert!(ok["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("66.67"));
+    // Argomenti non validi e strumenti non esposti sono errori dello strumento, non del protocollo.
+    let (_, invalid) = e
+        .api(
+            "POST",
+            "/api/mcp",
+            Some(call(
+                4,
+                "tools/call",
+                json!({"name": "biz__margin", "arguments": {"cost": -5, "price": 100}}),
+            )),
+        )
+        .await;
+    assert_eq!(invalid["result"]["isError"], true);
+    let (_, hidden) = e
+        .api(
+            "POST",
+            "/api/mcp",
+            Some(call(
+                5,
+                "tools/call",
+                json!({"name": "shell__run", "arguments": {"command": "ls"}}),
+            )),
+        )
+        .await;
+    assert_eq!(hidden["result"]["isError"], true);
+    let (_, unknown) = e
+        .api(
+            "POST",
+            "/api/mcp",
+            Some(call(6, "resources/list", json!({}))),
+        )
+        .await;
+    assert_eq!(unknown["error"]["code"], -32601);
+    // Le notifiche non hanno risposta; un lotto risponde a ogni richiesta con id.
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/mcp",
+            Some(json!({"jsonrpc": "2.0", "method": "notifications/initialized"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let (_, batch) = e
+        .api(
+            "POST",
+            "/api/mcp",
+            Some(json!([
+                call(7, "ping", json!({})),
+                call(8, "ping", json!({}))
+            ])),
+        )
+        .await;
+    assert_eq!(batch.as_array().unwrap().len(), 2);
+    // L'audit registra le chiamate fatte via MCP.
+    let (_, audit) = e.api("GET", "/api/audit?limit=20", None).await;
+    assert!(audit.to_string().contains("biz.margin"));
+}
+
+#[tokio::test]
+async fn the_owner_profile_is_private_validated_and_audited() {
+    let e = env();
+    let (status, empty) = e.api("GET", "/api/profile", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(empty["completion_percent"], 0);
+    let (status, saved) = e
+        .api(
+            "PATCH",
+            "/api/profile",
+            Some(json!({"role": "Direttrice commerciale", "tone": "diretto", "level": "esperto"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["role"], "Direttrice commerciale");
+    assert!(saved["completion_percent"].as_u64().unwrap() > 0);
+    let (status, _) = e
+        .api(
+            "PATCH",
+            "/api/profile",
+            Some(json!({"goals": "scrivimi a x@example.org"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (_, again) = e.api("GET", "/api/profile", None).await;
+    assert_eq!(again["role"], "Direttrice commerciale");
+}
+
+#[tokio::test]
+async fn typed_messages_are_corrected_and_the_correction_is_reported() {
+    let e = env();
+    let (status, out) = e
+        .api(
+            "POST",
+            "/api/prompt/check",
+            Some(json!({"text": "perche e' gia tardi,vero?"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(out["text"], "Perché è già tardi, vero?");
+    assert_eq!(out["changed"], true);
+    assert!(out["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|c| c["from"] == "e'" && c["to"] == "è"));
+    let (_, same) = e
+        .api(
+            "POST",
+            "/api/prompt/check",
+            Some(json!({"text": "Tutto in ordine."})),
+        )
+        .await;
+    assert_eq!(
+        (same["changed"].clone(), same["changes"].clone()),
+        (json!(false), json!([]))
+    );
+    let (bad, _) = e.api("POST", "/api/prompt/check", Some(json!({}))).await;
+    assert_eq!(bad, StatusCode::BAD_REQUEST);
+    // La chat usa il testo corretto e dice cosa è cambiato.
+    let (status, out) = e
+        .api(
+            "POST",
+            "/api/chat",
+            Some(json!({"message": "che ore sono perche'"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(out["corrected"]["text"], "che ore sono perché");
+    // Un messaggio già corretto non porta alcun campo.
+    let (_, clean) = e
+        .api(
+            "POST",
+            "/api/chat",
+            Some(json!({"message": "Che ore sono"})),
+        )
+        .await;
+    assert!(clean.get("corrected").is_none());
+}
+
+#[tokio::test]
 async fn source_followup_uses_only_the_previous_turn_and_stays_local() {
     let e = env();
     let out = e.chat("che ore sono").await;

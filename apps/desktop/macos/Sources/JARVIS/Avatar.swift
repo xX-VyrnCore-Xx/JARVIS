@@ -7,15 +7,20 @@ import SwiftUI
 struct Avatar: View {
     let thinking: Bool
     var speaking = false
+    /// In ascolto dopo «Hey Jarvis» (ADR-0139): anelli che convergono e occhi attenti.
+    var listening = false
+    /// Livello del microfono (0–1): fa vibrare gli anelli in ascolto.
+    var level = 0.0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovering = false
     @State private var tapped: TimeInterval = -1_000
 
     var body: some View {
-        AvatarCanvas(think: thinking ? 1 : 0, talk: speaking ? 1 : 0, reduceMotion: reduceMotion,
-                     hovering: hovering, tapped: tapped)
+        AvatarCanvas(think: thinking ? 1 : 0, talk: speaking ? 1 : 0, listen: listening ? 1 : 0, level: level,
+                     reduceMotion: reduceMotion, hovering: hovering, tapped: tapped)
             .animation(.easeInOut(duration: 0.7), value: thinking)
             .animation(.easeInOut(duration: 0.5), value: speaking)
+            .animation(.easeInOut(duration: 0.4), value: listening)
             .scaleEffect(hovering && !reduceMotion ? 1.045 : 1)
             .animation(.spring(response: 0.45, dampingFraction: 0.55), value: hovering)
             .aspectRatio(1, contentMode: .fit)
@@ -24,7 +29,7 @@ struct Avatar: View {
             .onTapGesture { tapped = Date().timeIntervalSinceReferenceDate }
             .accessibilityElement(children: .ignore)
             .accessibilityAddTraits(.isImage)
-            .accessibilityLabel(speaking ? "JARVIS sta parlando" : (thinking ? "JARVIS sta elaborando" : "Avatar JARVIS"))
+            .accessibilityLabel(speaking ? "JARVIS sta parlando" : (listening ? "JARVIS ti sta ascoltando" : (thinking ? "JARVIS sta elaborando" : "Avatar JARVIS")))
     }
 }
 
@@ -32,20 +37,22 @@ struct Avatar: View {
 private struct AvatarCanvas: View, Animatable {
     var think: Double
     var talk: Double
+    var listen: Double
+    let level: Double
     let reduceMotion: Bool
     let hovering: Bool
     let tapped: TimeInterval
 
-    var animatableData: AnimatablePair<Double, Double> {
-        get { AnimatablePair(think, talk) }
-        set { think = newValue.first; talk = newValue.second }
+    var animatableData: AnimatablePair<AnimatablePair<Double, Double>, Double> {
+        get { AnimatablePair(AnimatablePair(think, talk), listen) }
+        set { think = newValue.first.first; talk = newValue.first.second; listen = newValue.second }
     }
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { timeline in
             let now = timeline.date.timeIntervalSinceReferenceDate
             Canvas { context, size in
-                AvatarArt.draw(context, size: size, now: now, think: think, talk: talk,
+                AvatarArt.draw(context, size: size, now: now, think: think, talk: talk, listen: listen, level: level,
                                still: reduceMotion, hovering: hovering, tapped: tapped)
             }
         }
@@ -93,9 +100,9 @@ private enum AvatarArt {
     // MARK: Disegno
 
     static func draw(_ context: GraphicsContext, size: CGSize, now: Double, think: Double, talk: Double,
-                     still: Bool, hovering: Bool, tapped: TimeInterval) {
+                     listen: Double, level: Double, still: Bool, hovering: Bool, tapped: TimeInterval) {
         let t = still ? 0 : now
-        let energy = 0.28 + 0.45 * think + 0.30 * talk + (hovering ? 0.12 : 0)
+        let energy = 0.28 + 0.45 * think + 0.30 * talk + 0.22 * listen + (hovering ? 0.12 : 0)
         var g = context
         g.translateBy(x: size.width / 2, y: size.height / 2)
         let scale = min(size.width, size.height) / 270
@@ -103,6 +110,7 @@ private enum AvatarArt {
 
         halo(&g, t: t, energy: energy)
         if !still { ripples(&g, t: t, now: now, energy: energy, talk: talk, think: think, tapped: tapped) }
+        if listen > 0.02 { listeningRings(&g, t: still ? 0 : t, listen: listen, level: level) }
         rings(&g, t: t, energy: energy, think: think)
         particles(&g, t: t, energy: energy)
 
@@ -126,7 +134,7 @@ private enum AvatarArt {
 
         body(&h)
         scan(&h, t: t, energy: energy)
-        eyes(&h, t: t, think: think, talk: talk, hovering: hovering, still: still)
+        eyes(&h, t: t, think: think, talk: talk, listen: listen, hovering: hovering, still: still)
         mouth(&h, t: t, think: think, talk: talk)
         reactor(&h, t: t, energy: energy)
     }
@@ -152,6 +160,18 @@ private enum AvatarArt {
             g.stroke(circle(30 + 112 * smooth(p)), with: .color(Color.white.opacity((1 - p) * 0.8)), lineWidth: 3 * (1 - p) + 0.4)
             g.stroke(circle(20 + 100 * smooth(p)), with: .color(cyan.opacity((1 - p) * 0.9)), lineWidth: 2 * (1 - p) + 0.4)
         }
+    }
+
+    /// Anelli che convergono verso il volto mentre JARVIS ascolta; il livello del microfono ne aumenta lo spessore.
+    static func listeningRings(_ g: inout GraphicsContext, t: Double, listen: Double, level: Double) {
+        for k in 0..<4 {
+            let phase = unit(t * 0.9 + Double(k) / 4)
+            let radius = 132 - 84 * phase
+            let alpha = (1 - abs(phase - 0.5) * 2) * 0.55 * listen
+            g.stroke(circle(radius), with: .color(cyan.opacity(alpha)),
+                     lineWidth: 1.2 + 3.5 * level * (1 - phase))
+        }
+        g.stroke(circle(46), with: .color(Color.white.opacity(0.35 * listen * (0.4 + level))), lineWidth: 1.2)
     }
 
     static func rings(_ g: inout GraphicsContext, t: Double, energy: Double, think: Double) {
@@ -253,7 +273,7 @@ private enum AvatarArt {
         }
     }
 
-    static func eyes(_ h: inout GraphicsContext, t: Double, think: Double, talk: Double, hovering: Bool, still: Bool) {
+    static func eyes(_ h: inout GraphicsContext, t: Double, think: Double, talk: Double, listen: Double, hovering: Bool, still: Bool) {
         // Sguardo: piccoli scatti verso punti casuali; quando elabora cerca avanti e indietro.
         let interval = 1.7
         let segment = floor(t / interval)
@@ -266,7 +286,7 @@ private enum AvatarArt {
         // Palpebre.
         let phase = t.truncatingRemainder(dividingBy: 4.9)
         let blink = (!still && phase < 0.16) ? abs(phase - 0.08) / 0.08 : 1
-        let open = 7 + hovering.asDouble * 1.5 - think * 1.4
+        let open = 7 + hovering.asDouble * 1.5 + listen * 1.6 - think * 1.4
         let height = max(1.6, open * blink)
         let pulse = 0.82 + 0.18 * sin(t * (4 + 6 * think)) + talk * 0.05
         for x in [-27.0, 13.0] {

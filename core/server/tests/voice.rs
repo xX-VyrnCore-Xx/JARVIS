@@ -134,6 +134,46 @@ async fn push_to_talk_transcription_is_local_and_conformant() {
 }
 
 #[tokio::test]
+async fn always_on_listening_returns_only_a_verdict() {
+    let app = app("fake");
+    for (text, expected) in [
+        ("Ehi Jarvis, info sistema", true),
+        ("parlavo d'altro", false),
+    ] {
+        let (status, body, _) = send(
+            &app,
+            "POST",
+            "/api/voice/wake",
+            wav(1.0, 4000.0, Some(text)),
+            "audio/wav",
+            true,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{}", String::from_utf8_lossy(&body));
+        let out = json_of(&body);
+        assert_eq!(out["detected"], expected, "{text}");
+        // Nessun testo né comando: solo l'esito, il motore e il punteggio.
+        let keys: Vec<_> = out.as_object().unwrap().keys().cloned().collect();
+        assert!(
+            keys.iter()
+                .all(|k| ["detected", "engine", "score"].contains(&k.as_str())),
+            "{keys:?}"
+        );
+        assert!(!String::from_utf8_lossy(&body).contains("sistema"));
+    }
+    let (status, _, _) = send(
+        &app,
+        "POST",
+        "/api/voice/wake",
+        Vec::new(),
+        "audio/wav",
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn wake_word_extracts_the_command() {
     let app = app("fake");
     let (_, body, _) = send(

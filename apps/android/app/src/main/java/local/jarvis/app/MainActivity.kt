@@ -3,6 +3,7 @@ package local.jarvis.app
 import android.Manifest
 import android.os.Build
 import android.os.Bundle
+import android.content.Intent
 import android.content.pm.PackageManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -56,6 +57,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -74,6 +76,7 @@ import local.jarvis.client.CoreClient
 import local.jarvis.client.CoreException
 import local.jarvis.client.DeviceSession
 import local.jarvis.client.Notices
+import local.jarvis.client.PairingLink
 import local.jarvis.client.PendingAction
 import local.jarvis.client.TaskSummary
 
@@ -104,9 +107,18 @@ internal fun notificationSeverityLabel(severity: String): String = when (severit
 class MainActivity : ComponentActivity() {
     private val appInForeground = mutableStateOf(false)
     private val openNotificationId = mutableStateOf<String?>(null)
+    /** Collegamento di associazione aperto da fuori (messaggio, AirDrop, browser). */
+    private val pendingLink = mutableStateOf<PairingLink?>(null)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        PairingLink.parse(intent.dataString)?.let { pendingLink.value = it }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingLink.value = PairingLink.parse(intent?.dataString)
         openNotificationId.value = intent?.getStringExtra(PushMessagingService.NOTIFICATION_ID_EXTRA)
         val store = SessionStore(applicationContext)
         setContent {
@@ -116,7 +128,7 @@ class MainActivity : ComponentActivity() {
                     Column(Modifier.padding(padding).fillMaxSize().imePadding()) {
                         val current = session
                         if (current == null) {
-                            PairingScreen { paired -> store.save(paired); session = paired }
+                            PairingScreen(initialLink = pendingLink.value) { paired -> store.save(paired); session = paired }
                         } else {
                             DeviceScreen(
                                 session = current,
@@ -158,7 +170,7 @@ class MainActivity : ComponentActivity() {
 private val client = CoreClient()
 
 @Composable
-private fun PairingScreen(onPaired: (DeviceSession) -> Unit) {
+private fun PairingScreen(initialLink: PairingLink?, onPaired: (DeviceSession) -> Unit) {
     var origin by remember { mutableStateOf("https://") }
     var code by remember { mutableStateOf("") }
     var name by remember { mutableStateOf(Build.MODEL ?: "Telefono Android") }
@@ -167,6 +179,16 @@ private fun PairingScreen(onPaired: (DeviceSession) -> Unit) {
     var checking by remember { mutableStateOf(false) }
     var verified by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
+    // Un collegamento aperto da fuori compila indirizzo e codice: resta solo da toccare «Associa».
+    LaunchedEffect(initialLink) {
+        initialLink?.let {
+            origin = it.origin
+            code = it.code
+            verified = false
+            error = null
+        }
+    }
     Column(Modifier.fillMaxSize().imePadding().padding(horizontal = 24.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -180,7 +202,18 @@ private fun PairingScreen(onPaired: (DeviceSession) -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text("Associa questo dispositivo", style = MaterialTheme.typography.titleLarge)
-            Text("Sul computer apri Dispositivi, genera un codice monouso e inseriscilo qui. Scade dopo 10 minuti.")
+            Text("Sul computer apri Dispositivi, tocca «Condividi collegamento» e aprilo su questo telefono: indirizzo e codice si compilano da soli. Il codice scade dopo 10 minuti.")
+            Button(enabled = !busy && !checking, onClick = {
+                val link = PairingLink.parse(clipboard.getText()?.text)
+                if (link == null) {
+                    error = "Negli appunti non c'è un collegamento di associazione di JARVIS."
+                } else {
+                    origin = link.origin
+                    code = link.code
+                    verified = false
+                    error = null
+                }
+            }, modifier = Modifier.fillMaxWidth()) { Text("Incolla il collegamento") }
             OutlinedTextField(origin, {
                 origin = it
                 verified = false

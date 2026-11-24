@@ -234,6 +234,8 @@ enum Event {
     UpdateInstalling(Result<Value, String>),
     /// Personalità corrente di JARVIS (ADR-0120).
     Persona(Result<Value, String>),
+    /// Profilo del proprietario (ADR-0133).
+    Profile(Result<Value, String>),
     /// Stato della voce di sistema maschile (ADR-0123).
     VoiceStatus(Result<Value, String>),
     /// Frammento di testo della risposta in arrivo (ADR-0131).
@@ -333,6 +335,11 @@ pub struct JarvisApp {
     voice_hint: String,
     persona_style: String,
     persona_address: String,
+    profile_loaded: bool,
+    public_host: String,
+    profile_doc: Value,
+    profile_draft: HashMap<String, String>,
+    profile_share: bool,
 }
 
 impl JarvisApp {
@@ -467,6 +474,11 @@ impl JarvisApp {
             voice_hint: String::new(),
             persona_style: "film".into(),
             persona_address: String::new(),
+            profile_loaded: false,
+            public_host: String::new(),
+            profile_doc: Value::Null,
+            profile_draft: HashMap::new(),
+            profile_share: true,
         }
     }
 
@@ -583,6 +595,33 @@ impl JarvisApp {
                             self.persona_address =
                                 doc["address"].as_str().unwrap_or_default().to_owned();
                             self.persona_loaded = true;
+                        }
+                        Err(error) => self.error = Some(error),
+                    }
+                }
+                Event::Profile(result) => {
+                    self.loading = false;
+                    match result {
+                        Ok(doc) => {
+                            for key in [
+                                "role",
+                                "company",
+                                "sector",
+                                "expertise",
+                                "interests",
+                                "goals",
+                                "language",
+                                "tone",
+                                "level",
+                            ] {
+                                self.profile_draft.insert(
+                                    key.to_string(),
+                                    doc[key].as_str().unwrap_or_default().to_owned(),
+                                );
+                            }
+                            self.profile_share = doc["share_with_cloud"].as_bool().unwrap_or(true);
+                            self.profile_doc = doc;
+                            self.profile_loaded = true;
                         }
                         Err(error) => self.error = Some(error),
                     }
@@ -3032,8 +3071,131 @@ impl JarvisApp {
         ui.separator();
     }
 
+    /// Profilo del proprietario (ADR-0133): ruolo, settore, tono e livello; niente recapiti.
+    fn show_profile(&mut self, ui: &mut egui::Ui) {
+        if self.remote {
+            return;
+        }
+        if !self.profile_loaded {
+            if let Some(client) = self.client.clone() {
+                self.profile_loaded = true;
+                let tx = self.tx.clone();
+                std::thread::spawn(move || {
+                    let _ = tx.send(Event::Profile(client.get("/api/profile")));
+                });
+            }
+        }
+        ui.heading("Il tuo profilo");
+        let percent = self.profile_doc["completion_percent"].as_u64().unwrap_or(0);
+        ui.add(
+            egui::ProgressBar::new(percent as f32 / 100.0).text(format!("{percent}% completato")),
+        );
+        if let Some(missing) = self.profile_doc["missing"]
+            .as_array()
+            .filter(|m| !m.is_empty())
+        {
+            let hints: Vec<&str> = missing.iter().filter_map(Value::as_str).take(3).collect();
+            ui.small(
+                egui::RichText::new(format!(
+                    "Per risposte più mirate aggiungi: {}.",
+                    hints.join(", ")
+                ))
+                .weak(),
+            );
+        }
+        for (key, label) in [
+            ("role", "Ruolo"),
+            ("company", "Azienda"),
+            ("sector", "Settore"),
+            ("expertise", "Competenze"),
+            ("interests", "Interessi"),
+            ("goals", "Obiettivi"),
+        ] {
+            ui.horizontal(|ui| {
+                ui.label(format!("{label:<11}"));
+                let value = self.profile_draft.entry(key.to_string()).or_default();
+                ui.add(egui::TextEdit::singleline(value).desired_width(320.0));
+            });
+        }
+        for (key, label, options) in [
+            (
+                "language",
+                "Lingua",
+                [
+                    ("auto", "Automatica"),
+                    ("it", "Italiano"),
+                    ("en", "Inglese"),
+                ]
+                .as_slice(),
+            ),
+            (
+                "tone",
+                "Tono",
+                [
+                    ("auto", "Automatico"),
+                    ("formale", "Formale"),
+                    ("cordiale", "Cordiale"),
+                    ("diretto", "Diretto"),
+                ]
+                .as_slice(),
+            ),
+            (
+                "level",
+                "Livello tecnico",
+                [
+                    ("auto", "Automatico"),
+                    ("principiante", "Principiante"),
+                    ("intermedio", "Intermedio"),
+                    ("esperto", "Esperto"),
+                ]
+                .as_slice(),
+            ),
+        ] {
+            ui.horizontal(|ui| {
+                ui.label(label);
+                for (value, text) in options {
+                    let current = self
+                        .profile_draft
+                        .get(key)
+                        .map(String::as_str)
+                        .unwrap_or("auto");
+                    if ui.selectable_label(current == *value, *text).clicked() {
+                        self.profile_draft
+                            .insert(key.to_string(), (*value).to_string());
+                    }
+                }
+            });
+        }
+        ui.checkbox(
+            &mut self.profile_share,
+            "Usa il profilo nelle richieste ai modelli cloud",
+        );
+        ui.small(
+            egui::RichText::new(
+                "Niente email, telefoni o password: JARVIS li rifiuta. Senza l'opzione il profilo resta sul computer.",
+            )
+            .weak(),
+        );
+        if ui.button("Salva profilo").clicked() {
+            let mut body = serde_json::Map::new();
+            for (key, value) in &self.profile_draft {
+                body.insert(key.clone(), json!(value));
+            }
+            body.insert("share_with_cloud".into(), json!(self.profile_share));
+            self.profile_loaded = false;
+            self.mutate(
+                &ui.ctx().clone(),
+                Mutation::Patch,
+                "/api/profile".into(),
+                Some(Value::Object(body)),
+            );
+        }
+        ui.separator();
+    }
+
     fn show_cloud_settings(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         self.show_persona(ui);
+        self.show_profile(ui);
         ui.heading("Collega un provider AI");
         ui.label("Le chiavi vengono salvate nel secret store del Core e non sono mostrate dopo il salvataggio.");
         ui.add_space(8.0);
@@ -3416,7 +3578,7 @@ impl JarvisApp {
         ui.group(|ui| {
             ui.heading("Associa un dispositivo");
             ui.label("1. Apri JARVIS sul dispositivo da associare.");
-            ui.label("2. Inserisci l’indirizzo HTTPS del Core e il codice monouso.");
+            ui.label("2. Apri il collegamento di associazione (o inserisci indirizzo e codice).");
             if pairing_urls.len() > 1 {
                 egui::ComboBox::from_id_salt("pairing-host")
                     .selected_text(pairing_url.as_str())
@@ -3431,8 +3593,25 @@ impl JarvisApp {
             } else {
                 ui.colored_label(
                     egui::Color32::from_rgb(255, 197, 108),
-                    "Configura prima un host HTTPS autorizzato nel Core per associare dispositivi remoti.",
+                    "Inserisci qui l'indirizzo HTTPS con cui il Core è raggiungibile (per esempio quello di Tailscale): si salva da solo, senza file né riavvii.",
                 );
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.public_host)
+                            .hint_text("casa.tailnet.ts.net")
+                            .desired_width(260.0),
+                    );
+                    if ui.button("Aggiungi indirizzo").clicked()
+                        && !self.public_host.trim().is_empty()
+                    {
+                        let host = std::mem::take(&mut self.public_host);
+                        self.act(
+                            ctx,
+                            "/api/devices/access".into(),
+                            Some(json!({"add": host.trim()})),
+                        );
+                    }
+                });
             }
             ui.add_enabled(
                 !self.invite_creating && invite.is_none(),
@@ -3465,6 +3644,17 @@ impl JarvisApp {
                 if let Some(code) = invite["code"].as_str() {
                     if ui.button("Copia codice").clicked() {
                         ctx.copy_text(code.to_owned());
+                    }
+                    if let Some(link) = invite["link"].as_str() {
+                        if ui.button("Copia collegamento (un solo tocco)").clicked() {
+                            ctx.copy_text(link.to_owned());
+                        }
+                        ui.small(
+                            egui::RichText::new(
+                                "Invialo al telefono e aprilo: indirizzo e codice si compilano da soli.",
+                            )
+                            .weak(),
+                        );
                     }
                     if !pairing_url.is_empty()
                         && ui.button("Copia istruzioni di associazione").clicked()

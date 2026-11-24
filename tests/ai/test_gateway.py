@@ -88,6 +88,7 @@ class OfflineBackend(unittest.TestCase):
             "cagr da 100 a 200 in 5 anni": ("biz.cagr", {"start": 100.0, "end": 200.0, "years": 5.0}),
             "unit economics: arpu 100 margine 70% churn 3% cac 500": ("biz.unit_economics", {"arpu_monthly": 100.0, "gross_margin_percent": 70.0, "monthly_churn_percent": 3.0, "cac": 500.0}),
             "van tasso 10% flussi -1000; 500; 500; 500": ("biz.npv", {"discount_rate_percent": 10.0, "cashflows": [-1000.0, 500.0, 500.0, 500.0]}),
+            "correggi: perche e' gia tardi": ("text.correct", {"text": "perche e' gia tardi"}),
             "prepara la sandbox": ("sandbox.prepare", {}),
             "importa nella sandbox: dati.csv": ("sandbox.import", {"from": "dati.csv"}),
             "importa nella sandbox: dati.csv come in/x.csv": ("sandbox.import", {"from": "dati.csv", "to": "in/x.csv"}),
@@ -241,6 +242,13 @@ class ExecutiveToolsTextTest(unittest.TestCase):
                 text = self.describe(tool, output)
                 for fragment in expected:
                     self.assertIn(fragment, text)
+
+    def test_the_corrected_text_and_its_changes_are_shown(self):
+        out = {"text": "Perché è già tardi", "changed": True, "changes": [{"from": "perche", "to": "perché"}]}
+        text = self.describe("text.correct", out)
+        self.assertIn("Perché è già tardi", text)
+        self.assertIn("«perche» → «perché»", text)
+        self.assertEqual(self.describe("text.correct", {"text": "x", "changed": False, "changes": []}), "Il testo è già corretto.")
 
     def test_missing_optional_values_do_not_break_the_text(self):
         self.assertIn("non definito", self.describe("biz.npv", {"npv": -5.0, "irr_percent": None, "payback_periods": None, "verdict": "x"}))

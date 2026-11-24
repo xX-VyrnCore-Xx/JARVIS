@@ -18,6 +18,8 @@
 	<string>@VERSION@</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>JARVIS ascolta il microfono solo per riconoscere «Hey Jarvis». L'audio resta sul tuo computer e viene analizzato soltanto dopo l'attivazione.</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
 </dict>
