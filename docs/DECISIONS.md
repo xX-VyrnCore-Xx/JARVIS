@@ -1694,6 +1694,26 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Non verificato:** la resa a schermo e la fluidità (nessuna schermata vista; SwiftUI si compila solo nella CI). Le animazioni continue usano `TimelineView` a 24–30 fotogrammi al secondo e si fermano con «Riduci movimento».
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
 
+### ADR-0126 — Plancia macOS ispirata al mock-up e carichi del sistema
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («prendi spunto dalla foto e migliora la qualità dell'app macOS»).
+- **Decisione:** la Plancia riprende la struttura del mock-up: saluto in base all'ora («Buongiorno / Sono JARVIS»), scheda **AI** (modello attivo e stato dell'Orchestratore), avatar con anelli in orbita e onda sonora (`OrbitRings`, `WaveformView`), scheda **Sistema** (CPU, RAM, archiviazione), scheda **Specialisti** (scorciatoie verso una chat già avviata), barra dei comandi «Parla con JARVIS…», sei categorie rapide, «Attività recenti» e «Missioni in corso». La barra laterale mostra il marchio, le voci evidenziate con sfumatura e, in fondo, la scheda «JARVIS Online / Modalità: Operativa». In testata compaiono lettura ad alta voce e ricerca nei ricordi.
+- **Nuova lettura:** `GET /api/system/stats` → `{cpu_percent, memory_percent, disk_percent, cores, os}`. Legge solo `/proc` (Linux), `vm_stat`/`sysctl` (macOS) e lo spazio del volume dei dati; nessun nome di processo, percorso o dato personale. Cache di 3 s, eseguita in `spawn_blocking`; richiede il token come ogni altra API.
+- **Non incluso:** le icone degli agenti del mock-up sono scorciatoie, non agenti separati: il Core resta l'unico orchestratore. Il modello mostrato è quello configurato, non una misura di latenza.
+- **Non verificato:** resa a schermo (SwiftUI si compila solo nella CI macOS); i parser dei carichi sono testati con fixture sintetiche, la lettura reale solo su Linux.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
+### ADR-0127 — Chat, riconoscimento vocale (STT), sintesi (TTS) e parola di attivazione migliori
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora le chat, la wake word ed entrambi i modelli TTS e STT»).
+- **Chat (macOS):** le risposte di JARVIS mostrano markdown (grassetto, corsivo, codice in linea, elenchi) e blocchi di codice con intestazione del linguaggio e pulsante «Copia» (`MessageContent`). I collegamenti si aprono solo se sono `http`/`https`. Il campo di scrittura è una capsula a più righe con pulsante rotondo di invio.
+- **STT:** pre-elaborazione dell'audio (rimozione del livello continuo, guadagno limitato, taglio dei silenzi), soglia sul rapporto di parlato prima della trascrizione, `beam_size=5`, soglie `no_speech`/`log_prob`/compressione, `initial_prompt` con il lessico di JARVIS, filtro delle allucinazioni tipiche («sottotitoli…», «grazie per la visione») e dei segmenti ripetuti.
+- **Wake word:** la decisione combina punteggio del modello e trascrizione (`confirmed_by`: `score`, `transcript`, `score+transcript`) e scarta l'audio con poco parlato (`speech_ratio`), per ridurre falsi positivi con rumore o musica. Contratto `jarvis.voice-transcription/1` esteso in modo compatibile.
+- **TTS:** il testo viene diviso in frasi e sintetizzato frase per frase con pause naturali; Piper usa `SynthesisConfig` esplicita. Restano solo voci **maschili** (decisione ADR-0123).
+- **Privacy:** audio e trascrizioni restano locali; nessun nuovo invio a servizi esterni.
+- **Non verificato:** accuratezza reale su microfono e voce vera (test con segnali sintetici); le soglie vanno tarate sull'hardware del proprietario.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.

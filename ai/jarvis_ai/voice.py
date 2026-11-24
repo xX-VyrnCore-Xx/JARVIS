@@ -165,6 +165,13 @@ class FakeTTS:
 # ---------------------------------------------------------------------- motori reali
 
 
+# Guida il modello verso l'italiano dei comandi (ortografia, punteggiatura e parole tecniche).
+INITIAL_PROMPT = (
+    "Comandi a JARVIS, l'assistente personale. Esempi: «Jarvis, ricordami tra venti minuti di chiamare Marco.» "
+    "«Apri l'app Spotify.» «Che ore sono?» «Scrivi una nota: comprare il latte.» «Avvia una missione.»"
+)
+
+
 class WhisperSTT:
     def __init__(self, env: dict[str, str]):
         os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
@@ -180,19 +187,25 @@ class WhisperSTT:
         import numpy as np
 
         samples, rate, _ = read_wav(data)
-        if not samples or rms(samples) < 45:
+        if not samples or rms(samples) < 45 or speech_ratio(samples, rate) < 0.04:
             return ""
+        samples = preprocess(samples, rate)
         audio = np.asarray(samples, dtype=np.float32) / 32768.0
         if rate != 16000:
             positions = np.arange(len(samples) * 16000 // rate) * (rate / 16000.0)
             audio = np.interp(positions, np.arange(len(samples)), audio).astype(np.float32)
         segments, _ = self.model.transcribe(
-            audio, language=language, vad_filter=True, beam_size=3,
+            audio, language=language, vad_filter=True, beam_size=5,
             condition_on_previous_text=False, temperature=0,
+            no_speech_threshold=0.6, log_prob_threshold=-1.0, compression_ratio_threshold=2.4,
+            initial_prompt=INITIAL_PROMPT if language == "it" else None,
             vad_parameters={"min_silence_duration_ms": 350, "speech_pad_ms": 180},
             hotwords="JARVIS, GitHub, Python, JavaScript, macOS, Ollama, NVIDIA NIM, sandbox, missione, conferma, annulla, ricordami, promemoria",
         )
-        return " ".join(s.text.strip() for s in segments if s.no_speech_prob < 0.8).strip()
+        text = " ".join(
+            s.text.strip() for s in segments if s.no_speech_prob < 0.7 and getattr(s, "avg_logprob", 0.0) > -1.3
+        ).strip()
+        return strip_hallucinations(text)
 
 
 _UNITS = {
@@ -317,6 +330,94 @@ def polish(samples: list[int], rate: int) -> list[int]:
     return out
 
 
+# ---------------------------------------------------------------------- qualità dell'audio e del testo (ADR-0127)
+
+
+def preprocess(samples: list[int], rate: int) -> list[int]:
+    """Prepara l'audio per il riconoscimento: toglie la componente continua e i rumori sotto ~80 Hz e livella il volume."""
+    if not samples:
+        return samples
+    mean = sum(samples) / len(samples)
+    alpha = 1.0 - math.exp(-2.0 * math.pi * 80.0 / max(rate, 1))
+    low = 0.0
+    out: list[float] = []
+    for s in samples:
+        x = s - mean
+        low += alpha * (x - low)
+        out.append(x - low)
+    peak = max(abs(v) for v in out) or 1.0
+    gain = min(40.0, 26000.0 / peak)
+    return [int(max(-32768, min(32767, v * gain))) for v in out]
+
+
+def speech_ratio(samples: list[int], rate: int) -> float:
+    """Frazione di blocchi da 20 ms con voce, rispetto al rumore di fondo stimato dai blocchi più silenziosi."""
+    size = max(int(rate * 0.02), 1)
+    frames = [rms(samples[i:i + size]) for i in range(0, len(samples) - size + 1, size)]
+    if not frames:
+        return 0.0
+    floor = sorted(frames)[len(frames) // 5]
+    # Il limite superiore evita che un suono costante e forte (voce continua) sembri rumore di fondo.
+    threshold = max(250.0, min(floor * 2.8, 1500.0))
+    return sum(1 for f in frames if f > threshold) / len(frames)
+
+
+# Frasi che Whisper inventa sul silenzio o sul rumore (note dai sottotitoli con cui è stato addestrato).
+_HALLUCINATIONS = (
+    "sottotitoli creati dalla comunita amara.org", "sottotitoli e revisione a cura di qtss",
+    "sottotitoli a cura di qtss", "grazie per la visione", "grazie per l'attenzione", "iscriviti al canale",
+    "alla prossima", "ci vediamo al prossimo video", "grazie a tutti", "buona visione", "musica", "applausi",
+)
+
+
+def strip_hallucinations(text: str) -> str:
+    """Elimina le frasi inventate dal modello sul silenzio e i cicli di parole ripetute."""
+    plain = re.sub(r"[^\w' .]+", "", text.lower().replace("à", "a")).strip(" .")
+    if any(plain == h.strip(" .") for h in _HALLUCINATIONS):
+        return ""
+    for h in _HALLUCINATIONS[:4]:
+        text = re.sub(re.escape(h), "", text, flags=re.I).strip()
+    # «ciao ciao ciao ciao» → «ciao»; «grazie. grazie. grazie.» → «grazie.»
+    text = re.sub(r"\b(\w+[.,!?]?)(\s+\1){3,}", r"\1", text, flags=re.I)
+    return text.strip()
+
+
+def wake_decision(score: float | None, threshold: float, transcript_match: bool, speech: float) -> tuple[bool, str]:
+    """Decide se è la parola di attivazione. Il solo punteggio basta se alto; uno medio richiede la conferma della
+    trascrizione; rumore senza voce non attiva mai."""
+    if speech < 0.08:
+        return False, ""
+    if score is None:
+        return transcript_match, "transcript" if transcript_match else ""
+    if score >= threshold:
+        return True, "score+transcript" if transcript_match else "score"
+    if score >= threshold * 0.65 and transcript_match:
+        return True, "score+transcript"
+    return False, ""
+
+
+_PAUSES = {".": 0.30, "!": 0.30, "?": 0.34, ":": 0.22, ";": 0.22}
+
+
+def split_sentences(text: str) -> list[tuple[str, float]]:
+    """Frasi con la pausa da inserire dopo ciascuna: una sintesi frase per frase dà un ritmo più naturale."""
+    parts = re.findall(r"[^.!?;:]+[.!?;:]?", text)
+    out: list[tuple[str, float]] = []
+    for part in parts:
+        part = part.strip()
+        if not part or not re.search(r"\w", part):
+            continue
+        out.append((part, _PAUSES.get(part[-1], 0.18)))
+    # frasi molto brevi si uniscono alla successiva per non spezzare il discorso
+    merged: list[tuple[str, float]] = []
+    for sentence, pause in out:
+        if merged and len(merged[-1][0]) < 14:
+            merged[-1] = (merged[-1][0] + " " + sentence, pause)
+        else:
+            merged.append((sentence, pause))
+    return merged[:14]
+
+
 def correct_transcript(text: str, language: str) -> str:
     """Corregge solo locuzioni italiane note; lascia comandi, codice e punteggiatura tecnica intatti."""
     if language != "it" or re.search(r"[`/:\\_@=]|\.\w{1,8}\b", text):
@@ -343,6 +444,7 @@ class PiperTTS:
             raise VoiceError("voice.model_missing", "voce Piper non trovata: imposta JARVIS_TTS_VOICE con il percorso del file .onnx")
         if not voice_is_male(Path(path).stem, env):
             raise not_male(Path(path).stem)
+        self.env = env
         self.piper = PiperVoice.load(path)
         self.voice = Path(path).stem
         self.rate = int(getattr(getattr(self.piper, "config", None), "sample_rate", 22050))
@@ -351,6 +453,20 @@ class PiperTTS:
     def synthesize(self, text: str) -> bytes:
         buf = io.BytesIO()
         with wave.open(buf, "wb") as wav:
+            config = None
+            try:
+                from piper import SynthesisConfig  # versioni recenti di Piper
+
+                scale = min(1.3, max(0.85, float(self.env.get("JARVIS_TTS_LENGTH_SCALE", "1.06"))))
+                config = SynthesisConfig(length_scale=scale, noise_scale=0.62, noise_w_scale=0.75)
+            except (ImportError, TypeError, ValueError):
+                config = None
+            if config is not None:
+                try:
+                    self.piper.synthesize_wav(text, wav, syn_config=config)
+                    return buf.getvalue()
+                except TypeError:
+                    pass
             self.piper.synthesize_wav(text, wav)
         return buf.getvalue()
 
@@ -503,11 +619,17 @@ class VoiceService:
         # Il comando senza la parola di attivazione è quello che conta per intento e numeri.
         if mode == "wake_word":
             match = WAKE_RE.match(text)
+            speech = speech_ratio(samples, rate)
+            wake["speech_ratio"] = round(speech, 3)
             if self.wake:
                 score = self.wake.score(samples, rate)
-                wake.update(engine=self.wake.name, score=round(min(max(score, 0.0), 1.0), 3), detected=score >= self.wake.threshold)
+                detected, confirmed = wake_decision(score, self.wake.threshold, bool(match), speech)
+                wake.update(engine=self.wake.name, score=round(min(max(score, 0.0), 1.0), 3), detected=detected)
             else:
-                wake.update(engine="trascrizione", detected=bool(match))
+                detected, confirmed = wake_decision(None, 0.5, bool(match), speech)
+                wake.update(engine="trascrizione", detected=detected)
+            if detected and confirmed:
+                wake["confirmed_by"] = confirmed
             if wake["detected"]:
                 wake["command"] = (text[match.end():] if match else text).strip()
         spoken = wake.get("command", text) if mode == "wake_word" else text
@@ -527,6 +649,24 @@ class VoiceService:
             result["intent"] = intent
         return result
 
+    def _render(self, spoken: str, sentences: list[tuple[str, float]]) -> tuple[bytes, list[int], int]:
+        """Audio del testo: frase per frase con pause naturali se è lungo, in un solo passaggio altrimenti."""
+        if len(sentences) < 2:
+            audio = self.tts.synthesize(spoken)
+            samples, rate, _ = read_wav(audio) if len(audio) <= MAX_BYTES else ([], self.tts.rate, {})
+            return audio, samples, rate
+        joined: list[int] = []
+        rate = self.tts.rate
+        for sentence, pause in sentences:
+            chunk, chunk_rate, _ = read_wav(self.tts.synthesize(sentence))
+            if joined and chunk_rate != rate:
+                chunk = resample(chunk, chunk_rate, rate)
+            else:
+                rate = chunk_rate
+            joined.extend(chunk)
+            joined.extend([0] * int(rate * pause))
+        return write_wav(joined, rate), joined, rate
+
     def synthesize(self, text: str) -> dict:
         if not self.tts:
             raise VoiceError("voice.unavailable", "; ".join(self.reasons) or "sintesi vocale non disponibile")
@@ -536,8 +676,9 @@ class VoiceService:
         if len(text) > MAX_TTS_CHARS:
             raise VoiceError("voice.too_long", f"testo oltre {MAX_TTS_CHARS} caratteri")
         spoken = speech_text(text) or text
+        sentences = split_sentences(spoken) if len(spoken) > 60 else []
         try:
-            audio = self.tts.synthesize(spoken)
+            audio, samples, rate = self._render(spoken, sentences)
         except Exception as exc:
             if not isinstance(self.tts, XttsTTS):
                 raise
@@ -546,8 +687,7 @@ class VoiceService:
             self.tts = self.fallback_tts
             if self.tts is None:
                 raise VoiceError("voice.unavailable", self.reasons[-1]) from None
-            audio = self.tts.synthesize(spoken)
-        samples, rate, _ = read_wav(audio) if len(audio) <= MAX_BYTES else ([], self.tts.rate, {})
+            audio, samples, rate = self._render(spoken, sentences)
         if samples:
             samples = polish(samples, rate)
             audio = write_wav(samples, rate)

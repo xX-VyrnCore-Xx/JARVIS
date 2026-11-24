@@ -59,6 +59,10 @@ function check(condition, message) {
   check(unauthorized.status === 401, "API protetta senza token");
   const tasks = await request("/api/tasks?limit=5", { token: ownerToken });
   check(tasks.status === 200 && Array.isArray(tasks.json?.items), "attività accessibili con il token proprietario");
+  const stats = await request("/api/system/stats", { token: ownerToken });
+  check(stats.status === 200 && ["cpu_percent", "memory_percent", "disk_percent"].every((key) => stats.json?.[key] == null || (stats.json[key] >= 0 && stats.json[key] <= 100)),
+    "carichi del sistema entro 0–100");
+  check((await request("/api/system/stats")).status === 401, "carichi del sistema protetti dal token");
   const notifications = await request("/api/notifications?limit=5", { token: ownerToken });
   check(notifications.status === 200 && Array.isArray(notifications.json?.items), "notifiche accessibili con il token proprietario");
 

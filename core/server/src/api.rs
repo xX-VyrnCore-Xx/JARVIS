@@ -404,6 +404,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/memory", get(memory))
         .route("/api/memory/graph", get(memory_graph))
         .route("/api/memory/stats", get(memory_stats))
+        .route("/api/system/stats", get(system_stats))
         .route("/api/memory/duplicates", get(memory_duplicates))
         .route("/api/memory/reindex", post(memory_reindex))
         .route("/api/memory/{id}", delete(forget).patch(memory_correct))
@@ -1557,6 +1558,14 @@ async fn memory(
     {
         Ok(items) => Json(json!({"items": items})).into_response(),
         Err(e) => e.into_response(),
+    }
+}
+
+/// Carico del computer per la Plancia (ADR-0126); letto fuori dal blocco del Core.
+async fn system_stats() -> Response {
+    match tokio::task::spawn_blocking(crate::sysstats::stats).await {
+        Ok(stats) => Json(stats).into_response(),
+        Err(_) => CoreError::Internal("Lettura del carico interrotta.".into()).into_response(),
     }
 }
 

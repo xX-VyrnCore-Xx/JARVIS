@@ -31,6 +31,8 @@
         "detected": { "type": "boolean" },
         "engine": { "type": "string", "maxLength": 100 },
         "score": { "type": "number", "minimum": 0, "maximum": 1 },
+        "speech_ratio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "confirmed_by": { "enum": ["score", "transcript", "score+transcript"] },
         "command": { "type": "string", "maxLength": 8000 }
       }
     }

@@ -127,3 +127,52 @@ extension View {
     func staggeredAppear(_ index: Int = 0) -> some View { modifier(StaggeredAppear(index: index)) }
     func hoverLift() -> some View { modifier(HoverLift()) }
 }
+
+/// Barre di un'onda sonora: lente a riposo, vivaci mentre JARVIS lavora.
+struct WaveformView: View {
+    var active: Bool
+    var barCount = 24
+    var color: Color = .cyan
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 24, paused: reduceMotion)) { context in
+            let time = context.date.timeIntervalSinceReferenceDate
+            HStack(alignment: .center, spacing: 3) {
+                ForEach(0..<barCount, id: \.self) { index in
+                    let envelope = sin(Double(index) / Double(max(barCount - 1, 1)) * Double.pi)
+                    let wave = reduceMotion ? 0.35 : 0.5 + 0.5 * sin(time * (active ? 7 : 2.2) + Double(index) * 0.55)
+                    let level = 0.15 + envelope * (active ? 0.85 : 0.45) * wave
+                    Capsule().fill(color.opacity(0.35 + 0.65 * level))
+                        .frame(width: 3, height: 4 + 30 * CGFloat(level))
+                }
+            }
+            .frame(height: 38)
+        }
+        .animation(.easeInOut(duration: 0.4), value: active)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Anelli che ruotano piano intorno all'avatar.
+struct OrbitRings: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { context in
+            let time = reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate
+            ZStack {
+                Circle().trim(from: 0.05, to: 0.30)
+                    .stroke(LinearGradient(colors: [Color.cyan, Color.blue.opacity(0.1)], startPoint: .leading, endPoint: .trailing),
+                            style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(time * 24))
+                Circle().trim(from: 0.55, to: 0.80)
+                    .stroke(Color.indigo.opacity(0.7), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-time * 16))
+                    .padding(14)
+                Circle().stroke(Color.cyan.opacity(0.18), lineWidth: 1).padding(6)
+            }
+        }
+        .accessibilityHidden(true)
+    }
+}

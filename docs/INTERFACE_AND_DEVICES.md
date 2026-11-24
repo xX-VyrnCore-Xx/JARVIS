@@ -80,3 +80,5 @@ La Plancia di desktop e macOS segue un unico flusso: intestazione di stato, «Da
 **Voce (ADR-0123).** Impostazione «Leggi le risposte ad alta voce» e pulsante «Fai tacere» in Modelli AI su desktop e macOS; solo voci maschili.
 
 **Animazioni su macOS (ADR-0125).** Evidenziazione scorrevole nella barra laterale, riquadri della Plancia che entrano in sequenza e si sollevano al passaggio del puntatore, indicatore di scrittura nella chat, scheda «Stato della memoria». Rispettano «Riduci movimento».
+
+**Plancia e chat su macOS (ADR-0126, ADR-0127).** Saluto, scheda AI, carichi di CPU/RAM/archiviazione (`/api/system/stats`), specialisti, barra dei comandi, categorie rapide e missioni; barra laterale con scheda «JARVIS Online». Chat con markdown, blocchi di codice copiabili e campo a capsula.
