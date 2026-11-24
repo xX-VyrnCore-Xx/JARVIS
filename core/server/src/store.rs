@@ -249,8 +249,39 @@ impl Store {
             self.conn
                 .execute("UPDATE chat_crypto_migration SET stage=2", [])?;
         }
+        // Le notifiche contengono sintesi di attività, briefing e promemoria: si cifrano come la chat (ADR-0149).
+        // Idempotente: le righe già cifrate (prefisso) non si toccano.
+        {
+            let rows: Vec<(String, String)> = {
+                let mut select = self.conn.prepare(
+                    "SELECT notification_id, doc FROM notifications WHERE doc NOT LIKE 'enc:v1:%'",
+                )?;
+                let collected = select
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                collected
+            };
+            if !rows.is_empty() {
+                let tx = self.conn.transaction()?;
+                for (id, doc) in rows {
+                    let sealed = cipher
+                        .seal(&format!("notification:{id}"), &doc)
+                        .map_err(crypto_error)?;
+                    tx.execute(
+                        "UPDATE notifications SET doc = ?1 WHERE notification_id = ?2",
+                        params![sealed, id],
+                    )?;
+                }
+                tx.commit()?;
+            }
+        }
         self.chat_cipher = Some(cipher);
         Ok(())
+    }
+
+    /// Vero se i campi sensibili (chat, attività, notifiche) sono cifrati a riposo.
+    pub fn chat_protected(&self) -> bool {
+        self.chat_cipher.is_some()
     }
 
     fn seal_chat(&self, purpose: &str, value: &str) -> StoreResult<String> {
@@ -967,7 +998,8 @@ impl Store {
     pub fn notification_put(&self, doc: &Value, keep: u32) -> StoreResult<()> {
         self.conn.execute(
             "INSERT INTO notifications (notification_id, created_at, dedupe_key, read_at, doc) VALUES (?1, ?2, ?3, NULL, ?4)",
-            params![doc["notification_id"].as_str(), doc["created_at"].as_str(), doc["dedupe_key"].as_str(), doc.to_string()],
+            params![doc["notification_id"].as_str(), doc["created_at"].as_str(), doc["dedupe_key"].as_str(),
+                self.seal_chat(&format!("notification:{}", doc["notification_id"].as_str().unwrap_or_default()), &doc.to_string())?],
         )?;
         // Conservazione: restano le `keep` notifiche più recenti.
         self.conn.execute(
@@ -992,14 +1024,28 @@ impl Store {
         since: Option<&str>,
     ) -> StoreResult<Vec<Value>> {
         let mut stmt = self.conn.prepare(
-            "SELECT doc, read_at FROM notifications WHERE (?1 = 0 OR read_at IS NULL) AND (?2 IS NULL OR created_at > ?2)
+            "SELECT notification_id, doc, read_at FROM notifications WHERE (?1 = 0 OR read_at IS NULL) AND (?2 IS NULL OR created_at > ?2)
              ORDER BY created_at DESC LIMIT ?3",
         )?;
         let rows = stmt.query_map(params![unread_only as i32, since, limit], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, Option<String>>(2)?,
+            ))
         })?;
-        rows.map(|r| r.map(|(d, read)| Self::with_read(d, read)))
-            .collect()
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, doc, read) = row?;
+            // Righe scritte prima della cifratura restano leggibili finché non vengono migrate.
+            let text = if doc.starts_with(crate::chat_crypto::PREFIX) {
+                self.open_chat(&format!("notification:{id}"), doc)?
+            } else {
+                doc
+            };
+            out.push(Self::with_read(text, read));
+        }
+        Ok(out)
     }
 
     pub fn notifications_unread(&self) -> StoreResult<u32> {

@@ -19,6 +19,15 @@
         "type": "string",
         "pattern": "^[a-z0-9-]{1,32}$"
       },
+      "profile": {
+        "type": "string",
+        "enum": [
+          "light",
+          "standard",
+          "build",
+          "data"
+        ]
+      },
       "timeout_s": {
         "type": "integer",
         "minimum": 1,
@@ -43,6 +52,7 @@
     "sandbox.unavailable",
     "sandbox.invalid_session",
     "sandbox.invalid_command",
+    "sandbox.invalid_profile",
     "sandbox.timeout",
     "sandbox.session_full",
     "sandbox.output_failed"

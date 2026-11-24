@@ -335,6 +335,21 @@ async fn guard(State(state): State<Shared>, mut req: Request, next: Next) -> Res
     );
     h.insert("referrer-policy", HeaderValue::from_static("no-referrer"));
     h.insert("cache-control", HeaderValue::from_static("no-store"));
+    h.insert("x-frame-options", HeaderValue::from_static("DENY"));
+    h.insert(
+        "permissions-policy",
+        HeaderValue::from_static(
+            "camera=(), geolocation=(), payment=(), usb=(), microphone=(self)",
+        ),
+    );
+    h.insert(
+        "cross-origin-opener-policy",
+        HeaderValue::from_static("same-origin"),
+    );
+    h.insert(
+        "cross-origin-resource-policy",
+        HeaderValue::from_static("same-origin"),
+    );
     h.insert(
         "content-security-policy",
         HeaderValue::from_static("default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; media-src 'self' blob:; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"),
@@ -486,6 +501,8 @@ pub fn router(state: Shared) -> Router {
         .route("/api/proactive/briefing", post(proactive_briefing))
         .route("/api/proactive/weekly", post(proactive_weekly))
         .route("/api/sandbox", get(sandbox_get).patch(sandbox_put))
+        .route("/api/docker", get(docker_status))
+        .route("/api/docker/cleanup", post(docker_cleanup))
         .route(
             "/api/permissions",
             get(permissions_get).patch(permissions_patch),
@@ -921,7 +938,7 @@ async fn cloud_background(
         });
         let _ = with_core(&worker, move |j| j.notify(note)).await;
     });
-    (StatusCode::ACCEPTED, Json(job)).into_response()
+    (StatusCode::ACCEPTED, Json(said(job, "background", None))).into_response()
 }
 
 async fn cloud_jobs(State(state): State<Shared>) -> Response {
@@ -1620,7 +1637,10 @@ async fn proactive_get(State(state): State<Shared>) -> Response {
 }
 
 async fn proactive_put(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
-    reply(with_core(&state, move |j| j.proactive_update(&body)).await)
+    reply_said(
+        with_core(&state, move |j| j.proactive_update(&body)).await,
+        "proactive",
+    )
 }
 
 async fn persona_get(State(state): State<Shared>) -> Response {
@@ -1640,7 +1660,10 @@ async fn persona_patch(
             "operazione disponibile solo dal computer del proprietario",
         );
     }
-    reply(with_core(&state, move |j| j.persona_update(&body)).await)
+    reply_said(
+        with_core(&state, move |j| j.persona_update(&body)).await,
+        "persona",
+    )
 }
 
 /// Profilo del proprietario (ADR-0133): lettura e modifica solo dal computer del Core.
@@ -1662,7 +1685,10 @@ async fn profile_patch(
     if device.is_some() {
         return owner_only_response();
     }
-    reply(with_core(&state, move |j| j.profile_update(&body)).await)
+    reply_said(
+        with_core(&state, move |j| j.profile_update(&body)).await,
+        "profile",
+    )
 }
 
 /// Permessi del proprietario: lettura e modifica solo dal computer del Core (ADR-0116).
@@ -1699,6 +1725,30 @@ async fn sandbox_get(State(state): State<Shared>) -> Response {
     reply(Ok(with_core(&state, |j| j.sandbox_settings()).await))
 }
 
+/// Stato del collegamento a Docker e del sandbox: motore, versione, immagine, profili e sessioni (ADR-0147).
+async fn docker_status(State(state): State<Shared>) -> Response {
+    let dir = with_core(&state, |j| j.data_dir()).await;
+    let status = tokio::task::spawn_blocking(move || crate::sandbox::terminal_status(&dir))
+        .await
+        .unwrap_or_else(|_| json!({"available": false}));
+    Json(status).into_response()
+}
+
+/// Rimuove i container del sandbox rimasti dopo un arresto brusco.
+async fn docker_cleanup(State(state): State<Shared>) -> Response {
+    let removed = tokio::task::spawn_blocking(crate::sandbox::cleanup_orphans)
+        .await
+        .unwrap_or(0);
+    let _ = with_core(&state, |j| j.record_owner_action("docker.cleanup")).await;
+    let removed_text = removed.to_string();
+    Json(said(
+        json!({"removed": removed}),
+        "docker.cleanup",
+        Some(&removed_text),
+    ))
+    .into_response()
+}
+
 /// Interruttore del terminale sandbox: solo il proprietario dal computer del Core.
 async fn sandbox_put(
     State(state): State<Shared>,
@@ -1712,15 +1762,21 @@ async fn sandbox_put(
             "operazione disponibile solo dal computer del proprietario",
         );
     }
-    reply(with_core(&state, move |j| j.sandbox_update(&body)).await)
+    reply_said(
+        with_core(&state, move |j| j.sandbox_update(&body)).await,
+        "sandbox",
+    )
 }
 
 async fn proactive_briefing(State(state): State<Shared>) -> Response {
-    reply(with_core(&state, |j| j.briefing_now()).await)
+    reply_said(with_core(&state, |j| j.briefing_now()).await, "briefing")
 }
 
 async fn proactive_weekly(State(state): State<Shared>) -> Response {
-    reply(with_core(&state, |j| j.weekly_briefing_now()).await)
+    reply_said(
+        with_core(&state, |j| j.weekly_briefing_now()).await,
+        "briefing",
+    )
 }
 
 async fn missions_list(State(state): State<Shared>) -> Response {
@@ -1892,17 +1948,26 @@ async fn conversations_list(State(state): State<Shared>) -> Response {
 }
 
 async fn conversation_new(State(state): State<Shared>) -> Response {
-    reply(with_core(&state, |j| j.conversation_new()).await)
+    reply_said(
+        with_core(&state, |j| j.conversation_new()).await,
+        "chat.new",
+    )
 }
 
 async fn conversation_select(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
     let id = body["id"].as_str().unwrap_or_default().to_string();
-    reply(with_core(&state, move |j| j.conversation_select(&id)).await)
+    reply_said(
+        with_core(&state, move |j| j.conversation_select(&id)).await,
+        "chat.select",
+    )
 }
 
 async fn conversation_delete(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
     let id = body["id"].as_str().unwrap_or_default().to_string();
-    reply(with_core(&state, move |j| j.conversation_delete(&id)).await)
+    reply_said(
+        with_core(&state, move |j| j.conversation_delete(&id)).await,
+        "chat.delete",
+    )
 }
 
 async fn memory(
@@ -1983,7 +2048,10 @@ async fn memory_pin(
     Json(body): Json<Value>,
 ) -> Response {
     let pinned = body["pinned"].as_bool().unwrap_or(true);
-    reply(with_core(&state, move |j| j.memory_pin(&id, pinned)).await)
+    reply_said(
+        with_core(&state, move |j| j.memory_pin(&id, pinned)).await,
+        if pinned { "memory.pin" } else { "memory.unpin" },
+    )
 }
 
 async fn forget(State(state): State<Shared>, Path(id): Path<String>) -> Response {
@@ -2094,6 +2162,26 @@ async fn tool_catalog(State(state): State<Shared>) -> Json<Value> {
     Json(json!({"items": with_core(&state, |j| j.tool_catalog()).await}))
 }
 
+/// Aggiunge a una risposta riuscita la frase di conferma nello stile della personalità (ADR-0148): dice cosa è
+/// successo davvero, non un generico «operazione completata».
+fn said(mut value: Value, key: &str, detail: Option<&str>) -> Value {
+    static SEED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let seed = SEED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if value.is_object() && value.get("message").is_none() {
+        value["message"] = json!(crate::persona::confirmation(
+            &crate::persona::active(),
+            key,
+            detail,
+            seed
+        ));
+    }
+    value
+}
+
+fn reply_said(result: Result<Value, CoreError>, key: &str) -> Response {
+    reply(result.map(|value| said(value, key, None)))
+}
+
 fn reply(result: Result<Value, CoreError>) -> Response {
     match result {
         Ok(v) => Json(v).into_response(),
@@ -2154,7 +2242,7 @@ async fn voice_system_patch(
     }
     let dir = with_core(&state, |j| j.data_dir()).await;
     match crate::speech::update(&dir, &body) {
-        Ok(_) => Json(crate::speech::status(&dir)).into_response(),
+        Ok(_) => Json(said(crate::speech::status(&dir), "voice", None)).into_response(),
         Err(message) => CoreError::BadRequest(message).into_response(),
     }
 }
@@ -2453,7 +2541,17 @@ async fn devices_access_put(State(state): State<Shared>, Json(body): Json<Value>
     }
     let current = hosts.clone();
     drop(hosts);
-    Json(json!({"hosts": current, "pairing_urls": pairing_urls(&state)})).into_response()
+    let key = if body["add"].is_string() {
+        "host.add"
+    } else {
+        "host.remove"
+    };
+    Json(said(
+        json!({"hosts": current, "pairing_urls": pairing_urls(&state)}),
+        key,
+        None,
+    ))
+    .into_response()
 }
 
 /// Salva l'elenco degli indirizzi pubblici (ADR-0137) e lo rende subito attivo.
@@ -2529,7 +2627,7 @@ async fn tailscale_connect(State(state): State<Shared>) -> Response {
     }
     let mut view = tailscale_view(&state, status);
     view["note"] = json!(note);
-    Json(view).into_response()
+    Json(said(view, "tailscale.connect", None)).into_response()
 }
 
 async fn devices(State(state): State<Shared>) -> Response {

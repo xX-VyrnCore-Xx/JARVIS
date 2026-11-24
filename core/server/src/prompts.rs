@@ -171,7 +171,11 @@ pub fn model_style(model: &str, route: &str) -> &'static str {
         "Stile del modello: risposte tecniche e complete, codice eseguibile, nessuna ripetizione della domanda."
     } else if name.contains("kimi") || route == "long" {
         "Stile del modello: nel contesto lungo ancora ogni affermazione al punto del testo da cui viene, non perdere i vincoli iniziali e chiudi con una sintesi."
-    } else if name.contains("deepseek") || name.contains("ultra") || route == "reasoning" {
+    } else if name.contains("deepseek")
+        || name.contains("ultra")
+        || route == "reasoning"
+        || route == "analysis"
+    {
         "Stile del modello: ragiona con attenzione sui vincoli e controlla i calcoli con gli strumenti; mostra la conclusione, le ipotesi e i passaggi essenziali, non tutto il ragionamento."
     } else if name.contains("flash") || name.contains("lightning") || name.contains("minimax") {
         "Stile del modello: vai dritto alla risposta, senza premesse né riepiloghi finali."

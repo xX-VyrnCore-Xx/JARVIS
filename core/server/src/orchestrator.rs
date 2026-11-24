@@ -2516,6 +2516,27 @@ impl Jarvis {
             "secrets_store": self.secrets.location(), "devices_active": active,
             "pending_confirmations": self.pending.len(), "web_enabled": self.cfg.web.enabled,
             "web_private_addresses": self.cfg.web.allow_private, "shell_enabled": !policy::shell_disabled(),
+            "encryption": {
+                "chat_at_rest": self.store.chat_protected(),
+                "algorithm": "XChaCha20-Poly1305",
+                "covers": ["messaggi", "attività", "notifiche"],
+                "secrets": self.secrets.location(),
+                "audit_signed": audit["signatures"]["enabled"],
+            },
+            "posture": posture(&[
+                ("chat", "Chat, attività e notifiche cifrate a riposo", self.store.chat_protected(),
+                 "Riavvia il Core con il portachiavi di sistema disponibile per attivare la cifratura."),
+                ("audit_chain", "Registro di audit integro", audit["chain_valid"] == true,
+                 "La catena dell'audit non è valida: esporta il registro e verifica i backup."),
+                ("audit_signed", "Registro di audit firmato", audit["signatures"]["enabled"] == true,
+                 "Abilita la firma del registro per rilevare manomissioni."),
+                ("web_private", "Il web non raggiunge indirizzi privati", !self.cfg.web.allow_private,
+                 "Disattiva l'accesso agli indirizzi privati se non serve."),
+                ("confirmations", "Nessuna conferma dimenticata", self.pending.is_empty(),
+                 "Ci sono azioni in attesa della tua conferma: approvale o annullale."),
+                ("sandbox", "Terminale sandbox isolato attivo", crate::sandbox::enabled(&self.cfg.data_dir),
+                 "Attiva il sandbox per eseguire codice senza toccare il computer."),
+            ]),
         }))
     }
 
@@ -2532,6 +2553,19 @@ impl Jarvis {
         )
         .map_err(|e| CoreError::Internal(e.message))
     }
+}
+
+/// Punteggio di protezione da una lista di controlli (id, descrizione, esito, cosa fare se manca).
+fn posture(checks: &[(&str, &str, bool, &str)]) -> Value {
+    let ok = checks.iter().filter(|c| c.2).count();
+    let score = (ok * 100).checked_div(checks.len()).unwrap_or(0);
+    json!({
+        "score": score,
+        "level": match score { 90..=100 => "alta", 60..=89 => "media", _ => "bassa" },
+        "items": checks.iter().map(|(id, label, ok, advice)| json!({
+            "id": id, "label": label, "ok": ok, "advice": if *ok { "" } else { advice },
+        })).collect::<Vec<_>>(),
+    })
 }
 
 // ---------------------------------------------------------------------- Automation Engine (RF-07)

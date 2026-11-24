@@ -21,6 +21,7 @@ pub mod connectors;
 mod container_runtime;
 pub mod executive;
 pub mod expert;
+pub mod guard;
 pub mod mcp;
 pub mod memory;
 pub mod missions;

@@ -63,10 +63,16 @@ impl Provider {
             (Self::Ollama, Route::Reasoning) => "deepseek-v4-pro:0813",
             (Self::Ollama, Route::Long) => "kimi-k3.1-pro",
             (Self::Ollama, Route::Coding) => "kimi-k2.7-code",
+            (Self::Ollama, Route::Writing | Route::Translation) => "glm-5.3-flash",
+            (Self::Ollama, Route::Analysis) => "deepseek-v4-pro:0813",
             (Self::Nim, Route::Fast) => "nvidia/nemotron-3.5-lightning-30b-a3b",
             (Self::Nim, Route::Reasoning) => "nvidia/nemotron-3-ultra-550b-a55b",
             (Self::Nim, Route::Long) => "moonshotai/kimi-k3.1-pro",
             (Self::Nim, Route::Coding) => "mistralai/mistral-large-4-1t-a52b",
+            (Self::Nim, Route::Writing | Route::Translation) => {
+                "nvidia/nemotron-3.5-lightning-30b-a3b"
+            }
+            (Self::Nim, Route::Analysis) => "nvidia/nemotron-3-ultra-550b-a55b",
         }
     }
 
@@ -81,7 +87,10 @@ impl Provider {
                 "fast": self.model(Route::Fast),
                 "reasoning": self.model(Route::Reasoning),
                 "coding": self.model(Route::Coding),
-                "long": self.model(Route::Long)
+                "long": self.model(Route::Long),
+                "writing": self.model(Route::Writing),
+                "translation": self.model(Route::Translation),
+                "analysis": self.model(Route::Analysis)
             },
             "configured": configured,
             "effective_rpm": (self == Self::Nim).then_some(NIM_RPM),
@@ -106,7 +115,7 @@ impl Provider {
             .unwrap_or(default);
         let alternative = if model != default {
             default
-        } else if route == Route::Fast {
+        } else if route.is_quick() {
             match self {
                 Self::Ollama => "minimax-m3.1-flash",
                 Self::Nim => "minimaxai/minimax-m3.1-flash",
@@ -190,6 +199,12 @@ enum Route {
     Reasoning,
     Coding,
     Long,
+    /// Scrittura e riassunti (ADR-0148): modello veloce, risposta più lunga e curata.
+    Writing,
+    /// Traduzioni: modello veloce, fedeltà prima dello stile.
+    Translation,
+    /// Analisi di dati e calcoli: modello di ragionamento, cifre dagli strumenti.
+    Analysis,
 }
 
 impl Route {
@@ -264,10 +279,17 @@ impl Route {
         .filter(|term| words.contains(term))
         .count()
             >= 2;
+        let role = crate::prompts::role_for(prompt);
         if coding_task {
             Self::Coding
         } else if tokens >= 3_200 {
             Self::Long
+        } else if role == crate::prompts::Role::Translation {
+            Self::Translation
+        } else if role == crate::prompts::Role::Writing {
+            Self::Writing
+        } else if role == crate::prompts::Role::Analysis {
+            Self::Analysis
         } else if complex || multiple_steps {
             Self::Reasoning
         } else {
@@ -281,7 +303,15 @@ impl Route {
             Self::Reasoning => "reasoning",
             Self::Coding => "coding",
             Self::Long => "long",
+            Self::Writing => "writing",
+            Self::Translation => "translation",
+            Self::Analysis => "analysis",
         }
+    }
+
+    /// Percorsi che usano il modello veloce e il suo tempo massimo ridotto.
+    fn is_quick(self) -> bool {
+        matches!(self, Self::Fast | Self::Writing | Self::Translation)
     }
 
     fn guidance(self) -> &'static str {
@@ -290,6 +320,9 @@ impl Route {
             Self::Reasoning => "Organizza i requisiti prima di rispondere. Confronta le opzioni sulla base dei vincoli espliciti e indica le verifiche mancanti.",
             Self::Long => "Individua le informazioni pertinenti nel contesto lungo e mantieni i riferimenti ai passaggi originali.",
             Self::Coding => "Verifica linguaggio, interfacce e vincoli di compatibilità. Se serve il repository, chiedi il file o usa gli strumenti concessi prima di suggerire modifiche.",
+            Self::Writing => "Consegna subito il testo pronto all'uso, adatto a destinatario e canale, con tono coerente; poi al massimo una riga con ciò che hai assunto. Non inventare fatti, nomi o cifre.",
+            Self::Translation => "Traduci fedelmente senso e registro, senza aggiungere né togliere contenuto; conserva nomi propri, numeri, formattazione e tono. Aggiungi una nota solo per un termine ambiguo.",
+            Self::Analysis => "Dichiara unità, periodo e ipotesi; ogni cifra calcolata passa da uno strumento di calcolo, non a memoria. Mostra il metodo in una riga, poi il risultato, poi cosa significa e quali limiti hanno i dati.",
         }
     }
 
@@ -299,6 +332,9 @@ impl Route {
             Self::Reasoning => 3072,
             Self::Coding => 6144,
             Self::Long => 6144,
+            Self::Writing => 3072,
+            Self::Translation => 3072,
+            Self::Analysis => 3072,
         }
     }
 }
@@ -813,7 +849,7 @@ impl AgentRequest {
                     messages.push(json!({"role": "assistant", "content": "",
                         "tool_calls": [{"function": {"name": name, "arguments": step.arguments}}]}));
                     messages
-                        .push(json!({"role": "tool", "tool_name": name, "content": step.output}));
+                        .push(json!({"role": "tool", "tool_name": name, "content": crate::guard::sanitize(&step.output)}));
                 }
                 Provider::Nim => {
                     let id = format!("call_{index}");
@@ -821,7 +857,7 @@ impl AgentRequest {
                         "tool_calls": [{"id": id, "type": "function",
                             "function": {"name": name, "arguments": step.arguments.to_string()}}]}));
                     messages
-                        .push(json!({"role": "tool", "tool_call_id": id, "content": step.output}));
+                        .push(json!({"role": "tool", "tool_call_id": id, "content": crate::guard::sanitize(&step.output)}));
                 }
             }
         }
@@ -938,7 +974,7 @@ impl Request {
             &target.key,
             &body,
             &self.limiter,
-            if target.route == Route::Fast {
+            if target.route.is_quick() {
                 FAST_REQUEST_TIMEOUT
             } else {
                 REQUEST_TIMEOUT
@@ -994,7 +1030,7 @@ impl Request {
                 ),
                 tools,
                 &self.limiter,
-                if target.route == Route::Fast {
+                if target.route.is_quick() {
                     FAST_REQUEST_TIMEOUT
                 } else {
                     REQUEST_TIMEOUT
@@ -1753,6 +1789,44 @@ mod tests {
             QualityPreference::from_counts(1, 1, 0, 0),
             QualityPreference::default()
         );
+    }
+
+    #[test]
+    fn writing_translation_and_analysis_get_their_own_routes_and_guidance() {
+        for provider in Provider::ALL {
+            let request = |prompt: &str| provider.target("test".into(), prompt, vec![], &json!({}));
+            let translation = request("Traduci in inglese: il contratto scade domani");
+            assert_eq!(translation.route, Route::Translation);
+            assert_eq!(translation.model, provider.model(Route::Fast));
+            let writing = request("Scrivi una email per rimandare la riunione");
+            assert_eq!(writing.route, Route::Writing);
+            let analysis = request("Analizza i dati di questa tabella e dimmi la media");
+            assert_eq!(analysis.route, Route::Analysis);
+            assert_eq!(analysis.model, provider.model(Route::Reasoning));
+            // Il codice ha la precedenza anche se la richiesta chiede un testo.
+            assert_eq!(
+                request("Scrivi il codice di una funzione: implementa il parser").route,
+                Route::Coding
+            );
+            // Veloci per tempo massimo e alternativa, ma con istruzioni e lunghezza proprie.
+            assert!(Route::Writing.is_quick() && Route::Translation.is_quick());
+            assert!(!Route::Analysis.is_quick());
+            assert_ne!(Route::Writing.guidance(), Route::Fast.guidance());
+            assert!(Route::Analysis.guidance().contains("strumento di calcolo"));
+            let names: std::collections::HashSet<_> = [
+                Route::Fast,
+                Route::Reasoning,
+                Route::Coding,
+                Route::Long,
+                Route::Writing,
+                Route::Translation,
+                Route::Analysis,
+            ]
+            .iter()
+            .map(|r| r.name())
+            .collect();
+            assert_eq!(names.len(), 7);
+        }
     }
 
     #[test]

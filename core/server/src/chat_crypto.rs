@@ -106,4 +106,50 @@ mod tests {
         drop(reopened);
         std::fs::remove_file(path).unwrap();
     }
+
+    #[test]
+    fn notifications_are_encrypted_at_rest_and_old_rows_migrate() {
+        use crate::store::Store;
+        use std::sync::Arc;
+
+        let path = std::env::temp_dir().join(format!(
+            "jarvis-notification-crypto-{}.sqlite3",
+            uuid::Uuid::new_v4()
+        ));
+        let mut store = Store::open(&path).unwrap();
+        let old = serde_json::json!({
+            "notification_id": "old", "created_at": "2026-01-01T00:00:00Z",
+            "title": "Titolo riservato precedente", "body": "corpo"
+        });
+        store.notification_put(&old, 100).unwrap();
+        store
+            .protect_chat(Arc::new(ChatCipher::from_secret(&[3; 32])))
+            .unwrap();
+        let fresh = serde_json::json!({
+            "notification_id": "new", "created_at": "2026-02-01T00:00:00Z",
+            "title": "Briefing riservato", "body": "dettagli"
+        });
+        store.notification_put(&fresh, 100).unwrap();
+        let raw: Vec<String> = {
+            let mut stmt = store.conn.prepare("SELECT doc FROM notifications").unwrap();
+            stmt.query_map([], |r| r.get(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        };
+        assert_eq!(raw.len(), 2);
+        for doc in &raw {
+            assert!(
+                doc.starts_with(PREFIX) && !doc.contains("riservato"),
+                "{doc}"
+            );
+        }
+        let listed = store.notifications(10, false, None).unwrap();
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0]["title"], "Briefing riservato");
+        assert_eq!(listed[1]["title"], "Titolo riservato precedente");
+        assert!(store.chat_protected());
+        drop(store);
+        std::fs::remove_file(path).unwrap();
+    }
 }
