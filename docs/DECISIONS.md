@@ -1562,6 +1562,17 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Non verificato:** la resa a schermo (nessuna schermata vista in questo ambiente: clippy e test egui passano, Swift si compila solo in CI); Android non è stato toccato in questa fase.
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
 
+### ADR-0112 — Aggiornamento dell'app Android dall'interno
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («gli aggiornamenti direttamente all'interno»), seguito di ADR-0109.
+- **Decisione:** la scheda «Aggiornamenti» della Plancia Android controlla le release su GitHub, scarica `JARVIS_<v>_android-release.apk` e `SHA256SUMS` solo via HTTPS da `github.com` e `*.githubusercontent.com` (reindirizzamenti seguiti a mano e riconvalidati, massimo 200 MB), verifica il SHA-256 e consegna l'APK al sistema con `FileProvider` limitato alla cartella `updates/` della cache. Android chiede il consenso all'installazione e accetta solo un APK firmato con la stessa chiave dell'app: è la garanzia di autenticità. Il permesso `REQUEST_INSTALL_PACKAGES` serve solo ad avviare la richiesta; se «Installa app sconosciute» non è consentito, l'app apre la schermata di sistema dove abilitarlo.
+- **Logica:** `AppUpdate` nel modulo `core-client` (JVM, testata): confronto delle versioni, scelta della release stabile più recente con APK e checksum, host ammessi, parsing di `SHA256SUMS`, hash e download verificato.
+- **Plancia Android:** il titolo di stato dice «Tutto in ordine» oppure quante notifiche aspettano; la scheda aggiornamenti compare nella Plancia.
+- **Limiti:** serve una repository raggiungibile senza credenziali (con repository privata il controllo fallisce con un messaggio e l'aggiornamento resta manuale); nessun controllo automatico in background, solo su richiesta.
+- **Non verificato:** compilazione e resa dell'interfaccia Compose (solo CI) e l'installazione reale su un telefono.
+- **Evidenza:** `AppUpdateTest` (versioni, scelta della release, host, checksum e hash).
+- **Documenti interessati:** ROADMAP.md, INTERFACE_AND_DEVICES.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.

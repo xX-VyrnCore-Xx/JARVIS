@@ -232,4 +232,6 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Plancia rifatta (2026-11-24, stesso ramo).** ADR-0111. Nuova Plancia egui e SwiftUI con «Da guardare», metriche cliccabili e layout senza altezze fisse. Verifiche: fmt, clippy e test egui. **Sospeso:** resa a schermo, Swift (solo CI), Android.
 
+**Aggiornamento Android (2026-11-24, base `0261462`).** ADR-0112. Scheda aggiornamenti nella Plancia Android, logica testata nel modulo `core-client`. Verifiche: test del client Android. **Sospeso:** compilazione Compose (solo CI) e installazione su un telefono.
+
 Per ogni ripresa registrare data, revisione, lavoro completato, verifiche eseguite, blocchi, ipotesi e prossimo passo concreto. Conservare il checkpoint con le modifiche alle quali si riferisce.

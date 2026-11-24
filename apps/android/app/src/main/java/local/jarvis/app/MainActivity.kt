@@ -401,7 +401,12 @@ private fun ColumnScope.HomeScreen(
                     color = MaterialTheme.colorScheme.primary,
                 )
                 Text(
-                    "Il tuo assistente personale",
+                    when {
+                        snapshot == null -> "Il tuo assistente personale"
+                        (snapshot?.unreadCount ?: 0) == 1 -> "Una notifica da leggere"
+                        (snapshot?.unreadCount ?: 0) > 1 -> "${snapshot?.unreadCount} notifiche da leggere"
+                        else -> "Tutto in ordine"
+                    },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -450,6 +455,8 @@ private fun ColumnScope.HomeScreen(
                 modifier = Modifier.weight(1f),
             )
         }
+
+        UpdateCard()
 
         Card(Modifier.fillMaxWidth()) {
             Column(
