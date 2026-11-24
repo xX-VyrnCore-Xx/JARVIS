@@ -8,6 +8,10 @@ use serde_json::{json, Value};
 use crate::tools::{resolve, ToolError};
 
 const IMAGE: &str = "python:3.13-alpine";
+/// Etichetta di tutti i container del sandbox: permette di ritrovare quelli rimasti dopo un arresto brusco.
+const LABEL: &str = "jarvis.sandbox=1";
+/// Dockerfile dell'immagine completa, incorporato per costruirla anche senza il repository (ADR-0114).
+const DOCKERFILE: &str = include_str!("../../../infra/sandbox/Dockerfile");
 const SOURCE_LIMIT: u64 = 65_536;
 const OUTPUT_LIMIT: u64 = 8_192;
 const DEADLINE: Duration = Duration::from_secs(12);
@@ -74,6 +78,8 @@ fn isolated_python(source: Vec<u8>, args: &[&str]) -> Result<Value, ToolError> {
             "never",
             "--name",
             &name,
+            "--label",
+            LABEL,
             "--network",
             "none",
             "--read-only",
@@ -308,10 +314,16 @@ fn pick_image() -> Result<String, ToolError> {
             return Ok(candidate.to_string());
         }
     }
-    Err(error(
-        "sandbox.unavailable",
-        "Docker non disponibile o immagine assente: avvia Docker e costruisci l'immagine con infra/sandbox/build.sh",
-    ))
+    let (health, _) = crate::container_runtime::diagnose();
+    let message = if health == crate::container_runtime::Health::Ready {
+        "Docker è pronto ma manca l'immagine del sandbox: chiedi «prepara la sandbox» (serve la rete una volta sola)".to_string()
+    } else {
+        health.hint().to_string()
+    };
+    Err(ToolError {
+        code: "sandbox.unavailable",
+        message,
+    })
 }
 
 #[cfg(unix)]
@@ -365,6 +377,10 @@ pub(crate) fn terminal_args(
         "never",
         "--name",
         name,
+        "--label",
+        LABEL,
+        "--ipc",
+        "none",
         "--network",
         "none",
         "--read-only",
@@ -622,6 +638,186 @@ pub fn export_file(data_dir: &Path, workspace: &Path, args: &Value) -> Result<Va
     Ok(json!({"session": session, "from": from, "path": to, "bytes": meta.len()}))
 }
 
+// ---------------------------------------------------------------- immagine e pulizia (ADR-0114, ADR-0115)
+
+#[derive(Clone, Default)]
+struct Build {
+    status: &'static str, // idle | building | ready | failed
+    detail: String,
+}
+
+fn build_state() -> &'static std::sync::Mutex<Build> {
+    static S: std::sync::OnceLock<std::sync::Mutex<Build>> = std::sync::OnceLock::new();
+    S.get_or_init(|| {
+        std::sync::Mutex::new(Build {
+            status: "idle",
+            ..Build::default()
+        })
+    })
+}
+
+pub fn build_status() -> Value {
+    let b = build_state()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    json!({"status": b.status, "detail": if b.detail.is_empty() { Value::Null } else { Value::String(b.detail) }})
+}
+
+fn set_build(status: &'static str, detail: impl Into<String>) {
+    let mut b = build_state().lock().unwrap_or_else(|e| e.into_inner());
+    b.status = status;
+    b.detail = detail.into();
+}
+
+/// Costruisce `jarvis-sandbox:latest` in background dal Dockerfile incorporato (serve la rete, solo qui).
+pub fn prepare_image(data_dir: &Path) -> Result<Value, ToolError> {
+    ensure_enabled(data_dir)?;
+    let (health, _) = crate::container_runtime::diagnose();
+    if health != crate::container_runtime::Health::Ready {
+        return Err(ToolError {
+            code: "sandbox.unavailable",
+            message: health.hint().to_string(),
+        });
+    }
+    {
+        let mut b = build_state().lock().unwrap_or_else(|e| e.into_inner());
+        if b.status == "building" {
+            return Err(error(
+                "sandbox.busy",
+                "La costruzione dell'immagine è già in corso",
+            ));
+        }
+        b.status = "building";
+        b.detail = String::new();
+    }
+    std::thread::spawn(|| match run_build() {
+        Ok(()) => set_build("ready", ""),
+        Err(message) => set_build("failed", message),
+    });
+    Ok(json!({"started": true, "image": TERMINAL_IMAGE}))
+}
+
+fn run_build() -> Result<(), String> {
+    let mut child = docker()
+        .args([
+            "build",
+            "--pull",
+            "-t",
+            TERMINAL_IMAGE,
+            "--label",
+            LABEL,
+            "-",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|_| "Docker non disponibile".to_string())?;
+    let mut input = child.stdin.take().expect("stdin");
+    let writer = std::thread::spawn(move || input.write_all(DOCKERFILE.as_bytes()));
+    let mut stderr = child.stderr.take().expect("stderr");
+    let log = std::thread::spawn(move || {
+        let mut kept = Vec::new();
+        let mut buf = [0u8; 4096];
+        while let Ok(n) = stderr.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            kept.extend_from_slice(&buf[..n]);
+            if kept.len() > 6000 {
+                kept.drain(..kept.len() - 3000);
+            }
+        }
+        String::from_utf8_lossy(&kept).into_owned()
+    });
+    let start = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) if start.elapsed() < Duration::from_secs(900) => {
+                std::thread::sleep(Duration::from_millis(200))
+            }
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break None;
+            }
+        }
+    };
+    let _ = writer.join();
+    let tail = log.join().unwrap_or_default();
+    match status {
+        Some(s) if s.success() => Ok(()),
+        Some(_) => Err(build_failure(&tail)),
+        None => Err("Costruzione interrotta: oltre 15 minuti".into()),
+    }
+}
+
+/// Riduce la coda del log di `docker build` a una causa leggibile.
+pub(crate) fn build_failure(log: &str) -> String {
+    let t = log.to_ascii_lowercase();
+    if [
+        "no such host",
+        "temporary failure in name resolution",
+        "dial tcp",
+        "tls handshake",
+        "i/o timeout",
+    ]
+    .iter()
+    .any(|k| t.contains(k))
+    {
+        "Costruzione non riuscita: Docker non raggiunge Internet (serve solo per scaricare l'immagine di base e i pacchetti)".into()
+    } else if t.contains("no space left") {
+        "Costruzione non riuscita: spazio su disco esaurito per Docker".into()
+    } else if t.contains("denied") || t.contains("unauthorized") {
+        "Costruzione non riuscita: accesso negato al registro delle immagini".into()
+    } else {
+        let line = log
+            .lines()
+            .rev()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or("errore sconosciuto");
+        format!(
+            "Costruzione non riuscita: {}",
+            line.chars().take(200).collect::<String>()
+        )
+    }
+}
+
+/// Elimina i container del sandbox rimasti dopo un arresto brusco del Core.
+pub fn cleanup_orphans() -> usize {
+    let Ok(out) = docker()
+        .args(["ps", "-aq", "--filter", &format!("label={LABEL}")])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+    else {
+        return 0;
+    };
+    let ids = parse_container_ids(&String::from_utf8_lossy(&out.stdout));
+    if ids.is_empty() {
+        return 0;
+    }
+    let _ = docker()
+        .args(["rm", "-f"])
+        .args(&ids)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    ids.len()
+}
+
+/// Identificativi validi (esadecimali) di `docker ps -q`: tutto il resto è ignorato.
+pub(crate) fn parse_container_ids(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| (6..=64).contains(&l.len()) && l.bytes().all(|b| b.is_ascii_hexdigit()))
+        .map(str::to_string)
+        .collect()
+}
+
 /// Dimensione in byte di ogni sessione esistente.
 pub fn session_sizes(data_dir: &Path) -> Vec<(String, u64)> {
     std::fs::read_dir(sandbox_root(data_dir))
@@ -649,9 +845,14 @@ pub fn terminal_status(data_dir: &Path) -> Value {
         })
         .collect();
     sessions.sort_by(|a, b| a["session"].as_str().cmp(&b["session"].as_str()));
-    let image = pick_image().ok();
+    let (health, version) = crate::container_runtime::diagnose();
+    let image = (health == crate::container_runtime::Health::Ready)
+        .then(|| pick_image().ok())
+        .flatten();
     json!({
         "enabled": enabled(data_dir), "available": image.is_some(), "image": image,
+        "docker": {"state": health.code(), "version": version, "hint": health.hint()},
+        "build": build_status(),
         "limits": {"timeout_s_max": 60, "memory_mb": 512, "cpus": 1, "pids": 128,
                    "output_bytes": TERMINAL_OUTPUT, "session_mb": SESSION_SOFT_LIMIT / 1024 / 1024,
                    "network": "none"},
@@ -848,5 +1049,23 @@ print(2 + 2)",
             assert!(!base.join("x.txt").exists());
         }
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn container_ids_and_build_failures_are_interpreted() {
+        assert_eq!(
+            parse_container_ids("abc123def456\n\nnot-an-id\n0123456789ab\n"),
+            vec!["abc123def456", "0123456789ab"]
+        );
+        assert!(
+            build_failure("dial tcp: lookup registry-1.docker.io: no such host")
+                .contains("Internet")
+        );
+        assert!(build_failure("write: no space left on device").contains("spazio"));
+        assert!(build_failure("pull access denied").contains("accesso negato"));
+        assert!(build_failure("boom\nerrore finale\n").contains("errore finale"));
+        let args = terminal_args("n", "img", Path::new("/d/main"), "1000:1000", "ls").join(" ");
+        assert!(args.contains("--label jarvis.sandbox=1") && args.contains("--ipc none"));
+        assert!(DOCKERFILE.contains("FROM python"));
     }
 }

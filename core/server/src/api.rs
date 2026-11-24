@@ -439,6 +439,10 @@ pub fn router(state: Shared) -> Router {
         .route("/api/proactive", get(proactive_get).patch(proactive_put))
         .route("/api/proactive/briefing", post(proactive_briefing))
         .route("/api/sandbox", get(sandbox_get).patch(sandbox_put))
+        .route(
+            "/api/permissions",
+            get(permissions_get).patch(permissions_patch),
+        )
         .route("/api/missions", get(missions_list).post(mission_create))
         .route("/api/missions/{id}/{action}", post(mission_action))
         .route("/api/skills", get(skills_list).post(skill_create))
@@ -1266,6 +1270,36 @@ async fn proactive_get(State(state): State<Shared>) -> Response {
 
 async fn proactive_put(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
     reply(with_core(&state, move |j| j.proactive_update(&body)).await)
+}
+
+/// Permessi del proprietario: lettura e modifica solo dal computer del Core (ADR-0116).
+async fn permissions_get(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+) -> Response {
+    if device.is_some() {
+        return error(
+            StatusCode::FORBIDDEN,
+            "owner_only",
+            "operazione disponibile solo dal computer del proprietario",
+        );
+    }
+    reply(Ok(with_core(&state, |j| j.permissions()).await))
+}
+
+async fn permissions_patch(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Json(body): Json<Value>,
+) -> Response {
+    if device.is_some() {
+        return error(
+            StatusCode::FORBIDDEN,
+            "owner_only",
+            "operazione disponibile solo dal computer del proprietario",
+        );
+    }
+    reply(with_core(&state, move |j| j.permissions_update(&body)).await)
 }
 
 async fn sandbox_get(State(state): State<Shared>) -> Response {

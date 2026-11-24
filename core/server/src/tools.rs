@@ -162,6 +162,11 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
             },
         ),
         "math.calc" => crate::toolbox::calc(s("expression")),
+        "security.cvss" => crate::expert::cvss(s("vector")),
+        "security.hash" => crate::expert::hash_file(ctx.workspace, args),
+        "it.subnet" => crate::expert::subnet(s("cidr")),
+        "biz.vat" => crate::expert::vat(args),
+        "biz.loan" => crate::expert::loan(args),
         "units.convert" => {
             crate::toolbox::convert(args["value"].as_f64().unwrap_or(0.0), s("from"), s("to"))
         }

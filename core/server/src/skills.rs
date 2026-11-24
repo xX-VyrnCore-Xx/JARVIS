@@ -25,7 +25,7 @@ type Builtin = (
 );
 
 /// Competenze incluse, create al primo avvio e modificabili dal proprietario.
-const BUILTIN: [Builtin; 7] = [
+const BUILTIN: [Builtin; 11] = [
     (
         "briefing",
         "Briefing del mattino",
@@ -110,6 +110,70 @@ const BUILTIN: [Builtin; 7] = [
             "sandbox.run",
             "sandbox.status",
         ],
+    ),
+    (
+        "azienda",
+        "Analisi e procedure aziendali",
+        "Analisi di processi, costi e rischi aziendali con numeri verificabili e passi concreti.",
+        &[
+            "analisi aziendale",
+            "piano aziendale",
+            "procedura aziendale",
+            "business plan",
+            "kpi",
+            "margine",
+            "fornitore",
+        ],
+        "Per richieste aziendali chiarisci prima obiettivo, orizzonte e vincoli; se mancano dati chiave chiedi solo quelli. Separa fatti forniti, ipotesi e stime e dichiara le ipotesi. Ogni calcolo passa da uno strumento (biz.vat, biz.loan, math.calc) e viene mostrato con gli input. Struttura la risposta in situazione, opzioni con pro e contro, raccomandazione e prossimi passi con responsabile e scadenza proposti. Per procedure e checklist usa passi numerati, responsabilità e criteri di completamento. Non fornire consulenza legale, fiscale o contabile vincolante: segnala quando serve un professionista. Non salvare dati personali di clienti o dipendenti nelle note se non richiesto.",
+        &["notes.add", "notes.list", "notes.search", "todo.add", "todo.list", "math.calc", "biz.vat", "biz.loan", "fs.read", "fs.list", "web.search"],
+    ),
+    (
+        "it-operazioni",
+        "Operazioni IT e runbook",
+        "Diagnosi, pianificazione di rete e procedure operative con rischio e ripristino dichiarati.",
+        &[
+            "runbook",
+            "sottorete",
+            "subnet",
+            "diagnosi di rete",
+            "capacity planning",
+            "disponibilità del servizio",
+            "procedura di ripristino",
+        ],
+        "Parti da letture in sola lettura (system.info, system.disks, process.list) e distingui osservazioni, ipotesi e dati mancanti. Per la rete usa it.subnet invece di calcolare a mente. Ogni runbook ha: scopo, prerequisiti, passi numerati con comando e risultato atteso, verifica, rollback e a chi escalare. Prima di una modifica indica impatto, finestra consigliata e modo di tornare indietro. Non eseguire comandi che modificano sistemi: proponili, e usa la sandbox solo per provare codice isolato.",
+        &["system.info", "system.disks", "process.list", "it.subnet", "fs.read", "fs.list", "fs.search", "notes.add", "sandbox.run", "sandbox.status"],
+    ),
+    (
+        "incidenti",
+        "Risposta agli incidenti di sicurezza",
+        "Triage e contenimento difensivo di un incidente, con cronologia e prove conservate.",
+        &[
+            "incidente di sicurezza",
+            "sono stato attaccato",
+            "ransomware",
+            "phishing",
+            "account compromesso",
+            "violazione dei dati",
+            "data breach",
+        ],
+        "Mantieni la calma e procedi in ordine: 1) contenere (isolare l'account o il dispositivo, cambiare le credenziali da un dispositivo pulito, senza spegnere ciò che serve alle prove), 2) preservare le prove (non cancellare log, file o email; annota ora e fonte), 3) valutare ambito e impatto (dati, sistemi, persone) separando fatti e ipotesi, 4) eradicare e ripristinare da copie verificate, 5) comunicare a chi deve sapere. Per un possibile data breach ricorda che il GDPR prevede la notifica al Garante entro 72 ore dalla conoscenza: indicalo e suggerisci di coinvolgere il responsabile della protezione dei dati o un legale. Per valutare la gravità di una vulnerabilità usa security.cvss; per verificare file sospetti usa security.hash contro un valore ufficiale. Non eseguire azioni offensive, contromisure verso terzi o accesso a sistemi non tuoi. Chiudi con una cronologia e un elenco di azioni di follow-up.",
+        &["security.status", "security.cvss", "security.hash", "system.info", "process.list", "fs.list", "fs.read", "fs.search", "notes.add", "todo.add"],
+    ),
+    (
+        "conformita",
+        "Conformità e protezione dei dati",
+        "Verifiche di allineamento a GDPR, NIS2 e ISO/IEC 27001 con lacune e priorità, senza valore legale.",
+        &[
+            "gdpr",
+            "nis2",
+            "iso 27001",
+            "conformità",
+            "registro dei trattamenti",
+            "valutazione d'impatto",
+            "dpia",
+        ],
+        "Fornisci un'analisi di allineamento, non un parere legale: dichiara che per decisioni vincolanti serve il DPO o un professionista. Chiedi settore, dimensione, dati trattati e fornitori coinvolti. Mappa i requisiti pertinenti (basi giuridiche, informative, registro dei trattamenti, misure tecniche e organizzative, gestione dei fornitori, notifica delle violazioni, continuità operativa) e per ognuno indica stato noto, lacuna, priorità e prova da raccogliere. Cita la norma o il controllo solo se ne sei certo e dichiara quando una verifica va fatta sul testo ufficiale aggiornato. Non inventare articoli, scadenze o sanzioni.",
+        &["notes.add", "notes.search", "todo.add", "fs.read", "fs.list", "fs.search", "web.search", "web.fetch"],
     ),
 ];
 

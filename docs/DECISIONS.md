@@ -1573,6 +1573,57 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `AppUpdateTest` (versioni, scelta della release, host, checksum e hash).
 - **Documenti interessati:** ROADMAP.md, INTERFACE_AND_DEVICES.md.
 
+### ADR-0113 — Diagnosi di Docker con la correzione da fare
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora ulteriormente Docker»).
+- **Problema:** quando Docker non andava, sandbox, `code.run_python` e n8n rispondevano allo stesso modo («Docker non disponibile»), senza dire se mancasse l'installazione, se il motore fosse spento o se mancassero i permessi.
+- **Decisione:** `container_runtime::diagnose()` interroga il motore con `docker version` (massimo 6 s) e classifica l'esito: non installato, motore spento, permesso negato, sconosciuto, pronto; `classify` è una funzione pura provata nei test (messaggi di Linux, macOS e Windows). Ogni stato ha un messaggio con la correzione («avvia Docker Desktop», «aggiungi l'utente al gruppo docker»). `sandbox.status`, l'errore di `sandbox.run` e lo stato di n8n riportano stato, versione del motore e messaggio.
+- **Evidenza:** test della classificazione; nessun Docker in questo ambiente, quindi la diagnosi su un motore reale non è stata provata.
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ROADMAP.md.
+
+### ADR-0114 — Preparazione dell'immagine del sandbox dall'app
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout.
+- **Problema:** l'immagine `jarvis-sandbox` si costruiva con `infra/sandbox/build.sh`, ma un'app installata non ha il repository.
+- **Decisione:** il Dockerfile è incorporato nel Core. Il nuovo strumento `sandbox.prepare` («prepara la sandbox», con conferma perché scarica dalla rete) costruisce l'immagine in background con `docker build -` (nessun contesto, solo il Dockerfile), massimo 15 minuti; lo stato (`idle`, `building`, `ready`, `failed`) e la causa di un errore (rete assente, disco pieno, accesso negato) compaiono in `sandbox.status`. Resta l'unico momento in cui il sandbox usa la rete: i container dei comandi restano senza rete. Escluso da missioni e automazioni.
+- **Evidenza:** test dell'interpretazione dei log di costruzione, del Dockerfile incorporato, dei descrittori e della regola del gateway.
+- **Non verificato:** una costruzione reale.
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md.
+
+### ADR-0115 — Etichette e pulizia dei container del sandbox
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout.
+- **Decisione:** ogni container creato dal sandbox porta l'etichetta `jarvis.sandbox=1` ed è avviato con `--ipc none` (nessuna memoria condivisa con altri container). All'avvio il Core elimina in un thread a parte i container con quell'etichetta rimasti dopo un arresto brusco; gli identificativi di `docker ps -q` sono validati (solo esadecimali). I container di n8n non portano l'etichetta e non vengono toccati.
+- **Evidenza:** test degli argomenti di `docker run` e dell'analisi degli identificativi.
+- **Documenti interessati:** SECURITY_AND_PRIVACY.md, ROADMAP.md.
+
+### ADR-0116 — Permessi del proprietario: profili e regole per strumento
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora i permessi di JARVIS»).
+- **Problema:** la policy dipendeva solo dal descrittore dello strumento (rischio e conferma): il proprietario non poteva rendere JARVIS più prudente, né vietare uno strumento, senza cambiare il catalogo.
+- **Decisione:** `permissions.rs` e `<dati>/permissions.json`. Tre profili: **Standard** (comportamento del catalogo), **Prudente** (ogni strumento che modifica o esegue chiede la conferma), **Solo lettura** (tutto ciò che modifica o esegue è negato). In più regole per strumento o per prefisso (`connector.*`): `ask` (conferma a ogni uso) o `deny`; la più severa vince. La policy applica le regole prima delle conferme del catalogo, con i motivi `policy.owner_rule_deny` e `policy.owner_rule_ask`, spiegati in italiano.
+- **Invariante di sicurezza:** si può solo **restringere**; nessun profilo o regola toglie una conferma richiesta dal catalogo o rende consentito ciò che la policy nega. Un file illeggibile fa scegliere il profilo Prudente (fallire chiuso).
+- **Controllo:** `GET/PATCH /api/permissions` solo dal computer del Core (403 per i dispositivi); le regole devono riferirsi a strumenti del catalogo; ogni modifica è nell'audit (`permissions.update`). Non c'è nessuno strumento di chat per cambiarle, così un testo ostile non può allargare né ridurre i permessi. Pagina «Permessi» nell'app desktop con profilo e regole per ogni strumento.
+- **Limiti:** la schermata macOS non c'è ancora (le regole valgono comunque, si gestiscono dall'API o dal desktop); le automazioni già salvate che usano uno strumento con regola `ask` si fermano alla richiesta di conferma diretta.
+- **Evidenza:** test unitari (profili, prefissi, la più severa vince, input non valido, file corrotto) e `tests/permissions.rs` con il Core (conferma richiesta, negazione, sola lettura che non blocca le letture, elenco con restrizioni).
+- **Documenti interessati:** SECURITY_AND_PRIVACY.md, AUTONOMY_AND_TOOLS.md, ROADMAP.md.
+
+### ADR-0117 — Strumenti di competenza per aziende, informatica e sicurezza
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («specialità nelle aziende, in informatica e in cyber security»).
+- **Decisione:** cinque strumenti di calcolo o sola lettura, senza rete e senza scritture (`expert.rs`): `security.cvss` (punteggio base CVSS v3.0/3.1 e gravità da un vettore), `security.hash` (SHA-256 di un file della workspace con confronto con un valore atteso, per verificare scaricamenti e immagini), `it.subnet` (rete, maschera, broadcast, host utilizzabili di una sottorete IPv4), `biz.vat` (IVA: aggiunge o scorpora, aliquota predefinita 22%) e `biz.loan` (rata costante, totale e interessi). Il calcolo non lo fa il modello: lo fa lo strumento, e il risultato è verificabile.
+- **Regole offline:** «cvss CVSS:3.1/…», «sottorete 192.168.1.0/24», «sha256 file [atteso <hash>]», «iva al 22% su 1.000,50», «rata mutuo 100.000 € al 3,5% in 20 anni»; i numeri si leggono all'italiana.
+- **Evidenza:** punteggi CVSS pubblicati (9,8, 10,0, 6,1, 7,8, 0), sottoreti, hash noto (`abc`), IVA e rata di un mutuo di riferimento (579,96 €), percorsi fuori dalla workspace rifiutati.
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ROADMAP.md.
+
+### ADR-0118 — Specialisti e competenze per aziende, IT e sicurezza difensiva
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout.
+- **Decisione:** nuovo specialista **business** (`delegation.schema.json` ammette il nome) con IVA, finanziamenti, note, cose da fare, lettura di file e ricerca Web, e nessuna scrittura né terminale. Lo specialista della sicurezza (`monitoring`) riconosce anche CVSS, vulnerabilità, ransomware, phishing, incidenti e violazioni dei dati e ottiene `security.cvss` e `security.hash`; lo specialista di sistema riconosce sottoreti e runbook e ottiene `it.subnet`. Quattro nuove competenze predefinite: **Analisi e procedure aziendali**, **Operazioni IT e runbook**, **Risposta agli incidenti di sicurezza** (contenere, preservare le prove, valutare, ripristinare, comunicare; ricorda la notifica entro 72 ore del GDPR), **Conformità e protezione dei dati** (GDPR, NIS2, ISO/IEC 27001, senza valore legale). Restano difensive: nessun exploit, scansione di sistemi terzi o azione offensiva.
+- **Limiti:** le competenze sono istruzioni per il modello, non consulenza professionale: ogni testo lo dice quando serve un legale, un DPO o un commercialista.
+- **Evidenza:** test di instradamento verso gli specialisti e dei loro strumenti concessi.
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.

@@ -234,4 +234,8 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Aggiornamento Android (2026-11-24, base `0261462`).** ADR-0112. Scheda aggiornamenti nella Plancia Android, logica testata nel modulo `core-client`. Verifiche: test del client Android. **Sospeso:** compilazione Compose (solo CI) e installazione su un telefono.
 
+**Docker (2026-11-24, base `21d766a`).** ADR-0113, ADR-0114, ADR-0115. Diagnosi di Docker con rimedio (sandbox e n8n), preparazione dell'immagine dall'app, etichette e pulizia degli orfani. Verifiche: fmt, clippy, `cargo test --locked`, test Python. **Sospeso:** prova con un motore Docker reale.
+
+**Permessi e competenze (2026-11-24, dopo PR #83).** ADR-0116, ADR-0117, ADR-0118. Profili e regole del proprietario (solo restrizioni), cinque strumenti di competenza, specialista aziendale e quattro competenze. Verifiche: fmt, clippy, `cargo test --locked`, test Python, build e test egui. **Sospeso:** schermata Permessi su macOS e Android.
+
 Per ogni ripresa registrare data, revisione, lavoro completato, verifiche eseguite, blocchi, ipotesi e prossimo passo concreto. Conservare il checkpoint con le modifiche alle quali si riferisce.

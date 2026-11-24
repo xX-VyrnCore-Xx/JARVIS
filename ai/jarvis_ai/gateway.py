@@ -160,9 +160,37 @@ def _describe_tool_result(result: dict) -> str:
         lim = output.get("limits") or {}
         state = "attivo" if output.get("enabled") else "disattivato dal proprietario"
         avail = f"immagine {output.get('image')}" if output.get("available") else "Docker o immagine non disponibili"
+        docker = output.get("docker") or {}
+        if docker.get("state") not in (None, "ready"):
+            avail = docker.get("hint") or avail
+        build = output.get("build") or {}
+        if build.get("status") == "building":
+            avail += " · costruzione dell'immagine in corso"
+        elif build.get("status") == "failed" and build.get("detail"):
+            avail += f" · {build['detail']}"
         sessions = ", ".join(f"{x['session']} ({x['bytes']} B)" for x in output.get("sessions", [])) or "nessuna"
         return (f"Sandbox {state}; {avail}. Limiti: {lim.get('memory_mb')} MB, {lim.get('cpus')} CPU, "
                 f"max {lim.get('timeout_s_max')} s, rete {lim.get('network')}. Sessioni: {sessions}.")
+    if tool == "security.cvss":
+        return (f"CVSS v3.1: punteggio base {output.get('base_score')} ({output.get('severity')}). "
+                f"Sfruttabilità {output.get('exploitability')}, impatto {output.get('impact')}.")
+    if tool == "security.hash":
+        verdict = ""
+        if "matches" in output:
+            verdict = " Corrisponde al valore atteso." if output["matches"] else " NON corrisponde al valore atteso: non usare il file."
+        return f"SHA-256 di «{output.get('path')}» ({output.get('bytes')} byte):\n{output.get('digest')}{verdict}"
+    if tool == "it.subnet":
+        return (f"Rete {output.get('network')}/{output.get('prefix')} (maschera {output.get('netmask')}): "
+                f"host da {output.get('first_host')} a {output.get('last_host')}, broadcast {output.get('broadcast')}, "
+                f"{output.get('usable_hosts')} host utilizzabili{', rete privata' if output.get('private') else ''}.")
+    if tool == "biz.vat":
+        return (f"Imponibile {output.get('net'):.2f} € + IVA {output.get('vat'):.2f} € ({output.get('rate_percent')}%) "
+                f"= totale {output.get('gross'):.2f} €.")
+    if tool == "biz.loan":
+        return (f"Rata mensile {output.get('monthly_payment'):.2f} € per {output.get('months')} mesi: "
+                f"totale {output.get('total_paid'):.2f} €, di cui interessi {output.get('total_interest'):.2f} €.")
+    if tool == "sandbox.prepare":
+        return "Sto costruendo l'immagine della sandbox in background: puoi controllare l'avanzamento con «stato sandbox»."
     if tool == "sandbox.import":
         return f"Copiato «{output.get('path')}» nella sandbox «{output.get('session')}» ({output.get('bytes')} byte)."
     if tool == "sandbox.export":
@@ -343,6 +371,16 @@ def _reason(output: Any) -> str:
     return str(output)
 
 
+def _it_number(text: str) -> float:
+    """Numero all'italiana: «100.000,50» e «100000.5» diventano float."""
+    s = text.strip().rstrip(".,")
+    if "," in s:
+        s = s.replace(".", "").replace(",", ".")
+    elif re.fullmatch(r"\d{1,3}(\.\d{3})+", s):
+        s = s.replace(".", "")
+    return float(s)
+
+
 def _form_fields(text: str) -> dict:
     """«nome=Ada, email=ada@example.org» -> {"nome": "Ada", "email": "ada@example.org"}."""
     out = {}
@@ -398,6 +436,18 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
      lambda m: {"path": m[1]}),
     (re.compile(r"^\s*esegui\s+python\s+in\s+sandbox\s*:\s*(\S.*)$", re.I | re.S), "code.run_python",
      lambda m: {"source": m[1]}),
+    # Competenze per aziende, informatica e sicurezza (ADR-0117).
+    (re.compile(r"^\s*(?:cvss|punteggio cvss|gravit[àa] cvss)\s*:?\s*(CVSS:3\.[01]/\S+)\s*$", re.I), "security.cvss",
+     lambda m: {"vector": m[1]}),
+    (re.compile(r"^\s*(?:sottorete|subnet|cidr|calcola la sottorete)\s*:?\s*(\d{1,3}(?:\.\d{1,3}){3}/\d{1,2})\s*$", re.I), "it.subnet",
+     lambda m: {"cidr": m[1]}),
+    (re.compile(r"^\s*(?:hash|sha-?256|checksum|calcola l'hash di)\s*:?\s+(\S+)(?:\s+(?:atteso|expected|=)\s*([0-9a-fA-F]{64}))?\s*$", re.I), "security.hash",
+     lambda m: {"path": m[1], **({"expected": m[2]} if m[2] else {})}),
+    (re.compile(r"^\s*iva\s+(?:al\s+)?(\d{1,2}(?:[.,]\d+)?)\s*%\s+(su|scorporata da|scorporo da)\s+(\d[\d.,]*)\s*(?:€|euro)?\s*$", re.I), "biz.vat",
+     lambda m: {"amount": _it_number(m[3]), "rate": _it_number(m[1]), "mode": "add" if m[2].lower() == "su" else "remove"}),
+    (re.compile(r"^\s*(?:rata|mutuo|finanziamento)\D{0,20}?(\d[\d.,]*)\s*(?:€|euro)?\s+al\s+(\d+(?:[.,]\d+)?)\s*%\s+(?:in|per)\s+(\d+)\s+(mesi|anni)\s*$", re.I), "biz.loan",
+     lambda m: {"principal": _it_number(m[1]), "annual_rate_percent": _it_number(m[2]),
+                "months": int(m[3]) * (12 if m[4].lower() == "anni" else 1)}),
     # Terminale sandbox (ADR-0105): isolato, senza conferma per comando.
     (re.compile(r"^\s*(?:esegui\s+(?:nella|in)\s+sandbox|sandbox)\s*:\s*(\S.*)$", re.I | re.S), "sandbox.run",
      lambda m: {"command": m[1].strip()[:4000]}),
@@ -405,6 +455,7 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
      lambda m: {"from": m[1], **({"to": m[2]} if m[2] else {})}),
     (re.compile(r"^\s*(?:esporta|copia)\s+dalla\s+sandbox\s*:\s*(\S+)\s+(?:come|in|->)\s+(\S+)\s*$", re.I), "sandbox.export",
      lambda m: {"from": m[1], "to": m[2]}),
+    (re.compile(r"^\s*(?:prepara|costruisci|installa)\s+(?:la\s+)?sandbox\s*$", re.I), "sandbox.prepare", lambda m: {}),
     (re.compile(r"^\s*(?:stato (?:della )?sandbox|sandbox\s+status)\s*\??\s*$", re.I), "sandbox.status", lambda m: {}),
     (re.compile(r"^\s*(?:azzera|resetta|svuota)\s+(?:la\s+)?sandbox(?:\s+([a-z0-9-]{1,32}))?\s*$", re.I), "sandbox.reset",
      lambda m: {"session": m[1].lower()} if m[1] else {}),

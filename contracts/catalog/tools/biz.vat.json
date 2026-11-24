@@ -1,0 +1,49 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "biz.vat",
+  "version": "1.0.0",
+  "summary": "Calcola l'IVA: aggiunge l'imposta a un imponibile o la scorpora da un totale (aliquota predefinita 22%)",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "amount"
+    ],
+    "properties": {
+      "amount": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1000000000000.0
+      },
+      "rate": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 100
+      },
+      "mode": {
+        "enum": [
+          "add",
+          "remove"
+        ]
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "none",
+  "risk": "low",
+  "permissions": [
+    "core.compute:execute"
+  ],
+  "errors": [
+    "biz.invalid"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}
