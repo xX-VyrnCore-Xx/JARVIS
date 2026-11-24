@@ -443,6 +443,7 @@ pub fn router(state: Shared) -> Router {
             "/api/permissions",
             get(permissions_get).patch(permissions_patch),
         )
+        .route("/api/persona", get(persona_get).patch(persona_patch))
         .route("/api/missions", get(missions_list).post(mission_create))
         .route("/api/missions/{id}/{action}", post(mission_action))
         .route("/api/skills", get(skills_list).post(skill_create))
@@ -592,15 +593,30 @@ async fn test_cloud_key(State(state): State<Shared>, Json(body): Json<Value>) ->
         Ok(request) => request,
         Err(error) => return error.into_response(),
     };
+    // Prima le credenziali (elenco dei modelli, nessuna chat), poi una risposta di prova (ADR-0119).
     match tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        request.verify()
+        let models = match crate::cloud::list_models(provider, &request.target.key) {
+            Ok(models) => Some(models),
+            // L'elenco può non essere offerto dal servizio: si prosegue con la chat di prova.
+            Err(crate::cloud::Failure::Rejected(_) | crate::cloud::Failure::Unavailable) => None,
+            Err(failure) => return Err(failure),
+        };
+        Ok((request.verify(), models))
     })
     .await
     {
-        Ok(completed) => match completed.answer {
+        Ok(Err(failure)) => error(
+            StatusCode::BAD_GATEWAY,
+            failure.code(),
+            &failure.user_message(provider).0,
+        ),
+        Ok(Ok((completed, models))) => match completed.answer {
             Ok(crate::cloud::Answer::Text(_)) => Json(json!({
-                "provider": provider.id(), "model": completed.model, "ok": true
+                "provider": provider.id(), "model": completed.model, "ok": true,
+                "credentials": "valid",
+                "models_available": models.as_ref().map(Vec::len),
+                "model_listed": models.as_ref().map(|m| m.contains(&completed.model)),
             }))
             .into_response(),
             Ok(crate::cloud::Answer::Call(_)) => error(
@@ -630,7 +646,10 @@ async fn cloud_chat(
     let Some(message) = body["message"].as_str() else {
         return CoreError::BadRequest("campo 'message' mancante".into()).into_response();
     };
-    if device.is_some() && crate::desktop::Target::from_request(message).is_some() {
+    if device.is_some()
+        && (crate::desktop::Target::from_request(message).is_some()
+            || crate::appcontrol::is_app_request(message))
+    {
         return CoreError::Unauthorized("Azione riservata al proprietario.".into()).into_response();
     }
     if crate::cloud::contains_credentials(message) {
@@ -640,7 +659,8 @@ async fn cloud_chat(
     let local = message.to_owned();
     let local_only = crate::orchestrator::is_source_followup(message)
         || crate::orchestrator::is_local_fact_request(message)
-        || crate::desktop::Target::from_request(message).is_some();
+        || (crate::desktop::Target::from_request(message).is_some()
+            || crate::appcontrol::is_app_request(message));
     if device.is_some() {
         body["provider"] = json!("auto");
         body["use_context"] = json!(false);
@@ -701,7 +721,10 @@ async fn chat(
             "campo 'message' mancante",
         );
     };
-    if device.is_some() && crate::desktop::Target::from_request(&message).is_some() {
+    if device.is_some()
+        && (crate::desktop::Target::from_request(&message).is_some()
+            || crate::appcontrol::is_app_request(&message))
+    {
         return error(
             StatusCode::FORBIDDEN,
             "owner_only",
@@ -728,7 +751,10 @@ async fn chat_stream(
             "campo 'message' mancante",
         );
     };
-    if device.is_some() && crate::desktop::Target::from_request(&message).is_some() {
+    if device.is_some()
+        && (crate::desktop::Target::from_request(&message).is_some()
+            || crate::appcontrol::is_app_request(&message))
+    {
         return error(
             StatusCode::FORBIDDEN,
             "owner_only",
@@ -1270,6 +1296,26 @@ async fn proactive_get(State(state): State<Shared>) -> Response {
 
 async fn proactive_put(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
     reply(with_core(&state, move |j| j.proactive_update(&body)).await)
+}
+
+async fn persona_get(State(state): State<Shared>) -> Response {
+    reply(Ok(with_core(&state, |j| j.persona()).await))
+}
+
+/// Personalità e forma di rivolgersi: solo il proprietario dal computer del Core (ADR-0120).
+async fn persona_patch(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Json(body): Json<Value>,
+) -> Response {
+    if device.is_some() {
+        return error(
+            StatusCode::FORBIDDEN,
+            "owner_only",
+            "operazione disponibile solo dal computer del proprietario",
+        );
+    }
+    reply(with_core(&state, move |j| j.persona_update(&body)).await)
 }
 
 /// Permessi del proprietario: lettura e modifica solo dal computer del Core (ADR-0116).

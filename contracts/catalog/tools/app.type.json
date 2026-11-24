@@ -1,0 +1,47 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "app.type",
+  "version": "1.0.0",
+  "summary": "Scrive un testo con la tastiera nell'applicazione in primo piano, dopo la conferma del proprietario",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "text"
+    ],
+    "properties": {
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 500
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "prerequisites": [
+    "macOS o Windows; su macOS serve il permesso Accessibilità"
+  ],
+  "effects": "write_local",
+  "risk": "high",
+  "permissions": [
+    "core.desktop:execute"
+  ],
+  "errors": [
+    "app.invalid",
+    "app.unavailable",
+    "app.timeout",
+    "app.not_found",
+    "app.permission",
+    "app.failed",
+    "app.sensitive"
+  ],
+  "timeout_ms": 15000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "required"
+}

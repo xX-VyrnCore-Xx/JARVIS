@@ -6,6 +6,7 @@
 
 pub mod agents;
 pub mod api;
+pub mod appcontrol;
 pub mod audit;
 pub mod automation;
 pub mod backup;
@@ -30,6 +31,7 @@ pub mod observability;
 pub mod orchestrator;
 pub mod passkeys;
 pub mod permissions;
+pub mod persona;
 pub mod policy;
 pub mod proactive;
 pub mod push;

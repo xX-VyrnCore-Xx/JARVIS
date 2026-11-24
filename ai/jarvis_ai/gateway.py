@@ -171,6 +171,21 @@ def _describe_tool_result(result: dict) -> str:
         sessions = ", ".join(f"{x['session']} ({x['bytes']} B)" for x in output.get("sessions", [])) or "nessuna"
         return (f"Sandbox {state}; {avail}. Limiti: {lim.get('memory_mb')} MB, {lim.get('cpus')} CPU, "
                 f"max {lim.get('timeout_s_max')} s, rete {lim.get('network')}. Sessioni: {sessions}.")
+    if tool == "app.open":
+        return f"Ho aperto «{output.get('opened')}»."
+    if tool == "app.focus":
+        return f"«{output.get('focused')}» è ora in primo piano."
+    if tool == "app.type":
+        return f"Ho scritto {output.get('typed_chars')} caratteri nell'app in primo piano."
+    if tool == "app.key":
+        mods = "+".join(output.get("modifiers") or [])
+        return f"Ho premuto {mods + '+' if mods else ''}{output.get('key')}."
+    if tool == "app.windows":
+        items = output.get("windows") or []
+        if not items:
+            return "Non vedo applicazioni o finestre aperte."
+        lines = [f"• {w['app']}" + (f" — {w['title']}" if w.get("title") else "") for w in items[:30]]
+        return f"Applicazioni aperte ({len(items)}):\n" + "\n".join(lines)
     if tool == "security.cvss":
         return (f"CVSS v3.1: punteggio base {output.get('base_score')} ({output.get('severity')}). "
                 f"Sfruttabilità {output.get('exploitability')}, impatto {output.get('impact')}.")
@@ -371,6 +386,20 @@ def _reason(output: Any) -> str:
     return str(output)
 
 
+_MODIFIERS = {
+    "cmd": "command", "command": "command", "comando": "command",
+    "ctrl": "control", "control": "control", "controllo": "control",
+    "alt": "option", "option": "option", "opzione": "option",
+    "shift": "shift", "maiusc": "shift",
+}
+
+_KEY_ALIASES = {
+    "invio": "return", "esc": "escape", "spazio": "space", "canc": "delete",
+    "freccia su": "up", "freccia giù": "down", "freccia giu": "down",
+    "freccia sinistra": "left", "freccia destra": "right",
+}
+
+
 def _it_number(text: str) -> float:
     """Numero all'italiana: «100.000,50» e «100000.5» diventano float."""
     s = text.strip().rstrip(".,")
@@ -436,6 +465,18 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
      lambda m: {"path": m[1]}),
     (re.compile(r"^\s*esegui\s+python\s+in\s+sandbox\s*:\s*(\S.*)$", re.I | re.S), "code.run_python",
      lambda m: {"source": m[1]}),
+    # Controllo delle applicazioni (ADR-0121): ogni azione chiede la conferma del proprietario.
+    (re.compile(r"^\s*(?:apri|avvia|lancia)\s+(?:l'app(?:licazione)?|il programma)\s+(.{2,60}?)\s*$", re.I), "app.open",
+     lambda m: {"app": m[1]}),
+    (re.compile(r"^\s*apri\s+([A-Z][\w.+-]*(?: [A-Z0-9][\w.+-]*){0,3})\s*$"), "app.open", lambda m: {"app": m[1]}),
+    (re.compile(r"^\s*(?:porta|metti) in primo piano\s+(?:l'app(?:licazione)?\s+)?(.{2,60}?)\s*$", re.I), "app.focus",
+     lambda m: {"app": m[1]}),
+    (re.compile(r"^\s*(?:scrivi|digita)\s+(?:nell'app(?:licazione)?|nella finestra|in primo piano)\s*:\s*(.{1,500})$", re.I | re.S), "app.type",
+     lambda m: {"text": m[1]}),
+    (re.compile(r"^\s*premi\s+((?:(?:cmd|command|comando|ctrl|control|controllo|alt|opzione|option|shift|maiusc)\s*\+\s*)*)([A-Za-z0-9]|invio|return|tab|esc|escape|spazio|canc|freccia (?:su|gi[uù]|sinistra|destra))\s*$", re.I), "app.key",
+     lambda m: {"key": _KEY_ALIASES.get(m[2].lower(), m[2].lower()),
+                **({"modifiers": [_MODIFIERS[p.strip().lower()] for p in m[1].split("+") if p.strip()]} if m[1].strip() else {})}),
+    (re.compile(r"\b(quali (?:app|applicazioni|finestre) (?:sono )?aperte|finestre aperte|app aperte)\b", re.I), "app.windows", lambda m: {}),
     # Competenze per aziende, informatica e sicurezza (ADR-0117).
     (re.compile(r"^\s*(?:cvss|punteggio cvss|gravit[àa] cvss)\s*:?\s*(CVSS:3\.[01]/\S+)\s*$", re.I), "security.cvss",
      lambda m: {"vector": m[1]}),

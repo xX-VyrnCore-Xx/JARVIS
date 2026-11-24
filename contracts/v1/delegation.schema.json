@@ -111,7 +111,7 @@
     },
     "tools": {
       "type": "array",
-      "maxItems": 64,
+      "maxItems": 96,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -128,7 +128,7 @@
           }
         }
       },
-      "description": "Limite portato da 32 a 64 (ADR-0046, aggiunta compatibile)."
+      "description": "Limite portato da 32 a 64 (ADR-0046) e da 64 a 96 (ADR-0121), aggiunte compatibili: il Core ne propone comunque al massimo 64 per richiesta."
     },
     "limits": {
       "type": "object",

@@ -93,3 +93,5 @@ Il servizio usa l'immagine versionata `docker.n8n.io/n8nio/n8n:2.48.7`, l'utente
 **Docker (ADR-0113, ADR-0114).** `sandbox.status` dice se Docker manca, è spento o non ha permessi, e come rimediare. «Prepara la sandbox» costruisce l'immagine dall'app (con conferma, serve la rete una volta sola).
 
 **Competenze (ADR-0117, ADR-0118).** Strumenti `security.cvss`, `security.hash`, `it.subnet`, `biz.vat`, `biz.loan`; specialista `business`; competenze «Analisi e procedure aziendali», «Operazioni IT e runbook», «Risposta agli incidenti di sicurezza» e «Conformità e protezione dei dati». **Permessi (ADR-0116):** pagina «Permessi» dell'app desktop e `GET/PATCH /api/permissions`.
+
+**Applicazioni (ADR-0121).** «apri l'app Spotify», «porta in primo piano Chrome», «scrivi nell'app: …», «premi cmd+s», «quali finestre sono aperte»: ogni azione chiede la tua conferma e mostra cosa farà. **Chiave API (ADR-0119):** incolla la chiave come capita, JARVIS la ripulisce; «Testa chiave» verifica prima le credenziali. **Personalità (ADR-0120):** stile «come nel film» o sobrio e forma di rivolgersi, in Modelli AI.

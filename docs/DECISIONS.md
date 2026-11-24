@@ -1624,6 +1624,35 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** test di instradamento verso gli specialisti e dei loro strumenti concessi.
 - **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ROADMAP.md.
 
+### ADR-0119 — Collegamento con chiave API affidabile
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («il collegamento tramite API Key funzionante al 100%»).
+- **Problemi trovati:** (1) la chiave incollata veniva rifiutata, o salvata sbagliata, se aveva «Bearer », «Authorization:», `export NOME=`, virgolette, a capo o caratteri invisibili (BOM, spazi a larghezza zero) copiati dai siti; (2) «Testa chiave» faceva una chat di prova e un errore di modello poteva sembrare un errore di chiave; (3) un deposito dei segreti che non salva dava errori misteriosi solo alla prima chat; (4) nessun avviso se la chiave era di un altro servizio.
+- **Decisione:** `normalize_key` ripulisce la chiave incollata (prefissi, virgolette, caratteri invisibili) e rifiuta con il motivo esatto spazi interni, caratteri non ASCII, chiavi vuote o troppo corte. Dopo il salvataggio la chiave viene riletta e confrontata; se non coincide, errore esplicito. `key_format_hint` avvisa (senza bloccare) se una chiave NVIDIA non inizia con `nvapi-` o se una chiave Ollama sembra di un altro servizio. «Testa chiave» ora verifica prima le **credenziali** con l'elenco dei modelli del provider (`GET /api/tags` per Ollama Cloud, `GET /v1/models` per NVIDIA NIM: nessuna chat consumata, 401/403/402/429/rete distinti con retry sugli errori transitori), poi fa la richiesta di prova, e risponde anche con il numero di modelli disponibili e se il modello scelto è fra quelli elencati. Se l'elenco non è offerto dal servizio si prosegue con la sola prova di chat.
+- **Limiti:** la verifica dell'elenco usa i due indirizzi pubblici dei provider; una rete che blocca `ollama.com` o `integrate.api.nvidia.com` ora lo dice con la causa (ADR-0108). Non ho potuto provare chiavi reali (nessuna disponibile in questa sessione): gli indirizzi e il formato delle risposte sono quelli documentati dai provider, provati con risposte simulate.
+- **Evidenza:** test di `normalize_key` (otto formati incollati, quattro rifiuti), di `list_models` con server locale (200, 401, 403) e dell'analisi delle risposte dei due provider.
+- **Documenti interessati:** FIREBASE_SETUP.md non coinvolto; AUTONOMY_AND_TOOLS.md, ROADMAP.md.
+
+### ADR-0120 — Personalità «come nel film» e chat più chiare
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora la personalità e fai sì che sia come quella del film»).
+- **Decisione:** `persona.rs` e `<dati>/persona.json`. Due stili: **film** (predefinito: maggiordomo digitale impeccabile, pacato e preciso, leggermente britannico, ironia asciutta e rara, anticipa le esigenze, rapporti di stato brevi, riserva garbata davanti a un'idea rischiosa e poi esegue ciò che il proprietario decide entro le regole, formule brevi come «Certamente.» e «Fatto.», mai servile, nessuna battuta o dialogo copiato) e **sobrio** (neutro ed essenziale). La **forma di rivolgersi** è vuota per impostazione predefinita: JARVIS non sa come vuoi essere chiamato e non assume «signore» o «signora»; si imposta (per esempio «Signore», «Signora» o il nome) nella pagina Modelli AI dell'app desktop o con `PATCH /api/persona`, solo dal computer del Core. Lo stile entra nel prompt di sistema accanto a data e ora; non tocca policy, permessi o conferme.
+- **Chat:** il prompt (ADR-0110) resta la base: testo semplice, lettura dichiarata se la richiesta è vaga, errori spiegati. Gli errori di connessione dicono la causa (ADR-0108).
+- **Limiti:** lo stile vale per le risposte dei modelli cloud; le risposte a regole offline restano neutre.
+- **Evidenza:** test della personalità predefinita, della validazione e del salvataggio, del prompt di sistema.
+- **Documenti interessati:** ROADMAP.md.
+
+### ADR-0121 — JARVIS apre le applicazioni e le usa al posto del proprietario
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («la possibilità di aprire applicazioni e usarle al posto tuo»). Estende `pc.open` (ADR-0053).
+- **Decisione:** `appcontrol.rs` e cinque strumenti: `app.open` (apre un'app installata per nome), `app.focus` (la porta in primo piano), `app.windows` (elenca app e finestre aperte, sola lettura), `app.type` (scrive un testo con la tastiera nell'app in primo piano, fino a 500 caratteri) e `app.key` (preme un tasto o una scorciatoia: lettera, cifra, invio, tab, esc, spazio, canc, frecce, con command/control/option/shift). macOS: `open -a` e `osascript` con System Events; Windows: PowerShell (`Start-Process`, `AppActivate`, `SendKeys`).
+- **Sicurezza:** ogni azione che agisce sul computer richiede la conferma del proprietario, e solo il proprietario dal computer del Core può darla; la schermata di conferma mostra il testo esatto che sarà scritto. Il nome dell'app ammette solo lettere, cifre, spazi e `.+_-`. **I valori non entrano mai nel testo di uno script:** passano come argomenti di `osascript` (`argv`) o come variabili d'ambiente di PowerShell; i soli frammenti variabili vengono da tabelle fisse. Nessuna credenziale o chiave può essere digitata (`app.sensitive`). Il processo non eredita token né segreti. Dispositivi associati, automazioni, nodi, missioni e agenti temporanei non possono usarli; i modelli cloud non li vedono se la richiesta non è una richiesta diretta del proprietario; i permessi del proprietario (ADR-0116) possono vietarli con `app.*`. Il tempo massimo è 10 secondi.
+- **Regole offline:** «apri l'app Spotify», «apri Spotify» (nome con iniziale maiuscola), «avvia il programma …», «porta in primo piano …», «scrivi nell'app: …», «premi cmd+shift+s», «quali finestre sono aperte».
+- **Limiti:** JARVIS non vede lo schermo (nessun modello di visione): non può cliccare in un punto né leggere il contenuto di una finestra, solo scrivere, premere tasti e sapere quali finestre esistono. macOS richiede il permesso Accessibilità (l'errore indica dove abilitarlo); Windows non può scrivere nelle finestre avviate come amministratore. Non disponibile su Linux. Il contratto di delega ammette ora fino a 96 strumenti (il Core ne propone al massimo 64 per richiesta).
+- **Non verificato:** l'esecuzione reale su macOS e Windows (non disponibili qui): sono provati la costruzione dei comandi per entrambi i sistemi, l'assenza di iniezione, la conferma e i divieti.
+- **Evidenza:** test unitari di nomi, argomenti, piani per macOS e Windows con testo ostile, mappe dei tasti, errori e finestre; `tests/appcontrol.rs` con il Core (conferma richiesta per ogni azione, testo mostrato, credenziali rifiutate, divieto dai permessi); test del gateway.
+- **Documenti interessati:** SECURITY_AND_PRIVACY.md, AUTONOMY_AND_TOOLS.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.

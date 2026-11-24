@@ -1,0 +1,37 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "app.windows",
+  "version": "1.0.0",
+  "summary": "Elenca le applicazioni e le finestre aperte sul computer (nomi e titoli)",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "prerequisites": [
+    "macOS o Windows; su macOS serve il permesso Accessibilità"
+  ],
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.desktop:execute"
+  ],
+  "errors": [
+    "app.invalid",
+    "app.unavailable",
+    "app.timeout",
+    "app.not_found",
+    "app.permission",
+    "app.failed"
+  ],
+  "timeout_ms": 15000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "none"
+}
