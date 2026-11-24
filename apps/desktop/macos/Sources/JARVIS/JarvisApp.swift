@@ -45,19 +45,19 @@ private enum Section: String, Identifiable {
     var icon: String {
         switch self {
         case .dashboard: "square.grid.2x2"
-        case .chat: "waveform"
+        case .chat: "bubble.left.and.text.bubble.right"
         case .tasks: "checklist"
         case .confirmations: "checkmark.shield"
-        case .workflows: "bolt"
-        case .memory: "cylinder"
+        case .workflows: "bolt.horizontal"
+        case .memory: "brain.head.profile"
         case .workspace: "folder"
         case .connectors: "link"
         case .devices: "laptopcomputer.and.iphone"
-        case .skills: "square.stack"
-        case .security: "lock.shield"
+        case .skills: "wand.and.stars"
+        case .security: "lock.shield.fill"
         case .audit: "list.bullet.rectangle"
-        case .system: "cpu"
-        case .models: "brain"
+        case .system: "gauge.with.dots.needle.50percent"
+        case .models: "sparkles"
         case .updates: "arrow.down.circle"
         case .notifications: "bell"
         case .missions: "scope"
@@ -127,6 +127,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var confirmKeyRemoval = false
     /// Turni recenti inviati al provider scelto (ADR-0130): attivo di default, il proprietario può spegnerlo qui.
     @AppStorage("jarvis.shareContext") private var useCloudContext = true
+    @AppStorage("jarvis.chatBackground") private var chatInBackground = false
     @State private var cloudModel = ""
     @State private var provider = "ollama_cloud"
     @State private var apiKey = ""
@@ -499,12 +500,54 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(.cyan.opacity(0.16)) }
     }
 
+    /// Scheda «Protezione» (ADR-0149): punteggio, cifratura a riposo e controlli da sistemare.
+    @ViewBuilder private var protectionCard: some View {
+        let security = payload["security"] as? [String: Any] ?? [:]
+        let posture = security["posture"] as? [String: Any] ?? [:]
+        if let score = posture["score"] as? Int {
+            let color: Color = score >= 90 ? .green : (score >= 60 ? .orange : .red)
+            let encryption = security["encryption"] as? [String: Any] ?? [:]
+            let atRest = encryption["chat_at_rest"] as? Bool ?? false
+            let items = posture["items"] as? [[String: Any]] ?? []
+            card("Protezione", icon: "lock.shield.fill") {
+                HStack(spacing: 14) {
+                    Gauge(value: Double(score), in: 0...100) { EmptyView() } currentValueLabel: {
+                        Text("\(score)").font(.system(.title3, design: .rounded).weight(.semibold)).monospacedDigit()
+                    }
+                    .gaugeStyle(.accessoryCircularCapacity).tint(color).frame(width: 64, height: 64)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Livello \(posture["level"] as? String ?? "—")").font(.headline).foregroundStyle(color)
+                        Label(atRest ? "Cifratura a riposo attiva · \(encryption["algorithm"] as? String ?? "AEAD")"
+                                     : "Cifratura a riposo non attiva",
+                              systemImage: atRest ? "lock.fill" : "lock.open")
+                            .font(.callout).foregroundStyle(atRest ? .green : .orange)
+                        Text("Messaggi, attività e notifiche sono cifrati sul disco.").font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                ForEach(items.indices, id: \.self) { index in
+                    let item = items[index]
+                    let ok = item["ok"] as? Bool ?? false
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: ok ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(ok ? .green : .orange)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(item["label"] as? String ?? "")
+                            if !ok { Text(item["advice"] as? String ?? "").font(.caption).foregroundStyle(.secondary) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private var dashboard: some View {
         VStack(alignment: .leading, spacing: 18) {
             dashboardHero.staggeredAppear(0)
             commandBar.staggeredAppear(1)
             quickCategories
             attentionCard.staggeredAppear(3)
+            protectionCard.staggeredAppear(3)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 12, alignment: .top)], spacing: 12) {
                 dashboardTile("Core", value: coreStatus, icon: "cpu", color: coreIsUp ? .green : .orange,
                               destination: .system, order: 0)
@@ -992,6 +1035,47 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         return outgoingMessage != nil && lastReply == nil ? "pending-message" : records(payload).last?.id
     }
 
+    /// Chat multiple e lavoro in background (ADR-0143, ADR-0144).
+    private var chatControls: some View {
+        let chats = (payload["chats"] as? [[String: Any]]) ?? []
+        return HStack(spacing: 8) {
+            Menu {
+                ForEach(chats.indices, id: \.self) { index in
+                    let item = chats[index]
+                    Button {
+                        changeChat("/api/conversations/select", body: ["id": item["id"] as? String ?? ""])
+                    } label: {
+                        Label(item["title"] as? String ?? "Chat",
+                              systemImage: item["active"] as? Bool == true ? "checkmark" : "bubble.left")
+                    }
+                }
+            } label: {
+                Label("Chat", systemImage: "clock.arrow.circlepath")
+            }
+            .menuStyle(.borderlessButton).fixedSize()
+            Button("Nuova chat", systemImage: "square.and.pencil") {
+                changeChat("/api/conversations", body: [:])
+            }
+            Toggle(isOn: $chatInBackground) {
+                Label("In background", systemImage: "moon.zzz")
+            }
+            .toggleStyle(.button)
+            .help("JARVIS lavora nel cloud anche se l'app è in secondo piano o chiusa e ti avvisa alla fine.")
+        }
+    }
+
+    private func changeChat(_ path: String, body: [String: Any]) {
+        Task {
+            do {
+                _ = try await core.request(path, method: "POST", body: body)
+                error = nil
+                await load(.chat)
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
     private var chat: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 15) {
@@ -1003,11 +1087,13 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                         Label("Elaborazione in corso", systemImage: "waveform")
                             .foregroundStyle(.cyan)
                     } else {
-                        Label("Inferenza cloud", systemImage: "cloud")
+                        Label(chatInBackground ? "Lavoro in background" : "Inferenza cloud",
+                              systemImage: chatInBackground ? "moon.zzz" : "cloud")
                             .foregroundStyle(.secondary)
                     }
                 }
                 Spacer()
+                chatControls
             }
             .padding(14).frame(maxWidth: .infinity, alignment: .leading)
             .background(LinearGradient(colors: [panel, base], startPoint: .leading, endPoint: .trailing),
@@ -1252,6 +1338,21 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !sending else { return }
         let includeContext = useCloudContext
+        if chatInBackground {
+            message = ""
+            Task {
+                do {
+                    _ = try await core.request("/api/cloud/background", method: "POST",
+                                               body: ["message": text, "provider": "auto", "use_context": includeContext])
+                    info = "Lavoro avviato in background: ti avviso con una notifica quando ha finito. La risposta resterà in questa chat."
+                    error = nil
+                } catch {
+                    self.error = error.localizedDescription
+                    if message.isEmpty { message = text }
+                }
+            }
+            return
+        }
         sending = true
         error = nil
         lastReply = nil
@@ -1628,6 +1729,10 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         case .memory:
             HStack {
                 Button("Modifica") { memoryText = item["text"] ?? ""; memoryEdit = item }
+                let pinned = item.data["pinned"] as? Bool ?? false
+                Button(pinned ? "Libera" : "Fissa", systemImage: pinned ? "pin.slash" : "pin") {
+                    mutate("/api/memory/\(urlSegment(item.id))/pin", body: ["pinned": !pinned])
+                }
                 Button("Chiedi di dimenticare") { select(.chat); message = "dimentica \(item.id)" }
             }
         case .tasks:
@@ -2115,6 +2220,11 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             if page == .dashboard {
                 let status = try? await core.request("/api/cloud", timeout: 3)
                 result["providers"] = status?["providers"]
+                result["security"] = try? await core.request("/api/security", timeout: 3)
+            }
+            if page == .chat {
+                let chats = try? await core.request("/api/conversations", timeout: 5)
+                result["chats"] = chats?["items"]
             }
             if page == .connectors {
                 let catalog = try await core.request("/api/connectors/templates")
@@ -2179,13 +2289,27 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         }
     }
 
+    /// Conferma specifica quando il Core non ne manda una: dice cosa è successo, mai un generico «operazione completata».
+    private func doneMessage(_ path: String, method: String) -> String {
+        let table: [(String, String)] = [
+            ("/api/workflows", "Automazione aggiornata."), ("/api/connectors", "Connettore aggiornato."),
+            ("/api/devices", "Dispositivi aggiornati."), ("/api/notifications", "Notifiche aggiornate."),
+            ("/api/skills", "Competenza salvata."), ("/api/memory", "Memoria aggiornata."),
+            ("/api/cloud", "Impostazioni dei modelli salvate."), ("/api/updates", "Aggiornamenti controllati."),
+            ("/api/permissions", "Permessi aggiornati."), ("/api/backup", "Copia di sicurezza creata."),
+            ("/api/missions", "Missione aggiornata."),
+        ]
+        if let hit = table.first(where: { path.hasPrefix($0.0) }) { return hit.1 }
+        return method == "DELETE" ? "Elemento rimosso." : "Modifica salvata."
+    }
+
     private func mutate(_ path: String, method: String = "POST", body: [String: Any]) {
         error = nil
         info = nil
         Task {
             do {
                 let result = try await core.request(path, method: method, body: body)
-                info = result["reply"] as? String ?? "Operazione completata."
+                info = result["message"] as? String ?? result["reply"] as? String ?? doneMessage(path, method: method)
                 await load(section)
                 await core.refreshHealth()
             } catch { self.error = error.localizedDescription }

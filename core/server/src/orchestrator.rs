@@ -27,6 +27,7 @@ pub use mission_runner::{MissionRun, Next};
 
 /// Memoria nel contesto dell'agente (ADR-0022).
 const MEMORY_PROCEDURAL: usize = 20;
+const MEMORY_PINNED: usize = 12;
 const MEMORY_SMALL: usize = 30;
 const MEMORY_RELEVANT: usize = 8;
 const HISTORY_MESSAGES: u32 = 10;
@@ -2128,6 +2129,15 @@ impl Jarvis {
         let _ = self.store.memory_purge_expired(&now());
         let mut out: Vec<Value> = vec![];
         let mut seen = std::collections::HashSet::new();
+        // Ricordi fissati dal proprietario: sempre nel contesto, prima di tutto il resto (ADR-0145).
+        for m in self.store.memory_pinned(MEMORY_PINNED).map_err(internal)? {
+            let text = m["text"].as_str().unwrap_or_default();
+            if crate::cloud::contains_credentials(text) {
+                continue;
+            }
+            seen.insert(m["id"].as_str().unwrap_or_default().to_string());
+            out.push(format!("[importante] {text}").into());
+        }
         for m in self
             .store
             .memory_list_kind(Some("procedural"))
@@ -2243,6 +2253,113 @@ impl Jarvis {
 
     pub fn tasks(&self, limit: u32) -> Result<Vec<Value>, CoreError> {
         self.store.tasks_recent(limit).map_err(internal)
+    }
+
+    /// Esegue `f` come se la chat attiva fosse `id` e ripristina poi quella dell'utente: un lavoro in background
+    /// scrive nella chat da cui è partito anche se nel frattempo se ne è aperta un'altra.
+    pub fn in_conversation<T>(&mut self, id: Option<&str>, f: impl FnOnce(&mut Self) -> T) -> T {
+        let Some(id) = id.filter(|id| self.store.conversation_exists(id)) else {
+            return f(self);
+        };
+        let previous = self.store.conversation_active();
+        self.store.set_active(id);
+        let out = f(self);
+        self.store.set_active(&previous);
+        out
+    }
+
+    /// Chat recenti e quale è attiva (ADR-0143).
+    pub fn conversations(&self) -> Result<Value, CoreError> {
+        Ok(json!({
+            "items": self.store.conversation_list(50).map_err(internal)?,
+            "active": self.store.conversation_active(),
+        }))
+    }
+
+    /// Apre una chat nuova e vuota: la cronologia precedente resta nella sua chat e nella memoria.
+    pub fn conversation_new(&mut self) -> Result<Value, CoreError> {
+        self.remember_conversation();
+        let at = automation::ts(chrono::Utc::now());
+        let id = self.store.conversation_new(&at).map_err(internal)?;
+        self.record_owner_action("conversation.new")?;
+        Ok(json!({"id": id, "active": id}))
+    }
+
+    /// Prima di aprire una chat nuova, un episodio con ciò di cui si è parlato: così «quella chat di ieri» resta
+    /// ritrovabile nella memoria anche se la nuova chat parte vuota (ADR-0145). Scade come ogni episodio.
+    fn remember_conversation(&self) {
+        let days: i64 = std::env::var("JARVIS_EPISODIC_DAYS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(30);
+        if days <= 0 {
+            return;
+        }
+        let Ok(recent) = self.store.conversation_recent(12, false) else {
+            return;
+        };
+        let asked: Vec<String> = recent
+            .iter()
+            .filter(|m| m["role"] == "user")
+            .filter_map(|m| m["content"].as_str())
+            .filter(|text| !crate::cloud::contains_credentials(text))
+            .map(|text| clip(text.lines().next().unwrap_or_default().trim(), 80))
+            .filter(|text| !text.is_empty())
+            .collect();
+        if asked.len() < 2 {
+            return;
+        }
+        let topics: Vec<String> = asked
+            .iter()
+            .rev()
+            .take(3)
+            .rev()
+            .map(|t| format!("«{t}»"))
+            .collect();
+        let text = format!(
+            "Chat del {}: {} richieste, le ultime {}",
+            &now()[..10],
+            asked.len(),
+            topics.join(", ")
+        );
+        let expires = (chrono::Utc::now() + chrono::Duration::days(days))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let id = uuid::Uuid::new_v4().simple().to_string()[..8].to_string();
+        let _ = self.store.memory_insert(
+            &crate::memory::NewItem {
+                id: &id,
+                text: &text,
+                kind: "episodic",
+                source: json!({"kind": "conversation", "conversation_id": self.store.conversation_active()}),
+                expires_at: Some(expires),
+            },
+            &now(),
+        );
+    }
+
+    /// Fissa o libera un ricordo.
+    pub fn memory_pin(&mut self, id: &str, pinned: bool) -> Result<Value, CoreError> {
+        if !self.store.memory_pin(id, pinned).map_err(internal)? {
+            return Err(CoreError::NotFound("ricordo non trovato".into()));
+        }
+        self.record_owner_action(if pinned { "memory.pin" } else { "memory.unpin" })?;
+        Ok(json!({"id": id, "pinned": pinned}))
+    }
+
+    pub fn conversation_select(&mut self, id: &str) -> Result<Value, CoreError> {
+        let at = automation::ts(chrono::Utc::now());
+        if !self.store.conversation_select(id, &at).map_err(internal)? {
+            return Err(CoreError::NotFound("chat non trovata".into()));
+        }
+        Ok(json!({"active": id}))
+    }
+
+    pub fn conversation_delete(&mut self, id: &str) -> Result<Value, CoreError> {
+        if !self.store.conversation_delete(id).map_err(internal)? {
+            return Err(CoreError::NotFound("chat non trovata".into()));
+        }
+        self.record_owner_action("conversation.delete")?;
+        Ok(json!({"deleted": id, "active": self.store.conversation_active()}))
     }
 
     pub fn conversation(&self, limit: u32) -> Result<Vec<Value>, CoreError> {
@@ -2399,6 +2516,27 @@ impl Jarvis {
             "secrets_store": self.secrets.location(), "devices_active": active,
             "pending_confirmations": self.pending.len(), "web_enabled": self.cfg.web.enabled,
             "web_private_addresses": self.cfg.web.allow_private, "shell_enabled": !policy::shell_disabled(),
+            "encryption": {
+                "chat_at_rest": self.store.chat_protected(),
+                "algorithm": "XChaCha20-Poly1305",
+                "covers": ["messaggi", "attività", "notifiche"],
+                "secrets": self.secrets.location(),
+                "audit_signed": audit["signatures"]["enabled"],
+            },
+            "posture": posture(&[
+                ("chat", "Chat, attività e notifiche cifrate a riposo", self.store.chat_protected(),
+                 "Riavvia il Core con il portachiavi di sistema disponibile per attivare la cifratura."),
+                ("audit_chain", "Registro di audit integro", audit["chain_valid"] == true,
+                 "La catena dell'audit non è valida: esporta il registro e verifica i backup."),
+                ("audit_signed", "Registro di audit firmato", audit["signatures"]["enabled"] == true,
+                 "Abilita la firma del registro per rilevare manomissioni."),
+                ("web_private", "Il web non raggiunge indirizzi privati", !self.cfg.web.allow_private,
+                 "Disattiva l'accesso agli indirizzi privati se non serve."),
+                ("confirmations", "Nessuna conferma dimenticata", self.pending.is_empty(),
+                 "Ci sono azioni in attesa della tua conferma: approvale o annullale."),
+                ("sandbox", "Terminale sandbox isolato attivo", crate::sandbox::enabled(&self.cfg.data_dir),
+                 "Attiva il sandbox per eseguire codice senza toccare il computer."),
+            ]),
         }))
     }
 
@@ -2415,6 +2553,19 @@ impl Jarvis {
         )
         .map_err(|e| CoreError::Internal(e.message))
     }
+}
+
+/// Punteggio di protezione da una lista di controlli (id, descrizione, esito, cosa fare se manca).
+fn posture(checks: &[(&str, &str, bool, &str)]) -> Value {
+    let ok = checks.iter().filter(|c| c.2).count();
+    let score = (ok * 100).checked_div(checks.len()).unwrap_or(0);
+    json!({
+        "score": score,
+        "level": match score { 90..=100 => "alta", 60..=89 => "media", _ => "bassa" },
+        "items": checks.iter().map(|(id, label, ok, advice)| json!({
+            "id": id, "label": label, "ok": ok, "advice": if *ok { "" } else { advice },
+        })).collect::<Vec<_>>(),
+    })
 }
 
 // ---------------------------------------------------------------------- Automation Engine (RF-07)

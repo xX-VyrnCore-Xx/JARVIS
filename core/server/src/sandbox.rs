@@ -359,8 +359,68 @@ fn session_dir(data_dir: &Path, session: &str) -> Result<std::path::PathBuf, Too
     Ok(dir)
 }
 
+/// Profilo di risorse di un'esecuzione (ADR-0147): stesso isolamento per tutti (nessuna rete, radice in sola
+/// lettura, nessuna capability), cambiano solo i limiti di memoria, CPU, processi e tempo.
+pub struct Profile {
+    pub name: &'static str,
+    pub summary: &'static str,
+    pub memory_mb: u32,
+    pub cpus: &'static str,
+    pub pids: u32,
+    pub tmp_mb: u32,
+    pub max_timeout_s: u64,
+}
+
+pub const PROFILES: [Profile; 4] = [
+    Profile {
+        name: "light",
+        summary: "Controlli rapidi e piccoli script",
+        memory_mb: 256,
+        cpus: "0.5",
+        pids: 64,
+        tmp_mb: 32,
+        max_timeout_s: 10,
+    },
+    Profile {
+        name: "standard",
+        summary: "Uso generale (predefinito)",
+        memory_mb: 512,
+        cpus: "1",
+        pids: 128,
+        tmp_mb: 64,
+        max_timeout_s: 60,
+    },
+    Profile {
+        name: "build",
+        summary: "Compilazioni e test più pesanti",
+        memory_mb: 1024,
+        cpus: "2",
+        pids: 256,
+        tmp_mb: 256,
+        max_timeout_s: 60,
+    },
+    Profile {
+        name: "data",
+        summary: "Elaborazione di dati in memoria",
+        memory_mb: 1024,
+        cpus: "1",
+        pids: 128,
+        tmp_mb: 256,
+        max_timeout_s: 60,
+    },
+];
+
+pub fn profile(name: &str) -> Option<&'static Profile> {
+    PROFILES.iter().find(|p| p.name == name)
+}
+
+fn standard() -> &'static Profile {
+    &PROFILES[1]
+}
+
 /// Argomenti di `docker run` del terminale sandbox. Isolamento: nessuna rete, radice di sola lettura,
 /// nessuna capability, niente mount del computer oltre la cartella della sessione.
+#[cfg(test)]
 pub(crate) fn terminal_args(
     name: &str,
     image: &str,
@@ -368,7 +428,21 @@ pub(crate) fn terminal_args(
     user: &str,
     command: &str,
 ) -> Vec<String> {
+    terminal_args_with(standard(), name, image, dir, user, command)
+}
+
+pub(crate) fn terminal_args_with(
+    profile: &Profile,
+    name: &str,
+    image: &str,
+    dir: &Path,
+    user: &str,
+    command: &str,
+) -> Vec<String> {
     let mount = format!("{}:/work:rw", dir.display());
+    let tmpfs = format!("/tmp:rw,size={}m", profile.tmp_mb);
+    let memory = format!("{}m", profile.memory_mb);
+    let pids = profile.pids.to_string();
     let mut args: Vec<String> = [
         "run",
         "--rm",
@@ -385,7 +459,7 @@ pub(crate) fn terminal_args(
         "none",
         "--read-only",
         "--tmpfs",
-        "/tmp:rw,size=64m",
+        &tmpfs,
         "--user",
         user,
         "--cap-drop",
@@ -393,13 +467,13 @@ pub(crate) fn terminal_args(
         "--security-opt",
         "no-new-privileges",
         "--pids-limit",
-        "128",
+        &pids,
         "--memory",
-        "512m",
+        &memory,
         "--memory-swap",
-        "512m",
+        &memory,
         "--cpus",
-        "1",
+        profile.cpus,
         "--ulimit",
         "nofile=256:256",
         "--ulimit",
@@ -460,7 +534,19 @@ pub fn terminal_run(data_dir: &Path, args: &Value) -> Result<Value, ToolError> {
         ));
     }
     let session = session_name(args)?;
-    let timeout = args["timeout_s"].as_u64().unwrap_or(20).clamp(1, 60);
+    let profile = match args["profile"].as_str() {
+        None => standard(),
+        Some(name) => profile(name).ok_or_else(|| {
+            error(
+                "sandbox.invalid_profile",
+                "Profilo sconosciuto: usa light, standard, build o data",
+            )
+        })?,
+    };
+    let timeout = args["timeout_s"]
+        .as_u64()
+        .unwrap_or(20)
+        .clamp(1, profile.max_timeout_s);
     let dir = session_dir(data_dir, &session)?;
     let used = dir_size(&dir);
     if used > SESSION_HARD_LIMIT {
@@ -482,7 +568,9 @@ pub fn terminal_run(data_dir: &Path, args: &Value) -> Result<Value, ToolError> {
     let user = container_user(&dir);
     let started = Instant::now();
     let mut child = docker()
-        .args(terminal_args(&name, &image, &dir, &user, command))
+        .args(terminal_args_with(
+            profile, &name, &image, &dir, &user, command,
+        ))
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -527,7 +615,7 @@ pub fn terminal_run(data_dir: &Path, args: &Value) -> Result<Value, ToolError> {
     }
     Ok(json!({
         "succeeded": status.success(), "exit_code": status.code(), "stdout": stdout,
-        "stderr": stderr, "truncated": out_cut || err_cut, "session": session,
+        "stderr": stderr, "truncated": out_cut || err_cut, "session": session, "profile": profile.name,
         "image": image, "duration_ms": started.elapsed().as_millis() as u64, "sandbox": "docker",
     }))
 }
@@ -856,6 +944,10 @@ pub fn terminal_status(data_dir: &Path) -> Value {
         "limits": {"timeout_s_max": 60, "memory_mb": 512, "cpus": 1, "pids": 128,
                    "output_bytes": TERMINAL_OUTPUT, "session_mb": SESSION_SOFT_LIMIT / 1024 / 1024,
                    "network": "none"},
+        "profiles": PROFILES.iter().map(|p| json!({
+            "name": p.name, "summary": p.summary, "memory_mb": p.memory_mb, "cpus": p.cpus,
+            "pids": p.pids, "tmp_mb": p.tmp_mb, "timeout_s_max": p.max_timeout_s,
+        })).collect::<Vec<_>>(),
         "sessions": sessions,
     })
 }
@@ -917,6 +1009,35 @@ print(2 + 2)",
 
     #[test]
     fn terminal_arguments_isolate_the_container() {
+        let light = terminal_args_with(
+            &PROFILES[0],
+            "n",
+            "img",
+            Path::new("/d/main"),
+            "1000:1000",
+            "ls",
+        )
+        .join(" ");
+        assert!(
+            light.contains("--memory 256m")
+                && light.contains("--cpus 0.5")
+                && light.contains("--pids-limit 64")
+        );
+        assert!(
+            light.contains("--network none")
+                && light.contains("--cap-drop ALL")
+                && light.contains("--read-only")
+        );
+        for p in &PROFILES {
+            let joined =
+                terminal_args_with(p, "n", "img", Path::new("/d/x"), "1:1", "ls").join(" ");
+            assert!(
+                joined.contains("--network none") && joined.contains("no-new-privileges"),
+                "{}",
+                p.name
+            );
+        }
+        assert!(profile("build").is_some() && profile("root").is_none());
         let args = terminal_args("n", "img", Path::new("/d/main"), "1000:1000", "ls");
         let joined = args.join(" ");
         for needle in [

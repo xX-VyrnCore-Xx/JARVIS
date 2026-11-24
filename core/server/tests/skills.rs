@@ -125,3 +125,31 @@ fn owner_manages_skills_and_they_activate_from_the_request() {
         "{audit}"
     );
 }
+
+#[test]
+fn the_developer_skills_activate_from_natural_requests() {
+    let mut j = jarvis();
+    for (request, skill) in [
+        ("crea un'app per gestire le spese", "app-completa"),
+        (
+            "serve una landing page moderna per il prodotto",
+            "interfaccia-moderna",
+        ),
+        ("rivedi il codice di questa funzione", "revisione-codice"),
+        ("ho questo traceback in produzione", "debug"),
+        ("scrivi i test per il modulo fatture", "test-software"),
+        ("progetta le api per gli ordini", "api-design"),
+        ("progetta il database dei clienti", "database"),
+        ("scrivi un dockerfile per il servizio", "devops"),
+        (
+            "controlla la sql injection in questo endpoint",
+            "sicurezza-applicativa",
+        ),
+    ] {
+        let out = j.chat(request).unwrap().to_json();
+        assert!(
+            skill_steps(&out).iter().any(|s| s == skill),
+            "{request} -> {skill}: {out}"
+        );
+    }
+}

@@ -11,7 +11,12 @@ use serde_json::{json, Value};
 pub struct Store {
     pub(crate) conn: Connection,
     chat_cipher: Option<Arc<ChatCipher>>,
+    /// Chat in cui finiscono i nuovi messaggi (ADR-0143).
+    active: std::sync::Mutex<String>,
 }
+
+/// Chat predefinita: contiene anche tutta la cronologia precedente alle chat multiple.
+pub const MAIN_CONVERSATION: &str = "main";
 
 pub type StoreResult<T> = Result<T, rusqlite::Error>;
 
@@ -104,9 +109,33 @@ impl Store {
         {
             conn.execute_batch("ALTER TABLE messages ADD COLUMN cloud_provider TEXT;")?;
         }
+        // Chat multiple (ADR-0143): migrazione additiva, i messaggi esistenti restano nella chat principale.
+        if conn
+            .prepare("SELECT conversation FROM messages LIMIT 0")
+            .is_err()
+        {
+            conn.execute_batch(
+                "ALTER TABLE messages ADD COLUMN conversation TEXT NOT NULL DEFAULT 'main';",
+            )?;
+        }
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS conversations (id TEXT PRIMARY KEY, created_at TEXT NOT NULL,
+                 updated_at TEXT NOT NULL);
+             CREATE INDEX IF NOT EXISTS messages_by_conversation ON messages (conversation, seq);
+             INSERT OR IGNORE INTO conversations (id, created_at, updated_at)
+                 VALUES ('main', '1970-01-01T00:00:00Z', '1970-01-01T00:00:00Z');",
+        )?;
+        let active: String = conn
+            .query_row(
+                "SELECT id FROM conversations ORDER BY updated_at DESC LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or_else(|_| MAIN_CONVERSATION.to_string());
         let store = Self {
             conn,
             chat_cipher: None,
+            active: std::sync::Mutex::new(active),
         };
         store.memory_migrate()?;
         crate::skills::migrate(&store)?;
@@ -220,8 +249,39 @@ impl Store {
             self.conn
                 .execute("UPDATE chat_crypto_migration SET stage=2", [])?;
         }
+        // Le notifiche contengono sintesi di attività, briefing e promemoria: si cifrano come la chat (ADR-0149).
+        // Idempotente: le righe già cifrate (prefisso) non si toccano.
+        {
+            let rows: Vec<(String, String)> = {
+                let mut select = self.conn.prepare(
+                    "SELECT notification_id, doc FROM notifications WHERE doc NOT LIKE 'enc:v1:%'",
+                )?;
+                let collected = select
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                collected
+            };
+            if !rows.is_empty() {
+                let tx = self.conn.transaction()?;
+                for (id, doc) in rows {
+                    let sealed = cipher
+                        .seal(&format!("notification:{id}"), &doc)
+                        .map_err(crypto_error)?;
+                    tx.execute(
+                        "UPDATE notifications SET doc = ?1 WHERE notification_id = ?2",
+                        params![sealed, id],
+                    )?;
+                }
+                tx.commit()?;
+            }
+        }
         self.chat_cipher = Some(cipher);
         Ok(())
+    }
+
+    /// Vero se i campi sensibili (chat, attività, notifiche) sono cifrati a riposo.
+    pub fn chat_protected(&self) -> bool {
+        self.chat_cipher.is_some()
     }
 
     fn seal_chat(&self, purpose: &str, value: &str) -> StoreResult<String> {
@@ -528,9 +588,14 @@ impl Store {
         cloud_provider: Option<&str>,
     ) -> StoreResult<()> {
         let purpose = message_purpose(role, Some(task_id), at);
+        let conversation = self.conversation_active();
         self.conn.execute(
-            "INSERT INTO messages (role, content, task_id, at, sources, cloud_provider)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "UPDATE conversations SET updated_at = ?2 WHERE id = ?1",
+            params![conversation, at],
+        )?;
+        self.conn.execute(
+            "INSERT INTO messages (role, content, task_id, at, sources, cloud_provider, conversation)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 role,
                 self.seal_chat(&format!("{purpose}:content"), content)?,
@@ -539,10 +604,128 @@ impl Store {
                 sources
                     .map(|s| self.seal_chat(&format!("{purpose}:sources"), &s.to_string()))
                     .transpose()?,
-                cloud_provider
+                cloud_provider,
+                conversation
             ],
         )?;
         Ok(())
+    }
+
+    /// Chat attiva: quella in cui finiscono i nuovi messaggi.
+    pub fn conversation_active(&self) -> String {
+        self.active
+            .lock()
+            .map(|a| a.clone())
+            .unwrap_or_else(|_| MAIN_CONVERSATION.to_string())
+    }
+
+    pub(crate) fn conversation_exists(&self, id: &str) -> bool {
+        self.conn
+            .query_row(
+                "SELECT 1 FROM conversations WHERE id = ?1",
+                [id],
+                |_| Ok(()),
+            )
+            .optional()
+            .map(|r| r.is_some())
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn set_active(&self, id: &str) {
+        if let Ok(mut active) = self.active.lock() {
+            *active = id.to_string();
+        }
+    }
+
+    /// Apre una chat nuova e vuota e la rende attiva.
+    pub fn conversation_new(&self, at: &str) -> StoreResult<String> {
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        self.conn.execute(
+            "INSERT INTO conversations (id, created_at, updated_at) VALUES (?1, ?2, ?2)",
+            params![id, at],
+        )?;
+        self.set_active(&id);
+        Ok(id)
+    }
+
+    /// Rende attiva una chat esistente; falso se non esiste.
+    pub fn conversation_select(&self, id: &str, at: &str) -> StoreResult<bool> {
+        let changed = self.conn.execute(
+            "UPDATE conversations SET updated_at = ?2 WHERE id = ?1",
+            params![id, at],
+        )?;
+        if changed > 0 {
+            self.set_active(id);
+        }
+        Ok(changed > 0)
+    }
+
+    /// Elimina una chat con i suoi messaggi. La principale viene solo svuotata.
+    pub fn conversation_delete(&self, id: &str) -> StoreResult<bool> {
+        let removed = self
+            .conn
+            .execute("DELETE FROM messages WHERE conversation = ?1", [id])?;
+        let existed = if id == MAIN_CONVERSATION {
+            removed > 0
+        } else {
+            self.conn
+                .execute("DELETE FROM conversations WHERE id = ?1", [id])?
+                > 0
+        };
+        if existed && self.conversation_active() == id {
+            self.set_active(MAIN_CONVERSATION);
+        }
+        Ok(existed)
+    }
+
+    /// Chat recenti: titolo ricavato dal primo messaggio (mai salvato in chiaro), numero di messaggi, attiva.
+    pub fn conversation_list(&self, limit: u32) -> StoreResult<Vec<Value>> {
+        let active = self.conversation_active();
+        let mut stmt = self.conn.prepare(
+            "SELECT c.id, c.created_at, c.updated_at,
+                    (SELECT COUNT(*) FROM messages m WHERE m.conversation = c.id)
+             FROM conversations c ORDER BY c.updated_at DESC LIMIT ?1",
+        )?;
+        let rows: Vec<(String, String, String, i64)> = stmt
+            .query_map([limit], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+            })?
+            .collect::<Result<_, _>>()?;
+        let mut out = Vec::new();
+        for (id, created, updated, count) in rows {
+            let first = self
+                .conn
+                .query_row(
+                    "SELECT content, task_id, at FROM messages
+                     WHERE conversation = ?1 AND role = 'user' ORDER BY seq LIMIT 1",
+                    [&id],
+                    |r| {
+                        let task: Option<String> = r.get(1)?;
+                        let at: String = r.get(2)?;
+                        let purpose = message_purpose("user", task.as_deref(), &at);
+                        self.open_chat(&format!("{purpose}:content"), r.get(0)?)
+                    },
+                )
+                .optional()?;
+            let title = match (id == MAIN_CONVERSATION, first) {
+                (true, _) => "Chat principale".to_string(),
+                (false, Some(text)) => {
+                    let line = text.lines().next().unwrap_or_default().trim().to_string();
+                    let clipped: String = line.chars().take(48).collect();
+                    if line.chars().count() > 48 {
+                        format!("{clipped}…")
+                    } else {
+                        clipped
+                    }
+                }
+                (false, None) => "Nuova chat".to_string(),
+            };
+            out.push(json!({
+                "id": id, "title": title, "created_at": created, "updated_at": updated,
+                "messages": count, "active": id == active,
+            }));
+        }
+        Ok(out)
     }
 
     /// Ultimi `limit` messaggi in ordine cronologico.
@@ -554,11 +737,12 @@ impl Store {
         let mut stmt = self.conn.prepare(
             "SELECT m.role, m.content, m.task_id, m.at, m.sources, m.seq,
                     f.provider, f.model, f.rating
-             FROM (SELECT * FROM messages ORDER BY seq DESC LIMIT ?1) AS m
+             FROM (SELECT * FROM messages WHERE conversation = ?3 ORDER BY seq DESC LIMIT ?1) AS m
              LEFT JOIN cloud_feedback AS f ON ?2 AND m.role = 'assistant' AND f.task_id = m.task_id
              ORDER BY m.seq",
         )?;
-        let rows = stmt.query_map(params![limit, owner], |r| {
+        let active = self.conversation_active();
+        let rows = stmt.query_map(params![limit, owner, active], |r| {
             let role: String = r.get(0)?;
             let task: Option<String> = r.get(2)?;
             let at: String = r.get(3)?;
@@ -607,7 +791,7 @@ impl Store {
     pub(crate) fn recent_cloud_turns(&self) -> StoreResult<Vec<ConversationTurn>> {
         let mut stmt = self.conn.prepare(
             "SELECT user.content, user.task_id, user.at, answer.content, answer.at, answer.cloud_provider
-             FROM (SELECT seq, task_id, content, at FROM messages WHERE role = 'user'
+             FROM (SELECT seq, task_id, content, at FROM messages WHERE role = 'user' AND conversation = ?1
                    ORDER BY seq DESC LIMIT 8) AS user
              LEFT JOIN messages AS answer ON answer.seq = (
                  SELECT seq FROM messages WHERE task_id = user.task_id AND role = 'assistant'
@@ -615,7 +799,7 @@ impl Store {
              )
              ORDER BY user.seq DESC",
         )?;
-        let rows = stmt.query_map([], |r| {
+        let rows = stmt.query_map([self.conversation_active()], |r| {
             let task: Option<String> = r.get(1)?;
             let at: String = r.get(2)?;
             let user = message_purpose("user", task.as_deref(), &at);
@@ -814,7 +998,8 @@ impl Store {
     pub fn notification_put(&self, doc: &Value, keep: u32) -> StoreResult<()> {
         self.conn.execute(
             "INSERT INTO notifications (notification_id, created_at, dedupe_key, read_at, doc) VALUES (?1, ?2, ?3, NULL, ?4)",
-            params![doc["notification_id"].as_str(), doc["created_at"].as_str(), doc["dedupe_key"].as_str(), doc.to_string()],
+            params![doc["notification_id"].as_str(), doc["created_at"].as_str(), doc["dedupe_key"].as_str(),
+                self.seal_chat(&format!("notification:{}", doc["notification_id"].as_str().unwrap_or_default()), &doc.to_string())?],
         )?;
         // Conservazione: restano le `keep` notifiche più recenti.
         self.conn.execute(
@@ -839,14 +1024,28 @@ impl Store {
         since: Option<&str>,
     ) -> StoreResult<Vec<Value>> {
         let mut stmt = self.conn.prepare(
-            "SELECT doc, read_at FROM notifications WHERE (?1 = 0 OR read_at IS NULL) AND (?2 IS NULL OR created_at > ?2)
+            "SELECT notification_id, doc, read_at FROM notifications WHERE (?1 = 0 OR read_at IS NULL) AND (?2 IS NULL OR created_at > ?2)
              ORDER BY created_at DESC LIMIT ?3",
         )?;
         let rows = stmt.query_map(params![unread_only as i32, since, limit], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, Option<String>>(2)?,
+            ))
         })?;
-        rows.map(|r| r.map(|(d, read)| Self::with_read(d, read)))
-            .collect()
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, doc, read) = row?;
+            // Righe scritte prima della cifratura restano leggibili finché non vengono migrate.
+            let text = if doc.starts_with(crate::chat_crypto::PREFIX) {
+                self.open_chat(&format!("notification:{id}"), doc)?
+            } else {
+                doc
+            };
+            out.push(Self::with_read(text, read));
+        }
+        Ok(out)
     }
 
     pub fn notifications_unread(&self) -> StoreResult<u32> {

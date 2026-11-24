@@ -477,6 +477,40 @@ impl Store {
         Ok(true)
     }
 
+    /// Fissa o libera un ricordo (ADR-0145): un ricordo fissato è sempre nel contesto e non scade.
+    pub fn memory_pin(&self, id: &str, pinned: bool) -> StoreResult<bool> {
+        let Some(source) = self
+            .conn
+            .query_row("SELECT source FROM memory WHERE id = ?1", [id], |r| {
+                r.get::<_, Option<String>>(0)
+            })
+            .optional()?
+        else {
+            return Ok(false);
+        };
+        let mut doc = source
+            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+            .filter(Value::is_object)
+            .unwrap_or_else(|| json!({}));
+        doc["pinned"] = json!(pinned);
+        self.conn.execute(
+            "UPDATE memory SET source = ?2, expires_at = CASE WHEN ?3 THEN NULL ELSE expires_at END WHERE id = ?1",
+            params![id, doc.to_string(), pinned],
+        )?;
+        Ok(true)
+    }
+
+    /// Ricordi fissati, dal più recente.
+    pub fn memory_pinned(&self, limit: usize) -> StoreResult<Vec<Value>> {
+        let sql = format!(
+            "SELECT {} FROM memory WHERE source LIKE '%\"pinned\":true%' ORDER BY created_at DESC LIMIT ?1",
+            Self::COLUMNS
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map([limit as i64], Self::memory_row)?;
+        rows.collect()
+    }
+
     fn memory_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<Value> {
         let source: Option<String> = r.get(4)?;
         Ok(json!({
@@ -484,6 +518,10 @@ impl Store {
             "text": r.get::<_, String>(1)?,
             "created_at": r.get::<_, String>(2)?,
             "kind": r.get::<_, String>(3)?,
+            "pinned": source
+                .as_deref()
+                .and_then(|s| serde_json::from_str::<Value>(s).ok())
+                .is_some_and(|s| s["pinned"] == true),
             "source": source.and_then(|s| serde_json::from_str::<Value>(&s).ok()).unwrap_or(Value::Null),
             "updated_at": r.get::<_, Option<String>>(5)?,
             "expires_at": r.get::<_, Option<String>>(6)?,

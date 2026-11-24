@@ -600,6 +600,283 @@ fn cloud_context_requires_opt_in_and_stays_with_the_provider() {
 }
 
 #[tokio::test]
+async fn new_chats_keep_their_own_history() {
+    let e = env();
+    e.api(
+        "POST",
+        "/api/chat",
+        Some(json!({"message": "che ore sono"})),
+    )
+    .await;
+    let (_, first) = e.api("GET", "/api/conversation", None).await;
+    assert!(!first["items"].as_array().unwrap().is_empty());
+    let (status, created) = e.api("POST", "/api/conversations", Some(json!({}))).await;
+    assert_eq!(status, StatusCode::OK);
+    let new_id = created["id"].as_str().unwrap().to_string();
+    // La chat nuova è vuota e attiva; la cronologia precedente non entra nel suo contesto.
+    let (_, empty) = e.api("GET", "/api/conversation", None).await;
+    assert_eq!(empty["items"], json!([]));
+    e.api(
+        "POST",
+        "/api/chat",
+        Some(json!({"message": "ricorda che il progetto si chiama Aurora"})),
+    )
+    .await;
+    let (_, list) = e.api("GET", "/api/conversations", None).await;
+    assert_eq!(list["active"], new_id);
+    let items = list["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["id"], new_id);
+    assert!(items[0]["title"]
+        .as_str()
+        .unwrap()
+        .starts_with("ricorda che il progetto"));
+    assert_eq!(items[1]["title"], "Chat principale");
+    // Si torna alla chat principale e la sua cronologia è intatta.
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/conversations/select",
+            Some(json!({"id": "main"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, back) = e.api("GET", "/api/conversation", None).await;
+    assert_eq!(back["items"], first["items"]);
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/conversations/select",
+            Some(json!({"id": "inesistente"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // Eliminare una chat rimuove solo i suoi messaggi.
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/conversations/delete",
+            Some(json!({"id": new_id})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (_, list) = e.api("GET", "/api/conversations", None).await;
+    assert_eq!(list["items"].as_array().unwrap().len(), 1);
+    assert_eq!(list["active"], "main");
+}
+
+#[tokio::test]
+async fn background_jobs_finish_without_the_app_and_write_to_their_own_chat() {
+    let e = env();
+    // Lavoro avviato dalla chat principale, poi l'utente apre una chat nuova.
+    let (status, job) = e
+        .api(
+            "POST",
+            "/api/cloud/background",
+            Some(json!({"message": "che ore sono", "conversation_id": "main"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert_eq!(job["status"], "running");
+    e.api("POST", "/api/conversations", Some(json!({}))).await;
+    let mut finished = Value::Null;
+    for _ in 0..100 {
+        let (_, jobs) = e.api("GET", "/api/cloud/jobs", None).await;
+        if jobs["items"][0]["status"] != "running" {
+            finished = jobs["items"][0].clone();
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert_eq!(finished["id"], job["id"]);
+    assert!(
+        matches!(finished["status"].as_str(), Some("done" | "error")),
+        "{finished}"
+    );
+    // La chat attiva (quella nuova) non è stata toccata; la risposta è nella chat principale.
+    let (_, active) = e.api("GET", "/api/conversation", None).await;
+    assert_eq!(active["items"], json!([]));
+    e.api(
+        "POST",
+        "/api/conversations/select",
+        Some(json!({"id": "main"})),
+    )
+    .await;
+    let (_, main) = e.api("GET", "/api/conversation", None).await;
+    if finished["status"] == "done" {
+        assert!(!main["items"].as_array().unwrap().is_empty(), "{main}");
+    }
+    // L'esito arriva come notifica anche se nessuna app è aperta.
+    let (_, inbox) = e.api("GET", "/api/notifications?limit=20", None).await;
+    assert!(inbox["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|n| n["source"]["id"] == "cloud-background"));
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/cloud/background",
+            Some(json!({"message": "  "})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn pinned_memories_never_expire_and_closed_chats_leave_an_episode() {
+    let e = env();
+    e.api(
+        "POST",
+        "/api/chat",
+        Some(json!({"message": "ricorda che il budget del progetto Aurora è 50000 euro"})),
+    )
+    .await;
+    let (_, list) = e.api("GET", "/api/memory", None).await;
+    let item = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["text"].as_str().is_some_and(|t| t.contains("Aurora")))
+        .expect("ricordo salvato")
+        .clone();
+    assert_eq!(item["pinned"], false);
+    let id = item["id"].as_str().unwrap();
+    let (status, pinned) = e
+        .api(
+            "POST",
+            &format!("/api/memory/{id}/pin"),
+            Some(json!({"pinned": true})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(pinned["pinned"], true);
+    let (_, list) = e.api("GET", "/api/memory", None).await;
+    let item = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["id"] == id)
+        .unwrap();
+    assert_eq!(item["pinned"], true);
+    assert!(item["expires_at"].is_null());
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/memory/inesistente/pin",
+            Some(json!({"pinned": true})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // Una chat con almeno due richieste lascia un episodio quando se ne apre una nuova.
+    e.api(
+        "POST",
+        "/api/chat",
+        Some(json!({"message": "che ore sono"})),
+    )
+    .await;
+    e.api(
+        "POST",
+        "/api/chat",
+        Some(json!({"message": "che giorno è oggi"})),
+    )
+    .await;
+    e.api("POST", "/api/conversations", Some(json!({}))).await;
+    let (_, after) = e.api("GET", "/api/memory?kind=episodic", None).await;
+    assert!(after["items"].as_array().unwrap().iter().any(|m| m["text"]
+        .as_str()
+        .is_some_and(|t| t.starts_with("Chat del "))));
+    let (_, un) = e
+        .api(
+            "POST",
+            &format!("/api/memory/{id}/pin"),
+            Some(json!({"pinned": false})),
+        )
+        .await;
+    assert_eq!(un["pinned"], false);
+}
+
+#[tokio::test]
+async fn the_openapi_document_only_lists_routes_that_exist() {
+    let e = env();
+    let (status, doc) = e.api("GET", "/api/openapi.json", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(doc["openapi"], "3.1.0");
+    for (method, path, _, _, _) in jarvis_core::openapi::ROUTES {
+        if *method != "GET" || path.contains('{') || path.ends_with("/stream") {
+            continue;
+        }
+        let (status, _) = e.api("GET", path, None).await;
+        assert_ne!(
+            status,
+            StatusCode::NOT_FOUND,
+            "{path} dichiarata ma assente"
+        );
+        assert_ne!(status, StatusCode::METHOD_NOT_ALLOWED, "{path}");
+    }
+}
+
+#[tokio::test]
+async fn confirmations_say_what_happened_and_the_title_is_configurable() {
+    let e = env();
+    let (_, persona) = e.api("GET", "/api/persona", None).await;
+    assert_eq!(persona["address"], "Signore");
+    assert_eq!(persona["address_frequency"], "rare");
+    assert_eq!(persona["formal"], true);
+    let (status, saved) = e
+        .api(
+            "PATCH",
+            "/api/persona",
+            Some(json!({"address": "Capo", "address_frequency": "often", "formal": false})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(saved["address"], "Capo");
+    let message = saved["message"].as_str().unwrap();
+    assert!(message.contains("Personalità aggiornata"), "{message}");
+    assert!(!message.to_lowercase().contains("operazione completata"));
+    let (status, _) = e
+        .api(
+            "PATCH",
+            "/api/persona",
+            Some(json!({"address_frequency": "sempre"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (_, pinned) = e.api("POST", "/api/conversations", Some(json!({}))).await;
+    assert!(pinned["message"]
+        .as_str()
+        .unwrap()
+        .contains("Nuova chat pronta"));
+}
+
+#[tokio::test]
+async fn protection_reports_encryption_posture_and_docker_profiles() {
+    let e = env();
+    let (status, security) = e.api("GET", "/api/security", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let score = security["posture"]["score"].as_u64().unwrap();
+    assert!(score <= 100);
+    assert!(["alta", "media", "bassa"].contains(&security["posture"]["level"].as_str().unwrap()));
+    assert!(security["posture"]["items"].as_array().unwrap().len() >= 5);
+    assert_eq!(security["encryption"]["algorithm"], "XChaCha20-Poly1305");
+    assert!(security["encryption"]["covers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|c| c == "notifiche"));
+    let (status, docker) = e.api("GET", "/api/docker", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let profiles = docker["profiles"].as_array().unwrap();
+    assert_eq!(profiles.len(), 4);
+    assert!(profiles
+        .iter()
+        .any(|p| p["name"] == "light" && p["memory_mb"] == 256));
+    assert!(docker["docker"]["state"].is_string() && docker["docker"]["hint"].is_string());
+    assert_eq!(docker["limits"]["network"], "none");
+}
+
+#[tokio::test]
 async fn tailscale_status_is_reported_without_authorising_anything() {
     let e = env();
     let (status, view) = e.api("GET", "/api/tailscale", None).await;

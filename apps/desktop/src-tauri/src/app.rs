@@ -238,6 +238,14 @@ enum Event {
     Profile(Result<Value, String>),
     /// Stato della voce di sistema maschile (ADR-0123).
     VoiceStatus(Result<Value, String>),
+    /// Chat recenti (ADR-0143).
+    Conversations(Result<Value, String>),
+    /// Una chat è stata aperta, scelta o eliminata: si ricarica la cronologia.
+    ChatChanged(Result<Value, String>),
+    /// Lavoro cloud avviato in background (ADR-0144).
+    BackgroundStarted(Result<Value, String>),
+    /// Lavori in background ancora in corso.
+    BackgroundRunning(usize),
     /// Comando pronunciato dopo «Hey Jarvis» (ADR-0140).
     #[cfg_attr(not(windows), allow(dead_code))]
     WakeCommand(String),
@@ -287,6 +295,13 @@ pub struct JarvisApp {
     history_loading: bool,
     chat_busy: bool,
     chat_cloud_context: bool,
+    chat_background: bool,
+    /// Conferma dell'ultima azione riuscita, mostrata per qualche secondo (ADR-0148).
+    action_notice: Option<(String, Instant)>,
+    background_running: usize,
+    background_polled: Instant,
+    conversations: Vec<Value>,
+    conversations_loaded: bool,
     notifications: Vec<Value>,
     notifications_error: Option<String>,
     confirmations: Vec<Value>,
@@ -342,6 +357,8 @@ pub struct JarvisApp {
     wake_shared: Option<Arc<crate::wake::Shared>>,
     persona_style: String,
     persona_address: String,
+    persona_frequency: String,
+    persona_formal: bool,
     profile_loaded: bool,
     public_host: String,
     profile_doc: Value,
@@ -431,6 +448,12 @@ impl JarvisApp {
             history_loading: false,
             chat_busy: false,
             chat_cloud_context: true,
+            chat_background: false,
+            action_notice: None,
+            background_running: 0,
+            background_polled: Instant::now(),
+            conversations: Vec::new(),
+            conversations_loaded: false,
             notifications: Vec::new(),
             notifications_error: None,
             confirmations: Vec::new(),
@@ -483,7 +506,9 @@ impl JarvisApp {
             voice_status_seen: false,
             wake_shared: None,
             persona_style: "film".into(),
-            persona_address: String::new(),
+            persona_address: "Signore".into(),
+            persona_frequency: "rare".into(),
+            persona_formal: true,
             profile_loaded: false,
             public_host: String::new(),
             profile_doc: Value::Null,
@@ -551,6 +576,50 @@ impl JarvisApp {
                     self.chat = parse_history(&history);
                     ctx.request_repaint();
                 }
+                Event::Conversations(result) => {
+                    if let Ok(doc) = result {
+                        self.conversations = doc["items"].as_array().cloned().unwrap_or_default();
+                    }
+                }
+                Event::ChatChanged(result) => {
+                    match result {
+                        Ok(_) => {
+                            self.chat.clear();
+                            self.confirmations.clear();
+                            self.error = None;
+                            self.load_history();
+                            self.load_conversations();
+                        }
+                        Err(error) => self.error = Some(error),
+                    }
+                    ctx.request_repaint();
+                }
+                Event::BackgroundRunning(count) => {
+                    if self.background_running > 0 && count == 0 {
+                        // Finito: la risposta è nella chat, si ricarica la cronologia.
+                        self.load_history();
+                        self.load_conversations();
+                    }
+                    self.background_running = count;
+                    ctx.request_repaint();
+                }
+                Event::BackgroundStarted(result) => {
+                    match result {
+                        Ok(_) => {
+                            self.background_running = self.background_running.max(1);
+                            self.background_polled = Instant::now() - Duration::from_secs(60);
+                            self.chat.push(ChatMessage {
+                            role: "assistant",
+                            text: "Lavoro avviato in background: continua anche se chiudi o nascondi l'app e ti avviso con una notifica quando ha finito. La risposta resterà in questa chat.".into(),
+                            });
+                        }
+                        Err(error) => self.chat.push(ChatMessage {
+                            role: "assistant",
+                            text: format!("Errore: {error}"),
+                        }),
+                    }
+                    ctx.request_repaint();
+                }
                 Event::History(Err(error)) => {
                     self.history_loading = false;
                     self.error = Some(error);
@@ -584,7 +653,12 @@ impl JarvisApp {
                 Event::ActionDone(result) => {
                     self.loading = false;
                     match result {
-                        Ok(_) => self.error = None,
+                        Ok(doc) => {
+                            self.error = None;
+                            if let Some(message) = doc["message"].as_str() {
+                                self.action_notice = Some((message.to_owned(), Instant::now()));
+                            }
+                        }
                         Err(error) => self.error = Some(error),
                     }
                     self.data = None;
@@ -606,6 +680,11 @@ impl JarvisApp {
                             self.persona_style = doc["style"].as_str().unwrap_or("film").to_owned();
                             self.persona_address =
                                 doc["address"].as_str().unwrap_or_default().to_owned();
+                            self.persona_frequency = doc["address_frequency"]
+                                .as_str()
+                                .unwrap_or("rare")
+                                .to_owned();
+                            self.persona_formal = doc["formal"].as_bool().unwrap_or(true);
                             self.persona_loaded = true;
                         }
                         Err(error) => self.error = Some(error),
@@ -854,6 +933,27 @@ impl JarvisApp {
         });
     }
 
+    fn load_conversations(&self) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(Event::Conversations(client.get("/api/conversations")));
+        });
+    }
+
+    /// Chiede al Core di aprire, scegliere o eliminare una chat e poi ricarica la cronologia.
+    fn change_chat(&self, path: &'static str, body: Option<Value>) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(Event::ChatChanged(client.post(path, body.as_ref())));
+        });
+    }
+
     fn load_history(&self) {
         let Some(client) = self.client.clone() else {
             return;
@@ -1025,6 +1125,32 @@ impl JarvisApp {
     #[cfg(not(target_os = "windows"))]
     fn sync_wake(&mut self, _ctx: &egui::Context) {}
 
+    /// Finché un lavoro in background è in corso controlla ogni pochi secondi se ha finito.
+    fn poll_background(&mut self, ctx: &egui::Context) {
+        if self.background_running == 0
+            || self.remote
+            || self.background_polled.elapsed() < Duration::from_secs(5)
+        {
+            return;
+        }
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        self.background_polled = Instant::now();
+        let tx = self.tx.clone();
+        let repaint = ctx.clone();
+        std::thread::spawn(move || {
+            if let Ok(doc) = client.get("/api/cloud/jobs") {
+                let running = doc["items"].as_array().map_or(0, |jobs| {
+                    jobs.iter().filter(|j| j["status"] == "running").count()
+                });
+                let _ = tx.send(Event::BackgroundRunning(running));
+                repaint.request_repaint();
+            }
+        });
+        ctx.request_repaint_after(Duration::from_secs(5));
+    }
+
     fn send_chat(&mut self) {
         let message = self.chat_input.trim().to_string();
         if message.is_empty() || self.chat_busy || self.history_loading {
@@ -1045,6 +1171,19 @@ impl JarvisApp {
         self.chat_busy = true;
         let tx = self.tx.clone();
         let use_context = self.chat_cloud_context && !self.remote;
+        if self.chat_background && !self.remote {
+            // Lavoro in background (ADR-0144): parte subito e prosegue nel Core anche con l'app in secondo piano.
+            self.chat.pop();
+            self.chat_busy = false;
+            std::thread::spawn(move || {
+                let result = client.post(
+                    "/api/cloud/background",
+                    Some(&json!({"message": message, "provider": "auto", "use_context": use_context})),
+                );
+                let _ = tx.send(Event::BackgroundStarted(result));
+            });
+            return;
+        }
         std::thread::spawn(move || {
             let deltas = tx.clone();
             let result = client.cloud_chat_stream(&message, use_context, &mut |piece| {
@@ -1243,6 +1382,15 @@ impl JarvisApp {
                 egui::Color32::from_rgb(177, 245, 246),
                 active,
             );
+            // Piastrella dietro l'icona: si accende con il passaggio del puntatore e con la pagina attiva.
+            painter.rect_filled(
+                egui::Rect::from_center_size(
+                    egui::pos2(rect.left() + 22.0, rect.center().y),
+                    egui::vec2(26.0, 26.0),
+                ),
+                egui::CornerRadius::same(8),
+                crate::avatar::alpha(ACCENT, 0.05 + 0.07 * hover + 0.12 * active),
+            );
             draw_nav_icon(
                 painter,
                 egui::pos2(rect.left() + 22.0, rect.center().y),
@@ -1371,6 +1519,44 @@ impl JarvisApp {
 
     fn show_chat(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         if !self.remote {
+            if !self.conversations_loaded {
+                self.conversations_loaded = true;
+                self.load_conversations();
+            }
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("＋ Nuova chat").clicked() {
+                    self.change_chat("/api/conversations", Some(json!({})));
+                }
+                let active = self
+                    .conversations
+                    .iter()
+                    .find(|c| c["active"] == true)
+                    .and_then(|c| c["title"].as_str())
+                    .unwrap_or("Chat principale")
+                    .to_owned();
+                egui::ComboBox::from_id_salt("chat-picker")
+                    .selected_text(active)
+                    .width(220.0)
+                    .show_ui(ui, |ui| {
+                        for chat in self.conversations.clone() {
+                            let title = chat["title"].as_str().unwrap_or("Chat");
+                            if ui
+                                .selectable_label(chat["active"] == true, title)
+                                .clicked()
+                                && chat["active"] != true
+                            {
+                                self.change_chat(
+                                    "/api/conversations/select",
+                                    Some(json!({"id": chat["id"]})),
+                                );
+                            }
+                        }
+                    });
+                ui.checkbox(&mut self.chat_background, "In background")
+                    .on_hover_text(
+                        "JARVIS lavora nel cloud anche se l'app è in secondo piano o chiusa e ti avvisa alla fine.",
+                    );
+            });
             ui.checkbox(
                 &mut self.chat_cloud_context,
                 "Ricorda la conversazione recente",
@@ -1562,6 +1748,26 @@ impl JarvisApp {
     }
 
     fn show_data(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if let Some((message, shown)) = self.action_notice.clone() {
+            if shown.elapsed() < Duration::from_secs(7) {
+                egui::Frame::new()
+                    .fill(RAISED)
+                    .stroke(egui::Stroke::new(1.0, crate::avatar::alpha(POSITIVE, 0.55)))
+                    .corner_radius(12)
+                    .inner_margin(egui::Margin::symmetric(12, 8))
+                    .show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
+                        ui.horizontal_wrapped(|ui| {
+                            ui.colored_label(POSITIVE, "✔");
+                            ui.label(message);
+                        });
+                    });
+                ui.add_space(6.0);
+                ctx.request_repaint_after(Duration::from_secs(1));
+            } else {
+                self.action_notice = None;
+            }
+        }
         match self.current.as_str() {
             "dashboard" => {
                 self.show_dashboard(ui, ctx);
@@ -2098,6 +2304,7 @@ impl JarvisApp {
                                     talking: self
                                         .speaking_until
                                         .is_some_and(|end| end > Instant::now()),
+                                    working: self.background_running > 0,
                                 };
                                 crate::avatar::draw(ui, ctx, self.reduce_motion, side, mood);
                             },
@@ -2308,6 +2515,7 @@ impl JarvisApp {
             self.go(ctx, page);
         }
 
+        self.show_dashboard_protection(ui, &data["security"]);
         self.show_dashboard_backends(ui, ctx);
 
         if ui.available_width() >= 820.0 {
@@ -2376,6 +2584,86 @@ impl JarvisApp {
                 ui.label(egui::RichText::new(format!("v{version}")).small().weak());
             }
         });
+    }
+
+    /// Scheda «Protezione» (ADR-0149): punteggio, cifratura a riposo e controlli da sistemare.
+    fn show_dashboard_protection(&self, ui: &mut egui::Ui, security: &Value) {
+        let Some(score) = security["posture"]["score"].as_u64() else {
+            return;
+        };
+        let color = match score {
+            90..=100 => POSITIVE,
+            60..=89 => CAUTION,
+            _ => NEGATIVE,
+        };
+        ui.add_space(14.0);
+        egui::Frame::new()
+            .fill(SURFACE)
+            .stroke(egui::Stroke::new(1.0, crate::avatar::alpha(color, 0.45)))
+            .corner_radius(16)
+            .inner_margin(14)
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.horizontal_wrapped(|ui| {
+                    ui.heading("Protezione");
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{score}/100 · livello {}",
+                            security["posture"]["level"].as_str().unwrap_or("—")
+                        ))
+                        .strong()
+                        .color(color),
+                    );
+                });
+                ui.add(
+                    egui::ProgressBar::new(score as f32 / 100.0)
+                        .fill(color)
+                        .desired_height(8.0),
+                );
+                ui.add_space(6.0);
+                let encryption = &security["encryption"];
+                let at_rest = encryption["chat_at_rest"] == true;
+                ui.label(
+                    egui::RichText::new(if at_rest {
+                        format!(
+                            "🔒 Cifratura a riposo attiva ({}): {}",
+                            encryption["algorithm"].as_str().unwrap_or("AEAD"),
+                            encryption["covers"]
+                                .as_array()
+                                .map(|items| items
+                                    .iter()
+                                    .filter_map(Value::as_str)
+                                    .collect::<Vec<_>>()
+                                    .join(", "))
+                                .unwrap_or_default()
+                        )
+                    } else {
+                        "🔓 Cifratura a riposo non attiva: manca il portachiavi di sistema".into()
+                    })
+                    .color(if at_rest { POSITIVE } else { CAUTION }),
+                );
+                for item in security["posture"]["items"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                {
+                    let ok = item["ok"] == true;
+                    ui.horizontal_wrapped(|ui| {
+                        ui.colored_label(
+                            if ok { POSITIVE } else { CAUTION },
+                            if ok { "✔" } else { "▲" },
+                        );
+                        ui.label(item["label"].as_str().unwrap_or(""));
+                        if !ok {
+                            ui.label(
+                                egui::RichText::new(item["advice"].as_str().unwrap_or(""))
+                                    .small()
+                                    .weak(),
+                            );
+                        }
+                    });
+                }
+            });
     }
 
     fn show_dashboard_backends(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -3166,6 +3454,40 @@ impl JarvisApp {
                     "/api/persona".into(),
                     Some(json!({"address": address})),
                 );
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Quanto spesso:");
+            for (value, label) in [("never", "Mai"), ("rare", "Di rado"), ("often", "Spesso")] {
+                if ui
+                    .selectable_label(self.persona_frequency == value, label)
+                    .clicked()
+                    && self.persona_frequency != value
+                {
+                    self.persona_frequency = value.into();
+                    self.mutate(
+                        &ui.ctx().clone(),
+                        Mutation::Patch,
+                        "/api/persona".into(),
+                        Some(json!({"address_frequency": value})),
+                    );
+                }
+            }
+            ui.separator();
+            for (formal, label) in [(true, "Dammi del lei"), (false, "Dammi del tu")] {
+                if ui
+                    .selectable_label(self.persona_formal == formal, label)
+                    .clicked()
+                    && self.persona_formal != formal
+                {
+                    self.persona_formal = formal;
+                    self.mutate(
+                        &ui.ctx().clone(),
+                        Mutation::Patch,
+                        "/api/persona".into(),
+                        Some(json!({"formal": formal})),
+                    );
+                }
             }
         });
         ui.separator();
@@ -4009,6 +4331,7 @@ impl eframe::App for JarvisApp {
         let ctx = ui.ctx().clone();
         self.receive_events(&ctx);
         self.sync_wake(&ctx);
+        self.poll_background(&ctx);
         if self.current != "models" {
             self.cloud_api_key.clear();
             self.cloud_action_error = None;
@@ -4331,6 +4654,10 @@ fn load_dashboard(
     let mut data = client.get("/api/health")?;
     if let Ok(setup) = client.get("/api/setup") {
         data["first_run"] = setup["first_run"].clone();
+    }
+    // Protezione e cifratura (ADR-0149): solo il proprietario le vede.
+    if let Ok(security) = client.get("/api/security") {
+        data["security"] = security;
     }
     // Nuova versione disponibile (esito dell'ultimo controllo, senza nuove richieste a GitHub).
     if let Ok(updates) = client.get("/api/updates") {
