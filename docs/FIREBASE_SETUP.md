@@ -1,5 +1,26 @@
 # Configurazione Firebase Cloud Messaging
 
+## Verifica rapida
+
+`scripts/check_firebase.py` controlla la configurazione senza mai stampare chiavi o token:
+
+```bash
+python3 scripts/check_firebase.py --google-services google-services.json \
+    --service-account ~/jarvis/fcm-service-account.json \
+    --apk JARVIS_<versione>_android-release.apk \
+    --core http://127.0.0.1:8765 --token <token di sessione>
+```
+
+Le tre parti devono essere tutte a posto, perché una sola mancante basta a non far arrivare le push:
+
+| Parte | Dove si configura | Cosa succede se manca |
+|---|---|---|
+| App Android | Quattro Actions variables `JARVIS_FIREBASE_*`, lette quando si costruisce l'APK | L'APK non contiene gli identificativi e il telefono non può registrarsi: **serve una nuova release dopo aver impostato le variabili** |
+| Core | `JARVIS_FCM_SERVICE_ACCOUNT_FILE` con la chiave di un account di servizio dello stesso progetto | Le registrazioni arrivano ma il Core non può inviare (`GET /api/push/status` mostra `configuration_missing`) |
+| Telefono | Permesso notifiche e «Attiva notifiche push» nella scheda Notifiche | Nessuna registrazione (`registered: 0`) |
+
+Ordine consigliato: 1) variabili e nuova release, 2) file dell'account di servizio sul Core e riavvio, 3) installa l'APK, associa il telefono e attiva le push, 4) premi «Briefing adesso» sul computer con l'app Android in background.
+
 JARVIS invia le notifiche push dal Core ai dispositivi Android associati usando FCM HTTP v1. Le
 notifiche contengono solo un avviso generico e un identificativo: non includono il titolo o il testo
 privato dell'evento.
