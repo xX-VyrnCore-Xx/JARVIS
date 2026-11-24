@@ -1,0 +1,30 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "screen.status",
+  "version": "1.0.0",
+  "summary": "Dice se la lettura privata dello schermo è pronta e cosa manca",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "prerequisites": [
+    "macOS o Windows; Tesseract OCR installato; su macOS il permesso Registrazione schermo"
+  ],
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.desktop:read"
+  ],
+  "errors": [],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "none"
+}

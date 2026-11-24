@@ -17,7 +17,10 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "ai"))
 
 from jarvis_ai.contracts import validation_errors  # noqa: E402
-from jarvis_ai.voice import VoiceError, VoiceService, correct_transcript, read_wav, write_wav  # noqa: E402
+from jarvis_ai.voice import (  # noqa: E402
+    VoiceError, VoiceService, correct_transcript, normalize_command, parse_it_number, polish, read_wav,
+    speech_text, voice_intent, voice_is_male, write_wav,
+)
 from jarvis_ai.worker import handle_line, assistant_handler  # noqa: E402
 
 FIXTURES = ROOT / "tests" / "contracts" / "fixtures" / "valid"
@@ -37,6 +40,89 @@ class TranscriptCorrectionTest(unittest.TestCase):
         for text in ("Scrivi note.txt: qual'è", "un pò in src/main.py", "password=un pò"):
             self.assertEqual(correct_transcript(text, "it"), text)
         self.assertEqual(correct_transcript("qual é", "es"), "qual é")
+
+
+class MaleVoiceTest(unittest.TestCase):
+    def test_only_male_voices_are_accepted(self):
+        for stem in ("it_IT-riccardo-x_low", "en_US-ryan-medium", "en_GB-alan-low"):
+            self.assertTrue(voice_is_male(stem, {}), stem)
+        for stem in ("it_IT-paola-medium", "en_US-lessac-medium", "en_US-amy-low"):
+            self.assertFalse(voice_is_male(stem, {"JARVIS_TTS_VOICE_GENDER": "male"}), "una voce femminile nota non si può forzare")
+        self.assertFalse(voice_is_male("voce-sconosciuta", {}))
+        self.assertTrue(voice_is_male("voce-sconosciuta", {"JARVIS_TTS_VOICE_GENDER": "male"}))
+
+    def test_a_female_voice_is_refused_with_an_explanation(self):
+        import tempfile, os
+        from jarvis_ai import voice
+        with tempfile.TemporaryDirectory() as d:
+            model = Path(d) / "it_IT-paola-medium.onnx"
+            model.write_bytes(b"x")
+            service = VoiceService({"JARVIS_VOICE_ENGINE": "local", "JARVIS_TTS_VOICE": str(model)})
+            self.assertIsNone(service.tts)
+            self.assertTrue(any("maschil" in r or "non installato" in r or "non disponibile" in r for r in service.reasons), service.reasons)
+        err = voice.not_male("it_IT-paola-medium")
+        self.assertEqual(err.code, "voice.not_male")
+        self.assertIn("riccardo", str(err))
+
+    def test_the_synthesis_status_declares_the_male_voice(self):
+        v = VoiceService({"JARVIS_VOICE_ENGINE": "fake"})
+        self.assertEqual(v.status()["tts"]["gender"], "male")
+
+
+class CommandNormalizationTest(unittest.TestCase):
+    def test_spoken_numbers_become_digits_before_units_only(self):
+        self.assertEqual(normalize_command("ricordami tra venti minuti", "it"), "ricordami tra 20 minuti")
+        self.assertEqual(normalize_command("fra trentacinque minuti", "it"), "fra 35 minuti")
+        self.assertEqual(normalize_command("duecento euro", "it"), "200 euro")
+        self.assertEqual(normalize_command("tra un minuto", "it"), "tra un minuto")
+        self.assertEqual(normalize_command("una nota importante", "it"), "una nota importante")
+        self.assertEqual(normalize_command("twenty minutes", "en"), "twenty minutes")
+        for word, value in (("quarantuno", 41), ("ventotto", 28), ("centocinquanta", 150), ("duecentoventi", 220), ("dieci", 10)):
+            self.assertEqual(parse_it_number(word), value, word)
+        self.assertIsNone(parse_it_number("uno"))
+        self.assertIsNone(parse_it_number("casa"))
+
+    def test_control_intents_only_when_they_are_the_whole_phrase(self):
+        for phrase in ("Stop", "basta!", "Jarvis, zitto", "silenzio per favore"):
+            self.assertEqual(voice_intent(phrase), "stop", phrase)
+        self.assertEqual(voice_intent("Ripeti"), "repeat")
+        self.assertEqual(voice_intent("annulla"), "cancel")
+        for phrase in ("non fermarti ora", "stop alla missione di domani", "ripeti il test python"):
+            self.assertIsNone(voice_intent(phrase), phrase)
+
+    def test_wake_word_survives_common_mis_transcriptions(self):
+        v = VoiceService({"JARVIS_VOICE_ENGINE": "fake"})
+        for phrase in ("Giarvis, che ore sono", "ehi Garvis che ore sono", "Jervis che ore sono"):
+            r = v.transcribe(b64(write_wav(tone(), 16000, {"jtxt": phrase.encode()})), "wake_word")
+            self.assertEqual((r["wake"]["detected"], r["wake"]["command"]), (True, "che ore sono"), phrase)
+
+    def test_the_transcription_carries_normalization_and_intent(self):
+        v = VoiceService({"JARVIS_VOICE_ENGINE": "fake"})
+        r = v.transcribe(b64(write_wav(tone(), 16000, {"jtxt": "Jarvis ricordami tra venti minuti di chiamare".encode()})), "wake_word")
+        self.assertEqual(r["normalized"], "ricordami tra 20 minuti di chiamare")
+        self.assertEqual(validation_errors("voice-transcription", r), ([], []))
+        r = v.transcribe(b64(write_wav(tone(), 16000, {"jtxt": "Jarvis, basta".encode()})), "wake_word")
+        self.assertEqual(r["intent"], "stop")
+        self.assertEqual(validation_errors("voice-transcription", r), ([], []))
+
+
+class SpeechPreparationTest(unittest.TestCase):
+    def test_markdown_code_links_and_symbols_are_spoken_naturally(self):
+        text = "**Fatto.** Ho letto https://example.org/x e `main.rs`.\n\n```py\nprint(1)\n```\nCosta 12,50 € e fa 21 °C, batteria al 80%."
+        spoken = speech_text(text)
+        for forbidden in ("**", "https", "`", "print(1)", "€", "°", "%"):
+            self.assertNotIn(forbidden, spoken, forbidden)
+        for expected in ("12,50 euro", "21 gradi", "80 per cento", "codice"):
+            self.assertIn(expected, spoken, expected)
+
+    def test_polish_levels_fades_and_trims_the_tail(self):
+        samples = [0] * 800 + [int(3000 * math.sin(i / 7)) for i in range(8000)] + [0] * 16000
+        out = polish(samples, 16000)
+        self.assertLess(len(out), len(samples))
+        self.assertEqual(out[0], 0)
+        self.assertGreater(max(abs(s) for s in out), 20000)
+        self.assertLessEqual(max(abs(s) for s in out), 32767)
+        self.assertEqual(polish([], 16000), [])
 
 
 class FakeEngines(unittest.TestCase):

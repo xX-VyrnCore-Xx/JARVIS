@@ -81,3 +81,26 @@ fn owner_rules_can_forbid_app_control() {
     assert_ne!(out["task"]["state"], "waiting_confirmation", "{out}");
     assert_ne!(out["task"]["state"], "succeeded", "{out}");
 }
+
+#[test]
+fn reading_the_screen_needs_confirmation_and_never_runs_unasked() {
+    let mut j = jarvis();
+    let out = j.chat("cosa c'è sullo schermo").unwrap().to_json();
+    assert_eq!(out["task"]["state"], "waiting_confirmation", "{out}");
+    let effect = out["confirmation"]["expected_effect"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        effect.contains("OCR") && effect.contains("Nulla viene inviato"),
+        "{effect}"
+    );
+    let status = j.chat("puoi leggere lo schermo?").unwrap().to_json();
+    assert_ne!(status["task"]["state"], "waiting_confirmation", "{status}");
+    assert!(
+        status["reply"]
+            .as_str()
+            .unwrap()
+            .contains("Lettura dello schermo"),
+        "{status}"
+    );
+}

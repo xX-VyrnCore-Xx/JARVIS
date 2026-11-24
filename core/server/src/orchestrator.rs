@@ -248,6 +248,8 @@ impl Jarvis {
         }
         crate::backup::tighten_dir(&cfg.data_dir);
         std::fs::create_dir_all(cfg.workspace()).map_err(|e| format!("workspace: {e}"))?;
+        // Nessuna schermata deve restare sul disco dopo un arresto brusco (ADR-0122).
+        crate::screen::purge(&cfg.data_dir);
         // Personalità scelta dal proprietario (ADR-0120): attiva dalla prima richiesta ai modelli.
         crate::persona::set_current(&crate::persona::load(&cfg.data_dir));
         // Compatibilità con le release che usano ancora il blocco interno.
@@ -2474,7 +2476,12 @@ impl Jarvis {
                 "pc.unavailable",
                 "È richiesta una conferma locale",
             )),
-            t if crate::appcontrol::is_control_tool(t) && (confirmed || t == "app.windows") => {
+            "screen.read" if confirmed => crate::screen::read(&self.cfg.data_dir),
+            "screen.status" => Ok(crate::screen::status()),
+            t if crate::appcontrol::is_control_tool(t)
+                && t != "screen.read"
+                && (confirmed || t == "app.windows") =>
+            {
                 crate::appcontrol::execute(t, arguments)
             }
             t if crate::appcontrol::is_control_tool(t) => Err(tool_error(

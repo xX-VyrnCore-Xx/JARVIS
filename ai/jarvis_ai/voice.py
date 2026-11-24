@@ -31,7 +31,38 @@ from jarvis_ai import visemes
 MAX_SECONDS = 60
 MAX_BYTES = 4 * 1024 * 1024
 MAX_TTS_CHARS = 4000
-WAKE_RE = re.compile(r"^\s*(?:(?:ehi|ehy|hey|ok|ciao)\s*,?\s*)?jarvis\b[\s,.:!?-]*", re.I)
+# «Jarvis» e le sue trascrizioni più frequenti: i riconoscitori italiani spesso scrivono «Giarvis» o «Garvis».
+WAKE_RE = re.compile(
+    r"^\s*(?:(?:ehi|ehy|hey|ok|ciao)\s*,?\s*)?(?:jarvis|giarvis|garvis|jervis|yarvis|charvis|giarvi|jarvi)\b[\s,.:!?-]*",
+    re.I,
+)
+
+# Solo voci maschili (ADR-0123). Il nome del parlante è nel nome del file Piper: «it_IT-riccardo-x_low».
+MALE_SPEAKERS = {
+    "riccardo", "ryan", "alan", "joe", "john", "norman", "danny", "kusal", "bryce", "carlfm", "hfc_male",
+    "northern_english_male", "thorsten", "pavoque", "karlsson", "gilles", "mls",
+}
+FEMALE_SPEAKERS = {
+    "paola", "lessac", "amy", "kathleen", "ljspeech", "jenny", "alba", "cori", "hfc_female", "southern_english_female",
+    "aru", "lisa", "eva", "siwis", "mirjam", "kerstin", "ramona", "faber",
+}
+
+
+def voice_is_male(stem: str, env: dict[str, str]) -> bool:
+    """Vero se la voce è maschile: nome noto, oppure dichiarata tale con JARVIS_TTS_VOICE_GENDER=male."""
+    parts = set(re.split(r"[-_.\s]+", stem.lower())) | {stem.lower()}
+    if parts & FEMALE_SPEAKERS:
+        return False
+    if parts & MALE_SPEAKERS:
+        return True
+    return env.get("JARVIS_TTS_VOICE_GENDER", "").strip().lower() == "male"
+
+
+def not_male(name: str) -> "VoiceError":
+    return VoiceError(
+        "voice.not_male",
+        f"La voce «{name}» non è maschile: JARVIS usa solo voci maschili. Esegui ./jarvis.sh voice-setup per scaricare «it_IT-riccardo-x_low».",
+    )
 
 
 class VoiceError(Exception):
@@ -159,9 +190,131 @@ class WhisperSTT:
             audio, language=language, vad_filter=True, beam_size=3,
             condition_on_previous_text=False, temperature=0,
             vad_parameters={"min_silence_duration_ms": 350, "speech_pad_ms": 180},
-            hotwords="JARVIS, GitHub, Python, JavaScript, macOS, Ollama, NVIDIA NIM",
+            hotwords="JARVIS, GitHub, Python, JavaScript, macOS, Ollama, NVIDIA NIM, sandbox, missione, conferma, annulla, ricordami, promemoria",
         )
         return " ".join(s.text.strip() for s in segments if s.no_speech_prob < 0.8).strip()
+
+
+_UNITS = {
+    "zero": 0, "uno": 1, "una": 1, "un": 1, "due": 2, "tre": 3, "quattro": 4, "cinque": 5, "sei": 6, "sette": 7,
+    "otto": 8, "nove": 9, "dieci": 10, "undici": 11, "dodici": 12, "tredici": 13, "quattordici": 14,
+    "quindici": 15, "sedici": 16, "diciassette": 17, "diciotto": 18, "diciannove": 19,
+}
+_TENS = {"venti": 20, "trenta": 30, "quaranta": 40, "cinquanta": 50, "sessanta": 60, "settanta": 70, "ottanta": 80, "novanta": 90}
+_COUNTED = r"(?:minut[oi]|second[oi]|or[ae]|giorn[oi]|settiman[ae]|mes[ei]|ann[oi]|euro|gradi|per cento|percento|chilometri|metri|chili|litri|gramm[oi]|pagine|righe|volte)"
+
+
+def parse_it_number(word: str) -> int | None:
+    """Numero italiano scritto in una sola parola, fino a 999 («trentacinque», «centocinquanta», «duecentoventi»).
+
+    «un», «uno» e «una» restano articoli: non sono mai convertiti.
+    """
+    rest = word.lower()
+    if rest in ("un", "uno", "una", ""):
+        return None
+    total = 0
+    m = re.match(r"^(?:(due|tre|quattro|cinque|sei|sette|otto|nove))?cento(.*)$", rest)
+    if m:
+        total = (_UNITS[m.group(1)] if m.group(1) else 1) * 100
+        rest = m.group(2)
+        if not rest:
+            return total
+    if rest in _UNITS and rest not in ("un", "una"):
+        return total + _UNITS[rest]
+    for tens, value in _TENS.items():
+        if rest == tens:
+            return total + value
+        stem = tens[:-1]
+        if rest.startswith(stem):
+            tail = rest[len(stem):]
+            for unit_word in ("uno", "due", "tre", "quattro", "cinque", "sei", "sette", "otto", "nove"):
+                if tail in (unit_word, "a" + unit_word):
+                    return total + value + _UNITS[unit_word]
+    return None
+
+
+def normalize_command(text: str, language: str) -> str:
+    """Riduce a cifre i numeri scritti a parole davanti a un'unità («tra venti minuti» → «tra 20 minuti»)."""
+    if language != "it":
+        return text
+    pattern = re.compile(rf"\b([A-Za-zàèéìòù]+)\s+({_COUNTED})\b", re.I)
+
+    def repl(m: re.Match) -> str:
+        n = parse_it_number(m.group(1))
+        return f"{n} {m.group(2)}" if n is not None and n > 1 else m.group(0)
+
+    return pattern.sub(repl, text)
+
+
+_STOP = {"stop", "basta", "zitto", "silenzio", "fermati", "ferma", "taci", "smettila"}
+_REPEAT = {"ripeti", "ripetilo", "ripeti per favore", "puoi ripetere", "ripeti l'ultima risposta", "come hai detto"}
+_CANCEL = {"annulla", "lascia perdere", "non importa", "dimentica"}
+
+
+def voice_intent(text: str) -> str | None:
+    """Comandi di controllo della sola voce, riconosciuti solo se sono l'intera frase."""
+    t = re.sub(r"[^\w' ]+", "", text.lower()).strip()
+    t = re.sub(r"\b(jarvis|giarvis|garvis)\b", "", t).strip()
+    t = re.sub(r"^(?:per favore|grazie|ok)\s+|\s+(?:per favore|grazie)$", "", t).strip()
+    if t in _STOP:
+        return "stop"
+    if t in _REPEAT:
+        return "repeat"
+    if t in _CANCEL:
+        return "cancel"
+    return None
+
+
+_ABBREV = (
+    (r"https?://\S+", " link "),
+    (r"\b\d{1,2}\s?%", lambda m: m.group(0).replace("%", "").strip() + " per cento"),
+    (r"%", " per cento"),
+    (r"€\s?(\d[\d.,]*)", r"\1 euro"),
+    (r"(\d[\d.,]*)\s?€", r"\1 euro"),
+    (r"(\d+)\s?°\s?C\b", r"\1 gradi"),
+    (r"(\d+)\s?°", r"\1 gradi"),
+    (r"\bkm/h\b", "chilometri orari"),
+    (r"\bkm\b", "chilometri"),
+    (r"\bGB\b", "gigabyte"),
+    (r"\bMB\b", "megabyte"),
+    (r"\bGHz\b", "gigahertz"),
+    (r"&", " e "),
+)
+
+
+def speech_text(text: str) -> str:
+    """Prepara un testo per la voce: toglie markdown, codice, indirizzi ed emoji e legge simboli e unità."""
+    text = re.sub(r"```.*?```", " Ecco il codice nella finestra. ", text, flags=re.S)
+    text = re.sub(r"`([^`]*)`", r"\1", text)
+    text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", text)
+    text = re.sub(r"[*_~]{1,3}([^*_~\n]+)[*_~]{1,3}", r"\1", text)
+    text = re.sub(r"^\s*(?:#{1,6}|>|[-*+])\s+", "", text, flags=re.M)
+    text = re.sub(r"[\U0001F300-\U0001FAFF\u2600-\u27BF\uFE0F]", "", text)
+    for pattern, replacement in _ABBREV:
+        text = re.sub(pattern, replacement, text)
+    text = re.sub(r"\s*\n+\s*", ". ", text)
+    text = re.sub(r"([.!?])\s*\.", r"\1", text)
+    return re.sub(r"[ \t]+", " ", text).strip()
+
+
+def polish(samples: list[int], rate: int) -> list[int]:
+    """Livella il volume (picco a −1 dBFS), dissolvenze di 25 ms e niente silenzio in coda."""
+    if not samples:
+        return samples
+    end = len(samples)
+    floor = 200
+    while end > 1 and abs(samples[end - 1]) < floor and len(samples) - end < rate * 2:
+        end -= 1
+    samples = samples[: min(len(samples), end + int(rate * 0.12))]
+    peak = max(abs(s) for s in samples) or 1
+    gain = min(8.0, 29000 / peak)
+    out = [int(max(-32768, min(32767, s * gain))) for s in samples]
+    fade = min(int(rate * 0.025), len(out) // 2)
+    for i in range(fade):
+        k = i / fade
+        out[i] = int(out[i] * k)
+        out[-1 - i] = int(out[-1 - i] * k)
+    return out
 
 
 def correct_transcript(text: str, language: str) -> str:
@@ -188,6 +341,8 @@ class PiperTTS:
         path = env.get("JARVIS_TTS_VOICE", "")
         if not path or not Path(path).is_file():
             raise VoiceError("voice.model_missing", "voce Piper non trovata: imposta JARVIS_TTS_VOICE con il percorso del file .onnx")
+        if not voice_is_male(Path(path).stem, env):
+            raise not_male(Path(path).stem)
         self.piper = PiperVoice.load(path)
         self.voice = Path(path).stem
         self.rate = int(getattr(getattr(self.piper, "config", None), "sample_rate", 22050))
@@ -210,6 +365,8 @@ class XttsTTS:
     def __init__(self, env: dict[str, str]):
         self.directory = Path(env.get("JARVIS_XTTS_DIR", ""))
         self.reference = Path(env.get("JARVIS_XTTS_REFERENCE", ""))
+        if env.get("JARVIS_TTS_VOICE_GENDER", "").strip().lower() != "male":
+            raise not_male("XTTS")
         self.language = env.get("JARVIS_VOICE_LANG", "it")
         speed = float(env.get("JARVIS_XTTS_SPEED", "1.08"))
         self.speed = min(1.3, max(0.8, speed))
@@ -325,7 +482,7 @@ class VoiceService:
     def status(self) -> dict:
         return {
             "stt": self.stt.info if self.stt else None,
-            "tts": {**self.tts.info, "voice": self.tts.voice} if self.tts else None,
+            "tts": {**self.tts.info, "voice": self.tts.voice, "gender": "male"} if self.tts else None,
             "wake": self.wake.name if self.wake else ("parola «Jarvis» nella trascrizione" if self.stt else None),
             "language": self.language,
             "available": bool(self.stt),
@@ -343,6 +500,7 @@ class VoiceService:
         text = self.stt.transcribe(data, self.language).strip()[:8000]
         text = correct_transcript(text, self.language)
         wake: dict[str, Any] = {"mode": mode, "detected": False}
+        # Il comando senza la parola di attivazione è quello che conta per intento e numeri.
         if mode == "wake_word":
             match = WAKE_RE.match(text)
             if self.wake:
@@ -352,7 +510,8 @@ class VoiceService:
                 wake.update(engine="trascrizione", detected=bool(match))
             if wake["detected"]:
                 wake["command"] = (text[match.end():] if match else text).strip()
-        return {
+        spoken = wake.get("command", text) if mode == "wake_word" else text
+        result = {
             "contract": "jarvis.voice-transcription/1",
             "text": text,
             "language": self.language,
@@ -360,6 +519,13 @@ class VoiceService:
             "engine": self.stt.info,
             "wake": wake,
         }
+        normalized = normalize_command(spoken, self.language)
+        if normalized != spoken:
+            result["normalized"] = normalized
+        intent = voice_intent(spoken)
+        if intent:
+            result["intent"] = intent
+        return result
 
     def synthesize(self, text: str) -> dict:
         if not self.tts:
@@ -369,8 +535,9 @@ class VoiceService:
             raise VoiceError("voice.invalid_text", "testo vuoto")
         if len(text) > MAX_TTS_CHARS:
             raise VoiceError("voice.too_long", f"testo oltre {MAX_TTS_CHARS} caratteri")
+        spoken = speech_text(text) or text
         try:
-            audio = self.tts.synthesize(text)
+            audio = self.tts.synthesize(spoken)
         except Exception as exc:
             if not isinstance(self.tts, XttsTTS):
                 raise
@@ -379,8 +546,11 @@ class VoiceService:
             self.tts = self.fallback_tts
             if self.tts is None:
                 raise VoiceError("voice.unavailable", self.reasons[-1]) from None
-            audio = self.tts.synthesize(text)
+            audio = self.tts.synthesize(spoken)
         samples, rate, _ = read_wav(audio) if len(audio) <= MAX_BYTES else ([], self.tts.rate, {})
+        if samples:
+            samples = polish(samples, rate)
+            audio = write_wav(samples, rate)
         return {
             "contract": "jarvis.voice-synthesis/1",
             "audio_format": "wav",

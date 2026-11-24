@@ -95,8 +95,13 @@ function check(condition, message) {
 
   const setup = await request("/api/setup", { token: ownerToken });
   check(setup.status === 200 && setup.json?.choices?.stt_models?.includes("tiny"), "opzioni del setup disponibili");
-  const setupStart = await request("/api/setup/start", {
+  const femaleVoice = await request("/api/setup/start", {
     method: "POST", token: ownerToken, body: { stt_model: "tiny", tts_voice: "it_IT-paola-medium" },
+  });
+  check(femaleVoice.status === 400, "una voce femminile non è ammessa (solo voci maschili)");
+  check(setup.json?.choices?.tts_voices?.every((voice) => !/paola|lessac/.test(voice)), "l'elenco delle voci è solo maschile");
+  const setupStart = await request("/api/setup/start", {
+    method: "POST", token: ownerToken, body: { stt_model: "tiny", tts_voice: "it_IT-riccardo-x_low" },
   });
   check(setupStart.status === 200 || setupStart.status === 202, "setup vocale avviato dal Core");
   let setupState;

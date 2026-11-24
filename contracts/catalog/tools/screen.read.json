@@ -1,0 +1,36 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "screen.read",
+  "version": "1.0.0",
+  "summary": "Legge il testo visibile sullo schermo con OCR locale: l'immagine non viene salvata né inviata e i dati sensibili sono mascherati",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "prerequisites": [
+    "macOS o Windows; Tesseract OCR installato; su macOS il permesso Registrazione schermo"
+  ],
+  "effects": "read",
+  "risk": "high",
+  "permissions": [
+    "core.desktop:read"
+  ],
+  "errors": [
+    "screen.unavailable",
+    "screen.ocr_missing",
+    "screen.capture_failed",
+    "screen.ocr_failed",
+    "screen.timeout"
+  ],
+  "timeout_ms": 90000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "required"
+}

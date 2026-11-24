@@ -240,4 +240,6 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Chiave API, personalità e controllo delle app (2026-11-24, base `cd2a07a`).** ADR-0119, ADR-0120, ADR-0121. Normalizzazione e verifica delle credenziali, personalità del film configurabile, apertura e uso delle applicazioni con conferma. Verifiche: fmt, clippy, `cargo test --locked`, test Python, build e test egui. **Sospeso:** prova con chiavi reali, esecuzione sui sistemi reali (macOS Accessibilità, Windows), schermata Swift/Android per personalità e permessi.
 
+**Schermo privato e voce maschile (2026-11-24, base `297b03f`).** ADR-0122, ADR-0123. Lettura dello schermo con OCR locale e mascheramento, voce solo maschile (Piper e voce di sistema), comandi vocali più robusti. Verifiche: fmt, clippy, `cargo test --locked`, test Python e contratti, build e test egui. **Sospeso:** prova reale di OCR, `say` e `System.Speech`; registrazione dal microfono nelle app; schermata Android.
+
 Per ogni ripresa registrare data, revisione, lavoro completato, verifiche eseguite, blocchi, ipotesi e prossimo passo concreto. Conservare il checkpoint con le modifiche alle quali si riferisce.

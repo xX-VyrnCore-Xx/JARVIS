@@ -171,6 +171,15 @@ def _describe_tool_result(result: dict) -> str:
         sessions = ", ".join(f"{x['session']} ({x['bytes']} B)" for x in output.get("sessions", [])) or "nessuna"
         return (f"Sandbox {state}; {avail}. Limiti: {lim.get('memory_mb')} MB, {lim.get('cpus')} CPU, "
                 f"max {lim.get('timeout_s_max')} s, rete {lim.get('network')}. Sessioni: {sessions}.")
+    if tool == "screen.read":
+        if output.get("empty"):
+            return "Non ho trovato testo leggibile sullo schermo (se usi macOS, controlla il permesso Registrazione schermo)."
+        red = (output.get("redactions") or {}).get("total", 0)
+        note = f"\n\n({red} dati sensibili mascherati; l'immagine è stata eliminata e nulla è uscito dal computer)" if red else "\n\n(Letto in locale; l'immagine è stata eliminata e nulla è uscito dal computer)"
+        cut = "\n(testo troncato)" if output.get("truncated") else ""
+        return f"Sullo schermo leggo:\n{output.get('text')}{cut}{note}"
+    if tool == "screen.status":
+        return f"Lettura dello schermo: {'pronta' if output.get('ready') else 'non pronta'}. {output.get('hint')}. {output.get('privacy')}."
     if tool == "app.open":
         return f"Ho aperto «{output.get('opened')}»."
     if tool == "app.focus":
@@ -476,6 +485,8 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
     (re.compile(r"^\s*premi\s+((?:(?:cmd|command|comando|ctrl|control|controllo|alt|opzione|option|shift|maiusc)\s*\+\s*)*)([A-Za-z0-9]|invio|return|tab|esc|escape|spazio|canc|freccia (?:su|gi[uù]|sinistra|destra))\s*$", re.I), "app.key",
      lambda m: {"key": _KEY_ALIASES.get(m[2].lower(), m[2].lower()),
                 **({"modifiers": [_MODIFIERS[p.strip().lower()] for p in m[1].split("+") if p.strip()]} if m[1].strip() else {})}),
+    (re.compile(r"^\s*(?:cosa c'è sullo schermo|cosa vedi sullo schermo|leggi (?:lo|il mio) schermo|che testo c'è sullo schermo)\s*\??\s*$", re.I), "screen.read", lambda m: {}),
+    (re.compile(r"^\s*(?:stato della lettura dello schermo|puoi leggere lo schermo)\s*\??\s*$", re.I), "screen.status", lambda m: {}),
     (re.compile(r"\b(quali (?:app|applicazioni|finestre) (?:sono )?aperte|finestre aperte|app aperte)\b", re.I), "app.windows", lambda m: {}),
     # Competenze per aziende, informatica e sicurezza (ADR-0117).
     (re.compile(r"^\s*(?:cvss|punteggio cvss|gravit[àa] cvss)\s*:?\s*(CVSS:3\.[01]/\S+)\s*$", re.I), "security.cvss",

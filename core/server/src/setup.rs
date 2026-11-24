@@ -16,11 +16,10 @@ use std::time::Duration;
 use serde_json::{json, Value};
 
 pub const STT_MODELS: [&str; 4] = ["tiny", "base", "small", "medium"];
-pub const TTS_VOICES: [&str; 3] = [
-    "it_IT-paola-medium",
-    "it_IT-riccardo-x_low",
-    "en_US-lessac-medium",
-];
+/// Solo voci maschili (ADR-0123).
+pub const TTS_VOICES: [&str; 2] = ["it_IT-riccardo-x_low", "en_US-ryan-medium"];
+/// Voce predefinita, anche per chi aveva scelto una voce non più ammessa.
+pub const DEFAULT_TTS_VOICE: &str = "it_IT-riccardo-x_low";
 #[derive(Clone, Debug)]
 pub struct Plan {
     pub stt_model: String,
@@ -49,7 +48,7 @@ impl Plan {
         }
         Ok(Self {
             stt_model: pick("stt_model", &STT_MODELS, "small")?,
-            tts_voice: pick("tts_voice", &TTS_VOICES, "it_IT-paola-medium")?,
+            tts_voice: pick("tts_voice", &TTS_VOICES, DEFAULT_TTS_VOICE)?,
         })
     }
 
@@ -140,7 +139,13 @@ impl Setup {
         }
         if let Some(saved) = self.saved() {
             let plan = &saved["plan"];
-            if let Some(voice) = plan["tts_voice"].as_str() {
+            if let Some(saved_voice) = plan["tts_voice"].as_str() {
+                // Una voce salvata prima di ADR-0123 e non maschile viene sostituita da quella predefinita.
+                let voice = if TTS_VOICES.contains(&saved_voice) {
+                    saved_voice
+                } else {
+                    DEFAULT_TTS_VOICE
+                };
                 let onnx = models.join("piper").join(format!("{voice}.onnx"));
                 if onnx.is_file() && !set("JARVIS_TTS_VOICE") {
                     env.push((
@@ -390,7 +395,8 @@ mod tests {
     fn plan_accepts_only_voice_settings() {
         let plan = Plan::from_json(&json!({})).unwrap();
         assert_eq!(plan.stt_model, "small");
-        assert_eq!(plan.tts_voice, "it_IT-paola-medium");
+        assert_eq!(plan.tts_voice, "it_IT-riccardo-x_low");
+        assert!(Plan::from_json(&json!({"tts_voice": "it_IT-paola-medium"})).is_err());
         assert!(Plan::from_json(&json!({"stt_model": "--index-url=http://x"})).is_err());
         assert!(Plan::from_json(&json!({"ollama_model": "qwen3:4b"})).is_err());
         assert!(Plan::from_json(&json!({"embed_model": "nomic-embed-text"})).is_err());

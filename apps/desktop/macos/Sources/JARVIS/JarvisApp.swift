@@ -99,6 +99,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var changingInvite = false
 
     @State private var section: Section = .dashboard
+    @State private var speakReplies = false
+    @State private var voiceHint = ""
     @State private var payload: [String: Any] = [:]
     @State private var message = ""
     @State private var memoryQuery = ""
@@ -832,12 +834,36 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 let result = try await core.request("/api/cloud/chat", method: "POST",
                                                      body: ["message": text, "provider": "auto", "use_context": includeContext])
                 lastReply = result
+                if speakReplies, let reply = result["reply"] as? String, !reply.isEmpty {
+                    Task { _ = try? await core.request("/api/voice/say", method: "POST", body: ["text": reply], timeout: 15) }
+                }
                 if section == .chat { await load(.chat) }
                 await core.refreshHealth()
             } catch {
                 self.error = error.localizedDescription
                 if message.isEmpty { message = text }
                 if section == .chat { composerFocused = true }
+            }
+        }
+    }
+
+    /// Voce maschile di sistema (ADR-0123): legge le risposte ad alta voce.
+    private var voiceCard: some View {
+        card("Voce di JARVIS", icon: "speaker.wave.2") {
+            Toggle("Leggi le risposte ad alta voce", isOn: $speakReplies)
+                .onChange(of: speakReplies) { _, value in
+                    Task { _ = try? await core.request("/api/voice/system", method: "PATCH", body: ["speak_replies": value]) }
+                }
+            Text("JARVIS parla solo con una voce maschile (Luca).").font(.caption).foregroundStyle(.secondary)
+            if !voiceHint.isEmpty { Text(voiceHint).font(.caption).foregroundStyle(.secondary) }
+            Button("Fai tacere") {
+                Task { _ = try? await core.request("/api/voice/stop", method: "POST", body: [:]) }
+            }
+        }
+        .task {
+            if let status = try? await core.request("/api/voice/system") {
+                speakReplies = status["speak_replies"] as? Bool ?? false
+                voiceHint = status["hint"] as? String ?? ""
             }
         }
     }
@@ -859,6 +885,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         case .devices:
             deviceConnection
         case .models:
+            voiceCard
             cloudSettings
         case .updates:
             card("Canale stabile", icon: "arrow.down.circle") {

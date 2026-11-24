@@ -86,7 +86,7 @@ async fn guided_setup_runs_steps_records_choices_and_restarts_the_worker() {
     .await;
     assert_eq!(code, StatusCode::BAD_REQUEST);
 
-    let plan = json!({"voice": true, "stt_model": "base", "tts_voice": "it_IT-paola-medium"});
+    let plan = json!({"voice": true, "stt_model": "base", "tts_voice": "it_IT-riccardo-x_low"});
     let (code, _) = call(&app, "POST", "/api/setup/start", Some(plan.clone()), true).await;
     assert_eq!(code, StatusCode::ACCEPTED);
     let (code, _) = call(&app, "POST", "/api/setup/start", Some(plan), true).await;
@@ -137,7 +137,7 @@ fn worker_env_points_to_installed_packages_and_models() {
     ));
     std::fs::create_dir_all(data.join("python-packages")).unwrap();
     std::fs::create_dir_all(data.join("models/piper")).unwrap();
-    std::fs::write(data.join("models/piper/it_IT-paola-medium.onnx"), b"x").unwrap();
+    std::fs::write(data.join("models/piper/it_IT-riccardo-x_low.onnx"), b"x").unwrap();
     std::fs::write(
         data.join("setup.json"),
         json!({"plan": {"tts_voice": "it_IT-paola-medium", "stt_model": "small", "ollama_model": "qwen2.5:3b"}}).to_string(),
@@ -148,6 +148,6 @@ fn worker_env_points_to_installed_packages_and_models() {
     assert!(
         env["PYTHONPATH"].starts_with(&data.join("python-packages").to_string_lossy().into_owned())
     );
-    assert!(env["JARVIS_TTS_VOICE"].ends_with("it_IT-paola-medium.onnx"));
+    assert!(env["JARVIS_TTS_VOICE"].ends_with("it_IT-riccardo-x_low.onnx"));
     assert!(!env.contains_key("JARVIS_OLLAMA_MODEL"));
 }
