@@ -85,3 +85,5 @@ Token del proprietario confrontato a tempo costante; token dei dispositivi scart
 ## Terminale sandbox (ADR-0105)
 
 Container senza rete, senza capability, `no-new-privileges`, radice in sola lettura, limiti di memoria, CPU, processi e dimensione dei file, un solo mount (la cartella di sessione, 0700). Nessun accesso a workspace, segreti, token o socket Docker. Spegnibile dal solo proprietario (`/api/sandbox`, `JARVIS_SANDBOX=off`); escluso da automazioni e nodi.
+
+Trasferimento file (ADR-0106): massimo 8 MiB in ingresso e 1 MiB in uscita, solo file, nessun collegamento simbolico della sessione viene seguito; l'esportazione nella workspace richiede conferma.

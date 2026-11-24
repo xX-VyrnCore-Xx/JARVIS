@@ -35,6 +35,8 @@ const SOURCES: &[&str] = &[
     tool_file!("notes.delete"),
     tool_file!("notes.list"),
     tool_file!("notes.search"),
+    tool_file!("sandbox.export"),
+    tool_file!("sandbox.import"),
     tool_file!("sandbox.reset"),
     tool_file!("sandbox.run"),
     tool_file!("sandbox.status"),

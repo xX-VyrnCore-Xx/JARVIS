@@ -2459,6 +2459,18 @@ impl Jarvis {
             )),
             // Terminale sandbox (ADR-0105): isolato, quindi senza conferma per comando.
             "sandbox.run" => crate::sandbox::terminal_run(&self.cfg.data_dir, arguments),
+            "sandbox.import" => {
+                let workspace = self.cfg.workspace();
+                crate::sandbox::import_file(&self.cfg.data_dir, &workspace, arguments)
+            }
+            "sandbox.export" if confirmed => {
+                let workspace = self.cfg.workspace();
+                crate::sandbox::export_file(&self.cfg.data_dir, &workspace, arguments)
+            }
+            "sandbox.export" => Err(tool_error(
+                "sandbox.not_confirmed",
+                "L’esportazione nella workspace richiede la conferma del proprietario",
+            )),
             "sandbox.status" => Ok(crate::sandbox::terminal_status(&self.cfg.data_dir)),
             "sandbox.reset" if confirmed => {
                 crate::sandbox::terminal_reset(&self.cfg.data_dir, arguments)
@@ -4935,7 +4947,7 @@ fn workflow_tool_restriction(tool: &str) -> Option<&'static str> {
             Some("un'automazione non può gestire altre automazioni")
         }
         crate::desktop::TOOL => Some("le azioni sul PC richiedono una richiesta diretta"),
-        "shell.run" | "code.run_python" | "sandbox.run" | "sandbox.reset" => {
+        "shell.run" | "code.run_python" | "sandbox.run" | "sandbox.reset" | "sandbox.export" => {
             Some("i comandi del terminale e del sandbox richiedono una conferma diretta")
         }
         _ => None,

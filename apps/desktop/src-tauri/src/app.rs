@@ -1238,6 +1238,7 @@ impl JarvisApp {
                     ("confirmations", "Promemoria delle conferme in attesa"),
                     ("workflows", "Automazioni che continuano a fallire"),
                     ("stale_todos", "Cose da fare lasciate indietro"),
+                    ("sandbox", "Sandbox quasi piena"),
                 ];
                 for (key, text) in toggles {
                     let mut value = settings[key].as_bool().unwrap_or(false);

@@ -27,7 +27,7 @@ pub fn defaults() -> Value {
         "enabled": true,
         "quiet_from": "22:00", "quiet_to": "07:00",
         "briefing": true, "briefing_time": "08:00",
-        "disk": true, "confirmations": true, "workflows": true, "stale_todos": true,
+        "disk": true, "confirmations": true, "workflows": true, "stale_todos": true, "sandbox": true,
     })
 }
 
@@ -227,6 +227,18 @@ pub fn compose_briefing(f: &Facts) -> (String, String) {
     (title, lines.join("\n"))
 }
 
+/// Una sessione del terminale sandbox oltre questa dimensione sta per essere rifiutata (limite 256 MiB).
+pub const SANDBOX_ALERT_BYTES: u64 = 200 * 1024 * 1024;
+
+/// Sessioni sandbox quasi piene: (sessione, MiB usati).
+pub fn sandbox_alerts(sizes: &[(String, u64)]) -> Vec<(String, u64)> {
+    sizes
+        .iter()
+        .filter(|(_, bytes)| *bytes >= SANDBOX_ALERT_BYTES)
+        .map(|(name, bytes)| (name.clone(), bytes / 1024 / 1024))
+        .collect()
+}
+
 /// Mount con spazio quasi esaurito: (mount, GB liberi, percentuale usata).
 pub fn disk_alerts(disks: &Value) -> Vec<(String, f64, f64)> {
     disks["disks"]
@@ -352,5 +364,15 @@ mod tests {
             week_key(chrono::NaiveDate::from_ymd_opt(2026, 11, 23).unwrap()),
             "2026-W48"
         );
+    }
+
+    #[test]
+    fn sandbox_alerts_flag_only_nearly_full_sessions() {
+        let sizes = vec![
+            ("main".to_string(), 10 * 1024 * 1024),
+            ("big".to_string(), 230 * 1024 * 1024),
+        ];
+        assert_eq!(sandbox_alerts(&sizes), vec![("big".to_string(), 230)]);
+        assert!(defaults()["sandbox"] == true);
     }
 }

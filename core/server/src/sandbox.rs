@@ -516,6 +516,126 @@ pub fn terminal_run(data_dir: &Path, args: &Value) -> Result<Value, ToolError> {
     }))
 }
 
+const IMPORT_LIMIT: u64 = 8 * 1024 * 1024;
+const EXPORT_LIMIT: u64 = 1024 * 1024;
+
+/// Unisce `rel` a `base` rifiutando percorsi fuori da `base` e qualunque collegamento simbolico già presente:
+/// il codice nel container può creare link verso percorsi che sul computer ospite hanno un altro significato.
+fn join_without_links(base: &Path, rel: &str) -> Result<std::path::PathBuf, ToolError> {
+    if rel.is_empty() || !crate::tools::lexically_inside(rel) {
+        return Err(error(
+            "sandbox.invalid_path",
+            "Percorso non ammesso: usa un percorso relativo senza «..»",
+        ));
+    }
+    let mut path = base.to_path_buf();
+    for part in Path::new(rel).components() {
+        if let std::path::Component::Normal(name) = part {
+            path.push(name);
+            if std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) {
+                return Err(error(
+                    "sandbox.invalid_path",
+                    "Collegamento simbolico non ammesso nella sessione",
+                ));
+            }
+        }
+    }
+    Ok(path)
+}
+
+/// Copia un file della workspace nella sessione (ADR-0106). Sola lettura sulla workspace.
+pub fn import_file(data_dir: &Path, workspace: &Path, args: &Value) -> Result<Value, ToolError> {
+    ensure_enabled(data_dir)?;
+    let from = args["from"].as_str().unwrap_or_default();
+    let source = resolve(workspace, from, true)?;
+    let meta = std::fs::metadata(&source)
+        .map_err(|_| error("sandbox.invalid_path", "File della workspace non leggibile"))?;
+    if !meta.is_file() {
+        return Err(error("sandbox.invalid_path", "È ammesso solo un file"));
+    }
+    if meta.len() > IMPORT_LIMIT {
+        return Err(error("sandbox.too_large", "Il file supera 8 MiB"));
+    }
+    let session = session_name(args)?;
+    let default_name = Path::new(from)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file");
+    let to = args["to"].as_str().unwrap_or(default_name);
+    let root = session_dir(data_dir, &session)?;
+    if dir_size(&root) + meta.len() > SESSION_SOFT_LIMIT {
+        return Err(error("sandbox.session_full", "La sessione è piena"));
+    }
+    let target = join_without_links(&root, to)?;
+    if target.is_dir() {
+        return Err(error(
+            "sandbox.invalid_path",
+            "La destinazione è una cartella",
+        ));
+    }
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(|_| {
+            error(
+                "sandbox.unavailable",
+                "Cartella di destinazione non creabile",
+            )
+        })?;
+    }
+    std::fs::copy(&source, &target)
+        .map_err(|_| error("sandbox.unavailable", "Copia nella sessione non riuscita"))?;
+    Ok(json!({"session": session, "path": to, "bytes": meta.len()}))
+}
+
+/// Copia un file della sessione nella workspace (ADR-0106). Scrive sul computer: richiede conferma.
+pub fn export_file(data_dir: &Path, workspace: &Path, args: &Value) -> Result<Value, ToolError> {
+    ensure_enabled(data_dir)?;
+    let session = session_name(args)?;
+    let from = args["from"].as_str().unwrap_or_default();
+    let root = sandbox_root(data_dir).join(&session);
+    let source = join_without_links(&root, from)?;
+    let meta = std::fs::symlink_metadata(&source)
+        .map_err(|_| error("sandbox.not_found", "File non presente nella sessione"))?;
+    if !meta.is_file() {
+        return Err(error("sandbox.invalid_path", "È ammesso solo un file"));
+    }
+    if meta.len() > EXPORT_LIMIT {
+        return Err(error("sandbox.too_large", "Il file supera 1 MiB"));
+    }
+    let to = args["to"].as_str().unwrap_or_default();
+    let target = resolve(workspace, to, false)?;
+    if target.is_dir() {
+        return Err(error(
+            "sandbox.invalid_path",
+            "La destinazione è una cartella",
+        ));
+    }
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent).map_err(|_| {
+            error(
+                "sandbox.unavailable",
+                "Cartella di destinazione non creabile",
+            )
+        })?;
+    }
+    std::fs::copy(&source, &target)
+        .map_err(|_| error("sandbox.unavailable", "Copia nella workspace non riuscita"))?;
+    Ok(json!({"session": session, "from": from, "path": to, "bytes": meta.len()}))
+}
+
+/// Dimensione in byte di ogni sessione esistente.
+pub fn session_sizes(data_dir: &Path) -> Vec<(String, u64)> {
+    std::fs::read_dir(sandbox_root(data_dir))
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            valid_session(&name).then(|| (name, dir_size(&e.path())))
+        })
+        .collect()
+}
+
 pub fn terminal_status(data_dir: &Path) -> Value {
     let root = sandbox_root(data_dir);
     let mut sessions: Vec<Value> = std::fs::read_dir(&root)
@@ -670,5 +790,63 @@ print(2 + 2)",
             "{second}"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn files_move_between_workspace_and_session_without_following_links() {
+        let base =
+            std::env::temp_dir().join(format!("jarvis-sbx-{}", uuid::Uuid::new_v4().simple()));
+        let data = base.join("data");
+        let work = base.join("workspace");
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::create_dir_all(&data).unwrap();
+        std::fs::write(work.join("a.txt"), b"ciao").unwrap();
+        let put = import_file(&data, &work, &json!({"from": "a.txt", "to": "sub/b.txt"})).unwrap();
+        assert_eq!(put["bytes"], 4);
+        assert_eq!(
+            std::fs::read(data.join("sandbox/main/sub/b.txt")).unwrap(),
+            b"ciao"
+        );
+        let got = export_file(
+            &data,
+            &work,
+            &json!({"from": "sub/b.txt", "to": "out/c.txt"}),
+        )
+        .unwrap();
+        assert_eq!(got["bytes"], 4);
+        assert_eq!(std::fs::read(work.join("out/c.txt")).unwrap(), b"ciao");
+        // Percorsi fuori ambito e file mancanti.
+        for bad in [
+            json!({"from": "../x", "to": "y"}),
+            json!({"from": "nope.txt"}),
+        ] {
+            assert!(import_file(&data, &work, &bad).is_err());
+        }
+        assert!(export_file(&data, &work, &json!({"from": "../x", "to": "y"})).is_err());
+        assert!(export_file(
+            &data,
+            &work,
+            &json!({"from": "sub/b.txt", "to": "../fuori"})
+        )
+        .is_err());
+        // Un collegamento creato dal container non deve far leggere file del computer.
+        #[cfg(unix)]
+        {
+            std::fs::write(base.join("segreto"), b"x").unwrap();
+            std::os::unix::fs::symlink(base.join("segreto"), data.join("sandbox/main/link"))
+                .unwrap();
+            std::os::unix::fs::symlink(&base, data.join("sandbox/main/dir")).unwrap();
+            for from in ["link", "dir/segreto"] {
+                let err = export_file(&data, &work, &json!({"from": from, "to": "leak.txt"}))
+                    .unwrap_err();
+                assert_eq!(err.code, "sandbox.invalid_path");
+            }
+            assert!(!work.join("leak.txt").exists());
+            let err = import_file(&data, &work, &json!({"from": "a.txt", "to": "dir/x.txt"}))
+                .unwrap_err();
+            assert_eq!(err.code, "sandbox.invalid_path");
+            assert!(!base.join("x.txt").exists());
+        }
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
