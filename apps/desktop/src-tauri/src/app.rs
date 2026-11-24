@@ -61,6 +61,8 @@ enum Event {
     UpdateInstalling(Result<Value, String>),
     /// Personalità corrente di JARVIS (ADR-0120).
     Persona(Result<Value, String>),
+    /// Stato della voce di sistema maschile (ADR-0123).
+    VoiceStatus(Result<Value, String>),
     ChatFinished(Result<Value, String>),
     Notifications(Result<Value, String>),
     /// Il flusso in tempo reale si è interrotto: serve solo a scoprire che l'app è chiusa.
@@ -149,6 +151,9 @@ pub struct JarvisApp {
     update_remove_confirm: bool,
     update_restarting: bool,
     persona_loaded: bool,
+    voice_loaded: bool,
+    speak_replies: bool,
+    voice_hint: String,
     persona_style: String,
     persona_address: String,
 }
@@ -257,7 +262,7 @@ impl JarvisApp {
             device_invite: None,
             pairing_url: String::new(),
             setup_stt: "small".into(),
-            setup_tts: "it_IT-paola-medium".into(),
+            setup_tts: "it_IT-riccardo-x_low".into(),
             connector_template: String::new(),
             mission_goal: String::new(),
             poll_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -279,6 +284,9 @@ impl JarvisApp {
             update_remove_confirm: false,
             update_restarting: false,
             persona_loaded: false,
+            voice_loaded: false,
+            speak_replies: false,
+            voice_hint: String::new(),
             persona_style: "film".into(),
             persona_address: String::new(),
         }
@@ -383,6 +391,12 @@ impl JarvisApp {
                     self.last_load = Instant::now() - Duration::from_secs(60);
                     self.refresh(ctx);
                 }
+                Event::VoiceStatus(result) => {
+                    if let Ok(doc) = result {
+                        self.speak_replies = doc["speak_replies"].as_bool().unwrap_or(false);
+                        self.voice_hint = doc["hint"].as_str().unwrap_or_default().to_owned();
+                    }
+                }
                 Event::Persona(result) => {
                     self.loading = false;
                     match result {
@@ -463,6 +477,14 @@ impl JarvisApp {
                 }
                 Event::ChatFinished(Ok(result)) => {
                     let reply = result["reply"].as_str().unwrap_or("").to_string();
+                    if self.speak_replies && !self.remote && !reply.is_empty() {
+                        if let Some(client) = self.client.clone() {
+                            let text = reply.clone();
+                            std::thread::spawn(move || {
+                                let _ = client.post("/api/voice/say", Some(&json!({"text": text})));
+                            });
+                        }
+                    }
                     if !reply.is_empty() {
                         if let Some(last) = self.chat.last_mut().filter(|m| m.role == "assistant") {
                             last.text = reply;
@@ -2568,6 +2590,44 @@ impl JarvisApp {
                     let _ = tx.send(Event::Persona(client.get("/api/persona")));
                 });
             }
+        }
+        if !self.voice_loaded && !self.remote {
+            if let Some(client) = self.client.clone() {
+                self.voice_loaded = true;
+                let tx = self.tx.clone();
+                std::thread::spawn(move || {
+                    let _ = tx.send(Event::VoiceStatus(client.get("/api/voice/system")));
+                });
+            }
+        }
+        if !self.remote {
+            ui.heading("Voce");
+            ui.label("JARVIS parla solo con una voce maschile (Luca su macOS, Cosimo su Windows).");
+            let mut speak = self.speak_replies;
+            if ui
+                .checkbox(&mut speak, "Leggi le risposte ad alta voce")
+                .changed()
+            {
+                self.speak_replies = speak;
+                let ctx = ui.ctx().clone();
+                self.mutate(
+                    &ctx,
+                    Mutation::Patch,
+                    "/api/voice/system".into(),
+                    Some(json!({"speak_replies": speak})),
+                );
+            }
+            if !self.voice_hint.is_empty() {
+                ui.small(egui::RichText::new(self.voice_hint.clone()).weak());
+            }
+            if ui.button("Fai tacere").clicked() {
+                if let Some(client) = self.client.clone() {
+                    std::thread::spawn(move || {
+                        let _ = client.post("/api/voice/stop", None);
+                    });
+                }
+            }
+            ui.separator();
         }
         ui.heading("Personalità");
         ui.label("Come JARVIS ti risponde. Non cambia permessi né conferme.");

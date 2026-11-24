@@ -68,6 +68,8 @@ const SOURCES: &[&str] = &[
     tool_file!("n8n.create"),
     tool_file!("process.list"),
     tool_file!("pc.open"),
+    tool_file!("screen.read"),
+    tool_file!("screen.status"),
     tool_file!("security.cvss"),
     tool_file!("security.hash"),
     tool_file!("security.status"),

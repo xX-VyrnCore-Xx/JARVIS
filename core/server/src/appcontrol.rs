@@ -28,7 +28,13 @@ fn err(code: &'static str, message: impl Into<String>) -> ToolError {
 pub fn is_control_tool(tool: &str) -> bool {
     matches!(
         tool,
-        "app.open" | "app.focus" | "app.type" | "app.key" | "app.windows"
+        "app.open"
+            | "app.focus"
+            | "app.type"
+            | "app.key"
+            | "app.windows"
+            | "screen.read"
+            | "screen.status"
     )
 }
 
@@ -52,6 +58,12 @@ pub fn is_app_request(message: &str) -> bool {
         "scrivi nell'applicazione",
         "digita nell'app",
         "premi ",
+        "cosa c'è sullo schermo",
+        "cosa vedi sullo schermo",
+        "leggi lo schermo",
+        "leggi il mio schermo",
+        "stato della lettura dello schermo",
+        "puoi leggere lo schermo",
         "quali app",
         "quali applicazioni",
         "quali finestre",

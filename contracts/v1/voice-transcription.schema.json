@@ -12,6 +12,15 @@
     "language": { "type": "string", "pattern": "^[a-z]{2}(-[A-Z]{2})?$" },
     "duration_ms": { "type": "integer", "minimum": 0, "maximum": 120000 },
     "engine": { "$ref": "#/$defs/engine" },
+    "normalized": {
+      "description": "Comando con i numeri scritti a parole ridotti a cifre («venti minuti» → «20 minuti»), senza altre modifiche (ADR-0123).",
+      "type": "string",
+      "maxLength": 8000
+    },
+    "intent": {
+      "description": "Comando vocale di controllo riconosciuto dal solo testo: ferma la voce, ripeti l'ultima risposta, annulla (ADR-0123).",
+      "enum": ["stop", "repeat", "cancel"]
+    },
     "wake": {
       "description": "Esito della parola di attivazione (solo in modalità mani libere). 'command' è il testo che segue la parola di attivazione.",
       "type": "object",

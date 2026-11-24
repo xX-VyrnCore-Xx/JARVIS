@@ -93,3 +93,5 @@ Container del sandbox (ADR-0115): etichetta `jarvis.sandbox=1`, `--ipc none`, pu
 **Permessi del proprietario (ADR-0116).** Profili Standard, Prudente e Solo lettura e regole `ask`/`deny` per strumento; solo restrizioni, modificabili dal solo computer del Core e mai da chat.
 
 **Controllo delle applicazioni (ADR-0121).** `app.open`, `app.focus`, `app.type`, `app.key` e `app.windows` agiscono sul computer: richiesta diretta del proprietario, conferma solo sua con il testo esatto, valori passati come argomenti e mai dentro uno script, nessuna credenziale digitata, vietati a dispositivi, automazioni, missioni e agenti temporanei.
+
+**Schermo (ADR-0122).** `screen.read` legge il testo con OCR locale, mostra solo testo con i dati sensibili mascherati, elimina l'immagine subito, richiede la conferma a ogni uso e non passa mai nulla ai modelli cloud.

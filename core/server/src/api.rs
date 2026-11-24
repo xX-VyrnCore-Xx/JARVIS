@@ -420,6 +420,12 @@ pub fn router(state: Shared) -> Router {
             post(voice_transcribe).layer(axum::extract::DefaultBodyLimit::max(5 * 1024 * 1024)),
         )
         .route("/api/voice/speak", post(voice_speak))
+        .route(
+            "/api/voice/system",
+            get(voice_system_get).patch(voice_system_patch),
+        )
+        .route("/api/voice/say", post(voice_say))
+        .route("/api/voice/stop", post(voice_stop))
         .route("/api/devices", get(devices))
         .route(
             "/api/push/subscriptions",
@@ -1701,6 +1707,69 @@ async fn voice_transcribe(
     let wake = q.get("mode").is_some_and(|m| m == "wake_word");
     let audio = body.to_vec();
     reply(with_core(&state, move |j| j.voice_transcribe(&audio, wake)).await)
+}
+
+fn owner_only_response() -> Response {
+    error(
+        StatusCode::FORBIDDEN,
+        "owner_only",
+        "operazione disponibile solo dal computer del proprietario",
+    )
+}
+
+/// Voce di sistema maschile (ADR-0123): stato e impostazione «leggi le risposte».
+async fn voice_system_get(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+) -> Response {
+    if device.is_some() {
+        return owner_only_response();
+    }
+    let dir = with_core(&state, |j| j.data_dir()).await;
+    Json(crate::speech::status(&dir)).into_response()
+}
+
+async fn voice_system_patch(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Json(body): Json<Value>,
+) -> Response {
+    if device.is_some() {
+        return owner_only_response();
+    }
+    let dir = with_core(&state, |j| j.data_dir()).await;
+    match crate::speech::update(&dir, &body) {
+        Ok(_) => Json(crate::speech::status(&dir)).into_response(),
+        Err(message) => CoreError::BadRequest(message).into_response(),
+    }
+}
+
+/// Legge un testo con la voce di sistema maschile: solo dal computer del proprietario.
+async fn voice_say(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Json(body): Json<Value>,
+) -> Response {
+    if device.is_some() {
+        return owner_only_response();
+    }
+    let _ = &state;
+    let Some(text) = body["text"].as_str().map(str::to_owned) else {
+        return CoreError::BadRequest("campo 'text' mancante".into()).into_response();
+    };
+    match tokio::task::spawn_blocking(move || crate::speech::speak(&text)).await {
+        Ok(Ok(doc)) => Json(doc).into_response(),
+        Ok(Err(e)) => error(StatusCode::UNPROCESSABLE_ENTITY, e.code, &e.message),
+        Err(_) => CoreError::Internal("Lettura interrotta.".into()).into_response(),
+    }
+}
+
+async fn voice_stop(device: Option<axum::Extension<DeviceCtx>>) -> Response {
+    if device.is_some() {
+        return owner_only_response();
+    }
+    crate::speech::stop();
+    Json(json!({"stopped": true})).into_response()
 }
 
 async fn voice_speak(State(state): State<Shared>, Json(body): Json<Value>) -> Response {

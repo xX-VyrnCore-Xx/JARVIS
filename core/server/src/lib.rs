@@ -33,13 +33,16 @@ pub mod passkeys;
 pub mod permissions;
 pub mod persona;
 pub mod policy;
+pub mod privacy;
 pub mod proactive;
 pub mod push;
 pub mod rollback;
+pub mod screen;
 pub mod secrets;
 pub mod selfupdate;
 pub mod setup;
 pub mod skills;
+pub mod speech;
 
 /// Su Windows i processi figli (worker Python, pip) non devono aprire una finestra di console quando il
 /// Core è avviato dall'app desktop. Altrove non fa nulla.
