@@ -114,7 +114,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var testingCloudKey = false
     @State private var savingCloudSettings = false
     @State private var confirmKeyRemoval = false
-    @State private var useCloudContext = false
+    /// Turni recenti inviati al provider scelto (ADR-0130): attivo di default, il proprietario può spegnerlo qui.
+    @AppStorage("jarvis.shareContext") private var useCloudContext = true
     @State private var cloudModel = ""
     @State private var provider = "ollama_cloud"
     @State private var apiKey = ""
@@ -173,7 +174,6 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         }
         .onChange(of: core.uiLocked) { _, locked in
             if locked {
-                useCloudContext = false
                 apiKey = ""
                 credential = ""
                 backupPassword = ""
@@ -191,7 +191,6 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         }
         .onChange(of: core.phase) { _, phase in
             if phase != .ready {
-                useCloudContext = false
                 apiKey = ""
                 confirmKeyRemoval = false
                 invite = nil
@@ -219,7 +218,6 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     private func select(_ value: Section) {
         guard section != value else { return }
-        useCloudContext = false
         activeLoad = nil
         payload = [:]
         error = nil
@@ -1163,7 +1161,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 Label("Inferenza cloud", systemImage: "cloud")
                     .foregroundStyle(.secondary)
                 Spacer()
-                Toggle("Includi conversazione recente", isOn: $useCloudContext)
+                Toggle("Ricorda la conversazione recente", isOn: $useCloudContext)
                     .toggleStyle(.checkbox)
                     .help("Invia i turni recenti compatibili allo stesso provider per questa richiesta.")
                     .disabled(sending)
@@ -1194,7 +1192,6 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !sending else { return }
         let includeContext = useCloudContext
-        useCloudContext = false
         sending = true
         error = nil
         lastReply = nil

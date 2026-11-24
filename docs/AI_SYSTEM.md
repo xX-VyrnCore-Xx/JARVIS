@@ -30,7 +30,7 @@ Per aggiornare prompt, agenti e adapter, versionare le modifiche e provarle su c
 
 ## Runtime, contesto e strumenti
 
-Il worker Python usa l’agente deterministico per i comandi offline. Il Core esegue le richieste autorizzate a Ollama Cloud e NVIDIA NIM e convalida le proposte di strumenti con i contratti locali. Il routing distingue risposte rapide, sviluppo, ragionamento e contesto lungo. L’inferenza può proporre soltanto calcoli isolati. I comandi che accedono a memoria, file e servizi passano dalle policy locali.
+Il worker Python usa l’agente deterministico per i comandi offline. Il Core esegue le richieste autorizzate a Ollama Cloud e NVIDIA NIM e convalida le proposte di strumenti con i contratti locali. Il routing distingue risposte rapide, sviluppo, ragionamento e contesto lungo. La complessità si misura sulla richiesta (non sulla cronologia) e le richieste ordinarie restano sul modello veloce, con ripiego dopo 40 s. I turni recenti vengono inviati al provider scelto per impostazione predefinita, senza segreti; il proprietario può spegnerli dall'interruttore «Ricorda la conversazione recente» (ADR-0130). L’inferenza può proporre soltanto calcoli isolati. I comandi che accedono a memoria, file e servizi passano dalle policy locali.
 
 Il Core stima i token tenendo conto di sequenze di testo, punteggiatura, sintassi e Unicode. Con continuità attiva include fino a otto scambi testuali consecutivi dello stesso provider entro 16.000 token stimati; conserva il messaggio corrente e accorcia i singoli turni sui confini dei caratteri. Schemi degli strumenti, istruzioni e margine per la risposta sono inclusi nel calcolo del plafond applicativo. La memoria, i segreti rilevati e gli esiti degli strumenti restano sul Core.
 

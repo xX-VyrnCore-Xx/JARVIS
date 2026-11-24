@@ -946,7 +946,8 @@ impl Jarvis {
                     .into(),
             ));
         }
-        let recent = if body["use_context"] == true {
+        // Contesto attivo salvo rifiuto esplicito del proprietario (ADR-0130): senza turni precedenti le risposte restano generiche.
+        let recent = if body["use_context"].as_bool().unwrap_or(true) {
             self.store.recent_cloud_turns().map_err(internal)?
         } else {
             Vec::new()

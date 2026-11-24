@@ -414,7 +414,7 @@ impl JarvisApp {
             memory_search: String::new(),
             history_loading: false,
             chat_busy: false,
-            chat_cloud_context: false,
+            chat_cloud_context: true,
             notifications: Vec::new(),
             notifications_error: None,
             confirmations: Vec::new(),
@@ -1249,8 +1249,11 @@ impl JarvisApp {
 
     fn show_chat(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         if !self.remote {
-            ui.checkbox(&mut self.chat_cloud_context, "Includi turni cloud recenti")
-                .on_hover_text("Condivide i turni precedenti con lo stesso provider.");
+            ui.checkbox(
+                &mut self.chat_cloud_context,
+                "Ricorda la conversazione recente",
+            )
+            .on_hover_text("Condivide i turni precedenti con lo stesso provider.");
         }
         if let Some(error) = &self.error {
             ui.colored_label(egui::Color32::LIGHT_RED, error);

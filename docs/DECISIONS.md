@@ -1735,6 +1735,17 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Non verificato:** resa e fluidità su schermo; il Kotlin si compila solo in CI (nessun Android SDK qui) e non ho eseguito il client egui su Windows. Verificati: fmt, clippy `-D warnings` e 23 test del client egui su build Linux con stub (funzioni pure dell'avatar comprese).
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
 
+### ADR-0130 — Risposte più rapide e meno generiche
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («ci mette troppo a rispondere e dà risposte troppo vaghe»).
+- **Cause trovate:** (1) la chat cloud partiva **senza i turni precedenti** salvo spuntare ogni volta la casella (che si azzerava a ogni invio): il modello non vedeva la conversazione e rispondeva a vuoto; (2) la scelta del modello mandava richieste ordinarie ai modelli di ragionamento, molto più lenti: la complessità includeva tutta la cronologia, «prima» e «poi» (parole comuni) contavano come sequenza, bastavano 5 righe o la parola «design»; (3) una nuova connessione TLS a ogni messaggio; (4) un modello veloce senza risposta teneva l'utente fino a 90 s prima del ripiego; (5) le istruzioni chiedevano di essere «concisi» e di chiedere chiarimenti quando mancava un elemento, il che produce panoramiche e domande.
+- **Decisione (contesto):** i turni recenti vanno al provider scelto **per impostazione predefinita** (scelta esplicita del proprietario, con interruttore «Ricorda la conversazione recente» su macOS e Windows, memorizzato e non più azzerato). Resta valido il filtro dei segreti; per i dispositivi collegati il contesto resta spento. Un `use_context` esplicito nella richiesta prevale.
+- **Decisione (velocità):** complessità misurata sulla sola richiesta (≥420 token, ≥8 righe, termini di analisi; «design» tolto); due parole di sequenza vere (`poi`, `infine`, …) invece di «prima/poi»; la cronologia conta solo per il contesto lungo (≥3200 token). Agente HTTP condiviso per riusare le connessioni. Timeout del modello veloce a 40 s (poi subentra l'alternativa); 90 s per gli altri.
+- **Decisione (qualità):** prompt di sistema con «sii specifico» (cifre, nomi, comandi, passaggi, esempi; niente consigli di rito; rispondere nel merito), ipotesi più probabile dichiarata invece di domande a vuoto, chiarimento richiesto solo per file, persone o azioni ambigue; guida del percorso veloce «diretta e completa» al posto di «concisa».
+- **Non incluso:** risposta in streaming per la chat cloud (richiede flussi per entrambi i provider, anche con chiamate a strumenti): è il prossimo passo per ridurre l'attesa percepita. Memoria personale del proprietario nel contesto cloud: non inviata (decisione di privacy da prendere a parte).
+- **Non verificato:** latenza e qualità reali (nessuna chiave API nel checkout): servono prove con i provider veri. Verificati con fixture: routing, prompt, contesto predefinito, test del Core.
+- **Documenti interessati:** AI_SYSTEM.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.
