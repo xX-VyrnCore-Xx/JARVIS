@@ -1,0 +1,38 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "security.cvss",
+  "version": "1.0.0",
+  "summary": "Calcola il punteggio base CVSS v3.1 e la gravità da un vettore",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "vector"
+    ],
+    "properties": {
+      "vector": {
+        "type": "string",
+        "minLength": 8,
+        "maxLength": 120
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "none",
+  "risk": "low",
+  "permissions": [
+    "core.compute:execute"
+  ],
+  "errors": [
+    "security.invalid_vector"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

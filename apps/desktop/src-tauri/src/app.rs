@@ -22,7 +22,7 @@ const POSITIVE: egui::Color32 = egui::Color32::from_rgb(105, 220, 174);
 const CAUTION: egui::Color32 = egui::Color32::from_rgb(245, 190, 96);
 const NEGATIVE: egui::Color32 = egui::Color32::from_rgb(255, 125, 135);
 
-const NAV: [(&str, &str, bool); 15] = [
+const NAV: [(&str, &str, bool); 16] = [
     ("dashboard", "Plancia", true),
     ("chat", "Chat", false),
     ("tasks", "Attività", false),
@@ -34,6 +34,7 @@ const NAV: [(&str, &str, bool); 15] = [
     ("connectors", "Connettori", true),
     ("devices", "Dispositivi", true),
     ("security", "Sicurezza", true),
+    ("permissions", "Permessi", true),
     ("audit", "Audit", true),
     ("system", "Sistema", true),
     ("models", "Modelli AI", true),
@@ -1055,6 +1056,7 @@ impl JarvisApp {
             "connectors" => self.show_connectors(ui, ctx),
             "memory" => self.show_memory(ui, ctx),
             "missions" => self.show_missions(ui, ctx),
+            "permissions" => self.show_permissions(ui, ctx),
             "tasks" | "automations" | "skills" | "workspace" | "devices" | "security" | "audit" => {
                 ui.horizontal(|ui| {
                     ui.heading(title(&self.current));
@@ -1090,6 +1092,114 @@ impl JarvisApp {
     }
 
     /// Missioni autonome e iniziative proattive (ADR-0096, ADR-0097).
+    /// Permessi del proprietario (ADR-0116): profilo e regole per strumento. Restringono, non allargano.
+    fn show_permissions(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let Some(data) = self.data.clone() else {
+            ui.label("Caricamento dei permessi…");
+            return;
+        };
+        ui.heading("Permessi di JARVIS");
+        ui.label("Decidi cosa JARVIS può fare da solo. Puoi solo restringere: le conferme richieste dal catalogo restano sempre.");
+        ui.add_space(8.0);
+        let profile = data["profile"].as_str().unwrap_or("standard").to_owned();
+        let label = |p: &str| match p {
+            "prudent" => "Prudente: conferma ogni modifica",
+            "read_only" => "Solo lettura: nessuna modifica",
+            _ => "Standard",
+        };
+        ui.horizontal(|ui| {
+            ui.label("Profilo");
+            egui::ComboBox::from_id_salt("permission-profile")
+                .selected_text(label(&profile))
+                .show_ui(ui, |ui| {
+                    for option in ["standard", "prudent", "read_only"] {
+                        if ui
+                            .selectable_label(profile == option, label(option))
+                            .clicked()
+                            && profile != option
+                        {
+                            self.mutate(
+                                ctx,
+                                Mutation::Patch,
+                                "/api/permissions".into(),
+                                Some(json!({"profile": option})),
+                            );
+                        }
+                    }
+                });
+        });
+        ui.add_space(10.0);
+        ui.heading("Regole per strumento");
+        ui.label(
+            "«Chiedi conferma» richiede il tuo consenso a ogni uso; «Vieta» blocca lo strumento.",
+        );
+        ui.add_space(4.0);
+        let tools = data["tools"].as_array().cloned().unwrap_or_default();
+        egui::Grid::new("permission-tools")
+            .num_columns(4)
+            .striped(true)
+            .spacing([14.0, 6.0])
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new("Strumento").strong());
+                ui.label(egui::RichText::new("Effetto").strong());
+                ui.label(egui::RichText::new("Rischio").strong());
+                ui.label(egui::RichText::new("Regola").strong());
+                ui.end_row();
+                for tool in &tools {
+                    let name = tool["name"].as_str().unwrap_or_default();
+                    let explicit = data["rules"][name].as_str().unwrap_or("none");
+                    let effective = tool["restriction"].as_str().unwrap_or("none");
+                    ui.label(name);
+                    ui.label(
+                        egui::RichText::new(tool["effects"].as_str().unwrap_or(""))
+                            .small()
+                            .weak(),
+                    );
+                    ui.label(
+                        egui::RichText::new(tool["risk"].as_str().unwrap_or(""))
+                            .small()
+                            .weak(),
+                    );
+                    let shown = match (explicit, effective) {
+                        ("deny", _) => "Vieta",
+                        ("ask", _) => "Chiedi conferma",
+                        (_, "deny") => "Vietato dal profilo",
+                        (_, "ask") => "Conferma dal profilo",
+                        _ => "Nessuna",
+                    };
+                    egui::ComboBox::from_id_salt(format!("perm-{name}"))
+                        .selected_text(shown)
+                        .width(170.0)
+                        .show_ui(ui, |ui| {
+                            for (value, text) in [
+                                ("none", "Nessuna"),
+                                ("ask", "Chiedi conferma"),
+                                ("deny", "Vieta"),
+                            ] {
+                                if ui.selectable_label(explicit == value, text).clicked()
+                                    && explicit != value
+                                {
+                                    let rule = if value == "none" {
+                                        Value::Null
+                                    } else {
+                                        json!(value)
+                                    };
+                                    self.mutate(
+                                        ctx,
+                                        Mutation::Patch,
+                                        "/api/permissions".into(),
+                                        Some(json!({"rules": {name: rule}})),
+                                    );
+                                }
+                            }
+                        });
+                    ui.end_row();
+                }
+            });
+        ui.add_space(8.0);
+        ui.small("Le modifiche sono registrate nell'audit e valgono dal prossimo comando.");
+    }
+
     fn show_missions(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.horizontal(|ui| {
             ui.heading("Missioni");
@@ -4062,6 +4172,7 @@ fn endpoint(page: &str) -> &'static str {
         "memory" => "/api/memory",
         "skills" => "/api/skills",
         "missions" => "/api/missions",
+        "permissions" => "/api/permissions",
         "workspace" => "/api/workspace",
         "connectors" => "/api/connectors",
         "devices" => "/api/devices",

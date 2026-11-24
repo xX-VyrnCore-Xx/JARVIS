@@ -1321,6 +1321,7 @@ impl Jarvis {
                     version: &version,
                     arguments: &arguments,
                     digest: &digest,
+                    perms: &crate::permissions::Rules::load(&self.cfg.data_dir),
                 },
             );
             out.steps.push(json!({"kind": "policy", "decision": decision["decision"], "reasons": decision["reasons"], "risk": decision["risk"]}));
@@ -1623,6 +1624,7 @@ impl Jarvis {
                 version,
                 arguments,
                 digest: &digest,
+                perms: &crate::permissions::Rules::load(&self.cfg.data_dir),
             },
         );
         let allowed = decision["decision"] == "allow";
@@ -2701,6 +2703,7 @@ impl Jarvis {
                     version: &version,
                     arguments: &arguments,
                     digest: &digest,
+                    perms: &crate::permissions::Rules::load(&self.cfg.data_dir),
                 },
             );
             let verdict = decision["decision"].as_str().unwrap_or("deny").to_string();
@@ -3113,6 +3116,55 @@ impl Jarvis {
 
     pub fn data_dir(&self) -> std::path::PathBuf {
         self.cfg.data_dir.clone()
+    }
+
+    /// Profilo e regole del proprietario, con l'elenco degli strumenti per la schermata Permessi (ADR-0116).
+    pub fn permissions(&self) -> Value {
+        let rules = crate::permissions::Rules::load(&self.cfg.data_dir);
+        let mut doc = rules.to_json();
+        let mut tools: Vec<Value> = self
+            .catalog
+            .iter()
+            .map(|t| {
+                let effects = t.descriptor["effects"].as_str().unwrap_or("write_local");
+                json!({"name": t.name(), "effects": effects, "risk": t.risk(),
+                "confirmation": t.needs_confirmation(),
+                "restriction": match rules.verdict(t.name(), effects) {
+                    Some(crate::permissions::Mode::Deny) => "deny",
+                    Some(crate::permissions::Mode::Ask) => "ask",
+                    None => "none",
+                }})
+            })
+            .collect();
+        tools.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+        doc["tools"] = json!(tools);
+        doc
+    }
+
+    pub fn permissions_update(&mut self, patch: &Value) -> Result<Value, CoreError> {
+        // Le regole devono riferirsi a strumenti del catalogo (o a un loro prefisso).
+        for pattern in patch["rules"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .map(|(p, _)| p)
+        {
+            let known = self
+                .catalog
+                .iter()
+                .any(|t| match pattern.strip_suffix(".*") {
+                    Some(prefix) => t.name().starts_with(&format!("{prefix}.")),
+                    None => t.name() == pattern,
+                });
+            if !known && crate::permissions::valid_pattern(pattern) {
+                return Err(CoreError::BadRequest(format!(
+                    "nessuno strumento del catalogo corrisponde a {pattern}"
+                )));
+            }
+        }
+        crate::permissions::update(&self.cfg.data_dir, patch).map_err(CoreError::BadRequest)?;
+        self.record_owner_action("permissions.update")?;
+        Ok(self.permissions())
     }
 
     pub fn updates_state(&self) -> Result<Value, CoreError> {

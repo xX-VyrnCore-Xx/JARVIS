@@ -41,6 +41,12 @@ pub fn explain(reason: &str) -> &'static str {
         "policy.shell_disabled" => {
             "il terminale del sistema richiede JARVIS_SHELL=on; per Python puoi usare la sandbox"
         }
+        "policy.owner_rule_deny" => {
+            "il proprietario ha vietato questo strumento nei permessi di JARVIS"
+        }
+        "policy.owner_rule_ask" => {
+            "i permessi del proprietario chiedono la conferma per questo strumento"
+        }
         "policy.command_blocked" => {
             "comando distruttivo o con privilegi di amministratore: JARVIS non lo esegue"
         }
@@ -57,6 +63,8 @@ pub struct Request<'a> {
     pub version: &'a str,
     pub arguments: &'a Value,
     pub digest: &'a str,
+    /// Restrizioni del proprietario (ADR-0116).
+    pub perms: &'a crate::permissions::Rules,
 }
 
 fn resource_uri(tool: &str, args: &Value) -> String {
@@ -339,6 +347,27 @@ pub fn decide(catalog: &Catalog, web: &WebConfig, req: &Request) -> Value {
                 vec![
                     check_url(web, req.arguments["url"].as_str().unwrap_or_default()).unwrap_err(),
                 ],
+                t.risk().into(),
+            )
+        }
+        Some(t)
+            if req.perms.verdict(
+                t.name(),
+                t.descriptor["effects"].as_str().unwrap_or("write_local"),
+            ) == Some(crate::permissions::Mode::Deny) =>
+        {
+            ("deny", vec!["policy.owner_rule_deny"], t.risk().into())
+        }
+        Some(t)
+            if !(t.needs_confirmation() || matches!(t.risk(), "high" | "critical"))
+                && req.perms.verdict(
+                    t.name(),
+                    t.descriptor["effects"].as_str().unwrap_or("write_local"),
+                ) == Some(crate::permissions::Mode::Ask) =>
+        {
+            (
+                "require_confirmation",
+                vec!["policy.owner_rule_ask"],
                 t.risk().into(),
             )
         }

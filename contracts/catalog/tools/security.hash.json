@@ -1,0 +1,48 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "security.hash",
+  "version": "1.0.0",
+  "summary": "Calcola lo SHA-256 di un file della workspace e lo confronta con un valore atteso",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "path"
+    ],
+    "properties": {
+      "path": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300
+      },
+      "expected": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 80
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "node.filesystem:read"
+  ],
+  "errors": [
+    "security.invalid_digest",
+    "security.not_a_file",
+    "security.too_large",
+    "security.unreadable",
+    "fs.outside_workspace",
+    "fs.not_found"
+  ],
+  "timeout_ms": 10000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

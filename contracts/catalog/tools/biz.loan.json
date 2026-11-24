@@ -1,0 +1,50 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "biz.loan",
+  "version": "1.0.0",
+  "summary": "Calcola la rata mensile, il totale e gli interessi di un finanziamento a rata costante",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "principal",
+      "annual_rate_percent",
+      "months"
+    ],
+    "properties": {
+      "principal": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "maximum": 1000000000000.0
+      },
+      "annual_rate_percent": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 100
+      },
+      "months": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 1200
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "none",
+  "risk": "low",
+  "permissions": [
+    "core.compute:execute"
+  ],
+  "errors": [
+    "biz.invalid"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

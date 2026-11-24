@@ -1597,6 +1597,33 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** test degli argomenti di `docker run` e dell'analisi degli identificativi.
 - **Documenti interessati:** SECURITY_AND_PRIVACY.md, ROADMAP.md.
 
+### ADR-0116 — Permessi del proprietario: profili e regole per strumento
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora i permessi di JARVIS»).
+- **Problema:** la policy dipendeva solo dal descrittore dello strumento (rischio e conferma): il proprietario non poteva rendere JARVIS più prudente, né vietare uno strumento, senza cambiare il catalogo.
+- **Decisione:** `permissions.rs` e `<dati>/permissions.json`. Tre profili: **Standard** (comportamento del catalogo), **Prudente** (ogni strumento che modifica o esegue chiede la conferma), **Solo lettura** (tutto ciò che modifica o esegue è negato). In più regole per strumento o per prefisso (`connector.*`): `ask` (conferma a ogni uso) o `deny`; la più severa vince. La policy applica le regole prima delle conferme del catalogo, con i motivi `policy.owner_rule_deny` e `policy.owner_rule_ask`, spiegati in italiano.
+- **Invariante di sicurezza:** si può solo **restringere**; nessun profilo o regola toglie una conferma richiesta dal catalogo o rende consentito ciò che la policy nega. Un file illeggibile fa scegliere il profilo Prudente (fallire chiuso).
+- **Controllo:** `GET/PATCH /api/permissions` solo dal computer del Core (403 per i dispositivi); le regole devono riferirsi a strumenti del catalogo; ogni modifica è nell'audit (`permissions.update`). Non c'è nessuno strumento di chat per cambiarle, così un testo ostile non può allargare né ridurre i permessi. Pagina «Permessi» nell'app desktop con profilo e regole per ogni strumento.
+- **Limiti:** la schermata macOS non c'è ancora (le regole valgono comunque, si gestiscono dall'API o dal desktop); le automazioni già salvate che usano uno strumento con regola `ask` si fermano alla richiesta di conferma diretta.
+- **Evidenza:** test unitari (profili, prefissi, la più severa vince, input non valido, file corrotto) e `tests/permissions.rs` con il Core (conferma richiesta, negazione, sola lettura che non blocca le letture, elenco con restrizioni).
+- **Documenti interessati:** SECURITY_AND_PRIVACY.md, AUTONOMY_AND_TOOLS.md, ROADMAP.md.
+
+### ADR-0117 — Strumenti di competenza per aziende, informatica e sicurezza
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («specialità nelle aziende, in informatica e in cyber security»).
+- **Decisione:** cinque strumenti di calcolo o sola lettura, senza rete e senza scritture (`expert.rs`): `security.cvss` (punteggio base CVSS v3.0/3.1 e gravità da un vettore), `security.hash` (SHA-256 di un file della workspace con confronto con un valore atteso, per verificare scaricamenti e immagini), `it.subnet` (rete, maschera, broadcast, host utilizzabili di una sottorete IPv4), `biz.vat` (IVA: aggiunge o scorpora, aliquota predefinita 22%) e `biz.loan` (rata costante, totale e interessi). Il calcolo non lo fa il modello: lo fa lo strumento, e il risultato è verificabile.
+- **Regole offline:** «cvss CVSS:3.1/…», «sottorete 192.168.1.0/24», «sha256 file [atteso <hash>]», «iva al 22% su 1.000,50», «rata mutuo 100.000 € al 3,5% in 20 anni»; i numeri si leggono all'italiana.
+- **Evidenza:** punteggi CVSS pubblicati (9,8, 10,0, 6,1, 7,8, 0), sottoreti, hash noto (`abc`), IVA e rata di un mutuo di riferimento (579,96 €), percorsi fuori dalla workspace rifiutati.
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ROADMAP.md.
+
+### ADR-0118 — Specialisti e competenze per aziende, IT e sicurezza difensiva
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout.
+- **Decisione:** nuovo specialista **business** (`delegation.schema.json` ammette il nome) con IVA, finanziamenti, note, cose da fare, lettura di file e ricerca Web, e nessuna scrittura né terminale. Lo specialista della sicurezza (`monitoring`) riconosce anche CVSS, vulnerabilità, ransomware, phishing, incidenti e violazioni dei dati e ottiene `security.cvss` e `security.hash`; lo specialista di sistema riconosce sottoreti e runbook e ottiene `it.subnet`. Quattro nuove competenze predefinite: **Analisi e procedure aziendali**, **Operazioni IT e runbook**, **Risposta agli incidenti di sicurezza** (contenere, preservare le prove, valutare, ripristinare, comunicare; ricorda la notifica entro 72 ore del GDPR), **Conformità e protezione dei dati** (GDPR, NIS2, ISO/IEC 27001, senza valore legale). Restano difensive: nessun exploit, scansione di sistemi terzi o azione offensiva.
+- **Limiti:** le competenze sono istruzioni per il modello, non consulenza professionale: ogni testo lo dice quando serve un legale, un DPO o un commercialista.
+- **Evidenza:** test di instradamento verso gli specialisti e dei loro strumenti concessi.
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.

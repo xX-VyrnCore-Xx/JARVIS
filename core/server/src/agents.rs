@@ -13,12 +13,12 @@ pub struct Agent {
 /// Strumenti concessi a ogni specializzazione oltre al proprio ambito: ora e ricerca nella memoria.
 const COMMON: [&str; 2] = ["time.now", "memory.search"];
 
-pub const SPECIALISTS: [Agent; 6] = [
+pub const SPECIALISTS: [Agent; 7] = [
     Agent {
         name: "monitoring",
         role: "Sicurezza difensiva: controlla postura, audit e configurazioni locali. Riferisci le evidenze raccolte, la gravità e le verifiche mancanti. Per la bonifica indica priorità e verifica del ripristino.",
-        keywords: &["cybersecurity", "postura di sicurezza", "centro sicurezza", "audit di sicurezza", "hardening", "controllo di sicurezza", "bonifica", "risposta a incidenti", "incident response", "audit dei permessi", "postura it"],
-        tools: &["security.status", "system.info", "system.disks", "process.list", "fs.read", "fs.list", "fs.search"],
+        keywords: &["cvss", "vulnerabilit", "ransomware", "phishing", "incidente di sicurezza", "violazione dei dati", "data breach", "integrita del file", "cybersecurity", "postura di sicurezza", "centro sicurezza", "audit di sicurezza", "hardening", "controllo di sicurezza", "bonifica", "risposta a incidenti", "incident response", "audit dei permessi", "postura it"],
+        tools: &["security.status", "security.cvss", "security.hash", "system.info", "system.disks", "process.list", "fs.read", "fs.list", "fs.search", "notes.add", "todo.add"],
     },
     Agent {
         name: "research",
@@ -29,8 +29,8 @@ pub const SPECIALISTS: [Agent; 6] = [
     Agent {
         name: "system",
         role: "Sistemi IT: inizia da diagnosi in sola lettura; distingue osservazioni e ipotesi. Prima di una modifica indica impatto, verifica e ripristino.",
-        keywords: &["processi", "processo", "terminale", "cpu", " ram", "task manager", "rallent", "che sistema", "info sistema", "informazioni di sistema", "informazioni sul sistema"],
-        tools: &["system.info", "system.disks", "process.list", "shell.run", "fs.list", "fs.read", "fs.search"],
+        keywords: &["sottorete", "subnet", "cidr", "runbook", "processi", "processo", "terminale", "cpu", " ram", "task manager", "rallent", "che sistema", "info sistema", "informazioni di sistema", "informazioni sul sistema"],
+        tools: &["system.info", "system.disks", "process.list", "it.subnet", "shell.run", "fs.list", "fs.read", "fs.search"],
     },
     Agent {
         name: "automation",
@@ -43,6 +43,12 @@ pub const SPECIALISTS: [Agent; 6] = [
         role: "Memoria: salva, cerca, corregge e dimentica ciò che il proprietario ti chiede; frasi brevi e autonome.",
         keywords: &["ricorda che", "ricordati", "cosa ricordi", "dimentica", "nella memoria", "preferisco"],
         tools: &["memory.remember", "memory.list", "memory.forget", "memory.update", "notes.add", "notes.list", "notes.search", "notes.delete"],
+    },
+    Agent {
+        name: "business",
+        role: "Aziende: analizza processi, costi e rischi con numeri verificati dagli strumenti; separa fatti, ipotesi e stime; chiudi con opzioni, raccomandazione e prossimi passi. Non dare pareri legali, fiscali o contabili vincolanti.",
+        keywords: &[" iva ", "l'iva", "mutuo", "finanziamento", "rata del", "business plan", "analisi aziendale", "piano aziendale", "margine", "kpi", "preventivo", "bilancio", "procedura aziendale", "fornitori"],
+        tools: &["biz.vat", "biz.loan", "math.calc", "date.calc", "notes.add", "notes.list", "notes.search", "todo.add", "todo.list", "fs.read", "fs.list", "fs.search", "web.search"],
     },
     Agent {
         name: "coding",
@@ -121,6 +127,26 @@ mod tests {
         assert_eq!(name("ciao, come stai?"), GENERAL);
         assert_eq!(name("ogni ora info sistema"), GENERAL);
         assert_eq!(name("leggi note.txt"), GENERAL);
+    }
+
+    #[test]
+    fn company_it_and_security_requests_reach_their_specialists() {
+        assert_eq!(name("calcola l'iva al 22% su 100 euro"), "business");
+        assert_eq!(
+            name("quanto è la rata del mutuo di 100000 euro"),
+            "business"
+        );
+        assert_eq!(name("che gravità ha questo vettore cvss"), "monitoring");
+        assert_eq!(name("ho ricevuto un phishing, cosa faccio"), "monitoring");
+        assert_eq!(name("calcola la sottorete 10.0.0.0/8"), "system");
+        let business = route("analisi aziendale dei costi").unwrap();
+        assert!(
+            allows(business, "biz.vat")
+                && !allows(business, "shell.run")
+                && !allows(business, "fs.write")
+        );
+        let security = route("cvss 9.8").unwrap();
+        assert!(allows(security, "security.hash") && !allows(security, "shell.run"));
     }
 
     #[test]

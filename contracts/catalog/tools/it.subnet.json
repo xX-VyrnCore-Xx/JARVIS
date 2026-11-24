@@ -1,0 +1,38 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "it.subnet",
+  "version": "1.0.0",
+  "summary": "Calcola rete, maschera, broadcast e host utilizzabili di una sottorete IPv4 in notazione CIDR",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "cidr"
+    ],
+    "properties": {
+      "cidr": {
+        "type": "string",
+        "minLength": 7,
+        "maxLength": 20
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "none",
+  "risk": "low",
+  "permissions": [
+    "core.compute:execute"
+  ],
+  "errors": [
+    "it.invalid_cidr"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

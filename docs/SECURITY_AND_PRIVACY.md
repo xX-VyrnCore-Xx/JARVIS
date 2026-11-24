@@ -89,3 +89,5 @@ Container senza rete, senza capability, `no-new-privileges`, radice in sola lett
 Trasferimento file (ADR-0106): massimo 8 MiB in ingresso e 1 MiB in uscita, solo file, nessun collegamento simbolico della sessione viene seguito; l'esportazione nella workspace richiede conferma.
 
 Container del sandbox (ADR-0115): etichetta `jarvis.sandbox=1`, `--ipc none`, pulizia degli orfani all'avvio.
+
+**Permessi del proprietario (ADR-0116).** Profili Standard, Prudente e Solo lettura e regole `ask`/`deny` per strumento; solo restrizioni, modificabili dal solo computer del Core e mai da chat.

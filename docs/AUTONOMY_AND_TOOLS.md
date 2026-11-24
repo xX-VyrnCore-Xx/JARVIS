@@ -91,3 +91,5 @@ Il servizio usa l'immagine versionata `docker.n8n.io/n8nio/n8n:2.48.7`, l'utente
 **File (ADR-0106).** `sandbox.import` copia un file della workspace nella sessione; `sandbox.export` riporta un file nella workspace e chiede conferma. Esempi: «importa nella sandbox: dati.csv», «esporta dalla sandbox: out.txt in risultati/out.txt». **Avviso (ADR-0107):** JARVIS segnala una sessione oltre 200 MiB.
 
 **Docker (ADR-0113, ADR-0114).** `sandbox.status` dice se Docker manca, è spento o non ha permessi, e come rimediare. «Prepara la sandbox» costruisce l'immagine dall'app (con conferma, serve la rete una volta sola).
+
+**Competenze (ADR-0117, ADR-0118).** Strumenti `security.cvss`, `security.hash`, `it.subnet`, `biz.vat`, `biz.loan`; specialista `business`; competenze «Analisi e procedure aziendali», «Operazioni IT e runbook», «Risposta agli incidenti di sicurezza» e «Conformità e protezione dei dati». **Permessi (ADR-0116):** pagina «Permessi» dell'app desktop e `GET/PATCH /api/permissions`.

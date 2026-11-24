@@ -18,6 +18,8 @@ macro_rules! tool_file {
 }
 
 const SOURCES: &[&str] = &[
+    tool_file!("biz.loan"),
+    tool_file!("biz.vat"),
     tool_file!("code.check_python"),
     tool_file!("code.run_python"),
     tool_file!("code.validate_json"),
@@ -26,6 +28,7 @@ const SOURCES: &[&str] = &[
     tool_file!("fs.mkdir"),
     tool_file!("fs.move"),
     tool_file!("fs.search"),
+    tool_file!("it.subnet"),
     tool_file!("math.calc"),
     tool_file!("memory.update"),
     tool_file!("mission.cancel"),
@@ -60,6 +63,8 @@ const SOURCES: &[&str] = &[
     tool_file!("n8n.create"),
     tool_file!("process.list"),
     tool_file!("pc.open"),
+    tool_file!("security.cvss"),
+    tool_file!("security.hash"),
     tool_file!("security.status"),
     tool_file!("shell.run"),
     tool_file!("system.info"),
