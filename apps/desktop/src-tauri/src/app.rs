@@ -26,20 +26,193 @@ const NAV: [(&str, &str, bool); 16] = [
     ("dashboard", "Plancia", true),
     ("chat", "Chat", false),
     ("tasks", "Attività", false),
+    ("models", "Modelli AI", true),
+    ("missions", "Missioni", true),
     ("automations", "Automazioni", true),
+    ("workspace", "Workspace", true),
     ("memory", "Memoria", true),
     ("skills", "Competenze", true),
-    ("missions", "Missioni", true),
-    ("workspace", "Workspace", true),
     ("connectors", "Connettori", true),
     ("devices", "Dispositivi", true),
     ("security", "Sicurezza", true),
     ("permissions", "Permessi", true),
     ("audit", "Audit", true),
     ("system", "Sistema", true),
-    ("models", "Modelli AI", true),
     ("updates", "Aggiornamenti", true),
 ];
+
+/// Gruppo della barra laterale di ogni pagina (stessi titoli dell'app macOS).
+fn nav_group(id: &str) -> &'static str {
+    match id {
+        "dashboard" | "chat" | "tasks" | "models" => "Assistente",
+        "missions" | "automations" | "workspace" | "memory" | "skills" => "Organizzazione",
+        "connectors" | "devices" => "Connessioni",
+        "security" | "permissions" | "audit" => "Protezione",
+        _ => "Sistema",
+    }
+}
+
+fn mix_color(a: egui::Color32, b: egui::Color32, amount: f32) -> egui::Color32 {
+    let channel = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * amount.clamp(0.0, 1.0)) as u8;
+    egui::Color32::from_rgb(
+        channel(a.r(), b.r()),
+        channel(a.g(), b.g()),
+        channel(a.b(), b.b()),
+    )
+}
+
+/// Icona geometrica di una pagina, disegnata con il painter (nessun glifo di font che possa mancare).
+fn draw_nav_icon(painter: &egui::Painter, center: egui::Pos2, id: &str, color: egui::Color32) {
+    let stroke = egui::Stroke::new(1.4, color);
+    let p = |x: f32, y: f32| center + egui::vec2(x, y);
+    let rounding = egui::CornerRadius::same(2);
+    match id {
+        "dashboard" => {
+            for (x, y) in [(-6.5, -6.5), (0.5, -6.5), (-6.5, 0.5), (0.5, 0.5)] {
+                painter.rect_stroke(
+                    egui::Rect::from_min_size(p(x, y), egui::vec2(6.0, 6.0)),
+                    rounding,
+                    stroke,
+                    egui::StrokeKind::Inside,
+                );
+            }
+        }
+        "chat" => {
+            painter.rect_stroke(
+                egui::Rect::from_min_max(p(-7.5, -6.5), p(7.5, 3.5)),
+                egui::CornerRadius::same(3),
+                stroke,
+                egui::StrokeKind::Inside,
+            );
+            painter.add(egui::Shape::line(
+                vec![p(-3.0, 3.5), p(-4.5, 7.5), p(1.0, 3.5)],
+                stroke,
+            ));
+        }
+        "tasks" => {
+            for row in 0..3 {
+                let y = -5.5 + row as f32 * 5.5;
+                painter.line_segment([p(-1.5, y), p(7.5, y)], stroke);
+                painter.circle_filled(p(-6.0, y), 1.4, color);
+            }
+        }
+        "models" => {
+            painter.circle_stroke(p(0.0, 0.0), 3.0, stroke);
+            for k in 0..6 {
+                let angle = k as f32 * std::f32::consts::TAU / 6.0;
+                painter.circle_filled(p(angle.cos() * 7.5, angle.sin() * 7.5), 1.3, color);
+            }
+        }
+        "missions" => {
+            painter.circle_stroke(p(0.0, 0.0), 7.5, stroke);
+            painter.circle_stroke(p(0.0, 0.0), 3.8, stroke);
+            painter.circle_filled(p(0.0, 0.0), 1.2, color);
+        }
+        "automations" => {
+            painter.add(egui::Shape::line(
+                vec![
+                    p(2.5, -8.0),
+                    p(-4.5, 1.0),
+                    p(0.0, 1.0),
+                    p(-2.5, 8.0),
+                    p(4.5, -1.5),
+                    p(0.0, -1.5),
+                    p(2.5, -8.0),
+                ],
+                stroke,
+            ));
+        }
+        "workspace" => {
+            painter.rect_stroke(
+                egui::Rect::from_min_max(p(-8.0, -4.5), p(8.0, 6.5)),
+                egui::CornerRadius::same(2),
+                stroke,
+                egui::StrokeKind::Inside,
+            );
+            painter.line_segment([p(-8.0, -4.5), p(-8.0, -7.0)], stroke);
+            painter.line_segment([p(-8.0, -7.0), p(-2.0, -7.0)], stroke);
+            painter.line_segment([p(-2.0, -7.0), p(0.0, -4.5)], stroke);
+        }
+        "memory" => {
+            painter.circle_stroke(p(-3.0, 0.0), 4.5, stroke);
+            painter.circle_stroke(p(3.0, 0.0), 4.5, stroke);
+            painter.line_segment([p(0.0, -4.0), p(0.0, 4.0)], stroke);
+        }
+        "skills" => {
+            painter.add(egui::Shape::closed_line(
+                vec![
+                    p(0.0, -8.0),
+                    p(2.2, -2.2),
+                    p(8.0, 0.0),
+                    p(2.2, 2.2),
+                    p(0.0, 8.0),
+                    p(-2.2, 2.2),
+                    p(-8.0, 0.0),
+                    p(-2.2, -2.2),
+                ],
+                stroke,
+            ));
+        }
+        "connectors" => {
+            painter.circle_stroke(p(-4.5, 0.0), 4.0, stroke);
+            painter.circle_stroke(p(4.5, 0.0), 4.0, stroke);
+        }
+        "devices" => {
+            painter.rect_stroke(
+                egui::Rect::from_min_max(p(-8.0, -6.5), p(8.0, 3.5)),
+                egui::CornerRadius::same(2),
+                stroke,
+                egui::StrokeKind::Inside,
+            );
+            painter.line_segment([p(-4.0, 7.0), p(4.0, 7.0)], stroke);
+            painter.line_segment([p(0.0, 3.5), p(0.0, 7.0)], stroke);
+        }
+        "security" => {
+            painter.add(egui::Shape::closed_line(
+                vec![
+                    p(0.0, -8.0),
+                    p(7.0, -5.0),
+                    p(6.0, 3.0),
+                    p(0.0, 8.5),
+                    p(-6.0, 3.0),
+                    p(-7.0, -5.0),
+                ],
+                stroke,
+            ));
+            painter.add(egui::Shape::line(
+                vec![p(-3.0, 0.0), p(-0.8, 2.6), p(3.5, -2.5)],
+                stroke,
+            ));
+        }
+        "permissions" => {
+            painter.circle_stroke(p(-3.5, -3.5), 3.8, stroke);
+            painter.line_segment([p(-0.8, -0.8), p(7.5, 7.5)], stroke);
+            painter.line_segment([p(4.0, 4.0), p(6.0, 2.0)], stroke);
+        }
+        "audit" => {
+            for row in 0..4 {
+                let y = -6.0 + row as f32 * 4.0;
+                painter.line_segment([p(-7.0, y), p(7.0 - row as f32 * 1.5, y)], stroke);
+            }
+        }
+        "system" => {
+            painter.circle_stroke(p(0.0, 0.0), 3.5, stroke);
+            for k in 0..8 {
+                let angle = k as f32 * std::f32::consts::TAU / 8.0;
+                let direction = egui::vec2(angle.cos(), angle.sin());
+                painter.line_segment([center + direction * 5.8, center + direction * 8.0], stroke);
+            }
+        }
+        _ => {
+            painter.line_segment([p(0.0, -7.5), p(0.0, 5.5)], stroke);
+            painter.add(egui::Shape::line(
+                vec![p(-4.5, 1.5), p(0.0, 6.0), p(4.5, 1.5)],
+                stroke,
+            ));
+            painter.line_segment([p(-7.0, 8.0), p(7.0, 8.0)], stroke);
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 struct ChatMessage {
@@ -153,6 +326,8 @@ pub struct JarvisApp {
     persona_loaded: bool,
     voice_loaded: bool,
     speak_replies: bool,
+    /// Fino a quando JARVIS sta leggendo ad alta voce (stima dalla lunghezza): pilota la bocca dell'avatar.
+    speaking_until: Option<Instant>,
     voice_hint: String,
     persona_style: String,
     persona_address: String,
@@ -286,6 +461,7 @@ impl JarvisApp {
             persona_loaded: false,
             voice_loaded: false,
             speak_replies: false,
+            speaking_until: None,
             voice_hint: String::new(),
             persona_style: "film".into(),
             persona_address: String::new(),
@@ -478,6 +654,9 @@ impl JarvisApp {
                 Event::ChatFinished(Ok(result)) => {
                     let reply = result["reply"].as_str().unwrap_or("").to_string();
                     if self.speak_replies && !self.remote && !reply.is_empty() {
+                        let seconds = (reply.chars().count() as f32 / 14.0).clamp(1.5, 45.0);
+                        self.speaking_until =
+                            Some(Instant::now() + Duration::from_secs_f32(seconds));
                         if let Some(client) = self.client.clone() {
                             let text = reply.clone();
                             std::thread::spawn(move || {
@@ -863,39 +1042,98 @@ impl JarvisApp {
     }
 
     fn navigation(&mut self, ui: &mut egui::Ui, compact: bool, ctx: &egui::Context) {
+        let mut last_group = "";
         for (id, label, owner_only) in NAV {
             if self.remote && owner_only {
                 continue;
             }
+            if !compact {
+                let group = nav_group(id);
+                if group != last_group {
+                    ui.add_space(if last_group.is_empty() { 2.0 } else { 12.0 });
+                    ui.label(
+                        egui::RichText::new(group.to_uppercase())
+                            .size(10.5)
+                            .strong()
+                            .color(egui::Color32::from_rgb(102, 130, 152)),
+                    );
+                    ui.add_space(3.0);
+                    last_group = group;
+                }
+            }
             let selected = self.current == id;
-            let button = egui::Button::new(egui::RichText::new(label).color(if selected {
-                egui::Color32::from_rgb(177, 245, 246)
+            let size = if compact {
+                egui::vec2(132.0, 38.0)
             } else {
-                egui::Color32::from_rgb(180, 195, 207)
-            }))
-            .fill(if selected {
-                SELECTED
-            } else {
-                egui::Color32::TRANSPARENT
-            })
-            .corner_radius(egui::CornerRadius::same(10))
-            .stroke(if selected {
-                egui::Stroke::new(1.0, egui::Color32::from_rgb(40, 105, 121))
-            } else {
-                egui::Stroke::NONE
-            });
-            let width = if compact { 122.0 } else { ui.available_width() };
-            let response = ui.add_sized([width, 42.0], button);
-            if selected {
-                ui.painter().rect_filled(
-                    egui::Rect::from_min_size(
-                        response.rect.min + egui::vec2(3.0, 8.0),
-                        egui::vec2(2.0, response.rect.height() - 16.0),
+                egui::vec2(ui.available_width(), 38.0)
+            };
+            let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+            let speed = if self.reduce_motion { 0.0 } else { 0.14 };
+            let hover = ctx.animate_bool_with_time(
+                egui::Id::unique(("nav-hover", id)),
+                response.hovered(),
+                speed,
+            );
+            let active = ctx.animate_bool_with_time(
+                egui::Id::unique(("nav-active", id)),
+                selected,
+                speed * 1.4,
+            );
+            response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+            let painter = ui.painter();
+            let corner = egui::CornerRadius::same(10);
+            if hover > 0.0 && active < 1.0 {
+                painter.rect_filled(
+                    rect,
+                    corner,
+                    crate::avatar::alpha(egui::Color32::WHITE, 0.07 * hover * (1.0 - active)),
+                );
+            }
+            if active > 0.0 {
+                painter.rect_filled(
+                    rect.expand(1.5),
+                    egui::CornerRadius::same(11),
+                    crate::avatar::alpha(ACCENT, 0.10 * active),
+                );
+                painter.rect_filled(rect, corner, mix_color(RAISED, SELECTED, active));
+                painter.rect_stroke(
+                    rect,
+                    corner,
+                    egui::Stroke::new(1.0, crate::avatar::alpha(ACCENT, 0.45 * active)),
+                    egui::StrokeKind::Inside,
+                );
+                let bar = (rect.height() - 14.0) * active;
+                painter.rect_filled(
+                    egui::Rect::from_center_size(
+                        egui::pos2(rect.left() + 4.0, rect.center().y),
+                        egui::vec2(3.0, bar),
                     ),
-                    egui::CornerRadius::same(1),
+                    egui::CornerRadius::same(2),
                     ACCENT,
                 );
             }
+            let ink = mix_color(
+                mix_color(
+                    egui::Color32::from_rgb(158, 178, 194),
+                    egui::Color32::from_rgb(222, 238, 246),
+                    hover,
+                ),
+                egui::Color32::from_rgb(177, 245, 246),
+                active,
+            );
+            draw_nav_icon(
+                painter,
+                egui::pos2(rect.left() + 22.0, rect.center().y),
+                id,
+                ink,
+            );
+            painter.text(
+                egui::pos2(rect.left() + 40.0, rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                label,
+                egui::FontId::proportional(14.0),
+                ink,
+            );
             if response.clicked() {
                 self.connector_credential.clear();
                 self.current = id.into();
@@ -903,6 +1141,110 @@ impl JarvisApp {
                 self.refresh(ctx);
             }
         }
+    }
+
+    /// Marchio in cima alla barra laterale: cerchio con arco che ruota e titolo.
+    fn sidebar_brand(&self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let (rect, _) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), 46.0), egui::Sense::hover());
+        let painter = ui.painter_at(rect);
+        let center = egui::pos2(rect.left() + 24.0, rect.center().y);
+        let time = if self.reduce_motion {
+            0.0
+        } else {
+            ctx.input(|input| input.time) as f32
+        };
+        painter.circle_filled(center, 17.0, crate::avatar::alpha(ACCENT, 0.12));
+        painter.circle_stroke(
+            center,
+            17.0,
+            egui::Stroke::new(1.2, crate::avatar::alpha(ACCENT, 0.55)),
+        );
+        painter.add(crate::avatar::arc(
+            center,
+            17.0,
+            time * 90.0,
+            time * 90.0 + 80.0,
+            egui::Stroke::new(2.2, ACCENT),
+        ));
+        painter.add(crate::avatar::arc(
+            center,
+            11.0,
+            -time * 140.0,
+            -time * 140.0 + 120.0,
+            egui::Stroke::new(1.4, crate::avatar::alpha(ACCENT, 0.7)),
+        ));
+        painter.circle_filled(center, 2.6, egui::Color32::WHITE);
+        painter.text(
+            egui::pos2(rect.left() + 50.0, rect.center().y - 7.0),
+            egui::Align2::LEFT_CENTER,
+            "JARVIS",
+            egui::FontId::proportional(18.0),
+            egui::Color32::from_rgb(226, 242, 250),
+        );
+        painter.text(
+            egui::pos2(rect.left() + 50.0, rect.center().y + 10.0),
+            egui::Align2::LEFT_CENTER,
+            "AI Assistant",
+            egui::FontId::proportional(11.0),
+            egui::Color32::from_rgb(112, 140, 162),
+        );
+        if !self.reduce_motion {
+            ctx.request_repaint_after(Duration::from_millis(50));
+        }
+    }
+
+    /// Scheda di stato in fondo alla barra laterale: punto che pulsa, modalità e onda sonora.
+    fn sidebar_status(&self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        egui::Frame::new()
+            .fill(RAISED)
+            .stroke(egui::Stroke::new(1.0, crate::avatar::alpha(ACCENT, 0.18)))
+            .corner_radius(12)
+            .inner_margin(10)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                let pulse = if self.reduce_motion {
+                    0.5
+                } else {
+                    0.5 + 0.5 * (ctx.input(|input| input.time) as f32 * 2.4).sin()
+                };
+                ui.horizontal(|ui| {
+                    let (dot, _) =
+                        ui.allocate_exact_size(egui::vec2(12.0, 12.0), egui::Sense::hover());
+                    ui.painter().circle_filled(
+                        dot.center(),
+                        3.5 + pulse * 2.0,
+                        crate::avatar::alpha(POSITIVE, 0.25),
+                    );
+                    ui.painter().circle_filled(dot.center(), 3.0, POSITIVE);
+                    ui.label(
+                        egui::RichText::new(if self.remote {
+                            "JARVIS remoto"
+                        } else {
+                            "JARVIS Online"
+                        })
+                        .strong()
+                        .size(12.5),
+                    );
+                });
+                ui.label(
+                    egui::RichText::new(if self.chat_busy || self.loading {
+                        "Modalità: Al lavoro"
+                    } else {
+                        "Modalità: Operativa"
+                    })
+                    .size(11.0)
+                    .color(egui::Color32::from_rgb(130, 158, 178)),
+                );
+                ui.add_space(4.0);
+                crate::avatar::waveform(
+                    ui,
+                    ctx,
+                    self.reduce_motion,
+                    egui::vec2(ui.available_width(), 20.0),
+                    self.chat_busy || self.loading,
+                );
+            });
     }
 
     fn show_chat(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -1601,7 +1943,7 @@ impl JarvisApp {
                 ui.horizontal(|ui| {
                     if wide {
                         // L'avatar occupa uno spazio fisso a destra: niente sovrapposizioni.
-                        let side = 112.0;
+                        let side = 132.0;
                         let text_width = (ui.available_width() - side - 16.0).max(200.0);
                         ui.allocate_ui_with_layout(
                             egui::vec2(text_width, side),
@@ -1622,7 +1964,13 @@ impl JarvisApp {
                             egui::vec2(side, side),
                             egui::Layout::top_down(egui::Align::Center),
                             |ui| {
-                                draw_avatar(ui, ctx, self.reduce_motion, side);
+                                let mood = crate::avatar::Mood {
+                                    thinking: self.chat_busy || self.loading,
+                                    talking: self
+                                        .speaking_until
+                                        .is_some_and(|end| end > Instant::now()),
+                                };
+                                crate::avatar::draw(ui, ctx, self.reduce_motion, side, mood);
                             },
                         );
                     } else {
@@ -3501,15 +3849,17 @@ impl eframe::App for JarvisApp {
         } else {
             egui::Panel::left("navigation")
                 .resizable(false)
-                .exact_size(190.0)
+                .exact_size(204.0)
                 .show(ui, |ui| {
-                    let footer_height = 34.0;
+                    let footer_height = 104.0;
                     let navigation_height = (ui.available_height() - footer_height).max(0.0);
                     ui.allocate_ui_with_layout(
                         egui::vec2(ui.available_width(), navigation_height),
                         egui::Layout::top_down(egui::Align::Min),
                         |ui| {
-                            ui.add_space(12.0);
+                            ui.add_space(10.0);
+                            self.sidebar_brand(ui, &ctx);
+                            ui.add_space(8.0);
                             egui::ScrollArea::vertical()
                                 .id_salt("navigation-list")
                                 .auto_shrink([false, false])
@@ -3517,12 +3867,8 @@ impl eframe::App for JarvisApp {
                         },
                     );
                     ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
-                        ui.separator();
-                        ui.label(if self.remote {
-                            "Core remoto"
-                        } else {
-                            "Core attivo"
-                        });
+                        ui.add_space(8.0);
+                        self.sidebar_status(ui, &ctx);
                     });
                 });
         }
@@ -3947,360 +4293,6 @@ fn dashboard_row(ui: &mut egui::Ui, color: egui::Color32, title: &str, detail: &
                 });
             });
         });
-}
-
-fn draw_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool, side: f32) {
-    let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(side), egui::Sense::hover());
-    let painter = ui.painter_at(rect);
-    let time = if reduce_motion {
-        0.0
-    } else {
-        ctx.input(|input| input.time)
-    };
-    let bob = (time as f32 * 1.35).sin() * side * 0.012;
-    let center = rect.center() + egui::vec2(0.0, bob);
-    let pulse = if reduce_motion {
-        0.0
-    } else {
-        ((time * 1.7).sin() * 0.5 + 0.5) as f32
-    };
-    let breath = pulse * 3.0;
-    let accent = egui::Color32::from_rgb(35, 198, 244);
-
-    painter.circle_filled(center, side * 0.47, egui::Color32::from_rgb(8, 24, 39));
-    painter.circle_filled(
-        center,
-        side * 0.39,
-        egui::Color32::from_rgba_unmultiplied(13, 89, 117, 18 + (pulse * 10.0) as u8),
-    );
-    painter.circle_stroke(
-        center,
-        side * 0.43 + breath,
-        egui::Stroke::new(1.4, egui::Color32::from_rgba_unmultiplied(35, 198, 244, 75)),
-    );
-    painter.circle_stroke(
-        center,
-        side * 0.36 - breath * 0.35,
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(32, 83, 112)),
-    );
-    painter.circle_stroke(
-        center,
-        side * 0.31,
-        egui::Stroke::new(0.7, egui::Color32::from_rgba_unmultiplied(51, 125, 151, 90)),
-    );
-    for index in 0..12 {
-        let angle = std::f32::consts::TAU * index as f32 / 12.0;
-        let direction = egui::Vec2::new(angle.cos(), angle.sin());
-        let inner = if index % 3 == 0 { 0.395 } else { 0.407 };
-        painter.line_segment(
-            [
-                center + direction * side * inner,
-                center + direction * side * 0.435,
-            ],
-            egui::Stroke::new(
-                if index % 3 == 0 { 1.3 } else { 0.8 },
-                egui::Color32::from_rgba_unmultiplied(
-                    61,
-                    143,
-                    171,
-                    if index % 3 == 0 { 200 } else { 110 },
-                ),
-            ),
-        );
-    }
-
-    let unit = side / 236.0;
-    let ring_radius = side * 0.40;
-    let sweep = std::f32::consts::PI * 1.45;
-    let start = time as f32 * 0.58;
-    let arc = (0..=48)
-        .map(|index| {
-            let angle = start + sweep * index as f32 / 48.0;
-            center + egui::Vec2::new(angle.cos(), angle.sin()) * ring_radius
-        })
-        .collect();
-    painter.add(egui::Shape::line(arc, egui::Stroke::new(2.0, accent)));
-    for index in 0..3 {
-        let angle = start + time as f32 * 0.9 + index as f32 * std::f32::consts::TAU / 3.0;
-        let point = center + egui::Vec2::new(angle.cos(), angle.sin()) * ring_radius;
-        painter.circle_filled(
-            point,
-            4.0 * unit,
-            egui::Color32::from_rgba_unmultiplied(35, 198, 244, 30),
-        );
-        painter.circle_filled(point, 2.2 * unit, accent);
-    }
-
-    let face_center = center + egui::vec2(0.0, -side * 0.035);
-    let shoulders = vec![
-        center + egui::vec2(-side * 0.31, side * 0.31),
-        center + egui::vec2(-side * 0.27, side * 0.22),
-        center + egui::vec2(-side * 0.20, side * 0.17),
-        center + egui::vec2(-side * 0.12, side * 0.14),
-        center + egui::vec2(-side * 0.065, side * 0.18),
-        center + egui::vec2(0.0, side * 0.205),
-        center + egui::vec2(side * 0.065, side * 0.18),
-        center + egui::vec2(side * 0.12, side * 0.14),
-        center + egui::vec2(side * 0.20, side * 0.17),
-        center + egui::vec2(side * 0.27, side * 0.22),
-        center + egui::vec2(side * 0.31, side * 0.31),
-    ];
-    painter.add(egui::Shape::convex_polygon(
-        shoulders,
-        egui::Color32::from_rgb(13, 37, 54),
-        egui::Stroke::new(1.7, egui::Color32::from_rgb(36, 149, 185)),
-    ));
-    painter.add(egui::Shape::convex_polygon(
-        vec![
-            center + egui::vec2(-side * 0.19, side * 0.29),
-            center + egui::vec2(-side * 0.15, side * 0.22),
-            center + egui::vec2(-side * 0.075, side * 0.19),
-            center + egui::vec2(-side * 0.12, side * 0.31),
-        ],
-        egui::Color32::from_rgb(20, 57, 75),
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(39, 133, 160)),
-    ));
-    painter.add(egui::Shape::convex_polygon(
-        vec![
-            center + egui::vec2(side * 0.19, side * 0.29),
-            center + egui::vec2(side * 0.15, side * 0.22),
-            center + egui::vec2(side * 0.075, side * 0.19),
-            center + egui::vec2(side * 0.12, side * 0.31),
-        ],
-        egui::Color32::from_rgb(20, 57, 75),
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(39, 133, 160)),
-    ));
-    painter.add(egui::Shape::convex_polygon(
-        vec![
-            center + egui::vec2(-side * 0.055, side * 0.105),
-            center + egui::vec2(side * 0.055, side * 0.105),
-            center + egui::vec2(side * 0.065, side * 0.22),
-            center + egui::vec2(0.0, side * 0.245),
-            center + egui::vec2(-side * 0.065, side * 0.22),
-        ],
-        egui::Color32::from_rgb(17, 49, 66),
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(40, 124, 151)),
-    ));
-    painter.line_segment(
-        [
-            center + egui::vec2(-side * 0.045, side * 0.205),
-            center + egui::vec2(0.0, side * 0.225),
-        ],
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(71, 166, 188)),
-    );
-    painter.line_segment(
-        [
-            center + egui::vec2(side * 0.045, side * 0.205),
-            center + egui::vec2(0.0, side * 0.225),
-        ],
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(71, 166, 188)),
-    );
-    painter.add(egui::Shape::convex_polygon(
-        vec![
-            face_center + egui::vec2(-side * 0.075, side * 0.115),
-            face_center + egui::vec2(-side * 0.12, side * 0.07),
-            face_center + egui::vec2(-side * 0.105, side * 0.015),
-            face_center + egui::vec2(-side * 0.075, side * 0.045),
-        ],
-        egui::Color32::from_rgb(20, 54, 72),
-        egui::Stroke::new(0.8, egui::Color32::from_rgb(46, 131, 157)),
-    ));
-    painter.add(egui::Shape::convex_polygon(
-        vec![
-            face_center + egui::vec2(side * 0.075, side * 0.115),
-            face_center + egui::vec2(side * 0.12, side * 0.07),
-            face_center + egui::vec2(side * 0.105, side * 0.015),
-            face_center + egui::vec2(side * 0.075, side * 0.045),
-        ],
-        egui::Color32::from_rgb(20, 54, 72),
-        egui::Stroke::new(0.8, egui::Color32::from_rgb(46, 131, 157)),
-    ));
-
-    let ear_y = face_center.y - side * 0.005;
-    for direction in [-1.0, 1.0] {
-        let ear = egui::pos2(face_center.x + direction * side * 0.15, ear_y);
-        painter.circle_filled(ear, side * 0.035, egui::Color32::from_rgb(13, 39, 54));
-        painter.circle_stroke(
-            ear,
-            side * 0.035,
-            egui::Stroke::new(1.2 * unit, egui::Color32::from_rgb(47, 150, 178)),
-        );
-        painter.circle_filled(
-            ear,
-            side * 0.009,
-            egui::Color32::from_rgba_unmultiplied(35, 198, 244, 170),
-        );
-    }
-    let head = vec![
-        face_center + egui::vec2(0.0, -side * 0.27),
-        face_center + egui::vec2(side * 0.075, -side * 0.255),
-        face_center + egui::vec2(side * 0.14, -side * 0.21),
-        face_center + egui::vec2(side * 0.16, -side * 0.12),
-        face_center + egui::vec2(side * 0.145, -side * 0.025),
-        face_center + egui::vec2(side * 0.12, side * 0.075),
-        face_center + egui::vec2(side * 0.075, side * 0.14),
-        face_center + egui::vec2(0.0, side * 0.17),
-        face_center + egui::vec2(-side * 0.075, side * 0.14),
-        face_center + egui::vec2(-side * 0.12, side * 0.075),
-        face_center + egui::vec2(-side * 0.145, -side * 0.025),
-        face_center + egui::vec2(-side * 0.16, -side * 0.12),
-        face_center + egui::vec2(-side * 0.14, -side * 0.21),
-        face_center + egui::vec2(-side * 0.075, -side * 0.255),
-    ];
-    painter.add(egui::Shape::convex_polygon(
-        head,
-        egui::Color32::from_rgb(16, 40, 56),
-        egui::Stroke::new(1.8, egui::Color32::from_rgb(71, 194, 224)),
-    ));
-    let eye_y = face_center.y - side * 0.025;
-    let scan = if reduce_motion {
-        0.0
-    } else {
-        ((time as f32 * 0.85).sin() * 0.5 + 0.5) * side * 0.09
-    };
-    let scan_y = eye_y - side * 0.045 + scan;
-    painter.line_segment(
-        [
-            egui::pos2(face_center.x - side * 0.095, scan_y),
-            egui::pos2(face_center.x + side * 0.095, scan_y),
-        ],
-        egui::Stroke::new(
-            3.0 * unit,
-            egui::Color32::from_rgba_unmultiplied(35, 198, 244, 24),
-        ),
-    );
-    painter.line_segment(
-        [
-            egui::pos2(face_center.x - side * 0.095, scan_y),
-            egui::pos2(face_center.x + side * 0.095, scan_y),
-        ],
-        egui::Stroke::new(
-            0.9 * unit,
-            egui::Color32::from_rgba_unmultiplied(115, 236, 255, 90 + (pulse * 90.0) as u8),
-        ),
-    );
-    painter.add(egui::Shape::line(
-        vec![
-            face_center + egui::vec2(-side * 0.095, -side * 0.195),
-            face_center + egui::vec2(-side * 0.045, -side * 0.22),
-            face_center + egui::vec2(0.0, -side * 0.225),
-            face_center + egui::vec2(side * 0.045, -side * 0.22),
-            face_center + egui::vec2(side * 0.095, -side * 0.195),
-        ],
-        egui::Stroke::new(1.1, egui::Color32::from_rgb(61, 142, 165)),
-    ));
-    painter.add(egui::Shape::convex_polygon(
-        vec![
-            face_center + egui::vec2(0.0, -side * 0.19),
-            face_center + egui::vec2(side * 0.025, -side * 0.16),
-            face_center + egui::vec2(0.0, -side * 0.125),
-            face_center + egui::vec2(-side * 0.025, -side * 0.16),
-        ],
-        egui::Color32::from_rgb(24, 81, 102),
-        egui::Stroke::new(0.8, egui::Color32::from_rgb(75, 195, 220)),
-    ));
-    for direction in [-1.0, 1.0] {
-        painter.line_segment(
-            [
-                face_center + egui::vec2(direction * side * 0.035, -side * 0.075),
-                face_center + egui::vec2(direction * side * 0.09, -side * 0.068),
-            ],
-            egui::Stroke::new(1.2, egui::Color32::from_rgb(57, 134, 158)),
-        );
-        painter.line_segment(
-            [
-                face_center + egui::vec2(direction * side * 0.13, -side * 0.12),
-                face_center + egui::vec2(direction * side * 0.115, side * 0.045),
-            ],
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(43, 106, 132)),
-        );
-    }
-
-    for direction in [-1.0, 1.0] {
-        let eye = egui::pos2(face_center.x + direction * side * 0.064, eye_y);
-        painter.circle_filled(
-            eye,
-            side * 0.049,
-            egui::Color32::from_rgba_unmultiplied(25, 167, 213, 24 + (pulse * 28.0) as u8),
-        );
-        painter.circle_stroke(
-            eye,
-            side * 0.035,
-            egui::Stroke::new(0.8, egui::Color32::from_rgba_unmultiplied(35, 198, 244, 85)),
-        );
-        painter.line_segment(
-            [
-                egui::pos2(face_center.x + direction * side * 0.09, eye_y),
-                egui::pos2(face_center.x + direction * side * 0.035, eye_y),
-            ],
-            egui::Stroke::new(2.8 * unit, accent),
-        );
-        painter.circle_filled(
-            egui::pos2(face_center.x + direction * side * 0.064, eye_y),
-            1.0 * unit + pulse * 0.5 * unit,
-            egui::Color32::from_rgb(206, 250, 255),
-        );
-    }
-    for direction in [-1.0, 1.0] {
-        painter.line_segment(
-            [
-                egui::pos2(
-                    face_center.x + direction * side * 0.118,
-                    eye_y + side * 0.055,
-                ),
-                egui::pos2(
-                    face_center.x + direction * side * 0.085,
-                    eye_y + side * 0.09,
-                ),
-            ],
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(59, 129, 154)),
-        );
-    }
-    painter.add(egui::Shape::line(
-        vec![
-            egui::pos2(face_center.x, eye_y + side * 0.005),
-            egui::pos2(face_center.x - side * 0.012, eye_y + side * 0.055),
-            egui::pos2(face_center.x + side * 0.012, eye_y + side * 0.065),
-        ],
-        egui::Stroke::new(1.2 * unit, egui::Color32::from_rgb(105, 179, 197)),
-    ));
-    painter.add(egui::Shape::line(
-        vec![
-            egui::pos2(face_center.x - side * 0.05, eye_y + side * 0.105),
-            egui::pos2(face_center.x - side * 0.025, eye_y + side * 0.117),
-            egui::pos2(face_center.x, eye_y + side * 0.12),
-            egui::pos2(face_center.x + side * 0.025, eye_y + side * 0.117),
-            egui::pos2(face_center.x + side * 0.05, eye_y + side * 0.105),
-        ],
-        egui::Stroke::new(1.3 * unit, egui::Color32::from_rgb(105, 179, 197)),
-    ));
-    let chest = center + egui::vec2(0.0, side * 0.205);
-    painter.circle_filled(chest, side * 0.042, egui::Color32::from_rgb(7, 26, 40));
-    painter.circle_stroke(
-        chest,
-        side * 0.042,
-        egui::Stroke::new(1.0, egui::Color32::from_rgb(49, 146, 174)),
-    );
-    painter.circle_filled(chest, side * (0.012 + pulse * 0.005), accent);
-    for direction in [-1.0, 1.0] {
-        painter.line_segment(
-            [
-                chest + egui::vec2(direction * side * 0.07, side * 0.01),
-                chest + egui::vec2(direction * side * 0.11, side * 0.04),
-            ],
-            egui::Stroke::new(1.0, egui::Color32::from_rgb(66, 142, 165)),
-        );
-    }
-    painter.text(
-        center + egui::vec2(0.0, side * 0.385),
-        egui::Align2::CENTER_CENTER,
-        "JARVIS",
-        egui::FontId::proportional(14.0 * unit),
-        egui::Color32::from_rgb(210, 235, 246),
-    );
-    if !reduce_motion {
-        ctx.request_repaint_after(Duration::from_millis(80));
-    }
 }
 
 fn endpoint(page: &str) -> &'static str {

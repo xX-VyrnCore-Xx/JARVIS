@@ -1724,6 +1724,17 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Non verificato:** resa e fluidità (nessuna schermata; SwiftUI solo in CI). Costo CPU da misurare su Mac reale: se eccessivo, abbassare i fotogrammi o le scintille.
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
 
+### ADR-0129 — Avatar su Windows e Android, barre laterali migliorate
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («adatta l'avatar anche a Windows e Android e migliora la sidebar dell'app»).
+- **Avatar:** la scena di ADR-0128 (alone, onde, anelli con tacche, scintille, scansione, sguardo, palpebre, bocca a barre, nucleo, glitch) è portata sul client desktop egui (`apps/desktop/src-tauri/src/avatar.rs`, usato dalla Plancia a 132 px) e su Android (`JarvisAvatar.kt`, Plancia, 248 dp). Stati continui riposo/elaborazione/parlato; clic o tocco emettono un'onda. Su Windows «parla» per la durata stimata della lettura (≈14 caratteri/s, perché il Core non segnala la fine della riproduzione); su Android non c'è lettura vocale, quindi gli stati sono riposo ed elaborazione. Con «Riduci animazioni» (egui) o animazioni di sistema a zero (Android) la scena resta ferma. Android disegna l'avatar su un disco scuro per restare leggibile anche con il tema chiaro e limita il disegno a 30 fotogrammi al secondo.
+- **Sidebar Windows (egui):** pagine raggruppate come su macOS (Assistente, Organizzazione, Connessioni, Protezione, Sistema); marchio animato in cima; voci disegnate con icone geometriche (nessun glifo di font che possa mancare), evidenziazione al passaggio e selezione con transizione e barra laterale accesa; scheda di stato in fondo con punto che pulsa, modalità (Operativa/Al lavoro) e onda sonora. L'ordine di `NAV` segue i gruppi.
+- **Android:** la barra inferiore usa `JarvisTabBar`: icone disegnate, pillola che si allarga con una molla, icona che salta e pallino con le notifiche da leggere (aggiornato ogni 20 s con l'app in primo piano).
+- **macOS:** la barra laterale mostra un contatore accanto a «Conferme» e «Notifiche» quando ci sono elementi in attesa.
+- **Non incluso:** contatori nella barra di Windows (la pagina corrente non conosce lo stato aggregato senza una chiamata in più).
+- **Non verificato:** resa e fluidità su schermo; il Kotlin si compila solo in CI (nessun Android SDK qui) e non ho eseguito il client egui su Windows. Verificati: fmt, clippy `-D warnings` e 23 test del client egui su build Linux con stub (funzioni pure dell'avatar comprese).
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.
