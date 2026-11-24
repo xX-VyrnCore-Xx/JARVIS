@@ -60,6 +60,11 @@ class OfflineBackend(unittest.TestCase):
             "avvia una missione: controlla lo spazio sul disco": ("mission.start", {"goal": "controlla lo spazio sul disco"}),
             "avvia una missione ogni 30 minuti: riassumi le novità": ("mission.start", {"goal": "riassumi le novità", "every_minutes": 30}),
             "le mie missioni": ("mission.list", {}),
+            "esegui nella sandbox: ls -la": ("sandbox.run", {"command": "ls -la"}),
+            "sandbox: python3 -V": ("sandbox.run", {"command": "python3 -V"}),
+            "stato sandbox": ("sandbox.status", {}),
+            "azzera la sandbox": ("sandbox.reset", {}),
+            "azzera la sandbox prova-1": ("sandbox.reset", {"session": "prova-1"}),
             "annulla la missione 1a2b3c4d": ("mission.cancel", {"id": "1a2b3c4d"}),
         }
         for message, (tool, args) in cases.items():
@@ -136,6 +141,14 @@ class OfflineBackend(unittest.TestCase):
             "upcoming": []}})
         self.assertIn("scaduta", r["text"])
         self.assertIn("Verifica il prossimo passo", r["text"])
+
+    def test_sandbox_results_are_described(self):
+        r = self.call("x", tool_result={"tool": "sandbox.run", "status": "succeeded", "output": {
+            "session": "main", "exit_code": 0, "duration_ms": 12, "stdout": "ciao\n", "stderr": ""}})
+        self.assertIn("ciao", r["text"])
+        r = self.call("x", tool_result={"tool": "sandbox.status", "status": "succeeded", "output": {
+            "enabled": True, "available": False, "limits": {}, "sessions": []}})
+        self.assertIn("non disponibili", r["text"])
 
     def test_mission_results_are_described(self):
         r = self.call("x", tool_result={"tool": "mission.start", "status": "succeeded", "output": {

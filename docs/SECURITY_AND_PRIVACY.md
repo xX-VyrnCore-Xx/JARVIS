@@ -81,3 +81,7 @@ Il Core cifra messaggi, fonti e documenti dei task con XChaCha20-Poly1305 e una 
 ## Indurimento del backend (ADR-0099)
 
 Token del proprietario confrontato a tempo costante; token dei dispositivi scartati se non sono 64 caratteri esadecimali e, dopo 30 tentativi falliti in 60 secondi, richieste remote con token sconosciuto respinte con 429 senza toccare il Core; al massimo 16 flussi di notifiche; cartella dati riportata a `0700` su Unix. Rotte come missioni, iniziative proattive e stato push restano riservate al proprietario. Sul Mac l'interfaccia si blocca per inattività, stop o schermo bloccato e le azioni sensibili richiedono di nuovo Touch ID o la password (ADR-0100). Limite residuo: nessun timeout sulla lettura delle intestazioni HTTP.
+
+## Terminale sandbox (ADR-0105)
+
+Container senza rete, senza capability, `no-new-privileges`, radice in sola lettura, limiti di memoria, CPU, processi e dimensione dei file, un solo mount (la cartella di sessione, 0700). Nessun accesso a workspace, segreti, token o socket Docker. Spegnibile dal solo proprietario (`/api/sandbox`, `JARVIS_SANDBOX=off`); escluso da automazioni e nodi.

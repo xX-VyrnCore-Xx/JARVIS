@@ -95,6 +95,7 @@ fn resource_uri(tool: &str, args: &Value) -> String {
             )
         }
         _ if tool == "shell.run" => "jarvis://terminal/workspace".to_string(),
+        _ if tool.starts_with("sandbox.") => "jarvis://terminal/sandbox".to_string(),
         _ if matches!(tool, "web.fetch" | "web.browse" | "web.form") => {
             let host = args["url"]
                 .as_str()

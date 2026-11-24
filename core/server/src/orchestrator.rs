@@ -1948,7 +1948,7 @@ impl Jarvis {
         let kind = match tool {
             t if t.starts_with("connector.") => "connector",
             t if t.starts_with("node.") => "node",
-            "shell.run" => "terminal",
+            "shell.run" | "sandbox.run" => "terminal",
             t if t.starts_with("web.") => "web",
             _ => "tool",
         };
@@ -2456,6 +2456,16 @@ impl Jarvis {
             "code.run_python" => Err(tool_error(
                 "code.not_confirmed",
                 "L’esecuzione richiede la conferma del proprietario",
+            )),
+            // Terminale sandbox (ADR-0105): isolato, quindi senza conferma per comando.
+            "sandbox.run" => crate::sandbox::terminal_run(&self.cfg.data_dir, arguments),
+            "sandbox.status" => Ok(crate::sandbox::terminal_status(&self.cfg.data_dir)),
+            "sandbox.reset" if confirmed => {
+                crate::sandbox::terminal_reset(&self.cfg.data_dir, arguments)
+            }
+            "sandbox.reset" => Err(tool_error(
+                "sandbox.not_confirmed",
+                "L’azzeramento richiede la conferma del proprietario",
             )),
             "shell.run" => {
                 if !confirmed {
@@ -4925,7 +4935,7 @@ fn workflow_tool_restriction(tool: &str) -> Option<&'static str> {
             Some("un'automazione non può gestire altre automazioni")
         }
         crate::desktop::TOOL => Some("le azioni sul PC richiedono una richiesta diretta"),
-        "shell.run" | "code.run_python" => {
+        "shell.run" | "code.run_python" | "sandbox.run" | "sandbox.reset" => {
             Some("i comandi del terminale e del sandbox richiedono una conferma diretta")
         }
         _ => None,

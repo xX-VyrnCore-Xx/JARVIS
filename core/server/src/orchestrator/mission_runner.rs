@@ -10,7 +10,7 @@ use crate::cloud::{AgentRequest, AgentStep, Answer, Failure, Function, Provider}
 use crate::missions::{self, RunReport};
 
 /// Strumenti di scrittura locale ammessi alle missioni: restano visibili al proprietario (note e promemoria).
-const WRITE_TOOLS: [&str; 2] = ["notes.add", "todo.add"];
+const WRITE_TOOLS: [&str; 3] = ["notes.add", "todo.add", "sandbox.run"];
 /// Dimensione massima del risultato di uno strumento inviato al modello.
 const LATEST_CHARS: usize = 4000;
 const EARLIER_CHARS: usize = 1200;

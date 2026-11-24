@@ -436,6 +436,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/connectors", get(connectors).post(install_connector))
         .route("/api/proactive", get(proactive_get).patch(proactive_put))
         .route("/api/proactive/briefing", post(proactive_briefing))
+        .route("/api/sandbox", get(sandbox_get).patch(sandbox_put))
         .route("/api/missions", get(missions_list).post(mission_create))
         .route("/api/missions/{id}/{action}", post(mission_action))
         .route("/api/skills", get(skills_list).post(skill_create))
@@ -1223,6 +1224,26 @@ async fn proactive_get(State(state): State<Shared>) -> Response {
 
 async fn proactive_put(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
     reply(with_core(&state, move |j| j.proactive_update(&body)).await)
+}
+
+async fn sandbox_get(State(state): State<Shared>) -> Response {
+    reply(Ok(with_core(&state, |j| j.sandbox_settings()).await))
+}
+
+/// Interruttore del terminale sandbox: solo il proprietario dal computer del Core.
+async fn sandbox_put(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Json(body): Json<Value>,
+) -> Response {
+    if device.is_some() {
+        return error(
+            StatusCode::FORBIDDEN,
+            "owner_only",
+            "operazione disponibile solo dal computer del proprietario",
+        );
+    }
+    reply(with_core(&state, move |j| j.sandbox_update(&body)).await)
 }
 
 async fn proactive_briefing(State(state): State<Shared>) -> Response {

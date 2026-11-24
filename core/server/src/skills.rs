@@ -107,6 +107,8 @@ const BUILTIN: [Builtin; 7] = [
             "code.check_python",
             "code.validate_json",
             "code.run_python",
+            "sandbox.run",
+            "sandbox.status",
         ],
     ),
 ];

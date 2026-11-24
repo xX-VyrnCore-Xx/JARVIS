@@ -1496,6 +1496,18 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `test_firebase_check.py` (configurazione coerente, pacchetto sbagliato, progetti diversi, chiave non di servizio, APK con e senza identificativi, nessun segreto nell'output); test del Core sul percorso nella cartella dati.
 - **Documenti interessati:** FIREBASE_SETUP.md, ROADMAP.md.
 
+### ADR-0105 — Terminale sandbox isolato per codice e comandi
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («un suo terminale Sandbox per eseguire codice e comandi»).
+- **Contesto:** `shell.run` esegue sul computer del proprietario e chiede conferma a ogni comando; `code.run_python` è un container monouso solo Python. Mancava un luogo dove JARVIS potesse provare codice e comandi in autonomia, con file che sopravvivono fra una chiamata e l'altra.
+- **Decisione:** tre strumenti, `sandbox.run` (`sh -c` in un container Docker; sessione `^[a-z0-9-]{1,32}$` persistente, timeout 1–60 s, output 16 KiB), `sandbox.status` (sola lettura: disponibilità, limiti, sessioni) e `sandbox.reset` (azzera una sessione, con conferma). Il container non ha rete, radice in sola lettura, nessuna capability, `no-new-privileges`, 512 MB di memoria, 1 CPU, 128 processi, `/tmp` in tmpfs da 64 MB e un solo mount: `<cartella dati>/sandbox/<sessione>` su `/work` (0700; utente uguale al proprietario della cartella su Unix, 65534 su Windows). Nessun mount della workspace, dei segreti o del socket Docker. Una sessione oltre 256 MiB rifiuta nuovi comandi, oltre 1 GiB viene azzerata. Immagine: `JARVIS_SANDBOX_IMAGE`, poi `jarvis-sandbox:latest` (`infra/sandbox/build.sh`), poi `python:3.13-alpine`; mai scaricata a runtime (`--pull never`).
+- **Consenso:** `sandbox.run` non chiede conferma per comando (rischio medio, effetti `write_local`) perché non può toccare il computer né la rete; resta tracciato in audit e nel diario del task. Il proprietario può spegnerlo con `PATCH /api/sandbox {"enabled": false}` (solo dal computer del Core, mai da un dispositivo) o con `JARVIS_SANDBOX=off`; spento, ogni chiamata risponde `sandbox.disabled`. `sandbox.run` e `sandbox.reset` sono esclusi da automazioni e nodi; `sandbox.run` è consentito alle missioni (senza conferma, non rischio alto) e allo specialista di codice; `sandbox.reset` no.
+- **Regole offline:** «esegui nella sandbox: …», «sandbox: …», «stato sandbox», «azzera la sandbox [sessione]». Le chat cloud restano limitate ai quattro strumenti di calcolo (ADR-0054).
+- **Limiti:** serve Docker; nessuna rete nella v1 (le dipendenze vanno incluse nell'immagine); `shell.run` sul computer resta con conferma e disattivato per impostazione predefinita.
+- **Non verificato:** l'esecuzione reale nel container (nessun Docker in questo ambiente): c'è un test `#[ignore]` da lanciare con Docker.
+- **Evidenza:** test unitari (nomi di sessione, argomenti di isolamento, interruttore, validazione prima di Docker), `core/server/tests/sandbox.rs`, test del gateway, schema dei descrittori.
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, SECURITY_AND_PRIVACY.md, ROADMAP.md, `infra/sandbox/`.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.

@@ -83,3 +83,7 @@ Il servizio usa l'immagine versionata `docker.n8n.io/n8nio/n8n:2.48.7`, l'utente
 
 
 **Strumenti quotidiani (ADR-0046, ADR-0084).** Calcolo, conversioni di unità, date, note, cose da fare con promemoria, ricerca e gestione dei file nella workspace (spostare ed eliminare con conferma), dischi, meteo da Open-Meteo, correzione di un ricordo. `todo.review` legge le attività scadute e quelle in scadenza entro 24 ore (orizzonte configurabile fino a 7 giorni) e propone i prossimi passi. È incluso nel briefing e nella competenza Organizzazione; non modifica le attività né invia comunicazioni.
+
+## Terminale sandbox (ADR-0105)
+
+`sandbox.run`, `sandbox.status` e `sandbox.reset` danno a JARVIS un terminale isolato: container Docker senza rete, radice in sola lettura, una cartella di sessione persistente in `<cartella dati>/sandbox/<sessione>`. Immagine consigliata: `infra/sandbox/build.sh` (Python, Node, compilatori, git, jq, ripgrep). Comandi senza conferma perché isolati; interruttore del proprietario `PATCH /api/sandbox` o `JARVIS_SANDBOX=off`. Esempi: «esegui nella sandbox: python3 -V», «stato sandbox», «azzera la sandbox».
