@@ -1,0 +1,56 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "sandbox.run",
+  "version": "1.0.0",
+  "summary": "Esegue un comando nel terminale sandbox isolato (container senza rete, cartella di sessione persistente)",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "command"
+    ],
+    "properties": {
+      "command": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 4000
+      },
+      "session": {
+        "type": "string",
+        "pattern": "^[a-z0-9-]{1,32}$"
+      },
+      "timeout_s": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 60
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "prerequisites": [
+    "Docker locale con l'immagine jarvis-sandbox:latest (infra/sandbox/build.sh) o python:3.13-alpine"
+  ],
+  "effects": "write_local",
+  "risk": "medium",
+  "permissions": [
+    "core.sandbox:execute"
+  ],
+  "errors": [
+    "sandbox.disabled",
+    "sandbox.unavailable",
+    "sandbox.invalid_session",
+    "sandbox.invalid_command",
+    "sandbox.timeout",
+    "sandbox.session_full",
+    "sandbox.output_failed"
+  ],
+  "timeout_ms": 65000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "none"
+}

@@ -1,0 +1,27 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "sandbox.status",
+  "version": "1.0.0",
+  "summary": "Mostra disponibilità, limiti e sessioni del terminale sandbox",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.sandbox:read"
+  ],
+  "errors": [],
+  "timeout_ms": 10000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "none"
+}

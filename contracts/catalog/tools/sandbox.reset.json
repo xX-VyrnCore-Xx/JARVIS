@@ -1,0 +1,36 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "sandbox.reset",
+  "version": "1.0.0",
+  "summary": "Azzera i file di una sessione del terminale sandbox",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "session": {
+        "type": "string",
+        "pattern": "^[a-z0-9-]{1,32}$"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "write_local",
+  "risk": "medium",
+  "permissions": [
+    "core.sandbox:execute"
+  ],
+  "errors": [
+    "sandbox.disabled",
+    "sandbox.invalid_session",
+    "sandbox.unavailable"
+  ],
+  "timeout_ms": 10000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "required"
+}

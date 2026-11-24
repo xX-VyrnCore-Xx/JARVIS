@@ -150,6 +150,21 @@ def _describe_tool_result(result: dict) -> str:
         if not output.get("succeeded"):
             label = f"Controllo Python terminato con codice {output.get('exit_code')}"
         return "\n".join(part for part in (label, stdout, stderr) if part)
+    if tool == "sandbox.run":
+        body = (output.get("stdout") or "").strip() or (output.get("stderr") or "").strip() or "(nessun output)"
+        cut = "\n(output troncato)" if output.get("truncated") else ""
+        err = f"\n{output['stderr'].strip()[:1000]}" if output.get("stdout", "").strip() and output.get("stderr", "").strip() else ""
+        return (f"Sandbox «{output.get('session')}»: codice {output.get('exit_code')} in {output.get('duration_ms')} ms\n"
+                f"{body[:3000]}{err}{cut}")
+    if tool == "sandbox.status":
+        lim = output.get("limits") or {}
+        state = "attivo" if output.get("enabled") else "disattivato dal proprietario"
+        avail = f"immagine {output.get('image')}" if output.get("available") else "Docker o immagine non disponibili"
+        sessions = ", ".join(f"{x['session']} ({x['bytes']} B)" for x in output.get("sessions", [])) or "nessuna"
+        return (f"Sandbox {state}; {avail}. Limiti: {lim.get('memory_mb')} MB, {lim.get('cpus')} CPU, "
+                f"max {lim.get('timeout_s_max')} s, rete {lim.get('network')}. Sessioni: {sessions}.")
+    if tool == "sandbox.reset":
+        return f"Sessione sandbox «{output.get('session')}» azzerata." if output.get("reset") else "Quella sessione non esisteva."
     if tool == "agent.delegate":
         used = ", ".join(f"{t['tool']} ({t['status']})" for t in output.get("tools_used", [])) or "nessuno"
         return f"L'agente temporaneo «{output.get('role')}» ha risposto:\n{output.get('reply')}\n(strumenti usati: {used})"
@@ -379,6 +394,12 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
      lambda m: {"path": m[1]}),
     (re.compile(r"^\s*esegui\s+python\s+in\s+sandbox\s*:\s*(\S.*)$", re.I | re.S), "code.run_python",
      lambda m: {"source": m[1]}),
+    # Terminale sandbox (ADR-0105): isolato, senza conferma per comando.
+    (re.compile(r"^\s*(?:esegui\s+(?:nella|in)\s+sandbox|sandbox)\s*:\s*(\S.*)$", re.I | re.S), "sandbox.run",
+     lambda m: {"command": m[1].strip()[:4000]}),
+    (re.compile(r"^\s*(?:stato (?:della )?sandbox|sandbox\s+status)\s*\??\s*$", re.I), "sandbox.status", lambda m: {}),
+    (re.compile(r"^\s*(?:azzera|resetta|svuota)\s+(?:la\s+)?sandbox(?:\s+([a-z0-9-]{1,32}))?\s*$", re.I), "sandbox.reset",
+     lambda m: {"session": m[1].lower()} if m[1] else {}),
     (re.compile(r"^\s*(?:delega a un agente|agente temporaneo|sotto-?agente)\s+(?:come\s+)?(.{3,200}?)\s*:\s*(.{3,2000})$", re.I | re.S), "agent.delegate",
      lambda m: {"role": m.group(1).strip(), "objective": m.group(2).strip()}),
     # Terminale (ADR-0038): solo con il prefisso esplicito; il Core chiede sempre la conferma.

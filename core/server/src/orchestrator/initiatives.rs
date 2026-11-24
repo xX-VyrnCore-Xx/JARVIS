@@ -245,6 +245,16 @@ impl Jarvis {
         proactive::settings(&self.cfg.data_dir)
     }
 
+    pub fn sandbox_settings(&self) -> Value {
+        crate::sandbox::settings(&self.cfg.data_dir)
+    }
+
+    pub fn sandbox_update(&mut self, patch: &Value) -> Result<Value, CoreError> {
+        let s = crate::sandbox::update(&self.cfg.data_dir, patch).map_err(CoreError::BadRequest)?;
+        self.record_owner_action("sandbox.update")?;
+        Ok(s)
+    }
+
     pub fn proactive_update(&mut self, patch: &Value) -> Result<Value, CoreError> {
         let s = proactive::update(&self.cfg.data_dir, patch).map_err(CoreError::BadRequest)?;
         self.record_owner_action("proactive.update")?;
