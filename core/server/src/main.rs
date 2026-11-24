@@ -320,6 +320,10 @@ async fn main() {
     );
     println!("  Arresto     : Ctrl+C");
     api::spawn_scheduler(state.clone(), std::time::Duration::from_secs(tick));
+    // Container del sandbox rimasti dopo un arresto brusco (ADR-0115): una sola pulizia, fuori dal percorso di avvio.
+    std::thread::spawn(|| {
+        let _ = jarvis_core::sandbox::cleanup_orphans();
+    });
     // mTLS dei nodi (ADR-0041): porta dedicata, solo su richiesta esplicita del proprietario.
     if let Ok(tls_addr) = std::env::var("JARVIS_NODE_TLS_ADDR") {
         match tls_addr.parse::<std::net::SocketAddr>() {

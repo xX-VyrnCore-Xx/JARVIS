@@ -160,9 +160,19 @@ def _describe_tool_result(result: dict) -> str:
         lim = output.get("limits") or {}
         state = "attivo" if output.get("enabled") else "disattivato dal proprietario"
         avail = f"immagine {output.get('image')}" if output.get("available") else "Docker o immagine non disponibili"
+        docker = output.get("docker") or {}
+        if docker.get("state") not in (None, "ready"):
+            avail = docker.get("hint") or avail
+        build = output.get("build") or {}
+        if build.get("status") == "building":
+            avail += " · costruzione dell'immagine in corso"
+        elif build.get("status") == "failed" and build.get("detail"):
+            avail += f" · {build['detail']}"
         sessions = ", ".join(f"{x['session']} ({x['bytes']} B)" for x in output.get("sessions", [])) or "nessuna"
         return (f"Sandbox {state}; {avail}. Limiti: {lim.get('memory_mb')} MB, {lim.get('cpus')} CPU, "
                 f"max {lim.get('timeout_s_max')} s, rete {lim.get('network')}. Sessioni: {sessions}.")
+    if tool == "sandbox.prepare":
+        return "Sto costruendo l'immagine della sandbox in background: puoi controllare l'avanzamento con «stato sandbox»."
     if tool == "sandbox.import":
         return f"Copiato «{output.get('path')}» nella sandbox «{output.get('session')}» ({output.get('bytes')} byte)."
     if tool == "sandbox.export":
@@ -405,6 +415,7 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
      lambda m: {"from": m[1], **({"to": m[2]} if m[2] else {})}),
     (re.compile(r"^\s*(?:esporta|copia)\s+dalla\s+sandbox\s*:\s*(\S+)\s+(?:come|in|->)\s+(\S+)\s*$", re.I), "sandbox.export",
      lambda m: {"from": m[1], "to": m[2]}),
+    (re.compile(r"^\s*(?:prepara|costruisci|installa)\s+(?:la\s+)?sandbox\s*$", re.I), "sandbox.prepare", lambda m: {}),
     (re.compile(r"^\s*(?:stato (?:della )?sandbox|sandbox\s+status)\s*\??\s*$", re.I), "sandbox.status", lambda m: {}),
     (re.compile(r"^\s*(?:azzera|resetta|svuota)\s+(?:la\s+)?sandbox(?:\s+([a-z0-9-]{1,32}))?\s*$", re.I), "sandbox.reset",
      lambda m: {"session": m[1].lower()} if m[1] else {}),

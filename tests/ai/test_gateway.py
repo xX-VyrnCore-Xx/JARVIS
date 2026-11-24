@@ -63,6 +63,7 @@ class OfflineBackend(unittest.TestCase):
             "esegui nella sandbox: ls -la": ("sandbox.run", {"command": "ls -la"}),
             "sandbox: python3 -V": ("sandbox.run", {"command": "python3 -V"}),
             "stato sandbox": ("sandbox.status", {}),
+            "prepara la sandbox": ("sandbox.prepare", {}),
             "importa nella sandbox: dati.csv": ("sandbox.import", {"from": "dati.csv"}),
             "importa nella sandbox: dati.csv come in/x.csv": ("sandbox.import", {"from": "dati.csv", "to": "in/x.csv"}),
             "esporta dalla sandbox: out.txt in risultati/out.txt": ("sandbox.export", {"from": "out.txt", "to": "risultati/out.txt"}),

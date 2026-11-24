@@ -2471,6 +2471,11 @@ impl Jarvis {
                 "sandbox.not_confirmed",
                 "L’esportazione nella workspace richiede la conferma del proprietario",
             )),
+            "sandbox.prepare" if confirmed => crate::sandbox::prepare_image(&self.cfg.data_dir),
+            "sandbox.prepare" => Err(tool_error(
+                "sandbox.not_confirmed",
+                "La preparazione scarica immagini da Internet e richiede la conferma del proprietario",
+            )),
             "sandbox.status" => Ok(crate::sandbox::terminal_status(&self.cfg.data_dir)),
             "sandbox.reset" if confirmed => {
                 crate::sandbox::terminal_reset(&self.cfg.data_dir, arguments)
@@ -4975,7 +4980,8 @@ fn workflow_tool_restriction(tool: &str) -> Option<&'static str> {
             Some("un'automazione non può gestire altre automazioni")
         }
         crate::desktop::TOOL => Some("le azioni sul PC richiedono una richiesta diretta"),
-        "shell.run" | "code.run_python" | "sandbox.run" | "sandbox.reset" | "sandbox.export" => {
+        "shell.run" | "code.run_python" | "sandbox.run" | "sandbox.reset" | "sandbox.export"
+        | "sandbox.prepare" => {
             Some("i comandi del terminale e del sandbox richiedono una conferma diretta")
         }
         _ => None,

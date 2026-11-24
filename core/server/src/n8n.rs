@@ -155,7 +155,10 @@ impl Manager {
                     json!({"enabled": true, "running": state == Some(true), "docker_connected": true, "container_created": state.is_some(), "items": jobs, "image": IMAGE})
                 }
                 Err(error) => {
-                    json!({"enabled": true, "running": false, "docker_connected": false, "items": jobs, "error": error, "image": IMAGE})
+                    // Perché Docker non risponde, con la correzione più probabile (ADR-0113).
+                    let (health, _) = crate::container_runtime::diagnose();
+                    json!({"enabled": true, "running": false, "docker_connected": false, "items": jobs, "error": error, "image": IMAGE,
+                           "docker": {"state": health.code(), "hint": health.hint()}})
                 }
             }
         };

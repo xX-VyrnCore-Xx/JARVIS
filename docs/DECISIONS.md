@@ -1573,6 +1573,30 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `AppUpdateTest` (versioni, scelta della release, host, checksum e hash).
 - **Documenti interessati:** ROADMAP.md, INTERFACE_AND_DEVICES.md.
 
+### ADR-0113 — Diagnosi di Docker con la correzione da fare
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora ulteriormente Docker»).
+- **Problema:** quando Docker non andava, sandbox, `code.run_python` e n8n rispondevano allo stesso modo («Docker non disponibile»), senza dire se mancasse l'installazione, se il motore fosse spento o se mancassero i permessi.
+- **Decisione:** `container_runtime::diagnose()` interroga il motore con `docker version` (massimo 6 s) e classifica l'esito: non installato, motore spento, permesso negato, sconosciuto, pronto; `classify` è una funzione pura provata nei test (messaggi di Linux, macOS e Windows). Ogni stato ha un messaggio con la correzione («avvia Docker Desktop», «aggiungi l'utente al gruppo docker»). `sandbox.status`, l'errore di `sandbox.run` e lo stato di n8n riportano stato, versione del motore e messaggio.
+- **Evidenza:** test della classificazione; nessun Docker in questo ambiente, quindi la diagnosi su un motore reale non è stata provata.
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ROADMAP.md.
+
+### ADR-0114 — Preparazione dell'immagine del sandbox dall'app
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout.
+- **Problema:** l'immagine `jarvis-sandbox` si costruiva con `infra/sandbox/build.sh`, ma un'app installata non ha il repository.
+- **Decisione:** il Dockerfile è incorporato nel Core. Il nuovo strumento `sandbox.prepare` («prepara la sandbox», con conferma perché scarica dalla rete) costruisce l'immagine in background con `docker build -` (nessun contesto, solo il Dockerfile), massimo 15 minuti; lo stato (`idle`, `building`, `ready`, `failed`) e la causa di un errore (rete assente, disco pieno, accesso negato) compaiono in `sandbox.status`. Resta l'unico momento in cui il sandbox usa la rete: i container dei comandi restano senza rete. Escluso da missioni e automazioni.
+- **Evidenza:** test dell'interpretazione dei log di costruzione, del Dockerfile incorporato, dei descrittori e della regola del gateway.
+- **Non verificato:** una costruzione reale.
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md.
+
+### ADR-0115 — Etichette e pulizia dei container del sandbox
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout.
+- **Decisione:** ogni container creato dal sandbox porta l'etichetta `jarvis.sandbox=1` ed è avviato con `--ipc none` (nessuna memoria condivisa con altri container). All'avvio il Core elimina in un thread a parte i container con quell'etichetta rimasti dopo un arresto brusco; gli identificativi di `docker ps -q` sono validati (solo esadecimali). I container di n8n non portano l'etichetta e non vengono toccati.
+- **Evidenza:** test degli argomenti di `docker run` e dell'analisi degli identificativi.
+- **Documenti interessati:** SECURITY_AND_PRIVACY.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.
