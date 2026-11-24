@@ -1714,6 +1714,16 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Non verificato:** accuratezza reale su microfono e voce vera (test con segnali sintetici); le soglie vanno tarate sull'hardware del proprietario.
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
 
+### ADR-0128 — Avatar olografico animato su macOS
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («concentrati sull'avatar, fatto bene e molto animato»).
+- **Decisione:** `Avatar.swift` è riscritto come un'unica scena `Canvas` a 30 fps, interamente vettoriale (nessuna immagine). Elementi: alone che respira; onde che si propagano dal centro; anello tratteggiato, archi controrotanti e 72 tacche con onda di luce; 42 scintille in orbita con scintillio individuale; testa con lieve oscillazione, inclinazione e respiro; fascio di scansione ritagliato sul volto; occhi con bagliore, palpebre e sguardo a scatti (cercano avanti e indietro mentre elabora); bocca a sette barre; nucleo sul petto che pulsa e ruota; glitch rapido ogni ~9 s.
+- **Stati:** a riposo, **elabora** (`thinking`: anelli più veloci, arco di scansione, occhi più stretti) e **parla** (`speaking`: sillabe sulla bocca, onde più fitte). I passaggi sono continui (`Animatable`), non a scatto. «Parla» dura quanto la lettura stimata (≈14 caratteri/s), perché il Core non segnala la fine della riproduzione.
+- **Interazione:** al passaggio del puntatore l'avatar si ingrandisce con una molla e guarda in avanti; al clic emette un'onda.
+- **Accessibilità:** con «Riduci movimento» la scena resta ferma e senza glitch; VoiceOver legge lo stato.
+- **Non verificato:** resa e fluidità (nessuna schermata; SwiftUI solo in CI). Costo CPU da misurare su Mac reale: se eccessivo, abbassare i fotogrammi o le scintille.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.

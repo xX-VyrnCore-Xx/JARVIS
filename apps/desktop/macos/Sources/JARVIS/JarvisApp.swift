@@ -106,6 +106,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var systemStats: [String: Any] = [:]
     @State private var missionsPreview: [Record] = []
     @State private var commandText = ""
+    @State private var avatarSpeaking = false
     @State private var voiceHint = ""
     @State private var payload: [String: Any] = [:]
     @State private var message = ""
@@ -540,10 +541,10 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         VStack(spacing: 10) {
             ZStack {
                 OrbitRings().frame(width: size, height: size)
-                Avatar(thinking: sending).frame(width: size * 0.78, height: size * 0.78)
+                Avatar(thinking: sending, speaking: avatarSpeaking).frame(width: size * 0.78, height: size * 0.78)
             }
             .frame(width: size, height: size)
-            WaveformView(active: sending, barCount: 26).frame(maxWidth: size)
+            WaveformView(active: sending || avatarSpeaking, barCount: 26).frame(maxWidth: size)
         }
         .frame(maxWidth: .infinity)
     }
@@ -930,7 +931,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     private var chat: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 15) {
-                Avatar(thinking: sending).frame(width: 76)
+                Avatar(thinking: sending, speaking: avatarSpeaking).frame(width: 76)
                 VStack(alignment: .leading, spacing: 5) {
                     Text("JARVIS").font(.title2.weight(.semibold))
                     if sending {
@@ -1188,7 +1189,14 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                                                      body: ["message": text, "provider": "auto", "use_context": includeContext])
                 lastReply = result
                 if speakReplies, let reply = result["reply"] as? String, !reply.isEmpty {
-                    Task { _ = try? await core.request("/api/voice/say", method: "POST", body: ["text": reply], timeout: 15) }
+                    // L'avatar «parla» per la durata stimata della lettura (circa 14 caratteri al secondo).
+                    let duration = min(max(Double(reply.count) / 14, 1.5), 45)
+                    Task {
+                        avatarSpeaking = true
+                        _ = try? await core.request("/api/voice/say", method: "POST", body: ["text": reply], timeout: 15)
+                        try? await Task.sleep(for: .seconds(duration))
+                        avatarSpeaking = false
+                    }
                 }
                 if section == .chat { await load(.chat) }
                 await core.refreshHealth()
