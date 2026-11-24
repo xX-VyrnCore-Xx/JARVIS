@@ -469,6 +469,7 @@ pub fn router(state: Shared) -> Router {
                 .put(devices_access_put)
                 .post(devices_access_put),
         )
+        .route("/api/openapi.json", get(openapi_document))
         .route("/api/tailscale", get(tailscale_status))
         .route("/api/tailscale/connect", post(tailscale_connect))
         .route("/api/devices/pairing/cancel", post(cancel_pairing))
@@ -2482,6 +2483,11 @@ fn tailscale_view(state: &Shared, mut status: Value) -> Value {
     status["allowed"] = json!(allowed);
     status["pairing_urls"] = json!(pairing_urls(state));
     status
+}
+
+/// Descrizione OpenAPI dell'API locale (ADR-0146).
+async fn openapi_document() -> Response {
+    Json(crate::openapi::document(env!("CARGO_PKG_VERSION"))).into_response()
 }
 
 /// Stato del collegamento con Tailscale (ADR-0141); solo per il proprietario.

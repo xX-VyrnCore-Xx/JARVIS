@@ -30,6 +30,7 @@ pub mod node_agent;
 pub mod nodes;
 pub mod oauth;
 pub mod observability;
+pub mod openapi;
 pub mod orchestrator;
 pub mod passkeys;
 pub mod permissions;

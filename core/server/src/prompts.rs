@@ -13,6 +13,8 @@ pub enum Role {
     Security,
     Systems,
     Coding,
+    AppBuilder,
+    CodeReview,
     Research,
     Translation,
     Writing,
@@ -32,6 +34,40 @@ fn fold(text: &str) -> String {
 
 /// Ruolo della richiesta: prima gli specialisti del Core, poi le attività di scrittura, analisi e studio.
 pub fn role_for(prompt: &str) -> Role {
+    {
+        let text = fold(prompt);
+        let has = |terms: &[&str]| terms.iter().any(|term| text.contains(term));
+        if has(&[
+            "rivedi il codice",
+            "revisione del codice",
+            "code review",
+            "rivedi questa pull request",
+            "rivedi la pr",
+        ]) {
+            return Role::CodeReview;
+        }
+        if has(&[
+            "crea un'app",
+            "crea un'applicazione",
+            "crea un applicazione",
+            "sviluppa un'app",
+            "sviluppa un'applicazione",
+            "costruisci un'app",
+            "costruisci un'applicazione",
+            "nuova applicazione",
+            "crea un sito",
+            "web app",
+            "landing page",
+            "dashboard web",
+            "interfaccia moderna",
+            "progetta un'api",
+            "progetta il database",
+            "app mobile",
+            "applicazione desktop",
+        ]) {
+            return Role::AppBuilder;
+        }
+    }
     if let Some(agent) = crate::agents::route(prompt) {
         match agent.name {
             "business" => return Role::Business,
@@ -116,6 +152,8 @@ pub fn role_guidance(role: Role) -> &'static str {
         Role::Security => "Contesto di sicurezza difensiva: separa evidenze, gravità (con la scala usata, ad esempio CVSS) e dati mancanti; indica priorità di bonifica e come verificare il ripristino. Niente istruzioni per attaccare sistemi altrui; per vulnerabilità descrivi mitigazioni, non exploit.",
         Role::Systems => "Contesto IT: parti da diagnosi in sola lettura e distingui osservazioni da ipotesi. Prima di una modifica indica impatto, comando esatto per il sistema operativo del proprietario, verifica e come tornare indietro.",
         Role::Coding => "Contesto di sviluppo: codice completo e funzionante in blocchi con il linguaggio indicato, nessun segnaposto; spiega la scelta in poche righe, segnala casi limite e dai il comando per verificarlo. Se il problema è un difetto, individua la causa prima di proporre la correzione.",
+        Role::AppBuilder => "Contesto di sviluppo di applicazioni: lavora da ingegnere senior e designer di prodotto. Dichiara le assunzioni, scegli lo stack più semplice che regge il requisito e motiva ogni scelta in una riga; mostra l'albero dei file e consegna codice completo ed eseguibile, mai segnaposto, con i comandi per avviarlo e testarlo. L'interfaccia è contemporanea: token di design (colori, tipografia, spaziatura) con tema chiaro e scuro, layout responsive, stati di caricamento/vuoto/errore, accessibilità (contrasto, focus, tastiera) e movimento sobrio e rispettoso di prefers-reduced-motion. Separa interfaccia, logica e dati; valida gli input ai confini; nessun segreto nel codice; ogni funzione con il suo test. Costruisci per fasi (scheletro, funzioni, rifinitura) e chiudi con cosa manca.",
+        Role::CodeReview => "Contesto di revisione del codice: leggi tutto prima di giudicare. Elenca i problemi per gravità (bloccanti, importanti, minori) con posizione, motivo e correzione in codice; controlla correttezza sui casi limite, errori ignorati, sicurezza, compatibilità e test mancanti. Non trattare preferenze di stile come difetti; chiudi con un verdetto in una riga.",
         Role::Research => "Contesto di ricerca: confronta almeno due fonti, riporta i fatti concordanti e segnala le discrepanze; cita solo URL esatti che conosci e indica la data delle informazioni quando conta.",
         Role::Translation => "Contesto di traduzione: restituisci prima la traduzione, fedele al senso e al registro dell'originale, senza aggiungere o togliere contenuto. Aggiungi una nota di una riga solo se un termine è ambiguo o intraducibile.",
         Role::Writing => "Contesto di scrittura: consegna prima il testo pronto all'uso, adatto al destinatario e al canale, con tono coerente e struttura chiara; dopo, al massimo una riga con ciò che hai assunto. Non inventare fatti, nomi o cifre non forniti.",
@@ -225,6 +263,11 @@ mod tests {
             ("Analizza i dati di questa tabella", Role::Analysis),
             ("Pianifica il lancio del prodotto", Role::Planning),
             ("Spiegami come funziona il DNS", Role::Learning),
+            (
+                "Crea un'app per gestire le spese con grafica moderna",
+                Role::AppBuilder,
+            ),
+            ("Fai una code review di questa funzione", Role::CodeReview),
             ("Ciao, come stai?", Role::General),
         ] {
             assert_eq!(role_for(prompt), role, "{prompt}");
@@ -238,6 +281,8 @@ mod tests {
             Role::Security,
             Role::Systems,
             Role::Coding,
+            Role::AppBuilder,
+            Role::CodeReview,
             Role::Research,
             Role::Translation,
             Role::Writing,
@@ -249,7 +294,7 @@ mod tests {
         for role in all {
             let text = role_guidance(role);
             assert!(
-                text.chars().count() > 80 && text.chars().count() < 600,
+                text.chars().count() > 80 && text.chars().count() < 1100,
                 "{role:?}"
             );
             assert!(seen.insert(text), "{role:?} duplica un altro ruolo");

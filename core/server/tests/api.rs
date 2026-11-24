@@ -797,6 +797,26 @@ async fn pinned_memories_never_expire_and_closed_chats_leave_an_episode() {
 }
 
 #[tokio::test]
+async fn the_openapi_document_only_lists_routes_that_exist() {
+    let e = env();
+    let (status, doc) = e.api("GET", "/api/openapi.json", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(doc["openapi"], "3.1.0");
+    for (method, path, _, _, _) in jarvis_core::openapi::ROUTES {
+        if *method != "GET" || path.contains('{') || path.ends_with("/stream") {
+            continue;
+        }
+        let (status, _) = e.api("GET", path, None).await;
+        assert_ne!(
+            status,
+            StatusCode::NOT_FOUND,
+            "{path} dichiarata ma assente"
+        );
+        assert_ne!(status, StatusCode::METHOD_NOT_ALLOWED, "{path}");
+    }
+}
+
+#[tokio::test]
 async fn tailscale_status_is_reported_without_authorising_anything() {
     let e = env();
     let (status, view) = e.api("GET", "/api/tailscale", None).await;

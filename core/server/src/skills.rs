@@ -25,7 +25,7 @@ type Builtin = (
 );
 
 /// Competenze incluse, create al primo avvio e modificabili dal proprietario.
-const BUILTIN: [Builtin; 15] = [
+const BUILTIN: [Builtin; 24] = [
     (
         "briefing",
         "Briefing del mattino",
@@ -243,6 +243,96 @@ const BUILTIN: [Builtin; 15] = [
         "Per un'offerta chiarisci cliente, valore per il cliente, vincoli e margine minimo accettabile. Verifica prezzo, sconto e margine con biz.margin e l'IVA con biz.vat prima di scrivere cifre. Struttura la proposta: problema del cliente, soluzione, prezzo con ciò che include, condizioni, prossimi passi. Per una trattativa indica concessioni possibili in cambio di qualcosa (volume, durata, pagamento) e il prezzo sotto il quale non scendere. Non promettere ciò che i dati forniti non confermano.",
         &["biz.margin", "biz.vat", "biz.breakeven", "math.calc", "notes.add", "notes.search", "todo.add"],
     ),
+    (
+        "app-completa",
+        "Applicazione completa",
+        "Progetta e costruisce un'applicazione intera, con architettura, codice eseguibile e interfaccia moderna.",
+        &[
+            "crea un'app",
+            "crea un'applicazione",
+            "sviluppa un'app",
+            "sviluppa un'applicazione",
+            "costruisci un'app",
+            "nuova applicazione",
+            "crea un sito",
+            "web app",
+        ],
+        "Lavora per fasi e dichiara la fase. 1) Requisiti: obiettivo, utenti, funzioni indispensabili e cosa resta fuori; assumi ciò che manca e dillo in una riga. 2) Architettura: scegli lo stack più semplice che regge il requisito (linguaggio, framework, archiviazione, dipendenze) con una riga di motivazione per ogni scelta, e mostra l'albero dei file. 3) Scheletro eseguibile: tutti i file completi, nessun segnaposto, con il comando per avviarlo. 4) Funzioni, una alla volta, ciascuna con il proprio test. 5) Rifinitura: stati di caricamento, vuoto ed errore, accessibilità, tema chiaro e scuro, responsive. Separa interfaccia, logica e accesso ai dati; valida ogni input ai confini; niente segreti nel codice (variabili d'ambiente); gestisci gli errori con messaggi chiari. Se hai gli strumenti, ispeziona prima i file esistenti (fs.list, fs.read), scrivi con fs.write e verifica con sandbox.run o code.check_python; riferisci come eseguito solo ciò che l'esito di uno strumento conferma. Chiudi con: come avviare, come testare, cosa manca.",
+        &["fs.list", "fs.read", "fs.search", "fs.mkdir", "fs.write", "sandbox.prepare", "sandbox.run", "code.check_python"],
+    ),
+    (
+        "interfaccia-moderna",
+        "Interfaccia moderna",
+        "Grafica contemporanea: design system, tema scuro, movimento sobrio e accessibilità.",
+        &[
+            "interfaccia moderna",
+            "ui moderna",
+            "design system",
+            "landing page",
+            "migliora la grafica",
+            "tema scuro",
+            "dashboard web",
+        ],
+        "Progetta prima il sistema, poi le schermate. Token: colori (sfondo, superficie, testo, accento, stati) definiti una volta con variante chiara e scura, scala tipografica (corpo 16 px, rapporto 1,2–1,25), spaziatura su griglia di 4/8 px, raggi e ombre coerenti. Gerarchia: un solo punto focale per schermata, molto spazio, contrasto del testo almeno 4,5:1, bersagli tocco da 44 px, stati di hover, focus visibile, disabilitato, caricamento, vuoto ed errore. Movimento: transizioni di 150–250 ms con easing morbido, solo dove spiegano un cambiamento; rispetta prefers-reduced-motion. Layout: mobile first, griglia fluida, nessuna larghezza fissa, testo che si adatta. Evita decorazioni inutili, troppi colori e animazioni continue. Consegna il codice completo (HTML/CSS/JS o il framework richiesto) e, in tre righe, le scelte di design: palette, tipografia, ritmo.",
+        &["fs.read", "fs.write", "fs.list"],
+    ),
+    (
+        "revisione-codice",
+        "Revisione del codice",
+        "Code review per correttezza, sicurezza, manutenibilità e test mancanti.",
+        &["rivedi il codice", "rivedi questa pull request", "rivedi la pr", "controlla questo codice"],
+        "Leggi il codice per intero prima di giudicare. Riporta i problemi per gravità: bloccanti (difetti, perdita di dati, falle di sicurezza), importanti (casi limite, concorrenza, errori ignorati, prestazioni), minori (nomi, duplicazioni, leggibilità). Per ognuno: dove (file e riga), perché è un problema, la correzione in codice. Controlla in ordine: correttezza sui casi limite, gestione degli errori, sicurezza (input non fidati, segreti, permessi), compatibilità delle interfacce, test mancanti o deboli. Non segnalare preferenze di stile come difetti e non riscrivere ciò che funziona. Chiudi con un verdetto in una riga: pronto, pronto con modifiche, da rifare.",
+        &["fs.read", "fs.list", "fs.search", "code.check_python"],
+    ),
+    (
+        "debug",
+        "Diagnosi dei difetti",
+        "Individua la causa di un errore prima di proporre la correzione.",
+        &["stack trace", "traceback", "trova il bug", "debug", "non funziona più", "errore nel codice"],
+        "Procedi come un investigatore. Riproduci il difetto: input, ambiente, passi minimi. Leggi il messaggio d'errore e la riga indicata, poi risali la catena delle chiamate. Formula al massimo tre ipotesi ordinate per probabilità e per ciascuna dì come verificarla (log, stampa mirata, test, riduzione del caso). Individua la causa radice, non il sintomo; solo dopo proponi la correzione minima e il test che avrebbe impedito il difetto. Se mancano informazioni decisive (versione, log completo, codice), chiedile in una riga e intanto offri la lettura più probabile. Con gli strumenti disponibili leggi i file (fs.read) e riproduci con sandbox.run; non dichiarare risolto ciò che non hai rieseguito.",
+        &["fs.read", "fs.search", "fs.list", "sandbox.run", "code.check_python"],
+    ),
+    (
+        "test-software",
+        "Test del software",
+        "Strategia e scrittura di test automatici affidabili.",
+        &["scrivi i test", "unit test", "test automatici", "copertura dei test", "test di integrazione"],
+        "Parti da ciò che deve restare vero: comportamenti, non implementazione. Elenca i casi: percorso normale, limiti (vuoto, massimo, zero, negativo), errori attesi, concorrenza o ordine se rilevanti. Scrivi test piccoli e indipendenti con nomi che descrivono il comportamento (dato…, quando…, allora…), dati sintetici e nessuna dipendenza dalla rete o dall'orologio reale. Usa il framework già presente nel progetto. Per un difetto scrivi prima il test che fallisce. Indica il comando per eseguirli e quali parti restano scoperte. Non dichiarare che i test passano se non li hai eseguiti.",
+        &["fs.read", "fs.list", "fs.write", "sandbox.run", "code.check_python"],
+    ),
+    (
+        "api-design",
+        "Progettazione di API",
+        "Contratti REST chiari, versionati e documentati con OpenAPI.",
+        &["progetta un'api", "progetta le api", "openapi", "endpoint rest", "documenta le api"],
+        "Progetta il contratto prima del codice. Risorse al plurale e nomi, verbi HTTP corretti (GET sicuro e idempotente, PUT/DELETE idempotenti, POST per creare e per azioni), codici di stato precisi (200, 201, 202 per lavori in background, 400, 401, 403, 404, 409, 429). Errori in un formato unico {codice, messaggio}. Paginazione con cursore, filtri e ordinamento espliciti, versione nel percorso o nell'intestazione, idempotenza con chiave per le scritture rischiose, limiti di dimensione e di frequenza. Autenticazione e permessi per ogni rotta, mai segreti in URL. Consegna uno schema OpenAPI 3.1 valido con esempi di richiesta e risposta e le regole di compatibilità: cosa si può aggiungere senza rompere i client.",
+        &["code.validate_json", "fs.write", "fs.read"],
+    ),
+    (
+        "database",
+        "Basi di dati",
+        "Schemi, indici, migrazioni e query efficienti.",
+        &["schema del database", "progetta il database", "modello dei dati", "migrazione del database", "query lenta"],
+        "Parti dalle entità e dalle domande a cui il sistema deve rispondere. Normalizza fino alla terza forma e denormalizza solo con una misura che lo giustifica. Chiavi primarie stabili, chiavi esterne con vincoli, tipi precisi, NOT NULL dove il dato è obbligatorio, indici sulle colonne di ricerca e di join (non su tutto). Le migrazioni sono additive, reversibili e testate su dati reali; per cambi rischiosi usa il passaggio in due fasi (aggiungi, riempi, sposta, rimuovi). Per una query lenta chiedi o produci il piano di esecuzione, cerca scansioni complete, funzioni su colonne indicizzate e N+1. Mostra sempre DDL completo e le query principali, con il dialetto del motore usato.",
+        &["fs.read", "fs.write", "sandbox.run"],
+    ),
+    (
+        "devops",
+        "Rilascio e infrastruttura",
+        "CI/CD, container e rilasci ripetibili.",
+        &["pipeline ci", "ci/cd", "dockerfile", "github actions", "docker compose", "rilascio automatico"],
+        "Rendi il rilascio ripetibile e verificabile. Pipeline: installa con dipendenze bloccate, formatta, analizza staticamente, testa, costruisci, pubblica solo da ramo protetto. Container: immagine base minima e con versione fissata, build a più stadi, utente non root, nessun segreto nell'immagine, healthcheck. Configurazione da variabili d'ambiente, un file di esempio senza valori reali. Ogni passo ha un comando locale equivalente. Prevedi il ritorno indietro (versione precedente, migrazione reversibile) e come verificare il rilascio dopo la pubblicazione. Consegna i file completi e l'elenco dei segreti da configurare nella piattaforma, senza mai scriverne i valori.",
+        &["fs.read", "fs.write", "fs.list", "code.validate_json"],
+    ),
+    (
+        "sicurezza-applicativa",
+        "Sicurezza del codice",
+        "Revisione difensiva di un'applicazione secondo le categorie OWASP.",
+        &["sicurezza del codice", "owasp", "vulnerabilità nel codice", "sql injection", "xss", "revisione di sicurezza"],
+        "Revisione solo difensiva del codice del proprietario. Controlla per categoria: controllo degli accessi (autorizzazione su ogni rotta e oggetto), crittografia (algoritmi moderni, nessun segreto nel codice), injection (query parametrizzate, escaping dell'output, niente esecuzione di input), progettazione insicura (limiti di frequenza, fiducia nei client), configurazione (impostazioni predefinite sicure, intestazioni, CORS), componenti vulnerabili (dipendenze aggiornate e bloccate), autenticazione (hash lento con sale, sessioni scadute, MFA), integrità (firme, aggiornamenti), registri (eventi di sicurezza senza dati sensibili), richieste verso l'esterno (SSRF). Per ogni problema: gravità (scala CVSS con security.cvss se hai il vettore), dove, come verificare, come correggere in codice. Descrivi mitigazioni, non exploit.",
+        &["fs.read", "fs.search", "fs.list", "security.cvss"],
+    ),
+
 ];
 
 pub fn migrate(store: &Store) -> StoreResult<()> {
