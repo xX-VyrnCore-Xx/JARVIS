@@ -108,6 +108,24 @@ impl ApiClient {
         self.request("POST", path, body)
     }
 
+    #[cfg_attr(not(windows), allow(dead_code))]
+    /// Invia un file audio (WAV) e restituisce la risposta JSON del Core.
+    pub fn post_audio(&self, path: &str, wav: &[u8]) -> Result<Value, String> {
+        let mut request = self
+            .agent
+            .post(&self.url(path))
+            .set("Accept", "application/json")
+            .set("Content-Type", "audio/wav");
+        if let Some((name, value)) = &self.auth {
+            request = request.set(name, value);
+        }
+        request
+            .send_bytes(wav)
+            .map_err(read_error)?
+            .into_json()
+            .map_err(|error| error.to_string())
+    }
+
     pub fn patch(&self, path: &str, body: &Value) -> Result<Value, String> {
         self.request("PATCH", path, Some(body))
     }

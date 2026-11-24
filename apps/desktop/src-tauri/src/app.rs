@@ -238,6 +238,9 @@ enum Event {
     Profile(Result<Value, String>),
     /// Stato della voce di sistema maschile (ADR-0123).
     VoiceStatus(Result<Value, String>),
+    /// Comando pronunciato dopo «Hey Jarvis» (ADR-0140).
+    #[cfg_attr(not(windows), allow(dead_code))]
+    WakeCommand(String),
     /// Frammento di testo della risposta in arrivo (ADR-0131).
     ChatDelta(String),
     ChatFinished(Result<Value, String>),
@@ -333,6 +336,10 @@ pub struct JarvisApp {
     /// Fino a quando JARVIS sta leggendo ad alta voce (stima dalla lunghezza): pilota la bocca dell'avatar.
     speaking_until: Option<Instant>,
     voice_hint: String,
+    /// Ascolto «Hey Jarvis» sempre attivo (ADR-0140): impostazione del Core e stato del thread di ascolto.
+    wake_listening: bool,
+    voice_status_seen: bool,
+    wake_shared: Option<Arc<crate::wake::Shared>>,
     persona_style: String,
     persona_address: String,
     profile_loaded: bool,
@@ -472,6 +479,9 @@ impl JarvisApp {
             speak_replies: false,
             speaking_until: None,
             voice_hint: String::new(),
+            wake_listening: true,
+            voice_status_seen: false,
+            wake_shared: None,
             persona_style: "film".into(),
             persona_address: String::new(),
             profile_loaded: false,
@@ -585,6 +595,8 @@ impl JarvisApp {
                     if let Ok(doc) = result {
                         self.speak_replies = doc["speak_replies"].as_bool().unwrap_or(false);
                         self.voice_hint = doc["hint"].as_str().unwrap_or_default().to_owned();
+                        self.wake_listening = doc["wake_listening"].as_bool().unwrap_or(true);
+                        self.voice_status_seen = true;
                     }
                 }
                 Event::Persona(result) => {
@@ -689,6 +701,14 @@ impl JarvisApp {
                                 Some(format!("Richiesta di prova riuscita · {model}{models}"));
                         }
                         Err(error) => self.cloud_action_error = Some(error),
+                    }
+                    ctx.request_repaint();
+                }
+                Event::WakeCommand(text) => {
+                    if !self.chat_busy && !self.history_loading {
+                        self.current = "chat".into();
+                        self.chat_input = text;
+                        self.send_chat();
                     }
                     ctx.request_repaint();
                 }
@@ -969,6 +989,42 @@ impl JarvisApp {
         }
     }
 
+    /// Avvia o ferma l'ascolto «Hey Jarvis» secondo l'impostazione del Core (solo Windows; su macOS è nell'app nativa).
+    #[cfg(target_os = "windows")]
+    fn sync_wake(&mut self, ctx: &egui::Context) {
+        let wanted =
+            self.wake_listening && self.voice_status_seen && !self.remote && self.client.is_some();
+        if !wanted {
+            if let Some(shared) = self.wake_shared.take() {
+                shared.request_stop();
+            }
+            return;
+        }
+        if self.wake_shared.is_none() {
+            let Some(client) = self.client.clone() else {
+                return;
+            };
+            let shared = Arc::new(crate::wake::Shared::default());
+            let (tx, ctx) = (self.tx.clone(), ctx.clone());
+            crate::mic::start(client, shared.clone(), move |text| {
+                let _ = tx.send(Event::WakeCommand(text));
+                ctx.request_repaint();
+            });
+            self.wake_shared = Some(shared);
+        }
+        if let Some(shared) = &self.wake_shared {
+            // Mentre JARVIS elabora o parla non ascolta: la sua voce non deve riattivarlo.
+            let speaking = self
+                .speaking_until
+                .is_some_and(|until| Instant::now() < until + Duration::from_millis(1500));
+            shared.set_suspended(self.chat_busy || speaking);
+            ctx.request_repaint_after(Duration::from_secs(1));
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn sync_wake(&mut self, _ctx: &egui::Context) {}
+
     fn send_chat(&mut self) {
         let message = self.chat_input.trim().to_string();
         if message.is_empty() || self.chat_busy || self.history_loading {
@@ -996,6 +1052,20 @@ impl JarvisApp {
             });
             let _ = tx.send(Event::ChatFinished(result));
         });
+    }
+
+    fn wake_status_text(&self) -> String {
+        use crate::wake::Phase;
+        let Some(shared) = &self.wake_shared else {
+            return "Ascolto spento: JARVIS non usa il microfono.".into();
+        };
+        match shared.phase() {
+            Phase::Waiting => "In ascolto: solo «Hey Jarvis» attiva JARVIS; l'audio resta sul computer finché non senti il segnale.".into(),
+            Phase::Capturing => "Ti ascolto…".into(),
+            Phase::Working => "Elaboro il comando…".into(),
+            Phase::Unavailable => shared.detail(),
+            Phase::Off => "Avvio dell'ascolto…".into(),
+        }
     }
 
     fn act(&mut self, ctx: &egui::Context, path: String, body: Option<Value>) {
@@ -3020,6 +3090,32 @@ impl JarvisApp {
                     Some(json!({"speak_replies": speak})),
                 );
             }
+            if cfg!(target_os = "windows") {
+                let mut listening = self.wake_listening;
+                if ui
+                    .checkbox(&mut listening, "Ascolta sempre «Hey Jarvis»")
+                    .changed()
+                {
+                    self.wake_listening = listening;
+                    let ctx = ui.ctx().clone();
+                    self.mutate(
+                        &ctx,
+                        Mutation::Patch,
+                        "/api/voice/system".into(),
+                        Some(json!({"wake_listening": listening})),
+                    );
+                }
+                ui.small(egui::RichText::new(self.wake_status_text()).weak());
+                if let Some(shared) = &self.wake_shared {
+                    if shared.phase() != crate::wake::Phase::Unavailable {
+                        ui.add(
+                            egui::ProgressBar::new(shared.level())
+                                .desired_width(160.0)
+                                .desired_height(6.0),
+                        );
+                    }
+                }
+            }
             if !self.voice_hint.is_empty() {
                 ui.small(egui::RichText::new(self.voice_hint.clone()).weak());
             }
@@ -3898,6 +3994,7 @@ impl eframe::App for JarvisApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.receive_events(&ctx);
+        self.sync_wake(&ctx);
         if self.current != "models" {
             self.cloud_api_key.clear();
             self.cloud_action_error = None;
