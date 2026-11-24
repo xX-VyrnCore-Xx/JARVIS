@@ -1,0 +1,54 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "biz.runway",
+  "version": "1.0.0",
+  "summary": "Calcola l'autonomia di cassa in mesi da liquidità, costi e ricavi mensili, con crescita dei ricavi opzionale",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "cash",
+      "monthly_costs"
+    ],
+    "properties": {
+      "cash": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1000000000000.0
+      },
+      "monthly_costs": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1000000000000.0
+      },
+      "monthly_revenue": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1000000000000.0
+      },
+      "revenue_growth_percent": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 100
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "none",
+  "risk": "low",
+  "permissions": [
+    "core.compute:execute"
+  ],
+  "errors": [
+    "biz.invalid"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

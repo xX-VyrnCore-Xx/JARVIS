@@ -1,0 +1,48 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "biz.margin",
+  "version": "1.0.0",
+  "summary": "Calcola margine e ricarico da costo e prezzo, oppure il prezzo che dà un margine obiettivo",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "cost"
+    ],
+    "properties": {
+      "cost": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1000000000000.0
+      },
+      "price": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "maximum": 1000000000000.0
+      },
+      "target_margin_percent": {
+        "type": "number",
+        "minimum": 0,
+        "exclusiveMaximum": 100
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "none",
+  "risk": "low",
+  "permissions": [
+    "core.compute:execute"
+  ],
+  "errors": [
+    "biz.invalid"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

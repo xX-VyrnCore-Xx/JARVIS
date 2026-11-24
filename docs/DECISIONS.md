@@ -1757,6 +1757,18 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Non verificato:** comportamento con provider reali (formati verificati con server di prova per entrambi); resa SwiftUI e prova su Windows reale.
 - **Documenti interessati:** AI_SYSTEM.md, INTERFACE_AND_DEVICES.md, ROADMAP.md.
 
+### ADR-0132 — JARVIS come assistente di direzione aziendale (CEO/CFO)
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («rendi ancora più professionale e specializzato JARVIS, un super CEO aziendale e gestionale»).
+- **Problema:** lo specialista «business» aveva solo IVA e finanziamenti; la chat cloud, il percorso usato dall'app, non vedeva nessun calcolo aziendale (solo `math.calc`, `date.calc`, conversioni, e solo con la parola «calcola»): le cifre di un'analisi potevano uscire a memoria dal modello.
+- **Decisione (strumenti, `executive.rs`):** sette calcoli deterministici, solo calcolo (senza rete, scritture o dati personali, rischio basso): `biz.margin` (margine, ricarico, prezzo da margine obiettivo), `biz.breakeven` (pareggio in unità e ricavi, profitto obiettivo, margine di sicurezza), `biz.npv` (VAN, TIR per bisezione, payback, indice di profittabilità), `biz.runway` (autonomia di cassa con crescita dei ricavi, soglie critico <6 mesi, attenzione <12), `biz.unit_economics` (LTV, LTV/CAC, payback del CAC), `biz.priorities` (RICE su fino a 30 iniziative), `biz.cagr` (crescita composta e proiezione). Input validati con intervalli, errori in italiano, risultati verificati su esempi svolti.
+- **Decisione (specialista e competenze):** ruolo «Direzione aziendale (CEO/CFO)» con più parole chiave e i nuovi strumenti; quattro competenze incluse: **Direzione e decisioni** (formato: decisione, raccomandazione subito, evidenze con strumenti, opzioni, rischi, prossimi passi con responsabile e scadenza), **Controllo finanziario**, **Riunioni e azioni** (ordine del giorno, verbale, azioni), **Vendite e offerte**; la competenza «azienda» riceve gli stessi strumenti.
+- **Decisione (chat cloud):** i nove strumenti aziendali (con IVA e finanziamenti) sono offerti al modello quando la richiesta contiene parole di calcolo aziendale (margine, pareggio, VAN, TIR, runway, LTV, CAC, CAGR, ROI, IVA, rata…); per le richieste aziendali il prompt aggiunge il formato da consulente di direzione e l'obbligo di usare gli strumenti per ogni cifra; le richieste aziendali di una certa sostanza (≥80 token) usano il modello di ragionamento. Comandi offline equivalenti (es. «punto di pareggio costi fissi … prezzo … costo variabile …», «runway cassa … costi … ricavi …», «van tasso 10% flussi -1000; 500; 500»).
+- **Limiti:** nessun parere legale, fiscale o contabile vincolante (dichiarato nel prompt e nei ruoli); i calcoli usano i dati forniti dal proprietario, senza accedere a gestionali o conti; nessuna scrittura (le azioni nate da una riunione si salvano solo su richiesta, con le conferme già previste).
+- **Non incluso:** collegamento a gestionali e contabilità (connettori dedicati) e report periodici automatici: possibili passi successivi.
+- **Non verificato:** qualità delle analisi con provider reali; testati con fixture i calcoli, i comandi offline, i testi, la registrazione degli strumenti e il prompt.
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.

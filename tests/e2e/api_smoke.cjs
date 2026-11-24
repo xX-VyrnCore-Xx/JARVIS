@@ -147,6 +147,9 @@ function check(condition, message) {
     ['valida il JSON: {"ok": true}', "code.validate_json", /Il JSON è valido/],
     ['valida il JSON: {"ok": }', "code.validate_json",
       /JSON non valido alla riga 1, colonna [1-9]/],
+    ["punto di pareggio costi fissi 10000 prezzo 50 costo variabile 30", "biz.breakeven", /Pareggio a 500 unità/],
+    ["runway cassa 120000 costi 30000 ricavi 10000", "biz.runway", /circa 6\.0 mesi/],
+    ["van tasso 10% flussi -1000; 500; 500; 500", "biz.npv", /VAN 243\.43; TIR 23\.38%/],
   ]) {
     const response = await request("/api/chat/stream", { method: "POST", token: ownerToken, body: { message } });
     const result = response.text.split("\n").filter(Boolean).map(JSON.parse).find((event) => event.type === "done")?.result;

@@ -94,6 +94,8 @@ Il servizio usa l'immagine versionata `docker.n8n.io/n8nio/n8n:2.48.7`, l'utente
 
 **Competenze (ADR-0117, ADR-0118).** Strumenti `security.cvss`, `security.hash`, `it.subnet`, `biz.vat`, `biz.loan`; specialista `business`; competenze «Analisi e procedure aziendali», «Operazioni IT e runbook», «Risposta agli incidenti di sicurezza» e «Conformità e protezione dei dati». **Permessi (ADR-0116):** pagina «Permessi» dell'app desktop e `GET/PATCH /api/permissions`.
 
+**Direzione aziendale (ADR-0132).** Strumenti di calcolo `biz.margin`, `biz.breakeven`, `biz.npv`, `biz.runway`, `biz.unit_economics`, `biz.priorities`, `biz.cagr` (oltre a `biz.vat` e `biz.loan`), offerti anche alla chat cloud; specialista «Direzione aziendale (CEO/CFO)» e competenze Direzione e decisioni, Controllo finanziario, Riunioni e azioni, Vendite e offerte. Tutti i calcoli sono locali, senza rete né scritture.
+
 **Applicazioni (ADR-0121).** «apri l'app Spotify», «porta in primo piano Chrome», «scrivi nell'app: …», «premi cmd+s», «quali finestre sono aperte»: ogni azione chiede la tua conferma e mostra cosa farà. **Chiave API (ADR-0119):** incolla la chiave come capita, JARVIS la ripulisce; «Testa chiave» verifica prima le credenziali. **Personalità (ADR-0120):** stile «come nel film» o sobrio e forma di rivolgersi, in Modelli AI.
 
 **Schermo e voce (ADR-0122, ADR-0123).** «cosa c'è sullo schermo» (con conferma; serve Tesseract) e «puoi leggere lo schermo?». La voce è solo maschile: «Leggi le risposte ad alta voce» in Modelli AI (Luca su macOS, Cosimo su Windows) e Piper con Riccardo. Comandi vocali: «Jarvis, ricordami tra venti minuti…», «stop», «ripeti».
