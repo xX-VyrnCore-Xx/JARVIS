@@ -1476,6 +1476,17 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** le note della release elencano anche l'APK Android, indicano la versione minima di macOS (14, come nel pacchetto Swift) e contengono i comandi per verificare impronta, attestazione GitHub e firma Sigstore; le modifiche della versione restano generate da GitHub.
 - **Documenti interessati:** `.github/release-notes.md`.
 
+### ADR-0103 — Arresto del Core senza processi rimasti
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («controlla l'esito della release e trova altri errori»).
+- **Problema:** la release automatica dopo la PR #76 è fallita nella prova «Installazione dal .dmg e avvio del Core installato» (macOS): il Core ha stampato «JARVIS arrestato» ma era ancora vivo 15 secondi dopo la chiusura dello stdin da parte del padre, e il worker Python è rimasto orfano. L'esecuzione successiva è passata: il difetto è intermittente. Causa probabile: al termine di `main` il runtime Tokio attende i compiti bloccanti ancora in corso (una richiesta lenta, una lettura di rete) e il processo non esce.
+- **Decisione:** dopo l'arresto del server il Core prende il blocco (al massimo 3 secondi), salva l'ultima istantanea delle metriche, ferma il worker AI e porta il WAL del database nel file principale (`Jarvis::shutdown`), poi esce esplicitamente con codice 0. Vale per Ctrl+C e per la chiusura dello stdin.
+- **Conseguenze:** l'uscita avviene in pochi centesimi di secondo (misurata: 20-30 ms) e non lascia il worker Python. Una richiesta ancora in corso viene interrotta: per l'arresto richiesto dal proprietario o dal padre è il comportamento voluto.
+- **Altro corretto nella stessa revisione:** il client egui apriva un nuovo flusso di notifiche a ogni riconnessione al Core senza chiudere i vecchi; con il limite di 16 flussi del Core si sarebbero esauriti. I thread di una connessione sostituita ora si fermano da soli (contatore di generazione, controllato a ogni riga del flusso, segnali di vita compresi).
+- **Verificato senza difetti:** 1702 richieste malformate (corpi vuoti, `null`, JSON non valido, tipi sbagliati, metodi non previsti) su tutte le rotte del Core: nessuna risposta 5xx, nessun blocco, nessun panic, il Core è rimasto vivo.
+- **Evidenza:** `tests/shutdown.rs` (avvia il binario, serve una chat che fa partire il worker, chiude lo stdin e richiede uscita con codice 0 entro 10 secondi); test del parser SSE con flusso superato; suite del Core stabile in due esecuzioni consecutive (276 test).
+- **Documenti interessati:** ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.

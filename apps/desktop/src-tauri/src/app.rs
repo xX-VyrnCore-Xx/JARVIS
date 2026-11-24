@@ -125,6 +125,7 @@ pub struct JarvisApp {
     setup_tts: String,
     connector_template: String,
     mission_goal: String,
+    poll_generation: Arc<std::sync::atomic::AtomicU64>,
     mission_every: String,
     mission_connectors: bool,
     proactive_times: Option<[String; 3]>,
@@ -250,6 +251,7 @@ impl JarvisApp {
             setup_tts: "it_IT-paola-medium".into(),
             connector_template: String::new(),
             mission_goal: String::new(),
+            poll_generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             mission_every: String::new(),
             mission_connectors: false,
             proactive_times: None,
@@ -481,14 +483,25 @@ impl JarvisApp {
         let Some(client) = self.client.clone() else {
             return;
         };
+        use std::sync::atomic::Ordering;
+        // Ogni nuova connessione al Core sostituisce le precedenti: i thread vecchi si fermano da soli invece di
+        // tenere aperti flussi inutili (il Core ne ammette 16).
+        let generation = self.poll_generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let current = self.poll_generation.clone();
         let live = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        let (tx, stream_ctx, stream_client, stream_live) =
-            (self.tx.clone(), ctx.clone(), client.clone(), live.clone());
-        std::thread::spawn(move || loop {
-            match stream_client.notification_stream() {
-                Ok(reader) => {
-                    stream_live.store(true, std::sync::atomic::Ordering::Relaxed);
-                    crate::client::read_events(reader, |name, _| {
+        let (tx, stream_ctx, stream_client, stream_live, stream_current) = (
+            self.tx.clone(),
+            ctx.clone(),
+            client.clone(),
+            live.clone(),
+            current.clone(),
+        );
+        std::thread::spawn(move || {
+            let fresh = || stream_current.load(Ordering::SeqCst) == generation;
+            while fresh() {
+                if let Ok(reader) = stream_client.notification_stream() {
+                    stream_live.store(true, Ordering::Relaxed);
+                    crate::client::read_events(reader, fresh, |name, _| {
                         if matches!(name, "notification" | "resync")
                             && tx
                                 .send(Event::Notifications(
@@ -501,33 +514,30 @@ impl JarvisApp {
                         stream_ctx.request_repaint();
                         true
                     });
-                    stream_live.store(false, std::sync::atomic::Ordering::Relaxed);
                 }
-                Err(_) => stream_live.store(false, std::sync::atomic::Ordering::Relaxed),
+                stream_live.store(false, Ordering::Relaxed);
+                if tx.send(Event::Ping).is_err() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_secs(5));
             }
-            if tx.send(Event::Ping).is_err() {
-                break;
-            }
-            std::thread::sleep(Duration::from_secs(5));
         });
         let tx = self.tx.clone();
         let ctx = ctx.clone();
-        std::thread::spawn(move || loop {
-            if tx
-                .send(Event::Notifications(
-                    client.get("/api/notifications?limit=20"),
-                ))
-                .is_err()
-            {
-                break;
+        std::thread::spawn(move || {
+            while current.load(Ordering::SeqCst) == generation {
+                if tx
+                    .send(Event::Notifications(
+                        client.get("/api/notifications?limit=20"),
+                    ))
+                    .is_err()
+                {
+                    break;
+                }
+                ctx.request_repaint();
+                let wait = if live.load(Ordering::Relaxed) { 30 } else { 5 };
+                std::thread::sleep(Duration::from_secs(wait));
             }
-            ctx.request_repaint();
-            let wait = if live.load(std::sync::atomic::Ordering::Relaxed) {
-                30
-            } else {
-                5
-            };
-            std::thread::sleep(Duration::from_secs(wait));
         });
     }
 
