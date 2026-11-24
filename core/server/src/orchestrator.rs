@@ -3064,7 +3064,7 @@ impl Jarvis {
             .map_err(CoreError::BadRequest)?;
         Ok(json!({
             "registered": true,
-            "delivery_status": crate::push::delivery_config_status()
+            "delivery_status": crate::push::delivery_config_status(&self.cfg.data_dir)
         }))
     }
 

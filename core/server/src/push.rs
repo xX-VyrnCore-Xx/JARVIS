@@ -163,10 +163,23 @@ fn decode_private_key(pem: &str) -> Option<Vec<u8>> {
         .ok()
 }
 
-fn load_service_account() -> Result<ServiceAccount, ConfigError> {
-    let path = std::env::var_os("JARVIS_FCM_SERVICE_ACCOUNT_FILE")
-        .filter(|p| !p.is_empty())
-        .ok_or(ConfigError::Missing)?;
+/// Nome del file dell'account di servizio nella cartella dati: così basta copiarlo lì, senza variabili
+/// d'ambiente (che un'app avviata dal Finder o dal menu Start non eredita dalla shell).
+pub const SERVICE_ACCOUNT_FILE: &str = "fcm-service-account.json";
+
+/// Percorso dell'account di servizio: prima `JARVIS_FCM_SERVICE_ACCOUNT_FILE`, poi il file nella cartella dati.
+fn service_account_path(data_dir: &Path) -> Option<PathBuf> {
+    if let Some(path) =
+        std::env::var_os("JARVIS_FCM_SERVICE_ACCOUNT_FILE").filter(|p| !p.is_empty())
+    {
+        return Some(path.into());
+    }
+    let default = data_dir.join(SERVICE_ACCOUNT_FILE);
+    default.is_file().then_some(default)
+}
+
+fn load_service_account(data_dir: &Path) -> Result<ServiceAccount, ConfigError> {
+    let path = service_account_path(data_dir).ok_or(ConfigError::Missing)?;
     let raw = std::fs::read_to_string(path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             ConfigError::Missing
@@ -178,8 +191,8 @@ fn load_service_account() -> Result<ServiceAccount, ConfigError> {
     service_account_from_json(&value)
 }
 
-pub fn delivery_config_status() -> &'static str {
-    match load_service_account() {
+pub fn delivery_config_status(data_dir: &Path) -> &'static str {
+    match load_service_account(data_dir) {
         Ok(_) => "ready",
         Err(ConfigError::Missing) => "configuration_missing",
         Err(ConfigError::Invalid) => "configuration_invalid",
@@ -246,6 +259,10 @@ impl PushSubscriptions {
         hashes.len()
     }
 
+    fn data_dir(&self) -> &Path {
+        self.db_path.parent().unwrap_or(Path::new("."))
+    }
+
     /// Stato per il proprietario: nessun token, solo conteggi e ultimo invio riuscito.
     pub fn status(&self) -> Value {
         let count = |sql: &str| -> i64 { self.conn.query_row(sql, [], |r| r.get(0)).unwrap_or(0) };
@@ -256,7 +273,7 @@ impl PushSubscriptions {
             })
             .unwrap_or(None);
         json!({
-            "delivery": delivery_config_status(),
+            "delivery": delivery_config_status(self.data_dir()),
             "registered": count("SELECT COUNT(*) FROM push_subscriptions WHERE invalid_at IS NULL"),
             "invalid_pending": count("SELECT COUNT(*) FROM push_subscriptions WHERE invalid_at IS NOT NULL"),
             "last_ok_at": last_ok,
@@ -432,12 +449,13 @@ impl PushSubscriptions {
             .unwrap_or("system")
             .to_string();
         let db_path = self.db_path.clone();
+        let data_dir = self.data_dir().to_path_buf();
         let (worker_id, worker_category, worker_obs) =
             (notification_id.clone(), category, obs.clone());
         if std::thread::Builder::new()
             .name("jarvis-fcm".into())
             .spawn(move || {
-                let account = match load_service_account() {
+                let account = match load_service_account(&data_dir) {
                     Ok(account) => account,
                     Err(error) => {
                         let reason = match error {
@@ -822,6 +840,23 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn the_service_account_is_found_in_the_data_directory() {
+        // Il test non imposta variabili d'ambiente (sono globali): vale quando la variabile non c'è.
+        if std::env::var_os("JARVIS_FCM_SERVICE_ACCOUNT_FILE").is_some() {
+            return;
+        }
+        let dir = scratch("account");
+        assert_eq!(delivery_config_status(&dir), "configuration_missing");
+        std::fs::write(dir.join(SERVICE_ACCOUNT_FILE), "non è json").unwrap();
+        assert_eq!(
+            service_account_path(&dir),
+            Some(dir.join(SERVICE_ACCOUNT_FILE))
+        );
+        assert_eq!(delivery_config_status(&dir), "configuration_invalid");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

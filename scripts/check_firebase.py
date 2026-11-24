@@ -107,8 +107,9 @@ def check_service_account(path: str, expected_project: str | None) -> None:
                      f"dell'app Android ({expected_project}): FCM rifiuterebbe i messaggi")
     elif expected_project:
         report(OK, "l'account di servizio e l'app Android sono dello stesso progetto")
-    print("  Avvia il Core con JARVIS_FCM_SERVICE_ACCOUNT_FILE=<percorso del file>. Il ruolo dell'account deve "
-          "essere «Firebase Cloud Messaging API Admin».")
+    print("  Copia il file nella cartella dati di JARVIS con il nome fcm-service-account.json "
+          "(macOS: ~/Library/Application Support/JARVIS, Windows: %LOCALAPPDATA%\\JARVIS) oppure imposta "
+          "JARVIS_FCM_SERVICE_ACCOUNT_FILE. Il ruolo dell'account deve essere «Firebase Cloud Messaging API Admin».")
 
 
 def check_apk(path: str) -> None:
@@ -139,8 +140,8 @@ def check_core(url: str, token: str) -> None:
     delivery = status.get("delivery")
     message = {
         "ready": (OK, "Core: credenziale dell'account di servizio valida"),
-        "configuration_missing": (FAIL, "Core: manca JARVIS_FCM_SERVICE_ACCOUNT_FILE (o il file non esiste): "
-                                        "nessuna push può partire"),
+        "configuration_missing": (FAIL, "Core: nessun account di servizio trovato (né fcm-service-account.json nella "
+                                        "cartella dati né JARVIS_FCM_SERVICE_ACCOUNT_FILE): nessuna push può partire"),
         "configuration_invalid": (FAIL, "Core: il file dell'account di servizio non è valido o ha un project_id "
                                         "non ammesso"),
     }.get(delivery, (WARN, f"Core: stato di consegna sconosciuto ({delivery})"))

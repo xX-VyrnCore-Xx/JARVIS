@@ -53,15 +53,16 @@ Gmail e Calendar usano un’autorizzazione OAuth separata dalle notifiche push. 
 
 ## Credenziale server sul Core
 
-1. In Google Cloud crea un service account dedicato al progetto e assegnagli solo i permessi
-   necessari per inviare messaggi FCM (ruolo **Firebase Cloud Messaging API Admin**).
-2. Genera una chiave JSON solo se il deployment non può usare credenziali di workload/ambiente.
-3. Copia il JSON fuori dal repository, in un percorso leggibile solo dall'utente del Core
-   (permessi `0600` su Unix).
-4. Avvia il Core con `JARVIS_FCM_SERVICE_ACCOUNT_FILE=/percorso/protetto/service-account.json`.
-   Il `project_id` del file deve coincidere con il progetto dell'app Android.
-5. Riavvia JARVIS e verifica lo stato push in **Sistema**/log. Se il file manca o non è valido,
-   il Core registra un errore esplicito e non invia il push.
+1. In Google Cloud crea un account di servizio dedicato al progetto Firebase e assegnagli solo il ruolo **Firebase Cloud Messaging API Admin**.
+2. Nella scheda **Chiavi** dell'account crea una chiave **JSON** e scaricala. Non va nel repository, nelle Actions né in chat.
+3. **Metodo semplice (consigliato):** copia il file nella cartella dati di JARVIS con il nome `fcm-service-account.json`:
+   - macOS: `~/Library/Application Support/JARVIS/fcm-service-account.json`
+   - Windows: `%LOCALAPPDATA%\JARVIS\fcm-service-account.json`
+   - Linux o Core headless: `<JARVIS_DATA_DIR>/fcm-service-account.json`
+
+   Su macOS e Linux limita i permessi: `chmod 600 <file>`. Il Core rilegge il file a ogni invio, quindi non serve riavviare.
+4. **Alternativa:** variabile d'ambiente `JARVIS_FCM_SERVICE_ACCOUNT_FILE=/percorso/del/file.json` (ha la precedenza). Funziona per un Core avviato da terminale; un'app aperta dal Finder o dal menu Start non eredita le variabili della shell, quindi per le app installate usa il metodo semplice.
+5. Il `project_id` del file deve coincidere con il progetto dell'app Android. Controlla lo stato con `GET /api/push/status` o con `scripts/check_firebase.py --core ... --token ...`: `delivery` deve valere `ready`. Se il file manca il Core non invia e registra un errore esplicito.
 
 Non caricare il JSON del service account nel repository, nei log o nelle Actions di build. Il Core
 usa questa credenziale al runtime per ottenere un token OAuth breve; non è necessaria per compilare

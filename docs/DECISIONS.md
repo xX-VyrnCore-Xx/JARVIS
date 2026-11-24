@@ -1487,6 +1487,15 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** `tests/shutdown.rs` (avvia il binario, serve una chat che fa partire il worker, chiude lo stdin e richiede uscita con codice 0 entro 10 secondi); test del parser SSE con flusso superato; suite del Core stabile in due esecuzioni consecutive (276 test).
 - **Documenti interessati:** ROADMAP.md.
 
+### ADR-0104 — Configurazione Firebase verificabile e credenziale FCM nella cartella dati
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («aiutami a configurare Firebase»).
+- **Problema:** la credenziale dell'account di servizio era letta solo da `JARVIS_FCM_SERVICE_ACCOUNT_FILE`, una variabile che le app installate (aperte dal Finder o dal menu Start) non ereditano dalla shell; inoltre l'APK della release `v1.13.290` non conteneva gli identificativi Firebase, e la build non lo segnalava (il controllo accettava sia «tutte e quattro le variabili» sia «nessuna»).
+- **Decisione:** il Core cerca la chiave prima nella variabile e poi in `<cartella dati>/fcm-service-account.json`, rileggendola a ogni invio (nessun riavvio). `scripts/check_firebase.py` verifica, senza stampare segreti, `google-services.json` (pacchetto `local.jarvis.app`), il file dell'account di servizio (tipo, campi, permessi, stesso progetto dell'app), la presenza degli identificativi in un APK e lo stato del Core (`GET /api/push/status`). La guida in FIREBASE_SETUP.md indica l'ordine: variabili e nuova release, chiave sul Core, attivazione sul telefono, prova con «Briefing adesso».
+- **Non verificato:** l'invio reale a un telefono (richiede il progetto Firebase del proprietario); il contenuto delle variabili del repository, che da questa sessione non è leggibile.
+- **Evidenza:** `test_firebase_check.py` (configurazione coerente, pacchetto sbagliato, progetti diversi, chiave non di servizio, APK con e senza identificativi, nessun segreto nell'output); test del Core sul percorso nella cartella dati.
+- **Documenti interessati:** FIREBASE_SETUP.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.
