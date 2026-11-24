@@ -4,6 +4,7 @@
 compile_error!("JARVIS desktop è supportato solo su macOS e Windows.");
 
 mod app;
+mod avatar;
 mod client;
 
 fn main() -> eframe::Result {

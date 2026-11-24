@@ -32,15 +32,12 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.Canvas
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.NavigationBar
-import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -50,28 +47,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -246,12 +230,21 @@ private fun ColumnScope.DeviceScreen(
     var linkedTaskId by rememberSaveable { mutableStateOf<String?>(null) }
     var chatDraft by rememberSaveable { mutableStateOf<String?>(null) }
     var sending by remember { mutableStateOf(false) }
-    val tabs = listOf("Plancia" to "⌂", "Chat" to "◉", "Attività" to "≡", "Notifiche" to "◇", "Core" to "◎")
+    val tabs = listOf("Plancia", "Chat", "Attività", "Notifiche", "Core")
+    var unread by remember { mutableStateOf(0) }
+    LaunchedEffect(session, appInForeground, tab) {
+        if (!appInForeground) return@LaunchedEffect
+        while (isActive) {
+            val result = withContext(Dispatchers.IO) { runCatching { client.notices(session).unread } }
+            result.onSuccess { unread = it }.onFailure { if (it is CoreException.Revoked) onRevoked() }
+            delay(20_000)
+        }
+    }
     LaunchedEffect(notificationId) {
         if (notificationId != null) tab = NOTIFICATIONS_TAB_INDEX
     }
     Text(
-        tabs[tab].first,
+        tabs[tab],
         modifier = Modifier.padding(horizontal = 22.dp, vertical = 12.dp),
         style = MaterialTheme.typography.headlineLarge,
         fontWeight = FontWeight.Bold,
@@ -317,18 +310,13 @@ private fun ColumnScope.DeviceScreen(
         }
     }
     HorizontalDivider(thickness = 0.5.dp, color = MaterialTheme.colorScheme.outlineVariant)
-    NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
-        tabs.forEachIndexed { index, (label, symbol) ->
-            NavigationBarItem(
-                selected = tab == index,
-                onClick = { tab = index },
-                enabled = !sending,
-                colors = iosTabColors(),
-                icon = { Text(symbol, style = MaterialTheme.typography.titleLarge) },
-                label = { Text(label, style = MaterialTheme.typography.labelSmall, maxLines = 1) },
-            )
-        }
-    }
+    JarvisTabBar(
+        labels = tabs,
+        selected = tab,
+        enabled = !sending,
+        badges = mapOf(NOTIFICATIONS_TAB_INDEX to unread),
+        onSelect = { tab = it },
+    )
 }
 
 private data class HomeSnapshot(
@@ -393,7 +381,7 @@ private fun ColumnScope.HomeScreen(
                 Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                AvatarPortrait()
+                JarvisAvatar(Modifier.fillMaxWidth().height(248.dp), thinking = loading)
                 Text(
                     "JARVIS",
                     style = MaterialTheme.typography.headlineMedium,
@@ -516,173 +504,6 @@ private fun HomeMetric(label: String, value: String, modifier: Modifier = Modifi
         ) {
             Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-        }
-    }
-}
-
-@Composable
-private fun AvatarPortrait() {
-    val transition = rememberInfiniteTransition(label = "jarvis-avatar")
-    val phase by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(1900), repeatMode = RepeatMode.Reverse),
-        label = "avatar-breath",
-    )
-    val accent = MaterialTheme.colorScheme.primary
-    val face = MaterialTheme.colorScheme.onSurfaceVariant
-    val orbit by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            tween(5200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "avatar-orbit",
-    )
-    Canvas(Modifier.fillMaxWidth().height(248.dp)) {
-        val center = Offset(size.width / 2f, size.height / 2f)
-        val unit = size.minDimension / 188.dp.toPx()
-        val pulse = phase * 3.dp.toPx()
-        drawCircle(
-            Brush.radialGradient(
-                colors = listOf(Color(0xFF173B52), Color(0xFF0B1C2A), Color.Transparent),
-                center = center,
-                radius = size.minDimension * 0.48f,
-            ),
-            radius = size.minDimension * 0.48f,
-            center = center,
-        )
-        drawCircle(
-            accent.copy(alpha = 0.10f + phase * 0.08f),
-            radius = size.minDimension * 0.43f + pulse,
-            center = center,
-            style = Stroke(width = 1.5.dp.toPx()),
-        )
-        drawCircle(
-            accent.copy(alpha = 0.32f),
-            radius = size.minDimension * 0.35f,
-            center = center,
-            style = Stroke(width = 1.dp.toPx()),
-        )
-        drawArc(
-            accent.copy(alpha = 0.78f),
-            startAngle = -90f + orbit * 360f,
-            sweepAngle = 220f,
-            useCenter = false,
-            topLeft = Offset(center.x - size.minDimension * 0.39f, center.y - size.minDimension * 0.39f),
-            size = Size(size.minDimension * 0.78f, size.minDimension * 0.78f),
-            style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round),
-        )
-        for (index in 0 until 3) {
-            val angle = orbit * (2 * Math.PI.toFloat()) + index * (2 * Math.PI.toFloat() / 3)
-            drawCircle(
-                accent.copy(alpha = 0.7f),
-                radius = 2.dp.toPx(),
-                center = Offset(
-                    center.x + kotlin.math.cos(angle) * size.minDimension * 0.39f,
-                    center.y + kotlin.math.sin(angle) * size.minDimension * 0.39f,
-                ),
-            )
-        }
-
-        val bob = kotlin.math.sin(phase * Math.PI.toFloat()) * 3.dp.toPx()
-        withTransform({
-            translate(top = bob)
-            scale(scaleX = 1.16f, scaleY = 1.16f, pivot = center)
-        }) {
-            val head = Path().apply {
-                moveTo(center.x, center.y - 42.dp.toPx())
-                cubicTo(center.x - 26.dp.toPx(), center.y - 42.dp.toPx(), center.x - 33.dp.toPx(), center.y - 22.dp.toPx(), center.x - 31.dp.toPx(), center.y + 2.dp.toPx())
-                cubicTo(center.x - 28.dp.toPx(), center.y + 27.dp.toPx(), center.x - 13.dp.toPx(), center.y + 35.dp.toPx(), center.x, center.y + 38.dp.toPx())
-                cubicTo(center.x + 13.dp.toPx(), center.y + 35.dp.toPx(), center.x + 28.dp.toPx(), center.y + 27.dp.toPx(), center.x + 31.dp.toPx(), center.y + 2.dp.toPx())
-                cubicTo(center.x + 33.dp.toPx(), center.y - 22.dp.toPx(), center.x + 26.dp.toPx(), center.y - 42.dp.toPx(), center.x, center.y - 42.dp.toPx())
-                close()
-            }
-            drawPath(head, Color(0xFF142D40))
-            drawPath(head, accent.copy(alpha = 0.9f), style = Stroke(width = 1.7.dp.toPx(), cap = StrokeCap.Round))
-            val scanY = center.y - 22.dp.toPx() + phase * 34.dp.toPx()
-            drawLine(
-                accent.copy(alpha = 0.18f),
-                Offset(center.x - 19.dp.toPx(), scanY),
-                Offset(center.x + 19.dp.toPx(), scanY),
-                3.dp.toPx(),
-                StrokeCap.Round,
-            )
-            drawLine(
-                Color(0xFF9CEFFF).copy(alpha = 0.82f),
-                Offset(center.x - 19.dp.toPx(), scanY),
-                Offset(center.x + 19.dp.toPx(), scanY),
-                0.8.dp.toPx(),
-                StrokeCap.Round,
-            )
-
-            val shoulders = Path().apply {
-                moveTo(center.x - 55.dp.toPx(), center.y + 73.dp.toPx())
-                quadraticTo(center.x - 48.dp.toPx(), center.y + 37.dp.toPx(), center.x - 17.dp.toPx(), center.y + 31.dp.toPx())
-                lineTo(center.x, center.y + 40.dp.toPx())
-                lineTo(center.x + 17.dp.toPx(), center.y + 31.dp.toPx())
-                quadraticTo(center.x + 48.dp.toPx(), center.y + 37.dp.toPx(), center.x + 55.dp.toPx(), center.y + 73.dp.toPx())
-                close()
-            }
-            drawPath(shoulders, Color(0xFF10283A))
-            drawPath(shoulders, accent.copy(alpha = 0.70f), style = Stroke(width = 1.6.dp.toPx()))
-            drawLine(
-                accent.copy(alpha = 0.45f),
-                Offset(center.x - 39.dp.toPx(), center.y + 52.dp.toPx()),
-                Offset(center.x - 19.dp.toPx(), center.y + 43.dp.toPx()),
-                1.dp.toPx(),
-            )
-            drawLine(
-                accent.copy(alpha = 0.45f),
-                Offset(center.x + 39.dp.toPx(), center.y + 52.dp.toPx()),
-                Offset(center.x + 19.dp.toPx(), center.y + 43.dp.toPx()),
-                1.dp.toPx(),
-            )
-            drawCircle(
-                Color(0xFF0A1B28),
-                radius = 9.dp.toPx(),
-                center = Offset(center.x, center.y + 49.dp.toPx()),
-            )
-            drawCircle(
-                accent.copy(alpha = 0.8f),
-                radius = 9.dp.toPx(),
-                center = Offset(center.x, center.y + 49.dp.toPx()),
-                style = Stroke(width = 1.dp.toPx()),
-            )
-            drawCircle(
-                accent.copy(alpha = 0.75f + phase * 0.2f),
-                radius = 3.dp.toPx() + pulse * 0.15f,
-                center = Offset(center.x, center.y + 49.dp.toPx()),
-            )
-            drawLine(
-                face.copy(alpha = 0.7f),
-                Offset(center.x - 11.dp.toPx(), center.y - 24.dp.toPx()),
-                Offset(center.x, center.y - 30.dp.toPx()),
-                1.dp.toPx(),
-            )
-            drawLine(
-                face.copy(alpha = 0.7f),
-                Offset(center.x, center.y - 30.dp.toPx()),
-                Offset(center.x + 11.dp.toPx(), center.y - 24.dp.toPx()),
-                1.dp.toPx(),
-            )
-            drawLine(accent, Offset(center.x - 19.dp.toPx(), center.y - 7.dp.toPx()), Offset(center.x - 5.dp.toPx(), center.y - 7.dp.toPx()), 2.4.dp.toPx(), StrokeCap.Round)
-            drawLine(accent, Offset(center.x + 5.dp.toPx(), center.y - 7.dp.toPx()), Offset(center.x + 19.dp.toPx(), center.y - 7.dp.toPx()), 2.4.dp.toPx(), StrokeCap.Round)
-            drawLine(face, Offset(center.x, center.y - 1.dp.toPx()), Offset(center.x - 4.dp.toPx(), center.y + 12.dp.toPx()), 1.dp.toPx(), StrokeCap.Round)
-            drawLine(face, Offset(center.x - 10.dp.toPx(), center.y + 21.dp.toPx()), Offset(center.x + 10.dp.toPx(), center.y + 21.dp.toPx()), 1.dp.toPx(), StrokeCap.Round)
-
-            for (index in 0 until 11) {
-                val x = center.x - 25.dp.toPx() + index * 5.dp.toPx()
-                val height = (5f + ((index * 7 + phase * 5).toInt() % 9)) * unit
-                drawLine(
-                    accent.copy(alpha = 0.45f + phase * 0.35f),
-                    Offset(x, center.y + 77.dp.toPx() - height / 2),
-                    Offset(x, center.y + 77.dp.toPx() + height / 2),
-                    1.5.dp.toPx(),
-                    StrokeCap.Round,
-                )
-            }
         }
     }
 }

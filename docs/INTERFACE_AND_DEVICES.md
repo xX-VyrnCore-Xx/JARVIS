@@ -84,3 +84,5 @@ La Plancia di desktop e macOS segue un unico flusso: intestazione di stato, «Da
 **Plancia e chat su macOS (ADR-0126, ADR-0127).** Saluto, scheda AI, carichi di CPU/RAM/archiviazione (`/api/system/stats`), specialisti, barra dei comandi, categorie rapide e missioni; barra laterale con scheda «JARVIS Online». Chat con markdown, blocchi di codice copiabili e campo a capsula.
 
 **Avatar su macOS (ADR-0128).** Testa olografica disegnata a vettori con alone, onde, anelli, scintille, scansione, sguardo, bocca a barre e nucleo; stati riposo/elaborazione/parlato; reagisce a puntatore e clic; ferma con «Riduci movimento».
+
+**Avatar e barre laterali su Windows e Android (ADR-0129).** Stessa testa olografica su egui e Compose, con stati riposo/elaborazione/parlato e onda al clic o al tocco. Windows: sidebar con gruppi, marchio animato, icone disegnate, transizioni e scheda di stato. Android: barra inferiore con icone disegnate, pillola a molla e contatore notifiche. macOS: contatori su Conferme e Notifiche.

@@ -258,6 +258,15 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                                         Image(systemName: entry.icon).frame(width: 18)
                                         Text(entry.rawValue).font(.callout.weight(section == entry ? .semibold : .regular))
                                         Spacer(minLength: 2)
+                                        if let badge = sidebarBadge(entry) {
+                                            Text(badge > 99 ? "99+" : "\(badge)")
+                                                .font(.caption2.weight(.bold)).monospacedDigit()
+                                                .padding(.horizontal, 6).padding(.vertical, 1)
+                                                .background(entry == .confirmations ? Color.orange : Color.cyan, in: Capsule())
+                                                .foregroundStyle(.black)
+                                                .transition(.scale.combined(with: .opacity))
+                                                .accessibilityLabel("\(badge) in attesa")
+                                        }
                                     }
                                     .foregroundStyle(section == entry ? Color.white : Color.primary.opacity(0.88))
                                     .padding(.horizontal, 10).padding(.vertical, 8)
@@ -291,6 +300,18 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         }
         .padding(12).background(panel.opacity(0.56))
         .animation(.snappy(duration: 0.28), value: section)
+    }
+
+    /// Contatore accanto alla voce: conferme in attesa e notifiche da leggere (solo se maggiori di zero).
+    private func sidebarBadge(_ entry: Section) -> Int? {
+        let key: String
+        switch entry {
+        case .confirmations: key = "pending_confirmations"
+        case .notifications: key = "notifications_unread"
+        default: return nil
+        }
+        guard let value = core.health[key] as? Int, value > 0 else { return nil }
+        return value
     }
 
     /// Scheda di stato in fondo alla barra laterale: «JARVIS Online» con onda sonora.
