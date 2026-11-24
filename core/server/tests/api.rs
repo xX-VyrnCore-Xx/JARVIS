@@ -587,6 +587,12 @@ fn cloud_context_requires_opt_in_and_stays_with_the_provider() {
     assert_eq!(history[0].user, "Parliamo di JARVIS");
     assert_eq!(history[2].assistant, long);
 
+    // Senza indicazione esplicita il contesto è attivo (ADR-0130): sono i turni recenti, non una richiesta isolata.
+    let by_default = core
+        .prepare_cloud_chat(&json!({"provider":"auto", "message":"E il secondo?"}))
+        .unwrap();
+    assert_eq!(by_default.target.history.len(), 4);
+
     core.chat("che ore sono").unwrap();
     assert!(ask(&core, true).target.history.is_empty());
     drop(core);

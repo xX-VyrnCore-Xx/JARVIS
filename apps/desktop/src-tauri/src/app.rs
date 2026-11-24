@@ -236,6 +236,8 @@ enum Event {
     Persona(Result<Value, String>),
     /// Stato della voce di sistema maschile (ADR-0123).
     VoiceStatus(Result<Value, String>),
+    /// Frammento di testo della risposta in arrivo (ADR-0131).
+    ChatDelta(String),
     ChatFinished(Result<Value, String>),
     Notifications(Result<Value, String>),
     /// Il flusso in tempo reale si è interrotto: serve solo a scoprire che l'app è chiusa.
@@ -414,7 +416,7 @@ impl JarvisApp {
             memory_search: String::new(),
             history_loading: false,
             chat_busy: false,
-            chat_cloud_context: false,
+            chat_cloud_context: true,
             notifications: Vec::new(),
             notifications_error: None,
             confirmations: Vec::new(),
@@ -648,6 +650,14 @@ impl JarvisApp {
                                 Some(format!("Richiesta di prova riuscita · {model}{models}"));
                         }
                         Err(error) => self.cloud_action_error = Some(error),
+                    }
+                    ctx.request_repaint();
+                }
+                Event::ChatDelta(piece) => {
+                    if self.chat_busy {
+                        if let Some(last) = self.chat.last_mut().filter(|m| m.role == "assistant") {
+                            last.text.push_str(&piece);
+                        }
                     }
                     ctx.request_repaint();
                 }
@@ -941,7 +951,10 @@ impl JarvisApp {
         let tx = self.tx.clone();
         let use_context = self.chat_cloud_context && !self.remote;
         std::thread::spawn(move || {
-            let result = client.cloud_chat(&message, use_context);
+            let deltas = tx.clone();
+            let result = client.cloud_chat_stream(&message, use_context, &mut |piece| {
+                let _ = deltas.send(Event::ChatDelta(piece.to_string()));
+            });
             let _ = tx.send(Event::ChatFinished(result));
         });
     }
@@ -1249,8 +1262,11 @@ impl JarvisApp {
 
     fn show_chat(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         if !self.remote {
-            ui.checkbox(&mut self.chat_cloud_context, "Includi turni cloud recenti")
-                .on_hover_text("Condivide i turni precedenti con lo stesso provider.");
+            ui.checkbox(
+                &mut self.chat_cloud_context,
+                "Ricorda la conversazione recente",
+            )
+            .on_hover_text("Condivide i turni precedenti con lo stesso provider.");
         }
         if let Some(error) = &self.error {
             ui.colored_label(egui::Color32::LIGHT_RED, error);

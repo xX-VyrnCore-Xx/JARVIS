@@ -107,6 +107,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var missionsPreview: [Record] = []
     @State private var commandText = ""
     @State private var avatarSpeaking = false
+    /// Testo della risposta che sta arrivando in streaming (ADR-0131).
+    @State private var streamingReply = ""
     @State private var voiceHint = ""
     @State private var payload: [String: Any] = [:]
     @State private var message = ""
@@ -114,7 +116,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var testingCloudKey = false
     @State private var savingCloudSettings = false
     @State private var confirmKeyRemoval = false
-    @State private var useCloudContext = false
+    /// Turni recenti inviati al provider scelto (ADR-0130): attivo di default, il proprietario può spegnerlo qui.
+    @AppStorage("jarvis.shareContext") private var useCloudContext = true
     @State private var cloudModel = ""
     @State private var provider = "ollama_cloud"
     @State private var apiKey = ""
@@ -173,7 +176,6 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         }
         .onChange(of: core.uiLocked) { _, locked in
             if locked {
-                useCloudContext = false
                 apiKey = ""
                 credential = ""
                 backupPassword = ""
@@ -191,7 +193,6 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         }
         .onChange(of: core.phase) { _, phase in
             if phase != .ready {
-                useCloudContext = false
                 apiKey = ""
                 confirmKeyRemoval = false
                 invite = nil
@@ -219,7 +220,6 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     private func select(_ value: Section) {
         guard section != value else { return }
-        useCloudContext = false
         activeLoad = nil
         payload = [:]
         error = nil
@@ -432,6 +432,9 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 .onChange(of: chatScrollAnchor, initial: true) { _, _ in
                     if section == .chat { scroll.scrollTo("latest-message", anchor: .bottom) }
                 }
+                .onChange(of: streamingReply) { _, _ in
+                    if section == .chat { scroll.scrollTo("latest-message", anchor: .bottom) }
+                }
             }
             if section == .chat {
                 Divider()
@@ -562,7 +565,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         VStack(spacing: 10) {
             ZStack {
                 OrbitRings().frame(width: size, height: size)
-                Avatar(thinking: sending, speaking: avatarSpeaking).frame(width: size * 0.78, height: size * 0.78)
+                Avatar(thinking: sending && streamingReply.isEmpty, speaking: avatarSpeaking || !streamingReply.isEmpty).frame(width: size * 0.78, height: size * 0.78)
             }
             .frame(width: size, height: size)
             WaveformView(active: sending || avatarSpeaking, barCount: 26).frame(maxWidth: size)
@@ -952,7 +955,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     private var chat: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 15) {
-                Avatar(thinking: sending, speaking: avatarSpeaking).frame(width: 76)
+                Avatar(thinking: sending && streamingReply.isEmpty, speaking: avatarSpeaking || !streamingReply.isEmpty).frame(width: 76)
                 VStack(alignment: .leading, spacing: 5) {
                     Text("JARVIS").font(.title2.weight(.semibold))
                     if sending {
@@ -997,13 +1000,17 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             if let outgoingMessage, lastReply == nil {
                 chatBubble(outgoingMessage, user: true)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
-                HStack(spacing: 8) {
-                    TypingIndicator()
-                    Text("JARVIS sta elaborando").font(.caption).foregroundStyle(.secondary)
+                if streamingReply.isEmpty {
+                    HStack(spacing: 8) {
+                        TypingIndicator()
+                        Text("JARVIS sta elaborando").font(.caption).foregroundStyle(.secondary)
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 9)
+                    .background(panel, in: Capsule())
+                    .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
+                } else {
+                    chatBubble(streamingReply + " ▍", user: false)
                 }
-                .padding(.horizontal, 14).padding(.vertical, 9)
-                .background(panel, in: Capsule())
-                .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
             }
         }
     }
@@ -1163,7 +1170,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 Label("Inferenza cloud", systemImage: "cloud")
                     .foregroundStyle(.secondary)
                 Spacer()
-                Toggle("Includi conversazione recente", isOn: $useCloudContext)
+                Toggle("Ricorda la conversazione recente", isOn: $useCloudContext)
                     .toggleStyle(.checkbox)
                     .help("Invia i turni recenti compatibili allo stesso provider per questa richiesta.")
                     .disabled(sending)
@@ -1194,7 +1201,6 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !sending else { return }
         let includeContext = useCloudContext
-        useCloudContext = false
         sending = true
         error = nil
         lastReply = nil
@@ -1203,11 +1209,15 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         Task {
             defer {
                 outgoingMessage = nil
+                streamingReply = ""
                 sending = false
             }
             do {
-                let result = try await core.request("/api/cloud/chat", method: "POST",
-                                                     body: ["message": text, "provider": "auto", "use_context": includeContext])
+                streamingReply = ""
+                let result = try await core.stream("/api/cloud/chat/stream",
+                                                   body: ["message": text, "provider": "auto", "use_context": includeContext]) { piece in
+                    streamingReply += piece
+                }
                 lastReply = result
                 if speakReplies, let reply = result["reply"] as? String, !reply.isEmpty {
                     // L'avatar «parla» per la durata stimata della lettura (circa 14 caratteri al secondo).

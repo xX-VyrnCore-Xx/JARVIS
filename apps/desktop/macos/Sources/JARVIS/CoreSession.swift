@@ -326,6 +326,53 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
             .contains { route == $0 || route.hasPrefix($0 + "/") }
     }
 
+    /// Chat in streaming (ADR-0131): righe NDJSON `delta` (testo), `done` (esito) o `error`. `onDelta` riceve ogni
+    /// frammento di testo; il risultato è l'esito finale, lo stesso oggetto di `request`.
+    func stream(_ path: String, body: [String: Any], timeout: TimeInterval = 190,
+                onDelta: @MainActor (String) -> Void) async throws -> [String: Any] {
+        guard process?.isRunning == true, parentPipe != nil else {
+            throw CoreFailure(message: "La sessione del Core è chiusa.")
+        }
+        guard path.hasPrefix("/api/"), let url = URL(string: "http://127.0.0.1:8765" + path) else {
+            throw CoreFailure(message: "Indirizzo del Core non valido.")
+        }
+        if uiLocked {
+            throw CoreFailure(message: "JARVIS è bloccato: sblocca l’interfaccia per continuare.")
+        }
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        request.httpMethod = "POST"
+        request.setValue(token, forHTTPHeaderField: "X-Jarvis-Token")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (bytes, response) = try await urlSession.bytes(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw CoreFailure(message: "Risposta del Core assente.")
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            var data = Data()
+            for try await byte in bytes { data.append(byte) }
+            let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            let error = object?["error"] as? [String: Any]
+            throw CoreFailure(message: error?["message"] as? String ?? "Il Core ha risposto HTTP \(http.statusCode).")
+        }
+        for try await line in bytes.lines {
+            guard let data = line.data(using: .utf8),
+                  let event = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { continue }
+            switch event["type"] as? String {
+            case "delta":
+                onDelta(event["text"] as? String ?? "")
+            case "done":
+                return event["result"] as? [String: Any] ?? [:]
+            case "error":
+                let error = event["error"] as? [String: Any]
+                throw CoreFailure(message: error?["message"] as? String ?? "Errore del Core.")
+            default:
+                break
+            }
+        }
+        throw CoreFailure(message: "Il flusso si è interrotto prima della risposta finale.")
+    }
+
     func request(_ path: String, method: String = "GET", body: [String: Any]? = nil,
                  timeout: TimeInterval = 190) async throws -> [String: Any] {
         guard process?.isRunning == true, parentPipe != nil else {
