@@ -72,3 +72,18 @@ fn rules_for_unknown_tools_and_bad_input_are_rejected_and_the_listing_shows_rest
     assert_eq!(get("notes.add")["restriction"], "ask");
     assert_eq!(get("time.now")["restriction"], "none");
 }
+
+#[test]
+fn a_reminder_about_a_company_topic_still_creates_the_task() {
+    let mut j = jarvis();
+    let created = j
+        .chat("ricordami di pagare la rata del mutuo entro 2030-01-01 09:00")
+        .unwrap()
+        .to_json();
+    assert_eq!(created["task"]["state"], "succeeded", "{created}");
+    let todos = j.chat("cose da fare").unwrap().to_json();
+    assert!(
+        todos["reply"].as_str().unwrap().contains("mutuo"),
+        "{todos}"
+    );
+}

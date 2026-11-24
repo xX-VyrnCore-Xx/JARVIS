@@ -46,7 +46,7 @@ pub const SPECIALISTS: [Agent; 7] = [
     },
     Agent {
         name: "business",
-        role: "Aziende: analizza processi, costi e rischi con numeri verificati dagli strumenti; separa fatti, ipotesi e stime; chiudi con opzioni, raccomandazione e prossimi passi. Non dare pareri legali, fiscali o contabili vincolanti.",
+        role: "Aziende: calcola con gli strumenti, separa fatti, ipotesi e stime, chiudi con opzioni e prossimi passi. Niente pareri legali, fiscali o contabili vincolanti.",
         keywords: &[" iva ", "l'iva", "mutuo", "finanziamento", "rata del", "business plan", "analisi aziendale", "piano aziendale", "margine", "kpi", "preventivo", "bilancio", "procedura aziendale", "fornitori"],
         tools: &["biz.vat", "biz.loan", "math.calc", "date.calc", "notes.add", "notes.list", "notes.search", "todo.add", "todo.list", "fs.read", "fs.list", "fs.search", "web.search"],
     },
@@ -127,6 +127,18 @@ mod tests {
         assert_eq!(name("ciao, come stai?"), GENERAL);
         assert_eq!(name("ogni ora info sistema"), GENERAL);
         assert_eq!(name("leggi note.txt"), GENERAL);
+    }
+
+    #[test]
+    fn every_role_fits_the_delegation_contract() {
+        for agent in SPECIALISTS.iter() {
+            assert!(
+                agent.role.chars().count() <= 200,
+                "{}: {}",
+                agent.name,
+                agent.role.chars().count()
+            );
+        }
     }
 
     #[test]
