@@ -89,4 +89,4 @@ La Plancia di desktop e macOS segue un unico flusso: intestazione di stato, «Da
 
 **Risposte in streaming (ADR-0131).** Su macOS e Windows il testo della risposta compare mentre il modello lo genera, con cursore; l'avatar «parla» durante il flusso.
 
-**Profilo, ascolto e collegamento (ADR-0133, 0134, 0137, 0139).** Pagina «Profilo» (macOS) e sezione dedicata (Windows); su macOS l'ascolto «Hey Jarvis» è sempre attivo (interruttore nelle impostazioni vocali, indicatore del microfono nella barra laterale, avatar in ascolto); gli inviti di associazione hanno un collegamento `jarvis://pair?…` che Android apre con un tocco o legge dagli appunti; gli indirizzi pubblici del Core si gestiscono dall'app.
+**Profilo, ascolto e collegamento (ADR-0133, 0134, 0137, 0139).** Pagina «Profilo» (macOS) e sezione dedicata (Windows); su macOS e Windows (ADR-0140) l'ascolto «Hey Jarvis» è sempre attivo (interruttore nelle impostazioni vocali, indicatore del microfono nella barra laterale, avatar in ascolto); gli inviti di associazione hanno un collegamento `jarvis://pair?…` che Android apre con un tocco o legge dagli appunti; gli indirizzi pubblici del Core si gestiscono dall'app.

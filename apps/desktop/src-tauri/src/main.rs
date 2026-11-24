@@ -6,6 +6,9 @@ compile_error!("JARVIS desktop è supportato solo su macOS e Windows.");
 mod app;
 mod avatar;
 mod client;
+#[cfg(target_os = "windows")]
+mod mic;
+mod wake;
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {

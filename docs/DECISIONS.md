@@ -1779,12 +1779,21 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 
 ### ADR-0134 — Ascolto sempre attivo «Hey Jarvis»
 
-- **Data:** 2026-11-24 · **Stato:** implementata su macOS e nel Core; **Windows non ancora** · **Fonte:** richiesta del proprietario («rendi sempre attiva la wake-word… deve ascoltare solo Hey Jarvis, nient'altro»).
+- **Data:** 2026-11-24 · **Stato:** implementata su macOS e nel Core; Windows in ADR-0140 · **Fonte:** richiesta del proprietario («rendi sempre attiva la wake-word… deve ascoltare solo Hey Jarvis, nient'altro»).
 - **Decisione:** in attesa il microfono alimenta solo un buffer in memoria (40 s al massimo). I blocchi con voce (soglia di energia) vanno a `POST /api/voice/wake`, che risponde soltanto `{detected, engine, score}`: con il modello openWakeWord non viene trascritto nulla; senza modello la trascrizione serve solo a confrontarla con «hey Jarvis» e non esce dal worker. L'audio è scartato dopo il verdetto. Solo dopo un sì il comando viene registrato (fino a ~1 s di silenzio, massimo 12 s), trascritto ed eseguito; poi si torna all'ascolto della sola parola di attivazione. Nulla finisce su disco né in cloud.
 - **Controlli:** impostazione `wake_listening` (attiva di default) in `/api/voice/system`, interruttore «Ascolto sempre attivo» nelle impostazioni vocali, indicatore del microfono nella barra laterale e avatar «in ascolto» con anelli sensibili al livello. L'ascolto si ferma con l'interfaccia bloccata, quando JARVIS parla o elabora (la sua voce non lo riattiva) e se il permesso del microfono è negato.
 - **Permesso:** `NSMicrophoneUsageDescription` nell'`Info.plist`; macOS chiede il consenso al primo avvio.
-- **Non incluso:** ascolto su Windows (serve la cattura audio WASAPI) e Android.
+- **Non incluso:** ascolto su Android (Windows: ADR-0140).
 - **Non verificato:** prova con microfono e modello reali; test con audio sintetico per il verdetto (Python e Core) e per l'assenza di testo nell'esito.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
+### ADR-0140 — Ascolto «Hey Jarvis» sul client Windows
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** scelta del proprietario («Ascolto su Windows») dopo ADR-0134.
+- **Decisione:** stesso comportamento di macOS. `wake.rs` (portabile, testato su Linux) tiene il buffer circolare in memoria, invia a `POST /api/voice/wake` solo le finestre con voce nuova sopra soglia, registra il comando fino a ~1,1 s di silenzio, lo trascrive con `?mode=wake_word` e, se c'è solo «Hey Jarvis», attende un secondo comando; intenti «stop» e «annulla» rispettati. `mic.rs` (solo Windows) cattura il microfono predefinito con WASAPI tramite `cpal` 0.16, porta i campioni a 16 kHz mono e non scrive nulla su disco. Il comando arriva alla chat come messaggio dell'utente.
+- **Controlli:** impostazione `wake_listening` (attiva di default) con interruttore «Ascolta sempre «Hey Jarvis»» nelle impostazioni vocali, stato e livello del microfono; l'ascolto è sospeso mentre la chat elabora o JARVIS parla; spento sui Core remoti (l'endpoint è riservato al proprietario).
+- **Non incluso:** Android; prova con microfono e modello reali.
+- **Evidenza:** fmt, Clippy Windows (`x86_64-pc-windows-gnu`, `--all-targets -D warnings`) e Clippy Linux con stub superati; 5 test di `wake` con trasporto simulato e audio sintetico (silenzio mai inviato, comando consegnato, altro parlato ignorato, «stop» zittisce la voce, ricampionamento 48 kHz stereo → 16 kHz mono). Il link dei test Windows non è stato eseguibile qui.
 - **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
 
 ### ADR-0135 — Correttore dei messaggi scritti
