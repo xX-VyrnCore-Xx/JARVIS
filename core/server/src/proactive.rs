@@ -27,6 +27,7 @@ pub fn defaults() -> Value {
         "enabled": true,
         "quiet_from": "22:00", "quiet_to": "07:00",
         "briefing": true, "briefing_time": "08:00",
+        "weekly_briefing": true, "weekly_day": 0, "weekly_time": "08:30",
         "disk": true, "confirmations": true, "workflows": true, "stale_todos": true, "sandbox": true,
     })
 }
@@ -48,7 +49,9 @@ pub fn settings(dir: &Path) -> Value {
 }
 
 fn same_kind(a: &Value, b: &Value) -> bool {
-    (a.is_boolean() && b.is_boolean()) || (a.is_string() && b.is_string())
+    (a.is_boolean() && b.is_boolean())
+        || (a.is_string() && b.is_string())
+        || (a.is_u64() && b.is_u64())
 }
 
 pub fn parse_time(text: &str) -> Option<NaiveTime> {
@@ -78,6 +81,9 @@ pub fn update(dir: &Path, patch: &Value) -> Result<Value, String> {
             if parse_time(text).is_none() {
                 return Err(format!("{k}: usa il formato HH:MM"));
             }
+        }
+        if k == "weekly_day" && v.as_u64().is_none_or(|day| day > 6) {
+            return Err("weekly_day: da 0 (lunedì) a 6 (domenica)".into());
         }
         current[k] = v.clone();
     }
@@ -227,6 +233,103 @@ pub fn compose_briefing(f: &Facts) -> (String, String) {
     (title, lines.join("\n"))
 }
 
+/// Dati del briefing settimanale della direzione (ADR-0142): la settimana trascorsa e quella che inizia.
+#[derive(Default)]
+pub struct WeekFacts {
+    pub week: u32,
+    pub done: u64,
+    pub opened: u64,
+    pub open_todos: u64,
+    pub overdue: u64,
+    pub upcoming: Vec<String>,
+    pub missions_active: u64,
+    pub missions_completed: u64,
+    pub memories: u64,
+    pub runs: u64,
+    pub runs_failed: u64,
+    pub confirmations: usize,
+    pub unread: u64,
+}
+
+/// Titolo e testo del briefing settimanale: cosa è stato fatto, cosa pesa e cosa viene dopo.
+pub fn compose_weekly(f: &WeekFacts) -> (String, String) {
+    let title = format!(
+        "Briefing settimanale della direzione · settimana {}",
+        f.week
+    );
+    let mut past = Vec::new();
+    past.push(format!(
+        "• Cose da fare: {} completate, {} nuove, {} ancora aperte.",
+        f.done, f.opened, f.open_todos
+    ));
+    if f.missions_completed > 0 || f.missions_active > 0 {
+        past.push(format!(
+            "• Missioni: {} concluse, {} in corso.",
+            f.missions_completed, f.missions_active
+        ));
+    }
+    if f.runs > 0 {
+        let mut line = format!(
+            "• Automazioni: {}",
+            plural(f.runs, "esecuzione", "esecuzioni")
+        );
+        if f.runs_failed > 0 {
+            line.push_str(&format!(", di cui {} non riuscite", f.runs_failed));
+        }
+        past.push(line + ".");
+    }
+    if f.memories > 0 {
+        past.push(format!(
+            "• Memoria: {} aggiunti.",
+            plural(f.memories, "ricordo", "ricordi")
+        ));
+    }
+    let mut attention = Vec::new();
+    if f.overdue > 0 {
+        attention.push(format!(
+            "• {} in ritardo: vanno chiuse o ripianificate.",
+            plural(f.overdue, "cosa da fare", "cose da fare")
+        ));
+    }
+    if f.confirmations > 0 {
+        attention.push(format!(
+            "• {} in attesa della tua conferma.",
+            plural(f.confirmations as u64, "azione", "azioni")
+        ));
+    }
+    if f.runs_failed > 0 {
+        attention.push("• Controlla le automazioni non riuscite: un errore ripetuto di solito nasconde un problema di processo.".into());
+    }
+    if f.unread > 0 {
+        attention.push(format!(
+            "• {} da leggere.",
+            plural(f.unread, "notifica", "notifiche")
+        ));
+    }
+    let mut lines = vec!["Settimana trascorsa".to_string()];
+    lines.extend(past);
+    if !attention.is_empty() {
+        lines.push(String::new());
+        lines.push("Richiede la tua attenzione".into());
+        lines.extend(attention);
+    }
+    lines.push(String::new());
+    lines.push("Settimana in arrivo".into());
+    if f.upcoming.is_empty() {
+        lines.push(
+            "• Nessuna scadenza nei prossimi sette giorni: è il momento di fissare le priorità."
+                .into(),
+        );
+    } else {
+        for item in f.upcoming.iter().take(5) {
+            lines.push(format!("• {item}"));
+        }
+    }
+    lines.push(String::new());
+    lines.push("Chiedimi «priorità RICE», «runway» o «margine» per trasformare questi numeri in decisioni.".into());
+    (title, lines.join("\n"))
+}
+
 /// Una sessione del terminale sandbox oltre questa dimensione sta per essere rifiutata (limite 256 MiB).
 pub const SANDBOX_ALERT_BYTES: u64 = 200 * 1024 * 1024;
 
@@ -350,6 +453,62 @@ mod tests {
         }
         facts.hour = 19;
         assert!(compose_briefing(&facts).0.starts_with("Buonasera"));
+    }
+
+    #[test]
+    fn the_weekly_briefing_reports_the_past_week_and_the_next() {
+        let (title, body) = compose_weekly(&WeekFacts {
+            week: 48,
+            ..Default::default()
+        });
+        assert!(title.ends_with("settimana 48"));
+        assert!(body.contains("0 completate, 0 nuove, 0 ancora aperte"));
+        assert!(body.contains("Nessuna scadenza nei prossimi sette giorni"));
+        assert!(!body.contains("Richiede la tua attenzione"));
+        let (_, body) = compose_weekly(&WeekFacts {
+            week: 48,
+            done: 6,
+            opened: 4,
+            open_todos: 9,
+            overdue: 2,
+            upcoming: vec!["firmare il contratto".into()],
+            missions_active: 1,
+            missions_completed: 2,
+            memories: 3,
+            runs: 7,
+            runs_failed: 1,
+            confirmations: 1,
+            unread: 5,
+        });
+        for expected in [
+            "6 completate, 4 nuove, 9 ancora aperte",
+            "2 concluse, 1 in corso",
+            "7 esecuzioni, di cui 1 non riuscite",
+            "3 ricordi aggiunti",
+            "Richiede la tua attenzione",
+            "2 cose da fare in ritardo",
+            "1 azione in attesa",
+            "5 notifiche da leggere",
+            "firmare il contratto",
+            "priorità RICE",
+        ] {
+            assert!(body.contains(expected), "{expected} in {body}");
+        }
+    }
+
+    #[test]
+    fn the_weekly_day_is_validated() {
+        let dir = std::env::temp_dir().join(format!("jarvis-weekly-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(settings(&dir)["weekly_day"], 0);
+        assert!(update(&dir, &json!({"weekly_day": 7})).is_err());
+        assert!(update(&dir, &json!({"weekly_day": "lunedì"})).is_err());
+        assert_eq!(
+            update(&dir, &json!({"weekly_day": 4})).unwrap()["weekly_day"],
+            4
+        );
+        assert!(update(&dir, &json!({"weekly_time": "9:00"})).is_err());
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

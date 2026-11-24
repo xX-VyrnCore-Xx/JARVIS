@@ -48,7 +48,8 @@ fn notes(j: &Jarvis, category: &str) -> Vec<Value> {
 #[test]
 fn the_morning_briefing_is_sent_once_a_day_with_the_real_state() {
     let mut j = jarvis();
-    j.proactive_update(&json!({"disk": false})).unwrap();
+    j.proactive_update(&json!({"disk": false, "weekly_briefing": false}))
+        .unwrap();
     j.chat("ricordami di pagare la bolletta entro 2020-01-01 09:00")
         .unwrap();
     j.chat("da fare: leggere il contratto").unwrap();
@@ -80,6 +81,47 @@ fn the_morning_briefing_is_sent_once_a_day_with_the_real_state() {
         "fuori finestra"
     );
     assert_eq!(j.proactive_tick(at(24, 8, 0)).unwrap(), ["briefing"]);
+}
+
+#[test]
+fn the_weekly_briefing_arrives_once_a_week_on_the_chosen_day() {
+    let mut j = jarvis();
+    j.proactive_update(&json!({"disk": false, "briefing": false}))
+        .unwrap();
+    j.chat("da fare: preparare il budget").unwrap();
+    assert!(
+        j.proactive_tick(at(23, 8, 0)).unwrap().is_empty(),
+        "prima dell'orario scelto"
+    );
+    assert_eq!(j.proactive_tick(at(23, 8, 30)).unwrap(), ["weekly"]);
+    assert!(
+        j.proactive_tick(at(23, 9, 30)).unwrap().is_empty(),
+        "una sola volta a settimana"
+    );
+    assert!(
+        j.proactive_tick(at(24, 8, 30)).unwrap().is_empty(),
+        "non è il giorno scelto"
+    );
+    let weekly = notes(&j, "briefing");
+    assert_eq!(weekly.len(), 1);
+    assert!(weekly[0]["title"]
+        .as_str()
+        .unwrap()
+        .starts_with("Briefing settimanale della direzione"));
+    let body = weekly[0]["body"].as_str().unwrap();
+    assert!(
+        body.contains("Settimana trascorsa") && body.contains("1 ancora aperte"),
+        "{body}"
+    );
+    assert_eq!(j.proactive_tick(at(30, 8, 30)).unwrap(), ["weekly"]);
+    // Il giorno si sceglie: giovedì.
+    j.proactive_update(&json!({"weekly_day": 3})).unwrap();
+    assert!(j.proactive_tick(at(30, 9, 0)).unwrap().is_empty());
+    let report = j.weekly_briefing_now().unwrap();
+    assert!(report["body"]
+        .as_str()
+        .unwrap()
+        .contains("Settimana in arrivo"));
 }
 
 #[test]
