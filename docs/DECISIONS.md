@@ -1842,6 +1842,31 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **«Addestramento dei modelli»:** i modelli sono servizi di terzi (cloud) o locali già addestrati; **il Core non può modificarne i pesi**. La specializzazione avviene nel contesto: ruoli, competenze, stile per famiglia di modello, feedback e profili di risposta (ADR-0095) già presenti. Un vero fine-tuning richiederebbe dataset, GPU e un provider che lo offra: resta una decisione separata.
 - **Evidenza:** test dei ruoli, delle competenze con richieste naturali, del documento OpenAPI e delle rotte dichiarate.
 
+### ADR-0147 — Docker: stato del collegamento e profili di risorse del sandbox
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora il collegamento a Docker e le sandbox per automazioni AI»).
+- **Decisione:** `GET /api/docker` (solo proprietario) riunisce stato del motore (installato, avviato, permessi, versione, cosa fare), immagine pronta, limiti, sessioni e **profili**; `POST /api/docker/cleanup` rimuove i container del sandbox rimasti dopo un arresto brusco (audit `docker.cleanup`). Lo strumento `sandbox.run` accetta `profile`: `light` (256 MiB, 0,5 CPU, 64 processi, 10 s), `standard` (512 MiB, 1 CPU, 128 processi, 60 s, predefinito), `build` (1 GiB, 2 CPU, 256 processi) e `data` (1 GiB, 1 CPU). Cambiano solo i limiti: **per ogni profilo** restano nessuna rete, radice di sola lettura, nessuna capability, `no-new-privileges`, utente non root e solo la cartella della sessione montata.
+- **Evidenza:** test degli argomenti `docker run` per tutti i profili (isolamento identico, limiti diversi), profilo sconosciuto rifiutato, test API dello stato; `docker run` reale non eseguito (Docker non disponibile qui).
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, descrittore `sandbox.run`.
+
+### ADR-0148 — Personalità, forma di rivolgersi, conferme specifiche e rotte per compito
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario (personalità, «signore», «operazione completata», modelli per task).
+- **Personalità (sostituisce il predefinito vuoto di ADR-0120):** la forma di rivolgersi predefinita è «Signore» (chiave assente); una chiave vuota salvata dal proprietario resta «nessun titolo». Nuove impostazioni `address_frequency` (`never`, `rare` predefinita, `often`) e `formal` (lei/tu, coerente per tutta la conversazione). Il prompt dice quando usare il titolo (nel saluto, nelle conferme importanti e nelle riserve, mai in ogni frase) e aggiunge l'ora del giorno (saluto adatto, di notte risposte più sobrie).
+- **Conferme:** le risposte alle modifiche (personalità, profilo, iniziative, voce, sandbox, chat, ricordi fissati, indirizzi, Tailscale, pulizia Docker, briefing, lavori in background) portano un campo `message` che dice **cosa è successo** («Fatto, Signore. Ricordo fissato: lo terrò sempre presente…»), con aperture che variano e il titolo solo secondo la frequenza; nello stile sobrio è la sola frase. Il prompt vieta il generico «operazione completata». Le app mostrano il messaggio (egui: riquadro per 7 s; macOS: avviso) o, se manca, una frase contestuale.
+- **Rotte per compito:** oltre a veloce, ragionamento, codice e contesto lungo, tre nuove rotte: `writing` (testi e riassunti), `translation` e `analysis` (dati e calcoli, modello di ragionamento), ciascuna con istruzioni e lunghezza di risposta proprie; scrittura e traduzione usano il modello veloce con il suo tempo massimo ridotto. Il codice ha sempre la precedenza.
+- **Evidenza:** test della personalità (predefinito, titolo vuoto, frequenza, lei/tu), delle conferme, delle rotte per entrambi i provider e API.
+
+### ADR-0149 — Protezione: notifiche cifrate, guardia anti-iniezione, punteggio e intestazioni
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora la protezione», «dashboard più crittografata»).
+- **Cifratura a riposo:** oltre a messaggi e attività (ADR-0037), ora anche le **notifiche** sono cifrate (XChaCha20-Poly1305, scopo `notification:<id>`); le righe precedenti si migrano in modo idempotente all'avvio e restano leggibili durante la migrazione. Le colonne di ricerca (data, chiave di deduplica, stato di lettura) restano in chiaro.
+- **Guardia anti-iniezione:** `guard.rs` cerca nei risultati degli strumenti (pagine web, file, connettori) segnali di dirottamento in italiano e inglese («ignora le istruzioni…», cambio di ruolo, richiesta del prompt, esfiltrazione, aggiramento delle conferme); se li trova antepone un avviso che li declassa a dato. Il contenuto non è alterato né troncato; policy e conferme restano comunque l'ultima difesa.
+- **Punteggio:** `GET /api/security` aggiunge `encryption` (cifratura a riposo, algoritmo, cosa copre, segreti, audit firmato) e `posture` (punteggio 0–100, livello alta/media/bassa e controlli con il rimedio per ognuno). La Plancia (macOS e Windows) mostra la scheda «Protezione».
+- **Intestazioni:** `X-Frame-Options: DENY`, `Permissions-Policy` (microfono solo same-origin), `Cross-Origin-Opener-Policy` e `Cross-Origin-Resource-Policy` same-origin, in aggiunta a CSP, `nosniff` e `no-store`.
+- **Non incluso:** cifratura della memoria a lungo termine (serve il testo in chiaro per l'indice FTS, ADR-0022) e del file di audit (firmato, non cifrato).
+- **Evidenza:** test di migrazione e lettura delle notifiche cifrate, test della guardia, test API del punteggio.
+
 ### ADR-0135 — Correttore dei messaggi scritti
 
 - **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora il correttore grammaticale di prompt»).

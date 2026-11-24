@@ -817,6 +817,66 @@ async fn the_openapi_document_only_lists_routes_that_exist() {
 }
 
 #[tokio::test]
+async fn confirmations_say_what_happened_and_the_title_is_configurable() {
+    let e = env();
+    let (_, persona) = e.api("GET", "/api/persona", None).await;
+    assert_eq!(persona["address"], "Signore");
+    assert_eq!(persona["address_frequency"], "rare");
+    assert_eq!(persona["formal"], true);
+    let (status, saved) = e
+        .api(
+            "PATCH",
+            "/api/persona",
+            Some(json!({"address": "Capo", "address_frequency": "often", "formal": false})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(saved["address"], "Capo");
+    let message = saved["message"].as_str().unwrap();
+    assert!(message.contains("Personalità aggiornata"), "{message}");
+    assert!(!message.to_lowercase().contains("operazione completata"));
+    let (status, _) = e
+        .api(
+            "PATCH",
+            "/api/persona",
+            Some(json!({"address_frequency": "sempre"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (_, pinned) = e.api("POST", "/api/conversations", Some(json!({}))).await;
+    assert!(pinned["message"]
+        .as_str()
+        .unwrap()
+        .contains("Nuova chat pronta"));
+}
+
+#[tokio::test]
+async fn protection_reports_encryption_posture_and_docker_profiles() {
+    let e = env();
+    let (status, security) = e.api("GET", "/api/security", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let score = security["posture"]["score"].as_u64().unwrap();
+    assert!(score <= 100);
+    assert!(["alta", "media", "bassa"].contains(&security["posture"]["level"].as_str().unwrap()));
+    assert!(security["posture"]["items"].as_array().unwrap().len() >= 5);
+    assert_eq!(security["encryption"]["algorithm"], "XChaCha20-Poly1305");
+    assert!(security["encryption"]["covers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|c| c == "notifiche"));
+    let (status, docker) = e.api("GET", "/api/docker", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let profiles = docker["profiles"].as_array().unwrap();
+    assert_eq!(profiles.len(), 4);
+    assert!(profiles
+        .iter()
+        .any(|p| p["name"] == "light" && p["memory_mb"] == 256));
+    assert!(docker["docker"]["state"].is_string() && docker["docker"]["hint"].is_string());
+    assert_eq!(docker["limits"]["network"], "none");
+}
+
+#[tokio::test]
 async fn tailscale_status_is_reported_without_authorising_anything() {
     let e = env();
     let (status, view) = e.api("GET", "/api/tailscale", None).await;

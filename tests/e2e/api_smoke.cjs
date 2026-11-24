@@ -211,6 +211,14 @@ function check(condition, message) {
   check(job.status === 202 && job.json?.status === "running", "lavoro in background avviato");
   const jobs = await request("/api/cloud/jobs", { token: ownerToken });
   check(Array.isArray(jobs.json?.items) && jobs.json.items.length >= 1, "elenco dei lavori in background");
+  const security = await request("/api/security", { token: ownerToken });
+  check(security.status === 200 && typeof security.json?.posture?.score === "number" && security.json?.encryption?.algorithm === "XChaCha20-Poly1305", "punteggio di protezione e cifratura");
+  const docker = await request("/api/docker", { token: ownerToken });
+  check(docker.status === 200 && docker.json?.profiles?.length === 4 && docker.json?.limits?.network === "none", "stato di Docker e profili del sandbox");
+  const persona = await request("/api/persona", { method: "PATCH", token: ownerToken, body: { address: "Signore", address_frequency: "rare" } });
+  check(persona.status === 200 && /Personalità aggiornata/.test(persona.json?.message || ""), "conferma specifica e non generica");
+  const badFrequency = await request("/api/persona", { method: "PATCH", token: ownerToken, body: { address_frequency: "sempre" } });
+  check(badFrequency.status === 400, "frequenza del titolo non valida rifiutata");
   const tailscale = await request("/api/tailscale", { token: ownerToken });
   check(tailscale.status === 200 && typeof tailscale.json?.installed === "boolean" && tailscale.json?.allowed === false, "stato di Tailscale senza autorizzare indirizzi");
 })().catch((error) => {
