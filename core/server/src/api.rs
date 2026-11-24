@@ -403,6 +403,8 @@ pub fn router(state: Shared) -> Router {
         .route("/api/conversation", get(conversation))
         .route("/api/memory", get(memory))
         .route("/api/memory/graph", get(memory_graph))
+        .route("/api/memory/stats", get(memory_stats))
+        .route("/api/memory/duplicates", get(memory_duplicates))
         .route("/api/memory/reindex", post(memory_reindex))
         .route("/api/memory/{id}", delete(forget).patch(memory_correct))
         .route("/api/audit", get(audit))
@@ -1554,6 +1556,28 @@ async fn memory(
     .await
     {
         Ok(items) => Json(json!({"items": items})).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+async fn memory_stats(State(state): State<Shared>) -> Response {
+    match with_core(&state, |j| j.memory_stats()).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+/// Ricordi quasi uguali; `?threshold=0.9` (da 0,6 a 0,99). Non elimina nulla.
+async fn memory_duplicates(
+    State(state): State<Shared>,
+    axum::extract::Query(query): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let threshold = query
+        .get("threshold")
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(0.9);
+    match with_core(&state, move |j| j.memory_duplicates(threshold)).await {
+        Ok(v) => Json(v).into_response(),
         Err(e) => e.into_response(),
     }
 }

@@ -242,4 +242,6 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Schermo privato e voce maschile (2026-11-24, base `297b03f`).** ADR-0122, ADR-0123. Lettura dello schermo con OCR locale e mascheramento, voce solo maschile (Piper e voce di sistema), comandi vocali più robusti. Verifiche: fmt, clippy, `cargo test --locked`, test Python e contratti, build e test egui. **Sospeso:** prova reale di OCR, `say` e `System.Speech`; registrazione dal microfono nelle app; schermata Android.
 
+**Database, memoria e animazioni macOS (2026-11-24, base `013b7b5`).** ADR-0124, ADR-0125. Pragma e manutenzione del database, indici di memoria verificati e ricostruiti, ricerca a candidati con recenza, statistiche e doppioni; animazioni SwiftUI. Verifiche: fmt, clippy, `cargo test --locked`, test Python e contratti. **Sospeso:** resa e fluidità delle animazioni (Swift solo CI).
+
 Per ogni ripresa registrare data, revisione, lavoro completato, verifiche eseguite, blocchi, ipotesi e prossimo passo concreto. Conservare il checkpoint con le modifiche alle quali si riferisce.

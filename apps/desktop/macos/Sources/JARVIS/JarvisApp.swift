@@ -99,6 +99,9 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var changingInvite = false
 
     @State private var section: Section = .dashboard
+    @Namespace private var navigationNamespace
+    @State private var hoveredEntry: Section?
+    @State private var memoryStats: [String: Any] = [:]
     @State private var speakReplies = false
     @State private var voiceHint = ""
     @State private var payload: [String: Any] = [:]
@@ -238,11 +241,22 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                                     }
                                     .foregroundStyle(section == entry ? Color.cyan : Color.primary)
                                     .padding(8)
-                                    .background(section == entry ? Color.cyan.opacity(0.13) : .clear,
-                                                in: RoundedRectangle(cornerRadius: 8))
+                                    .background {
+                                        ZStack {
+                                            if section == entry {
+                                                RoundedRectangle(cornerRadius: 8).fill(Color.cyan.opacity(0.14))
+                                                    .matchedGeometryEffect(id: "navigation-highlight", in: navigationNamespace)
+                                            } else if hoveredEntry == entry {
+                                                RoundedRectangle(cornerRadius: 8).fill(Color.white.opacity(0.06))
+                                            }
+                                        }
+                                    }
                                     .contentShape(Rectangle())
                                 }
-                                .buttonStyle(.plain)
+                                .buttonStyle(PressableStyle())
+                                .onHover { inside in
+                                    if inside { hoveredEntry = entry } else if hoveredEntry == entry { hoveredEntry = nil }
+                                }
                                 .accessibilityAddTraits(section == entry ? .isSelected : [])
                             }
                         }
@@ -253,7 +267,9 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                   systemImage: "circle.fill")
                 .font(.caption).foregroundStyle(core.health.isEmpty ? Color.orange : Color.green)
                 .padding(.horizontal, 8)
-        }.padding(12).background(panel.opacity(0.56))
+        }
+        .padding(12).background(panel.opacity(0.56))
+        .animation(.snappy(duration: 0.28), value: section)
     }
 
     private var compactNavigation: some View {
@@ -311,7 +327,9 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     } else {
                         Image(systemName: "bell")
                     }
-                }.help("Notifiche").accessibilityLabel("Notifiche")
+                }
+                .help("Notifiche").accessibilityLabel("Notifiche")
+                .symbolEffect(.bounce, value: core.health["notifications_unread"] as? Int ?? 0)
                 Button { refresh += 1 } label: {
                     if activeLoad != nil {
                         ProgressView().controlSize(.small).frame(width: 15, height: 15)
@@ -335,8 +353,12 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                         default: tools
                         }
                         if section == .chat { Color.clear.frame(height: 1).id("latest-message") }
-                    }.padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(18).frame(maxWidth: .infinity, alignment: .leading)
+                    .id(section)
+                    .transition(.opacity.combined(with: .offset(y: 10)))
                 }
+                .animation(.easeOut(duration: 0.22), value: section)
                 .onChange(of: chatScrollAnchor, initial: true) { _, _ in
                     if section == .chat { scroll.scrollTo("latest-message", anchor: .bottom) }
                 }
@@ -368,22 +390,22 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     private var dashboard: some View {
         VStack(alignment: .leading, spacing: 18) {
             dashboardHeader
-            attentionCard
+            attentionCard.staggeredAppear(1)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 12, alignment: .top)], spacing: 12) {
                 dashboardTile("Core", value: coreStatus, icon: "cpu", color: coreIsUp ? .green : .orange,
-                              destination: .system)
+                              destination: .system, order: 0)
                 dashboardTile("Intelligenza artificiale", value: aiStatus.0, icon: "sparkles", color: aiStatus.1,
-                              destination: .models)
+                              destination: .models, order: 1)
                 dashboardTile("Conferme in attesa", value: count("pending_confirmations"), icon: "checkmark.shield",
                               color: (core.health["pending_confirmations"] as? Int ?? 0) > 0 ? .orange : .green,
-                              destination: .confirmations)
+                              destination: .confirmations, order: 2)
                 dashboardTile("Notifiche da leggere", value: count("notifications_unread"), icon: "bell",
                               color: (core.health["notifications_unread"] as? Int ?? 0) > 0 ? .cyan : .green,
-                              destination: .notifications)
+                              destination: .notifications, order: 3)
                 dashboardTile("Automazioni attive", value: count("automations"), icon: "bolt",
-                              color: .cyan, destination: .workflows)
+                              color: .cyan, destination: .workflows, order: 4)
                 dashboardTile("Verifica audit", value: auditStatus.0, icon: "lock.shield",
-                              color: auditStatus.1, destination: .security)
+                              color: auditStatus.1, destination: .security, order: 5)
             }
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 12) {
@@ -395,6 +417,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     providerStatus
                 }
             }
+            .staggeredAppear(7)
         }
     }
 
@@ -495,15 +518,23 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         }
         .padding(22)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(LinearGradient(colors: [panel, base], startPoint: .topLeading, endPoint: .bottomTrailing),
-                    in: RoundedRectangle(cornerRadius: 20))
+        .background {
+            ZStack {
+                LinearGradient(colors: [panel, base], startPoint: .topLeading, endPoint: .bottomTrailing)
+                AuroraGlow()
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+        }
         .overlay { RoundedRectangle(cornerRadius: 20).strokeBorder(.cyan.opacity(0.28)) }
+        .staggeredAppear(0)
     }
 
     private func headerText(_ headline: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Label("JARVIS · Plancia", systemImage: "lock.shield")
-                .font(.subheadline.weight(.medium)).foregroundStyle(.cyan)
+            HStack(spacing: 6) {
+                PulsingDot(color: coreIsUp ? .green : .orange, size: 6)
+                Text("JARVIS · Plancia").font(.subheadline.weight(.medium)).foregroundStyle(.cyan)
+            }
             Text(headline).font(.system(size: 28, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white).accessibilityAddTraits(.isHeader)
             ViewThatFits(in: .horizontal) {
@@ -525,7 +556,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     }
 
     private func dashboardTile(_ title: String, value: String, icon: String, color: Color,
-                               destination: Section) -> some View {
+                               destination: Section, order: Int = 0) -> some View {
         Button { select(destination) } label: {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
@@ -535,13 +566,18 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 }
                 Text(value).font(.title3.weight(.semibold)).monospacedDigit()
                     .lineLimit(1).minimumScaleFactor(0.75)
+                    .contentTransition(.numericText())
+                    .animation(.snappy, value: value)
                 Text(title).font(.caption).foregroundStyle(.secondary)
             }
             .padding(14).frame(maxWidth: .infinity, alignment: .leading)
             .background(panel, in: RoundedRectangle(cornerRadius: 12))
             .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(color.opacity(0.25)) }
             .contentShape(Rectangle())
-        }.buttonStyle(.plain)
+        }
+        .buttonStyle(PressableStyle())
+        .hoverLift()
+        .staggeredAppear(order)
         .accessibilityLabel("\(title), \(value)")
     }
 
@@ -647,14 +683,26 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 }
             }
             LazyVStack(alignment: .leading, spacing: 10) {
-                ForEach(history) { item in chatEntry(item) }
+                ForEach(history) { item in
+                    chatEntry(item)
+                        .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
+                                                removal: .opacity))
+                }
             }
+            .animation(.spring(response: 0.4, dampingFraction: 0.85), value: history.count)
             if let confirmation = lastReply?["confirmation"] as? [String: Any] {
                 Button("Esamina l’azione proposta") { pending = Record(confirmation, index: 0) }
             }
             if let outgoingMessage, lastReply == nil {
                 chatBubble(outgoingMessage, user: true)
-                ProgressView("JARVIS sta elaborando").controlSize(.small)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                HStack(spacing: 8) {
+                    TypingIndicator()
+                    Text("JARVIS sta elaborando").font(.caption).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                .background(panel, in: Capsule())
+                .transition(.opacity.combined(with: .scale(scale: 0.9, anchor: .leading)))
             }
         }
     }
@@ -847,6 +895,51 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         }
     }
 
+    /// Riepilogo della memoria (ADR-0124): quanti ricordi, di che tipo e se gli indici sono in ordine.
+    private var memoryOverview: some View {
+        card("Stato della memoria", icon: "brain") {
+            let total = memoryStats["total"] as? Int ?? 0
+            let kinds = (memoryStats["by_kind"] as? [String: Any] ?? [:]).sorted { $0.key < $1.key }
+            HStack(alignment: .firstTextBaseline, spacing: 18) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(total)").font(.system(size: 30, weight: .semibold, design: .rounded))
+                        .monospacedDigit().foregroundStyle(.cyan)
+                        .contentTransition(.numericText())
+                    Text("ricordi").font(.caption).foregroundStyle(.secondary)
+                }
+                ForEach(kinds, id: \.key) { entry in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(entry.value as? Int ?? 0)").font(.title3.weight(.semibold)).monospacedDigit()
+                            .contentTransition(.numericText())
+                        Text(memoryKindLabel(entry.key)).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+            }
+            .animation(.snappy, value: total)
+            if let expiring = memoryStats["expiring_within_7_days"] as? Int, expiring > 0 {
+                Label("\(expiring) in scadenza entro 7 giorni", systemImage: "hourglass").font(.caption)
+                    .foregroundStyle(.orange)
+            }
+            if memoryStats["indexes_consistent"] as? Bool == false {
+                Label("Gli indici di ricerca non sono allineati: premi Reindicizza", systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+        }
+        .task(id: refresh) {
+            if let stats = try? await core.request("/api/memory/stats") { memoryStats = stats }
+        }
+    }
+
+    private func memoryKindLabel(_ kind: String) -> String {
+        switch kind {
+        case "semantic": return "fatti"
+        case "episodic": return "episodi"
+        case "procedural": return "preferenze"
+        default: return kind
+        }
+    }
+
     /// Voce maschile di sistema (ADR-0123): legge le risposte ad alta voce.
     private var voiceCard: some View {
         card("Voce di JARVIS", icon: "speaker.wave.2") {
@@ -880,6 +973,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     message = "ricorda che "
                 }
             }
+            memoryOverview
         case .missions: missionTools
         case .connectors: connectorSetup
         case .devices:

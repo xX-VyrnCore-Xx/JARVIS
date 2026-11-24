@@ -78,3 +78,5 @@ La Plancia di desktop e macOS segue un unico flusso: intestazione di stato, «Da
 **Aggiornamento Android (ADR-0112).** La Plancia Android ha la scheda «Aggiornamenti»: controlla, scarica con verifica SHA-256 e passa l'APK all'installatore di sistema, che chiede conferma.
 
 **Voce (ADR-0123).** Impostazione «Leggi le risposte ad alta voce» e pulsante «Fai tacere» in Modelli AI su desktop e macOS; solo voci maschili.
+
+**Animazioni su macOS (ADR-0125).** Evidenziazione scorrevole nella barra laterale, riquadri della Plancia che entrano in sequenza e si sollevano al passaggio del puntatore, indicatore di scrittura nella chat, scheda «Stato della memoria». Rispettano «Riduci movimento».

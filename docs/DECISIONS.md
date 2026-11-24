@@ -1675,6 +1675,25 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** test Python (voce maschile e rifiuto di quelle femminili, numeri, intenti, attivazione, testo da leggere, livellamento), test Rust (`speech`, `setup`) e dei contratti.
 - **Documenti interessati:** AUTONOMY_AND_TOOLS.md, INTERFACE_AND_DEVICES.md, ROADMAP.md.
 
+### ADR-0124 — Database e memoria più robusti e veloci
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora il database e la memoria»).
+- **Database:** pragma di prestazioni (cache da 16 MiB, `mmap` da 128 MiB, limite del file di journal a 64 MiB) oltre a WAL, `busy_timeout` e `synchronous=NORMAL` già presenti. La manutenzione periodica ora compatta il file (`VACUUM`) solo quando conviene, cioè oltre il 25% di pagine libere e almeno 8 MiB recuperabili. Conservazione: tracce di esecuzione oltre 60 giorni e notifiche **lette** oltre 120 giorni vengono eliminate (le non lette restano). Lo stato del database riporta spazio libero e coerenza degli indici di memoria.
+- **Memoria, coerenza:** gli indici derivati (ricerca testuale e vettori) sono confrontati con la tabella dei ricordi all'avvio; se dopo un arresto brusco un elemento manca in un indice o ce n'è uno orfano, gli indici vengono ricostruiti dalla sola tabella `memory`. Prima si controllava solo l'assenza dei vettori.
+- **Memoria, ricerca:** il costo non cresce più con il testo di ogni ricordo: il coseno si calcola sui soli vettori e testo e frasi si valutano sui candidati (i 300 più vicini più i risultati della ricerca testuale). I ricordi più recenti passano avanti a parità di pertinenza (mezza vita di un anno, al massimo 0,04): vale solo per l'ordine, mai per la soglia di pertinenza. Con 3000 ricordi la ricerca resta sotto i due secondi nel test.
+- **Nuove letture:** `GET /api/memory/stats` (ricordi per tipo, in scadenza entro 7 giorni, relazioni, più vecchio e più recente, indici coerenti) e `GET /api/memory/duplicates?threshold=` (coppie di ricordi quasi uguali, solo da leggere: decide il proprietario cosa dimenticare). Nessuna eliminazione automatica: due ricordi simili possono avere sfumature diverse.
+- **Limiti:** la ricerca vettoriale resta lineare sul numero di ricordi (adeguata fino a decine di migliaia); gli embedding sono quelli locali già in uso.
+- **Evidenza:** test su indici interrotti e orfani, riepilogo e doppioni senza eliminazioni, 3000 ricordi con ricerca corretta e rapida, ordinamento per recenza senza superare la pertinenza, soglie di compattazione e potatura delle notifiche.
+- **Documenti interessati:** ARCHITECTURE.md non toccato; ROADMAP.md.
+
+### ADR-0125 — Più animazioni e grafica nell'app macOS
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora ancora la grafica macOS con SwiftUI e aggiungi più animazioni»).
+- **Decisione:** nuovo `Motion.swift` con componenti riusabili: `PressableStyle` (il pulsante si abbassa), `PulsingDot` (onda di stato), `TypingIndicator` (tre punti che rimbalzano), `AuroraGlow` (bagliore lento dietro l'intestazione), `StaggeredAppear` e `HoverLift`. Applicati a: barra laterale (evidenziazione che scorre fra le voci con `matchedGeometryEffect`, evidenziazione al passaggio del puntatore, pressione), passaggio fra sezioni (dissolvenza con piccolo scorrimento), Plancia (intestazione con bagliore e punto di stato pulsante, schede e riquadri che entrano in sequenza, riquadri che si sollevano al passaggio del puntatore, valori che cambiano con `numericText`), campanella delle notifiche che rimbalza quando ne arrivano, chat (messaggi che salgono dal basso, indicatore di scrittura al posto della barra di avanzamento) e nuova scheda «Stato della memoria» con contatori animati.
+- **Accessibilità:** con «Riduci movimento» attivo in macOS spariscono scorrimenti, rimbalzi, ingrandimenti e animazioni continue (onda, bagliore, punti): restano dissolvenze brevi. Gli elementi puramente decorativi sono nascosti a VoiceOver.
+- **Non verificato:** la resa a schermo e la fluidità (nessuna schermata vista; SwiftUI si compila solo nella CI). Le animazioni continue usano `TimelineView` a 24–30 fotogrammi al secondo e si fermano con «Riduci movimento».
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.
