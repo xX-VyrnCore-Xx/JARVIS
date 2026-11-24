@@ -40,7 +40,7 @@ const BUILTIN: [Builtin; 15] = [
         "Correzione, riscrittura e miglioramento di testi in italiano.",
         &["correggi", "rivedi il testo", "riscrivi", "migliora il testo", "bozza di"],
         "Quando rivedi un testo: correggi ortografia, grammatica e punteggiatura, rendi le frasi più chiare e attive, mantieni il tono e il significato dell'autore. Restituisci prima il testo corretto, poi al massimo tre note sulle modifiche importanti. Non inventare fatti e non aggiungere contenuti non richiesti.",
-        &[],
+        &["text.correct", "text.count"],
     ),
     (
         "ricerca",

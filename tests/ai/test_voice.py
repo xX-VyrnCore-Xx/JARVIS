@@ -271,6 +271,53 @@ class WorkerProtocol(unittest.TestCase):
         worker._VOICE = None
 
 
+class WakeOnly(unittest.TestCase):
+    """Ascolto sempre attivo (ADR-0134): la parola di attivazione è un sì o un no, mai testo."""
+
+    def test_only_a_verdict_comes_back_and_silence_never_wakes(self):
+        service = VoiceService({"JARVIS_VOICE_ENGINE": "fake"})
+        for text, expected in ((b"hey jarvis", True), (b"che ore sono", False), (b"jarvis accendi la luce", True)):
+            out = service.wake_only(b64(write_wav(tone(), 16000, {"jtxt": text})))
+            self.assertEqual(out["detected"], expected, text)
+            self.assertEqual(set(out) - {"detected", "engine", "speech", "score"}, set(), "nessun testo nell'esito")
+        silent = service.wake_only(b64(write_wav([0] * 16000, 16000, {"jtxt": b"hey jarvis"})))
+        self.assertFalse(silent["detected"])
+        with self.assertRaises(VoiceError):
+            service.wake_only("%%%")
+
+    def test_a_model_decides_alone_without_any_transcription(self):
+        service = VoiceService({"JARVIS_VOICE_ENGINE": "fake"})
+
+        class Boom:
+            def transcribe(self, *_):
+                raise AssertionError("non si deve trascrivere")
+
+        class Model:
+            name, threshold = "modello-di-prova", 0.5
+
+            def __init__(self, score):
+                self.value = score
+
+            def score(self, *_):
+                return self.value
+
+        service.stt = Boom()
+        service.wake = Model(0.9)
+        self.assertTrue(service.wake_only(b64(write_wav(tone(), 16000)))["detected"])
+        service.wake = Model(0.2)
+        self.assertFalse(service.wake_only(b64(write_wav(tone(), 16000)))["detected"])
+
+    def test_through_the_bridge(self):
+        import jarvis_ai.worker as worker
+
+        worker._VOICE = VoiceService({"JARVIS_VOICE_ENGINE": "fake"})
+        env = json.loads((FIXTURES / "envelope.delegation-request.json").read_text(encoding="utf-8"))
+        env.update(type="voice.wake", payload={"audio_b64": b64(write_wav(tone(), 16000, {"jtxt": b"ehi jarvis"}))})
+        out = handle_line(json.dumps(env), assistant_handler)
+        self.assertEqual((out["status"], out["type"], out["payload"]["detected"]), ("succeeded", "voice.result", True))
+        worker._VOICE = None
+
+
 class RealWakeWord(unittest.TestCase):
     def test_openwakeword_rejects_non_speech(self):
         try:

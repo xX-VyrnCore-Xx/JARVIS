@@ -1769,6 +1769,60 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Non verificato:** qualità delle analisi con provider reali; testati con fixture i calcoli, i comandi offline, i testi, la registrazione degli strumenti e il prompt.
 - **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ROADMAP.md.
 
+### ADR-0133 — Profilo del proprietario
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora il profilo utente»).
+- **Decisione:** `profile.rs` salva in `<dati>/profile.json` ruolo, azienda, settore, competenze, interessi, obiettivi e tre preferenze (lingua, tono formale/cordiale/diretto, livello tecnico principiante/intermedio/esperto). `GET/PATCH /api/profile` solo per il proprietario, con audit (`profile.update`). Il riepilogo entra nel prompt di sistema (una riga, «usalo solo se pertinente e non citarlo») solo se «Usa il profilo nelle richieste cloud» è attivo; la percentuale di completamento e i suggerimenti dei campi mancanti guidano la compilazione.
+- **Privacy:** niente nome completo né recapiti: email, indirizzi web, numeri di telefono (7+ cifre) e credenziali sono rifiutati sia in scrittura sia nel caricamento di un file modificato a mano (campo per campo). Tutto è facoltativo.
+- **Client:** pagina «Profilo» su macOS, sezione nella pagina dei modelli su Windows. Android non lo modifica (i dispositivi non accedono al profilo).
+- **Documenti interessati:** AI_SYSTEM.md, INTERFACE_AND_DEVICES.md.
+
+### ADR-0134 — Ascolto sempre attivo «Hey Jarvis»
+
+- **Data:** 2026-11-24 · **Stato:** implementata su macOS e nel Core; **Windows non ancora** · **Fonte:** richiesta del proprietario («rendi sempre attiva la wake-word… deve ascoltare solo Hey Jarvis, nient'altro»).
+- **Decisione:** in attesa il microfono alimenta solo un buffer in memoria (40 s al massimo). I blocchi con voce (soglia di energia) vanno a `POST /api/voice/wake`, che risponde soltanto `{detected, engine, score}`: con il modello openWakeWord non viene trascritto nulla; senza modello la trascrizione serve solo a confrontarla con «hey Jarvis» e non esce dal worker. L'audio è scartato dopo il verdetto. Solo dopo un sì il comando viene registrato (fino a ~1 s di silenzio, massimo 12 s), trascritto ed eseguito; poi si torna all'ascolto della sola parola di attivazione. Nulla finisce su disco né in cloud.
+- **Controlli:** impostazione `wake_listening` (attiva di default) in `/api/voice/system`, interruttore «Ascolto sempre attivo» nelle impostazioni vocali, indicatore del microfono nella barra laterale e avatar «in ascolto» con anelli sensibili al livello. L'ascolto si ferma con l'interfaccia bloccata, quando JARVIS parla o elabora (la sua voce non lo riattiva) e se il permesso del microfono è negato.
+- **Permesso:** `NSMicrophoneUsageDescription` nell'`Info.plist`; macOS chiede il consenso al primo avvio.
+- **Non incluso:** ascolto su Windows (serve la cattura audio WASAPI) e Android.
+- **Non verificato:** prova con microfono e modello reali; test con audio sintetico per il verdetto (Python e Core) e per l'assenza di testo nell'esito.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
+### ADR-0135 — Correttore dei messaggi scritti
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora il correttore grammaticale di prompt»).
+- **Decisione:** `promptfix.rs` corregge in locale e senza modelli ciò che è inequivocabile: accenti mancanti («perche'» → «perché», «e'» → «è», decine di parole in -tà), abbreviazioni da chat («nn», «cmq», «xche»), spazi e punteggiatura («ciao,come» → «ciao, come», «va !» → «va!»), elisioni staccate, parole di funzione doppie, «un po» → «un po'», maiuscole a inizio frase, JARVIS. Non tocca mai codice (blocchi e `inline`), percorsi, URL, indirizzi, numeri, nomi con maiuscole interne o parole sconosciute; il risultato è stabile (correggere due volte non cambia nulla).
+- **Uso:** la chat applica il correttore **senza cambiare le maiuscole** (un comando o un ricordo non devono cambiare iniziale) e restituisce `corrected {text, changes}` solo se è cambiato qualcosa; `POST /api/prompt/check` mostra la versione completa con maiuscole; lo strumento `text.correct` (anche via MCP e offline: «correggi: …») serve alla competenza di scrittura. `JARVIS_PROMPT_FIX=off` lo disattiva.
+- **Limiti:** non sostituisce una revisione grammaticale con un modello: non cambia lessico né sintassi.
+
+### ADR-0136 — Prompt di sistema specializzati per ruolo e modello
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora il system prompt di ogni modello e sottomodello e specializzalo in più modelli… risposte più coerenti»).
+- **Decisione:** `prompts.rs` compone il prompt a livelli senza ripetizioni: nucleo comune (ora con la regola di **coerenza**: stessi nomi, cifre, terminologia e decisioni, nessun cambio di registro, correzioni dichiarate), data e personalità, **profilo** del proprietario, guida del percorso (veloce/ragionamento/codice/contesto lungo), **ruolo** della richiesta e **stile per famiglia di modello**. Dieci ruoli riconosciuti con regole deterministiche (direzione aziendale, sicurezza, IT, sviluppo, ricerca, traduzione, scrittura, analisi dati, pianificazione, didattica); stili distinti per modelli veloci, di ragionamento, a contesto lungo e per il codice, scelti dal nome del modello e dal percorso.
+- **Limiti:** nessun livello amplia permessi, policy o conferme; il prompt resta sotto i 6500 caratteri (test).
+- **Non verificato:** l'effetto sulla qualità con provider reali.
+
+### ADR-0137 — Collegamento dei dispositivi senza toccare host o file
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora il collegamento tra più dispositivi senza modificare host… in maniera più facile»).
+- **Problema:** per associare un telefono servivano un file `remote-hosts.txt` o una variabile d'ambiente con riavvio, poi indirizzo e codice da digitare.
+- **Decisione:** (1) **indirizzi pubblici dall'app**: `GET/PUT/POST /api/devices/access` (`add`/`remove`) salva `remote-hosts.txt` e aggiorna subito l'elenco degli host ammessi (nessun riavvio, nessuna variabile); accetta anche un indirizzo copiato per intero. (2) **collegamento di associazione**: ogni invito include `link` (`jarvis://pair?origin=…&code=…`); su macOS si condivide o si copia, su Windows si copia. (3) **Android** apre il collegamento da un messaggio o dal browser (intent `jarvis://pair`), oppure lo legge dagli appunti con «Incolla il collegamento»: indirizzo e codice si compilano da soli (`PairingLink`, solo `https`, nomi completi, niente credenziali nell'URL).
+- **Sicurezza invariata:** il codice resta monouso e a scadenza, il dispositivo riceve il proprio token, l'accesso remoto passa solo da host HTTPS dichiarati dal proprietario.
+- **Non incluso:** scoperta automatica sulla rete locale (richiederebbe un listener sulla LAN con certificato fissato: decisione di sicurezza da prendere a parte) e codice QR.
+
+### ADR-0138 — Server MCP
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora gli MCP e API»).
+- **Decisione:** `POST /api/mcp` espone gli strumenti di JARVIS ad altri agenti con il Model Context Protocol (JSON-RPC 2.0 su HTTP, risposte JSON, richieste singole o in lotto fino a 32): `initialize`, `ping`, `tools/list`, `tools/call`; le notifiche ricevono 202. Autenticazione: lo stesso token del proprietario (`X-Jarvis-Token` o `Authorization: Bearer`); i dispositivi associati non hanno accesso. `JARVIS_MCP=off` lo disattiva.
+- **Cosa espone:** solo calcolo e sola lettura senza dati personali: i sette calcoli aziendali, IVA e finanziamenti, `time.now`, `date.calc`, `math.calc`, `units.convert`, `text.count`, `text.correct`, `code.validate_json`, `security.cvss`, `it.subnet`, `system.info`, `system.disks`. Restano fuori file, memoria, note, schermo, applicazioni, terminale, rete, connettori e nodi.
+- **Controlli:** ogni chiamata crea un task, passa dalla policy e dai permessi del proprietario ed è registrata nell'audit come l'agente interno; argomenti validati dallo schema dello strumento. I nomi usano `__` al posto del punto.
+- **API:** inoltre `POST /api/prompt/check`, `GET/PATCH /api/profile`, `POST /api/voice/wake`, `GET/PUT /api/devices/access`, `POST /api/cloud/chat/stream`; l'invito ora porta `link`.
+
+### ADR-0139 — Avatar in ascolto e grafica
+
+- **Data:** 2026-11-24 · **Stato:** implementata su macOS · **Fonte:** richiesta del proprietario («migliora ulteriormente l'avatar… e la grafica»).
+- **Decisione:** nuovo stato «in ascolto» dell'avatar macOS (si fonde con elaborazione e parlato): anelli che convergono verso il volto, spessore legato al livello del microfono, occhi più aperti e alone più vivo; la barra laterale mostra lo stato dell'ascolto con icona del microfono che pulsa e onda sonora attiva durante la registrazione. Pagina «Profilo» con avanzamento, campi e preferenze; pagina Dispositivi con indirizzo pubblico e condivisione del collegamento.
+- **Non verificato:** resa a schermo (Swift solo in CI).
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.

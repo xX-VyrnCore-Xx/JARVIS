@@ -264,11 +264,7 @@ async fn main() {
         .map(|h| h.trim().to_ascii_lowercase())
         .filter(|h| !h.is_empty())
         .filter(|h| {
-            let ok = h.len() <= 253 && h.contains('.') && h.split('.').all(|label| {
-                !label.is_empty() && label.len() <= 63
-                    && !label.starts_with('-') && !label.ends_with('-')
-                    && label.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-            });
+            let ok = jarvis_core::api::valid_remote_host(h);
             if !ok {
                 eprintln!("JARVIS_ALLOWED_HOSTS: host ignorato «{h}» (servono nomi completi, senza caratteri jolly)");
             }

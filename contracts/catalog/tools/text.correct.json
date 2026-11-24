@@ -1,0 +1,38 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "text.correct",
+  "version": "1.0.0",
+  "summary": "Corregge ortografia, accenti e punteggiatura di un testo italiano senza toccare codice, percorsi, URL e numeri; riporta le parole cambiate",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "text"
+    ],
+    "properties": {
+      "text": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 8000
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "none",
+  "risk": "low",
+  "permissions": [
+    "core.compute:execute"
+  ],
+  "errors": [
+    "text.invalid"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

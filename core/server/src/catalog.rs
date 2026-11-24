@@ -57,6 +57,7 @@ const SOURCES: &[&str] = &[
     tool_file!("sandbox.run"),
     tool_file!("sandbox.status"),
     tool_file!("system.disks"),
+    tool_file!("text.correct"),
     tool_file!("text.count"),
     tool_file!("todo.add"),
     tool_file!("todo.done"),

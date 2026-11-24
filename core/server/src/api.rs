@@ -24,7 +24,7 @@ pub struct AppState {
     pub last_health: Mutex<Value>,
     cloud_slots: Arc<tokio::sync::Semaphore>,
     /// Host pubblicati da un proxy fidato (es. `tailscale serve`) per i dispositivi associati (RF-11).
-    pub remote_hosts: Vec<String>,
+    pub remote_hosts: std::sync::RwLock<Vec<String>>,
     /// Assegnazioni ai nodi esecutori: le loro richieste non passano dal blocco del Core.
     pub nodes: Arc<crate::nodes::NodeHub>,
     device_db: std::path::PathBuf,
@@ -206,6 +206,8 @@ async fn guard(State(state): State<Shared>, mut req: Request, next: Next) -> Res
                         || authority.port_u16().is_some_and(|port| port != 0))
                     && state
                         .remote_hosts
+                        .read()
+                        .unwrap_or_else(|e| e.into_inner())
                         .iter()
                         .any(|h| h.eq_ignore_ascii_case(authority.host()))
             });
@@ -292,10 +294,17 @@ async fn guard(State(state): State<Shared>, mut req: Request, next: Next) -> Res
         // Ritorno da OAuth (ADR-0027): navigazione del browser senza token, autenticata dallo `state` monouso.
         && path != "/api/connectors/oauth/callback"
     {
+        // I client MCP inviano il segreto come «Authorization: Bearer»: stesso token del proprietario.
         let token = req
             .headers()
             .get("x-jarvis-token")
-            .and_then(|t| t.to_str().ok());
+            .and_then(|t| t.to_str().ok())
+            .or_else(|| {
+                req.headers()
+                    .get(header::AUTHORIZATION)
+                    .and_then(|t| t.to_str().ok())
+                    .and_then(|t| t.strip_prefix("Bearer "))
+            });
         if !same_token(token, &state.token) {
             return error(
                 StatusCode::UNAUTHORIZED,
@@ -338,6 +347,7 @@ fn device_route_allowed(method: &str, route: &str, scopes: &[&str]) -> bool {
         ("GET", "/api/conversation"),
         ("POST", "/api/chat"),
         ("POST", "/api/cloud/chat"),
+        ("POST", "/api/prompt/check"),
         ("POST", "/api/chat/stream"),
         ("GET", "/api/tasks"),
         ("GET", "/api/confirmations"),
@@ -377,6 +387,8 @@ pub fn router(state: Shared) -> Router {
         .route("/api/n8n/jobs/{id}", delete(n8n_remove))
         .route("/api/cloud", get(cloud_status).post(configure_cloud))
         .route("/api/cloud/chat", post(cloud_chat))
+        .route("/api/mcp", post(mcp_endpoint))
+        .route("/api/prompt/check", post(prompt_check))
         .route("/api/cloud/chat/stream", post(cloud_chat_stream))
         .route("/api/cloud/test", post(test_cloud_key))
         .route("/api/cloud/feedback", post(rate_cloud_reply))
@@ -423,6 +435,10 @@ pub fn router(state: Shared) -> Router {
             "/api/voice/transcribe",
             post(voice_transcribe).layer(axum::extract::DefaultBodyLimit::max(5 * 1024 * 1024)),
         )
+        .route(
+            "/api/voice/wake",
+            post(voice_wake).layer(axum::extract::DefaultBodyLimit::max(2 * 1024 * 1024)),
+        )
         .route("/api/voice/speak", post(voice_speak))
         .route(
             "/api/voice/system",
@@ -436,6 +452,12 @@ pub fn router(state: Shared) -> Router {
             post(push_subscription_register).delete(push_subscription_delete),
         )
         .route("/api/devices/pairing", post(create_pairing))
+        .route(
+            "/api/devices/access",
+            get(devices_access_get)
+                .put(devices_access_put)
+                .post(devices_access_put),
+        )
         .route("/api/devices/pairing/cancel", post(cancel_pairing))
         .route("/api/devices/pair", post(pair_device))
         .route("/api/devices/me", get(device_me))
@@ -454,6 +476,7 @@ pub fn router(state: Shared) -> Router {
             get(permissions_get).patch(permissions_patch),
         )
         .route("/api/persona", get(persona_get).patch(persona_patch))
+        .route("/api/profile", get(profile_get).patch(profile_patch))
         .route("/api/missions", get(missions_list).post(mission_create))
         .route("/api/missions/{id}/{action}", post(mission_action))
         .route("/api/skills", get(skills_list).post(skill_create))
@@ -648,6 +671,56 @@ async fn rate_cloud_reply(State(state): State<Shared>, Json(body): Json<Value>) 
     reply(with_core(&state, move |j| j.rate_cloud_reply(&body)).await)
 }
 
+/// Server MCP (ADR-0138): JSON-RPC 2.0 su HTTP; solo il proprietario, con il suo token.
+async fn mcp_endpoint(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Json(message): Json<Value>,
+) -> Response {
+    if device.is_some() {
+        return owner_only_response();
+    }
+    if std::env::var("JARVIS_MCP").is_ok_and(|value| value == "off") {
+        return CoreError::Unavailable("Il server MCP è disattivato (JARVIS_MCP=off).".into())
+            .into_response();
+    }
+    match with_core(&state, move |j| crate::mcp::handle_message(j, &message)).await {
+        Some(reply) => Json(reply).into_response(),
+        None => StatusCode::ACCEPTED.into_response(),
+    }
+}
+
+/// Corregge il campo `message` del corpo (ADR-0135) e restituisce le modifiche, se ce ne sono.
+fn apply_correction(body: &mut Value) -> Option<Value> {
+    let original = body["message"].as_str()?.to_owned();
+    let fixed = crate::promptfix::fix_with(&original, false);
+    if !fixed.changed(&original) {
+        return None;
+    }
+    let report = fixed.to_json();
+    body["message"] = json!(fixed.text);
+    Some(report)
+}
+
+fn with_correction(mut out: Value, correction: Option<Value>) -> Value {
+    if let (Some(report), Some(map)) = (correction, out.as_object_mut()) {
+        map.insert("corrected".into(), report);
+    }
+    out
+}
+
+/// Controlla un testo senza inviarlo: restituisce la versione corretta e le parole cambiate.
+async fn prompt_check(Json(body): Json<Value>) -> Response {
+    let Some(text) = body["text"].as_str().filter(|t| t.chars().count() <= 8000) else {
+        return CoreError::BadRequest("campo 'text' mancante o troppo lungo".into())
+            .into_response();
+    };
+    let fixed = crate::promptfix::fix(text);
+    let mut out = fixed.to_json();
+    out["changed"] = json!(fixed.changed(text));
+    Json(out).into_response()
+}
+
 /// Errori di una richiesta cloud: quelli del Core e la saturazione delle richieste in corso.
 enum CloudChatError {
     Core(CoreError),
@@ -746,6 +819,17 @@ async fn run_cloud_chat(
     mut body: Value,
     deltas: Option<tokio::sync::mpsc::UnboundedSender<String>>,
 ) -> Result<Value, CloudChatError> {
+    let correction = apply_correction(&mut body);
+    let out = run_cloud_chat_inner(state, is_device, body, deltas).await?;
+    Ok(with_correction(out, correction))
+}
+
+async fn run_cloud_chat_inner(
+    state: &Shared,
+    is_device: bool,
+    mut body: Value,
+    deltas: Option<tokio::sync::mpsc::UnboundedSender<String>>,
+) -> Result<Value, CloudChatError> {
     let Some(message) = body["message"].as_str() else {
         return Err(CoreError::BadRequest("campo 'message' mancante".into()).into());
     };
@@ -828,8 +912,16 @@ async fn chat(
             "Azione disponibile dal computer del proprietario",
         );
     }
+    let (message, correction) = {
+        let mut body = json!({"message": message});
+        let correction = apply_correction(&mut body);
+        (
+            body["message"].as_str().unwrap_or_default().to_string(),
+            correction,
+        )
+    };
     match with_core(&state, move |j| j.chat(&message)).await {
-        Ok(out) => Json(out.to_json()).into_response(),
+        Ok(out) => Json(with_correction(out.to_json(), correction)).into_response(),
         Err(e) => e.into_response(),
     }
 }
@@ -858,6 +950,14 @@ async fn chat_stream(
             "Azione disponibile dal computer del proprietario",
         );
     }
+    let (message, correction) = {
+        let mut body = json!({"message": message});
+        let correction = apply_correction(&mut body);
+        (
+            body["message"].as_str().unwrap_or_default().to_string(),
+            correction,
+        )
+    };
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let core = state.core.clone();
     let deltas = tx.clone();
@@ -867,7 +967,9 @@ async fn chat_stream(
             let _ = deltas.send(json!({"type": "delta", "text": d}).to_string() + "\n");
         });
         let line = match guard.chat_streaming(&message, sink) {
-            Ok(out) => json!({"type": "done", "result": out.to_json()}),
+            Ok(out) => {
+                json!({"type": "done", "result": with_correction(out.to_json(), correction)})
+            }
             Err(e) => {
                 let (code, message) = core_error_parts(e);
                 json!({"type": "error", "error": {"code": code, "message": message}})
@@ -1408,6 +1510,28 @@ async fn persona_patch(
     reply(with_core(&state, move |j| j.persona_update(&body)).await)
 }
 
+/// Profilo del proprietario (ADR-0133): lettura e modifica solo dal computer del Core.
+async fn profile_get(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+) -> Response {
+    if device.is_some() {
+        return owner_only_response();
+    }
+    reply(Ok(with_core(&state, |j| j.profile()).await))
+}
+
+async fn profile_patch(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Json(body): Json<Value>,
+) -> Response {
+    if device.is_some() {
+        return owner_only_response();
+    }
+    reply(with_core(&state, move |j| j.profile_update(&body)).await)
+}
+
 /// Permessi del proprietario: lettura e modifica solo dal computer del Core (ADR-0116).
 async fn permissions_get(
     State(state): State<Shared>,
@@ -1813,6 +1937,19 @@ fn reply(result: Result<Value, CoreError>) -> Response {
     }
 }
 
+/// Ascolto «hey Jarvis» (ADR-0134): solo il proprietario, e la risposta è un sì o un no.
+async fn voice_wake(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    body: axum::body::Bytes,
+) -> Response {
+    if device.is_some() {
+        return owner_only_response();
+    }
+    let audio = body.to_vec();
+    reply(with_core(&state, move |j| j.voice_wake(&audio)).await)
+}
+
 async fn voice_transcribe(
     State(state): State<Shared>,
     Query(q): Query<std::collections::HashMap<String, String>>,
@@ -2062,12 +2199,101 @@ async fn workflows(State(state): State<Shared>) -> Response {
     )
 }
 
-async fn devices(State(state): State<Shared>) -> Response {
-    let pairing_urls: Vec<_> = state
+/// Un host pubblicabile: nome completo (con almeno un punto), senza caratteri jolly né porte.
+pub fn valid_remote_host(host: &str) -> bool {
+    host.len() <= 253
+        && host.contains('.')
+        && host.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+        })
+}
+
+fn pairing_urls(state: &Shared) -> Vec<String> {
+    state
         .remote_hosts
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
         .iter()
         .map(|host| format!("https://{host}"))
-        .collect();
+        .collect()
+}
+
+/// Codifica per un parametro di URL: lascia solo i caratteri sicuri.
+fn percent_encode(text: &str) -> String {
+    text.bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (byte as char).to_string()
+            }
+            _ => format!("%{byte:02X}"),
+        })
+        .collect()
+}
+
+/// Collegamento di associazione (ADR-0137): un solo tocco compila indirizzo e codice sul dispositivo.
+pub fn pairing_link(origin: &str, code: &str) -> String {
+    format!(
+        "jarvis://pair?origin={}&code={}",
+        percent_encode(origin),
+        percent_encode(code)
+    )
+}
+
+/// Indirizzi pubblici del Core (ADR-0137): il proprietario li gestisce dall'app, senza file né variabili.
+async fn devices_access_get(State(state): State<Shared>) -> Response {
+    let hosts = state
+        .remote_hosts
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    Json(json!({"hosts": hosts, "pairing_urls": pairing_urls(&state)})).into_response()
+}
+
+async fn devices_access_put(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let dir = with_core(&state, |j| j.data_dir()).await;
+    let mut hosts = state
+        .remote_hosts
+        .write()
+        .unwrap_or_else(|e| e.into_inner());
+    if let Some(host) = body["add"].as_str() {
+        // Accetta anche un indirizzo copiato per intero: https://nome.esempio.net/ → nome.esempio.net
+        let host = host
+            .trim()
+            .trim_start_matches("https://")
+            .trim_end_matches('/')
+            .to_ascii_lowercase();
+        if !valid_remote_host(&host) {
+            return CoreError::BadRequest(
+                "Indirizzo non valido: serve un nome completo come casa.tailnet.ts.net, senza porta né caratteri jolly".into(),
+            )
+            .into_response();
+        }
+        if !hosts.contains(&host) {
+            hosts.push(host);
+        }
+    } else if let Some(host) = body["remove"].as_str() {
+        hosts.retain(|h| !h.eq_ignore_ascii_case(host.trim()));
+    } else {
+        return CoreError::BadRequest("indica «add» o «remove»".into()).into_response();
+    }
+    hosts.sort_unstable();
+    hosts.dedup();
+    if std::fs::write(dir.join("remote-hosts.txt"), hosts.join("\n")).is_err() {
+        return CoreError::Internal("impossibile salvare gli indirizzi".into()).into_response();
+    }
+    let current = hosts.clone();
+    drop(hosts);
+    Json(json!({"hosts": current, "pairing_urls": pairing_urls(&state)})).into_response()
+}
+
+async fn devices(State(state): State<Shared>) -> Response {
+    let pairing_urls = pairing_urls(&state);
     reply(
         with_core(&state, move |j| {
             j.devices()
@@ -2084,15 +2310,22 @@ async fn create_pairing(State(state): State<Shared>, Json(body): Json<Value>) ->
         .flatten()
         .filter_map(|s| s.as_str().map(str::to_string))
         .collect();
+    let origins = pairing_urls(&state);
     reply(
         with_core(&state, move |j| {
-            let invite = j.create_pairing(&scopes)?;
+            let mut invite = j.create_pairing(&scopes)?;
             if let Some(previous) = body["replace"]
                 .as_str()
                 .filter(|old| invite["code"] != *old)
             {
                 j.cancel_pairing(previous);
             }
+            let code = invite["code"].as_str().unwrap_or_default().to_string();
+            invite["links"] = json!(origins
+                .iter()
+                .map(|origin| pairing_link(origin, &code))
+                .collect::<Vec<_>>());
+            invite["link"] = invite["links"][0].clone();
             Ok(invite)
         })
         .await,
@@ -2551,7 +2784,7 @@ pub fn state_with_remote(
         port,
         last_health: Mutex::new(json!({})),
         cloud_slots: Arc::new(tokio::sync::Semaphore::new(2)),
-        remote_hosts,
+        remote_hosts: std::sync::RwLock::new(remote_hosts),
         nodes,
         device_db,
         setup,

@@ -326,6 +326,34 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
             .contains { route == $0 || route.hasPrefix($0 + "/") }
     }
 
+    /// Invia un audio WAV (ADR-0134): serve all'ascolto «Hey Jarvis» e alla trascrizione; restituisce il JSON del Core.
+    func postAudio(_ path: String, wav: Data, timeout: TimeInterval = 60) async throws -> [String: Any] {
+        guard process?.isRunning == true, parentPipe != nil else {
+            throw CoreFailure(message: "La sessione del Core è chiusa.")
+        }
+        guard path.hasPrefix("/api/voice/"), let url = URL(string: "http://127.0.0.1:8765" + path) else {
+            throw CoreFailure(message: "Indirizzo del Core non valido.")
+        }
+        if uiLocked {
+            throw CoreFailure(message: "JARVIS è bloccato: sblocca l’interfaccia per continuare.")
+        }
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        request.httpMethod = "POST"
+        request.setValue(token, forHTTPHeaderField: "X-Jarvis-Token")
+        request.setValue("audio/wav", forHTTPHeaderField: "Content-Type")
+        request.httpBody = wav
+        let (data, response) = try await urlSession.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw CoreFailure(message: "Risposta del Core assente.")
+        }
+        let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        guard (200..<300).contains(http.statusCode) else {
+            let error = object?["error"] as? [String: Any]
+            throw CoreFailure(message: error?["message"] as? String ?? "Il Core ha risposto HTTP \(http.statusCode).")
+        }
+        return object ?? [:]
+    }
+
     /// Chat in streaming (ADR-0131): righe NDJSON `delta` (testo), `done` (esito) o `error`. `onDelta` riceve ogni
     /// frammento di testo; il risultato è l'esito finale, lo stesso oggetto di `request`.
     func stream(_ path: String, body: [String: Any], timeout: TimeInterval = 190,

@@ -213,6 +213,12 @@ def _describe_tool_result(result: dict) -> str:
     if tool == "biz.loan":
         return (f"Rata mensile {output.get('monthly_payment'):.2f} € per {output.get('months')} mesi: "
                 f"totale {output.get('total_paid'):.2f} €, di cui interessi {output.get('total_interest'):.2f} €.")
+    if tool == "text.correct":
+        changes = output.get("changes") or []
+        notes = "; ".join(f"«{c['from']}» → «{c['to']}»" for c in changes[:8])
+        if not output.get("changed"):
+            return "Il testo è già corretto."
+        return f"Testo corretto:\n{output.get('text')}" + (f"\n\nParole cambiate: {notes}." if notes else "")
     if tool == "biz.margin":
         markup = output.get("markup_percent")
         return (f"Costo {output.get('cost'):.2f} €, prezzo {output.get('price'):.2f} €: utile {output.get('profit'):.2f} €, "
@@ -533,6 +539,9 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
     (re.compile(r"^\s*(?:rata|mutuo|finanziamento)\D{0,20}?(\d[\d.,]*)\s*(?:€|euro)?\s+al\s+(\d+(?:[.,]\d+)?)\s*%\s+(?:in|per)\s+(\d+)\s+(mesi|anni)\s*$", re.I), "biz.loan",
      lambda m: {"principal": _it_number(m[1]), "annual_rate_percent": _it_number(m[2]),
                 "months": int(m[3]) * (12 if m[4].lower() == "anni" else 1)}),
+    # Correttore dei testi (ADR-0135).
+    (re.compile(r"^\s*(?:correggi(?: il testo| l'ortografia)?|controlla l'ortografia)\s*:\s*(\S.*)$", re.I | re.S), "text.correct",
+     lambda m: {"text": m[1].strip()[:8000]}),
     # Direzione aziendale (ADR-0132): calcoli di CEO e CFO, sempre da strumento.
     (re.compile(r"^\s*(?:margine|markup|ricarico)\s+(?:con\s+)?costo\s+(\d[\d.,]*)\s*(?:€|euro)?\s+(?:e\s+)?prezzo\s+(\d[\d.,]*)\s*(?:€|euro)?\s*$", re.I), "biz.margin",
      lambda m: {"cost": _it_number(m[1]), "price": _it_number(m[2])}),
