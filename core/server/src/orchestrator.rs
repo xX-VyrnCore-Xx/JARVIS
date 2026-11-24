@@ -3064,7 +3064,7 @@ impl Jarvis {
             .map_err(CoreError::BadRequest)?;
         Ok(json!({
             "registered": true,
-            "delivery_status": crate::push::delivery_config_status()
+            "delivery_status": crate::push::delivery_config_status(&self.cfg.data_dir)
         }))
     }
 
@@ -3353,6 +3353,13 @@ impl Jarvis {
             .notifications_read_all(&now())
             .map_err(internal)?;
         Ok(json!({"marked": n, "unread": 0}))
+    }
+
+    /// Arresto ordinato (ADR-0103): ferma il worker AI senza attendere il drop del Core e porta il WAL del
+    /// database nel file principale, così l'uscita immediata del processo non lascia nulla in sospeso.
+    pub fn shutdown(&mut self) {
+        self.worker = None;
+        let _ = self.store.maintenance();
     }
 
     /// Solo per i test: simula l'arresto improvviso del worker.

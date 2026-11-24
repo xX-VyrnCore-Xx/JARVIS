@@ -1,5 +1,26 @@
 # Configurazione Firebase Cloud Messaging
 
+## Verifica rapida
+
+`scripts/check_firebase.py` controlla la configurazione senza mai stampare chiavi o token:
+
+```bash
+python3 scripts/check_firebase.py --google-services google-services.json \
+    --service-account ~/jarvis/fcm-service-account.json \
+    --apk JARVIS_<versione>_android-release.apk \
+    --core http://127.0.0.1:8765 --token <token di sessione>
+```
+
+Le tre parti devono essere tutte a posto, perché una sola mancante basta a non far arrivare le push:
+
+| Parte | Dove si configura | Cosa succede se manca |
+|---|---|---|
+| App Android | Quattro Actions variables `JARVIS_FIREBASE_*`, lette quando si costruisce l'APK | L'APK non contiene gli identificativi e il telefono non può registrarsi: **serve una nuova release dopo aver impostato le variabili** |
+| Core | `JARVIS_FCM_SERVICE_ACCOUNT_FILE` con la chiave di un account di servizio dello stesso progetto | Le registrazioni arrivano ma il Core non può inviare (`GET /api/push/status` mostra `configuration_missing`) |
+| Telefono | Permesso notifiche e «Attiva notifiche push» nella scheda Notifiche | Nessuna registrazione (`registered: 0`) |
+
+Ordine consigliato: 1) variabili e nuova release, 2) file dell'account di servizio sul Core e riavvio, 3) installa l'APK, associa il telefono e attiva le push, 4) premi «Briefing adesso» sul computer con l'app Android in background.
+
 JARVIS invia le notifiche push dal Core ai dispositivi Android associati usando FCM HTTP v1. Le
 notifiche contengono solo un avviso generico e un identificativo: non includono il titolo o il testo
 privato dell'evento.
@@ -32,15 +53,16 @@ Gmail e Calendar usano un’autorizzazione OAuth separata dalle notifiche push. 
 
 ## Credenziale server sul Core
 
-1. In Google Cloud crea un service account dedicato al progetto e assegnagli solo i permessi
-   necessari per inviare messaggi FCM (ruolo **Firebase Cloud Messaging API Admin**).
-2. Genera una chiave JSON solo se il deployment non può usare credenziali di workload/ambiente.
-3. Copia il JSON fuori dal repository, in un percorso leggibile solo dall'utente del Core
-   (permessi `0600` su Unix).
-4. Avvia il Core con `JARVIS_FCM_SERVICE_ACCOUNT_FILE=/percorso/protetto/service-account.json`.
-   Il `project_id` del file deve coincidere con il progetto dell'app Android.
-5. Riavvia JARVIS e verifica lo stato push in **Sistema**/log. Se il file manca o non è valido,
-   il Core registra un errore esplicito e non invia il push.
+1. In Google Cloud crea un account di servizio dedicato al progetto Firebase e assegnagli solo il ruolo **Firebase Cloud Messaging API Admin**.
+2. Nella scheda **Chiavi** dell'account crea una chiave **JSON** e scaricala. Non va nel repository, nelle Actions né in chat.
+3. **Metodo semplice (consigliato):** copia il file nella cartella dati di JARVIS con il nome `fcm-service-account.json`:
+   - macOS: `~/Library/Application Support/JARVIS/fcm-service-account.json`
+   - Windows: `%LOCALAPPDATA%\JARVIS\fcm-service-account.json`
+   - Linux o Core headless: `<JARVIS_DATA_DIR>/fcm-service-account.json`
+
+   Su macOS e Linux limita i permessi: `chmod 600 <file>`. Il Core rilegge il file a ogni invio, quindi non serve riavviare.
+4. **Alternativa:** variabile d'ambiente `JARVIS_FCM_SERVICE_ACCOUNT_FILE=/percorso/del/file.json` (ha la precedenza). Funziona per un Core avviato da terminale; un'app aperta dal Finder o dal menu Start non eredita le variabili della shell, quindi per le app installate usa il metodo semplice.
+5. Il `project_id` del file deve coincidere con il progetto dell'app Android. Controlla lo stato con `GET /api/push/status` o con `scripts/check_firebase.py --core ... --token ...`: `delivery` deve valere `ready`. Se il file manca il Core non invia e registra un errore esplicito.
 
 Non caricare il JSON del service account nel repository, nei log o nelle Actions di build. Il Core
 usa questa credenziale al runtime per ottenere un token OAuth breve; non è necessaria per compilare

@@ -190,14 +190,16 @@ mod tests {
 }
 
 /// Legge un flusso Server-Sent Events e chiama `on_event(nome, dati)` per ogni evento completo. Si ferma
-/// quando il flusso termina, in caso di errore di lettura o se `on_event` restituisce `false`.
+/// quando il flusso termina, in caso di errore di lettura, se `on_event` restituisce `false` o se `keep_going`
+/// (controllato a ogni riga, segnali di vita compresi) restituisce `false`.
 pub fn read_events<R: std::io::BufRead>(
     mut reader: R,
+    keep_going: impl Fn() -> bool,
     mut on_event: impl FnMut(&str, &str) -> bool,
 ) {
     let (mut name, mut data) = (String::new(), String::new());
     let mut line = String::new();
-    loop {
+    while keep_going() {
         line.clear();
         // Una riga senza fine non deve crescere senza limite.
         match std::io::BufRead::read_line(
@@ -233,10 +235,14 @@ mod stream_tests {
     fn server_sent_events_are_split_and_comments_ignored() {
         let raw = "retry: 3000\nevent: ready\ndata: {}\n\n: ping\n\nid: 7\nevent: notification\ndata: {\"a\":1}\n\nevent: resync\ndata: {}\n\n";
         let mut seen = Vec::new();
-        read_events(std::io::Cursor::new(raw), |name, data| {
-            seen.push((name.to_string(), data.to_string()));
-            true
-        });
+        read_events(
+            std::io::Cursor::new(raw),
+            || true,
+            |name, data| {
+                seen.push((name.to_string(), data.to_string()));
+                true
+            },
+        );
         assert_eq!(
             seen,
             [
@@ -247,10 +253,25 @@ mod stream_tests {
         );
         // Il chiamante può fermare la lettura.
         let mut count = 0;
-        read_events(std::io::Cursor::new(raw), |_, _| {
-            count += 1;
-            false
-        });
+        read_events(
+            std::io::Cursor::new(raw),
+            || true,
+            |_, _| {
+                count += 1;
+                false
+            },
+        );
         assert_eq!(count, 1);
+        // Un flusso ormai superato (nuova connessione) si ferma alla riga successiva, anche senza eventi.
+        let mut events = 0;
+        read_events(
+            std::io::Cursor::new(raw),
+            || false,
+            |_, _| {
+                events += 1;
+                true
+            },
+        );
+        assert_eq!(events, 0);
     }
 }

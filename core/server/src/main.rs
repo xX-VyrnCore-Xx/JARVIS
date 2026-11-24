@@ -360,11 +360,31 @@ async fn main() {
     {
         eprintln!("Server terminato con errore: {e}");
     }
-    // Ultima istantanea delle metriche, così lo storico copre anche la fine della sessione.
-    if let Ok(mut j) = core.lock() {
-        let _ = j.persist_metrics(true);
+    // Ultima istantanea delle metriche, così lo storico copre anche la fine della sessione. Il blocco del Core
+    // può essere tenuto da una richiesta ancora in corso: si attende al massimo 3 secondi.
+    for _ in 0..30 {
+        match core.try_lock() {
+            Ok(mut j) => {
+                let _ = j.persist_metrics(true);
+                j.shutdown();
+                break;
+            }
+            Err(std::sync::TryLockError::Poisoned(e)) => {
+                let mut j = e.into_inner();
+                j.shutdown();
+                break;
+            }
+            Err(std::sync::TryLockError::WouldBlock) => {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        }
     }
     println!("JARVIS arrestato.");
+    // Uscita esplicita (ADR-0103): al termine di `main` il runtime attende i compiti bloccanti ancora in corso
+    // (una richiesta lenta, una lettura di rete) e il processo poteva restare vivo oltre l'arresto, come ha
+    // mostrato la prova di installazione su macOS. Dopo l'arresto ordinato non c'è altro da attendere.
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    std::process::exit(0);
 }
 
 /// Arresto con Ctrl+C oppure, se `JARVIS_EXIT_WITH_PARENT=stdin`, quando il processo padre (per esempio
