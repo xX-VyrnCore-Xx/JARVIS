@@ -74,3 +74,5 @@ Queste lacune non riattivano né richiedono il client Web o iOS; vanno completat
 ## Plancia (ADR-0111)
 
 La Plancia di desktop e macOS segue un unico flusso: intestazione di stato, «Da guardare» (azioni che richiedono il proprietario, con il pulsante che porta alla pagina), metriche cliccabili, Core collegati, attività e notifiche. Nessuna altezza fissa per il contenuto; l'avatar ha uno spazio riservato.
+
+**Aggiornamento Android (ADR-0112).** La Plancia Android ha la scheda «Aggiornamenti»: controlla, scarica con verifica SHA-256 e passa l'APK all'installatore di sistema, che chiede conferma.
