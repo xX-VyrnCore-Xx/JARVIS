@@ -365,23 +365,19 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     private var dashboard: some View {
         VStack(alignment: .leading, spacing: 18) {
-            dashboardHero
-            card("Accesso rapido", icon: "square.grid.2x2") {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 145), alignment: .leading)], alignment: .leading) {
-                    ForEach([Section.models, .memory, .workflows, .connectors]) { destination in
-                        Button { select(destination) } label: {
-                            Label(destination.rawValue, systemImage: destination.icon)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }.buttonStyle(.bordered)
-                    }
-                }
-            }
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 155), spacing: 12, alignment: .top)], spacing: 12) {
+            dashboardHeader
+            attentionCard
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 12, alignment: .top)], spacing: 12) {
                 dashboardTile("Core", value: coreStatus, icon: "cpu", color: coreIsUp ? .green : .orange,
                               destination: .system)
-                dashboardTile("Conferme", value: count("pending_confirmations"), icon: "checkmark.shield",
-                              color: (core.health["pending_confirmations"] as? Int ?? 0) > 0 ? .orange : .cyan,
+                dashboardTile("Intelligenza artificiale", value: aiStatus.0, icon: "sparkles", color: aiStatus.1,
+                              destination: .models)
+                dashboardTile("Conferme in attesa", value: count("pending_confirmations"), icon: "checkmark.shield",
+                              color: (core.health["pending_confirmations"] as? Int ?? 0) > 0 ? .orange : .green,
                               destination: .confirmations)
+                dashboardTile("Notifiche da leggere", value: count("notifications_unread"), icon: "bell",
+                              color: (core.health["notifications_unread"] as? Int ?? 0) > 0 ? .cyan : .green,
+                              destination: .notifications)
                 dashboardTile("Automazioni attive", value: count("automations"), icon: "bolt",
                               color: .cyan, destination: .workflows)
                 dashboardTile("Verifica audit", value: auditStatus.0, icon: "lock.shield",
@@ -396,6 +392,60 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     recentActivity
                     providerStatus
                 }
+            }
+        }
+    }
+
+    /// Cose che richiedono l'attenzione del proprietario: (icona, colore, titolo, dettaglio, destinazione).
+    private var attentionItems: [(icon: String, color: Color, title: String, detail: String, destination: Section)] {
+        var items: [(icon: String, color: Color, title: String, detail: String, destination: Section)] = []
+        let pending = core.health["pending_confirmations"] as? Int ?? 0
+        if pending > 0 {
+            items.append(("checkmark.shield", .orange, pending == 1 ? "Un'azione attende la tua conferma" : "\(pending) azioni attendono la tua conferma",
+                          "JARVIS non procede senza il tuo consenso.", .confirmations))
+        }
+        if let audit = core.health["audit"] as? [String: Any], audit["chain_valid"] as? Bool == false {
+            items.append(("lock.trianglebadge.exclamationmark", .red, "Il registro di audit non risulta integro",
+                          "Controlla la catena e la firma del registro.", .security))
+        }
+        if !coreIsUp {
+            items.append(("exclamationmark.triangle", .orange, "Il Core non risponde",
+                          "Controlla lo stato in Sistema.", .system))
+        } else if aiStatus.1 == .red {
+            items.append(("sparkles", .red, "L'intelligenza artificiale non è disponibile",
+                          "Verifica la chiave e il modello in Modelli AI.", .models))
+        }
+        let unread = core.health["notifications_unread"] as? Int ?? 0
+        if unread > 0 {
+            items.append(("bell.badge", .cyan, unread == 1 ? "Una notifica da leggere" : "\(unread) notifiche da leggere",
+                          "Aprile per vedere cosa è successo mentre non c'eri.", .notifications))
+        }
+        return items
+    }
+
+    private var attentionCard: some View {
+        card("Da guardare", icon: "eye") {
+            let items = attentionItems
+            if items.isEmpty {
+                Label("Nessuna azione richiesta: servizi attivi e nessuna conferma in sospeso.",
+                      systemImage: "checkmark.circle")
+                    .foregroundStyle(.green)
+            }
+            ForEach(items.indices, id: \.self) { index in
+                let item = items[index]
+                Button { select(item.destination) } label: {
+                    HStack(alignment: .center, spacing: 12) {
+                        Image(systemName: item.icon).foregroundStyle(item.color).frame(width: 24)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.title).font(.body.weight(.medium))
+                            Text(item.detail).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 4).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                .accessibilityElement(children: .combine)
             }
         }
     }
@@ -418,62 +468,56 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         (core.health[key] as? Int).map(String.init) ?? "—"
     }
 
-    private var dashboardHero: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 12) {
-                welcome.frame(minWidth: 255, maxWidth: .infinity, alignment: .leading)
-                Avatar(thinking: sending).frame(width: 244)
+    private var aiStatus: (String, Color) {
+        let status = (core.health["ai"] as? [String: Any])?["status"] as? String
+        switch status?.lowercased() {
+        case "up", "active", "ready", "online", "ok", "healthy", "configured": return ("Operativa", .green)
+        case "down", "error", "failed", "offline", "unavailable", "stopped": return ("Non disponibile", .red)
+        case .some: return ("In avvio", .orange)
+        case .none: return ("—", .secondary)
+        }
+    }
+
+    private var dashboardHeader: some View {
+        let urgent = attentionItems.filter { $0.color != .cyan }.count
+        let headline = urgent == 0 ? "Tutto in ordine." : (urgent == 1 ? "Una cosa richiede la tua attenzione." : "\(urgent) cose richiedono la tua attenzione.")
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 18) {
+                headerText(headline).frame(maxWidth: .infinity, alignment: .leading)
+                Avatar(thinking: sending).frame(width: 132, height: 132)
             }
-            VStack(alignment: .leading, spacing: 10) {
-                Avatar(thinking: sending).frame(width: 176).frame(maxWidth: .infinity)
-                welcome
+            VStack(alignment: .leading, spacing: 12) {
+                Avatar(thinking: sending).frame(width: 110, height: 110).frame(maxWidth: .infinity)
+                headerText(headline)
             }
         }
-        .padding(24)
+        .padding(22)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            ZStack {
-                LinearGradient(colors: [panel, base], startPoint: .topLeading, endPoint: .bottomTrailing)
-                RadialGradient(colors: [.cyan.opacity(0.16), .clear], center: .trailing,
-                               startRadius: 8, endRadius: 330)
-                Canvas { context, size in
-                    var lines = Path()
-                    for x in stride(from: 0.0, through: size.width, by: 28.0) {
-                        lines.move(to: CGPoint(x: x, y: 0))
-                        lines.addLine(to: CGPoint(x: x, y: size.height))
-                    }
-                    for y in stride(from: 0.0, through: size.height, by: 28.0) {
-                        lines.move(to: CGPoint(x: 0, y: y))
-                        lines.addLine(to: CGPoint(x: size.width, y: y))
-                    }
-                    context.stroke(lines, with: .color(.cyan.opacity(0.06)), lineWidth: 1)
-                }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 20))
-        }
+        .background(LinearGradient(colors: [panel, base], startPoint: .topLeading, endPoint: .bottomTrailing),
+                    in: RoundedRectangle(cornerRadius: 20))
         .overlay { RoundedRectangle(cornerRadius: 20).strokeBorder(.cyan.opacity(0.28)) }
     }
 
-    private var welcome: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Label("Sessione proprietario attiva", systemImage: "lock.shield")
+    private func headerText(_ headline: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("JARVIS · Plancia", systemImage: "lock.shield")
                 .font(.subheadline.weight(.medium)).foregroundStyle(.cyan)
-            Text("JARVIS").font(.system(size: 52, weight: .semibold, design: .rounded))
-                .tracking(3).foregroundStyle(.white)
-                .accessibilityAddTraits(.isHeader)
+            Text(headline).font(.system(size: 28, weight: .semibold, design: .rounded))
+                .foregroundStyle(.white).accessibilityAddTraits(.isHeader)
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 8) { openChat; openConnections }
-                VStack(alignment: .leading, spacing: 8) { openChat; openConnections }
+                HStack(spacing: 8) { headerButtons }
+                VStack(alignment: .leading, spacing: 8) { headerButtons }
             }
         }
     }
 
-    private var openChat: some View {
-        Button { select(.chat) } label: { Label("Apri chat", systemImage: "bubble.left") }
+    @ViewBuilder private var headerButtons: some View {
+        Button { select(.chat) } label: { Label("Nuova chat", systemImage: "bubble.left") }
             .buttonStyle(.borderedProminent).controlSize(.large).tint(.cyan)
-    }
-
-    private var openConnections: some View {
+        Button { select(.missions) } label: { Label("Missioni", systemImage: "scope") }
+            .buttonStyle(.bordered).controlSize(.large)
+        Button { select(.memory) } label: { Label("Memoria", systemImage: "brain") }
+            .buttonStyle(.bordered).controlSize(.large)
         Button { select(.devices) } label: { Label("Connessioni", systemImage: "network") }
             .buttonStyle(.bordered).controlSize(.large)
     }

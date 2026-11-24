@@ -1294,281 +1294,381 @@ impl JarvisApp {
             });
     }
 
+    /// Va a una pagina dall'interno della Plancia.
+    fn go(&mut self, ctx: &egui::Context, page: &str) {
+        self.current = page.into();
+        self.data = None;
+        self.refresh(ctx);
+    }
+
+    /// Plancia (ADR-0111): intestazione con stato, cose che richiedono attenzione, metriche cliccabili,
+    /// Core collegati, attività e notifiche. Nessuna altezza fissa: tutto scorre e si adatta alla larghezza.
     fn show_dashboard(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         if let Some(error) = &self.error {
             ui.colored_label(egui::Color32::LIGHT_RED, error);
         }
-
-        let core_status = self
-            .data
-            .as_ref()
-            .and_then(|data| {
-                data["aggregate"]["core_label"]
-                    .as_str()
-                    .or_else(|| data["core"]["status"].as_str())
-            })
+        let data = self.data.clone().unwrap_or(Value::Null);
+        let text = |value: &Value| value.as_str().unwrap_or("—").to_owned();
+        let count = |value: &Value| {
+            value
+                .as_u64()
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "—".into())
+        };
+        let core_status = data["aggregate"]["core_label"]
+            .as_str()
+            .or_else(|| data["core"]["status"].as_str())
             .unwrap_or("—")
             .to_owned();
-        let ai_status = self
-            .data
-            .as_ref()
-            .and_then(|data| {
-                data["aggregate"]["ai_label"]
-                    .as_str()
-                    .or_else(|| data["ai"]["status"].as_str())
-            })
+        let ai_status = data["aggregate"]["ai_label"]
+            .as_str()
+            .or_else(|| data["ai"]["status"].as_str())
             .unwrap_or("—")
             .to_owned();
-        let confirmations = self
-            .data
-            .as_ref()
-            .and_then(|data| data["pending_confirmations"].as_u64())
-            .map(|count| count.to_string())
-            .unwrap_or_else(|| "—".into());
-        let unread = self
-            .data
-            .as_ref()
-            .and_then(|data| data["notifications_unread"].as_u64())
-            .map(|count| count.to_string())
-            .unwrap_or_else(|| "—".into());
-        let version = self
-            .data
-            .as_ref()
-            .and_then(|data| data["core"]["version"].as_str())
-            .unwrap_or("—")
-            .to_owned();
-        let automations = self
-            .data
-            .as_ref()
-            .and_then(|data| data["automations"].as_u64())
-            .map(|count| count.to_string())
-            .unwrap_or_else(|| "—".into());
-        let audit_status = self.data.as_ref().map_or("—", |data| {
-            if data["aggregate"]["all_online"] == false {
-                "Parziale"
-            } else {
-                match data["audit"]["chain_valid"].as_bool() {
-                    Some(true) => "Verificato",
-                    Some(false) => "Da controllare",
-                    None => "—",
-                }
+        let confirmations = count(&data["pending_confirmations"]);
+        let unread = count(&data["notifications_unread"]);
+        let automations = count(&data["automations"]);
+        let version = text(&data["core"]["version"]);
+        let audit_status = if data.is_null() {
+            "—"
+        } else if data["aggregate"]["all_online"] == false {
+            "Parziale"
+        } else {
+            match data["audit"]["chain_valid"].as_bool() {
+                Some(true) => "Verificato",
+                Some(false) => "Da controllare",
+                None => "—",
             }
-        });
-        let core_color = self.data.as_ref().map_or(ACCENT, dashboard_core_color);
-        let ai_color = self
-            .data
-            .as_ref()
-            .map_or(ACCENT, |data| dashboard_ai_color(data, &ai_status));
-
-        egui::Frame::new()
-            .fill(SURFACE)
-            .stroke(egui::Stroke::new(
-                1.0,
-                egui::Color32::from_rgb(30, 112, 145),
-            ))
-            .corner_radius(22)
-            .inner_margin(18)
-            .show(ui, |ui| {
-                let width = ui.available_width();
-                ui.set_min_width(width);
-
-                let time = ctx.input(|input| input.time) as f32;
-                let pulse = if self.reduce_motion {
-                    0.0
-                } else {
-                    (time * 1.1).sin() * 0.5 + 0.5
-                };
-                let rect = ui.max_rect();
-                let painter = ui.painter().with_clip_rect(rect);
-                let orbit_x = if width >= 900.0 {
-                    rect.left() + rect.width() * 0.59
-                } else {
-                    rect.right() - rect.width() * 0.22
-                };
-                let orbit = egui::pos2(orbit_x, rect.center().y);
-                painter.circle_filled(
-                    orbit,
-                    118.0 + pulse * 8.0,
-                    egui::Color32::from_rgba_unmultiplied(25, 161, 210, 8),
-                );
-                painter.circle_stroke(
-                    orbit,
-                    132.0 + pulse * 4.0,
-                    egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(64, 194, 225, 42)),
-                );
-                painter.circle_stroke(
-                    orbit,
-                    148.0,
-                    egui::Stroke::new(0.7, egui::Color32::from_rgba_unmultiplied(64, 194, 225, 22)),
-                );
-
-                if width < 570.0 {
-                    self.dashboard_intro(ui, ctx, &core_status, &ai_status, core_color, ai_color);
-                    ui.add_space(6.0);
-                    ui.vertical_centered(|ui| show_avatar(ui, ctx, self.reduce_motion));
-                    ui.add_space(4.0);
-                    self.dashboard_actions(ui, ctx);
-                } else if width >= 900.0 {
-                    ui.set_height(292.0);
-                    let intro_width = (width * 0.49).clamp(280.0, width - 478.0);
-                    let avatar_width = 280.0;
-                    let actions_width = (width - intro_width - avatar_width - 28.0).max(170.0);
-                    ui.horizontal_top(|ui| {
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(intro_width, 284.0),
-                            egui::Layout::top_down(egui::Align::Min),
-                            |ui| {
-                                self.dashboard_intro(
-                                    ui,
-                                    ctx,
-                                    &core_status,
-                                    &ai_status,
-                                    core_color,
-                                    ai_color,
-                                )
-                            },
-                        );
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(avatar_width, 284.0),
-                            egui::Layout::centered_and_justified(egui::Direction::TopDown),
-                            |ui| show_avatar(ui, ctx, self.reduce_motion),
-                        );
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(actions_width, 284.0),
-                            egui::Layout::centered_and_justified(egui::Direction::TopDown),
-                            |ui| self.dashboard_actions(ui, ctx),
-                        );
-                    });
-                } else {
-                    ui.set_height(292.0);
-                    let intro_width = width * 0.62;
-                    let avatar_width = (width - intro_width - 12.0).max(132.0);
-                    ui.horizontal_top(|ui| {
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(intro_width, 284.0),
-                            egui::Layout::top_down(egui::Align::Min),
-                            |ui| {
-                                self.dashboard_intro(
-                                    ui,
-                                    ctx,
-                                    &core_status,
-                                    &ai_status,
-                                    core_color,
-                                    ai_color,
-                                )
-                            },
-                        );
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(avatar_width, 284.0),
-                            egui::Layout::centered_and_justified(egui::Direction::TopDown),
-                            |ui| show_avatar(ui, ctx, self.reduce_motion),
-                        );
-                    });
-                    ui.add_space(4.0);
-                    self.dashboard_actions(ui, ctx);
-                }
-            });
-
-        ui.add_space(16.0);
-        ui.horizontal_wrapped(|ui| {
-            ui.heading("Panoramica");
-            ui.label(
-                egui::RichText::new("Servizi, conferme e integrità del sistema")
-                    .small()
-                    .weak(),
-            );
-        });
-        ui.add_space(8.0);
+        };
+        let core_color = if data.is_null() {
+            ACCENT
+        } else {
+            dashboard_core_color(&data)
+        };
+        let ai_color = if data.is_null() {
+            ACCENT
+        } else {
+            dashboard_ai_color(&data, &ai_status)
+        };
         let audit_color = match audit_status {
             "Verificato" => POSITIVE,
             "Da controllare" => NEGATIVE,
             "Parziale" => CAUTION,
             _ => ACCENT,
         };
-        let metrics = [
-            ("CORE", core_status.as_str(), version.as_str(), core_color),
+
+        // Cose che richiedono attenzione: (colore, titolo, dettaglio, pagina, etichetta del pulsante).
+        let mut attention: Vec<(egui::Color32, String, String, &'static str, &'static str)> =
+            Vec::new();
+        if data["first_run"] == true {
+            attention.push((
+                CAUTION,
+                "Configurazione iniziale da completare".into(),
+                "Imposta modelli, sicurezza e dispositivi.".into(),
+                "system",
+                "Apri Sistema",
+            ));
+        }
+        if let Some(n) = data["pending_confirmations"].as_u64().filter(|n| *n > 0) {
+            attention.push((
+                CAUTION,
+                format!("{n} azioni attendono la tua conferma"),
+                "JARVIS non procede senza il tuo consenso.".into(),
+                "tasks",
+                "Rivedi",
+            ));
+        }
+        if audit_status == "Da controllare" {
+            attention.push((
+                NEGATIVE,
+                "Il registro di audit non risulta integro".into(),
+                "Controlla la catena e la firma del registro.".into(),
+                "audit",
+                "Apri Audit",
+            ));
+        }
+        if data["aggregate"]["all_online"] == false {
+            attention.push((
+                CAUTION,
+                "Un Core collegato non risponde".into(),
+                "Controlla rete e associazione nella sezione Core qui sotto.".into(),
+                "devices",
+                "Dispositivi",
+            ));
+        }
+        if ai_color == NEGATIVE {
+            attention.push((
+                NEGATIVE,
+                "L'intelligenza artificiale non è disponibile".into(),
+                "Verifica la chiave e il modello in Modelli AI.".into(),
+                "models",
+                "Modelli AI",
+            ));
+        }
+        if data["update_available"] == true {
+            attention.push((
+                ACCENT,
+                "È disponibile una nuova versione".into(),
+                "Scaricala e installala senza uscire dall'app.".into(),
+                "updates",
+                "Aggiorna",
+            ));
+        }
+        if data["notifications_unread"].as_u64().is_some_and(|n| n > 0)
+            && data["pending_confirmations"].as_u64() == Some(0)
+        {
+            attention.push((
+                ACCENT,
+                format!("{unread} notifiche da leggere"),
+                "Le trovi qui sotto, in Notifiche recenti.".into(),
+                "dashboard",
+                "",
+            ));
+        }
+
+        // Intestazione.
+        egui::Frame::new()
+            .fill(SURFACE)
+            .stroke(egui::Stroke::new(
+                1.0,
+                egui::Color32::from_rgb(30, 112, 145),
+            ))
+            .corner_radius(18)
+            .inner_margin(egui::Margin::symmetric(20, 16))
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                let wide = ui.available_width() >= 640.0;
+                ui.horizontal(|ui| {
+                    if wide {
+                        // L'avatar occupa uno spazio fisso a destra: niente sovrapposizioni.
+                        let side = 112.0;
+                        let text_width = (ui.available_width() - side - 16.0).max(200.0);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(text_width, side),
+                            egui::Layout::top_down(egui::Align::Min),
+                            |ui| {
+                                self.dashboard_header_text(
+                                    ui,
+                                    &attention,
+                                    &core_status,
+                                    &ai_status,
+                                    core_color,
+                                    ai_color,
+                                    &version,
+                                );
+                            },
+                        );
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(side, side),
+                            egui::Layout::top_down(egui::Align::Center),
+                            |ui| {
+                                draw_avatar(ui, ctx, self.reduce_motion, side);
+                            },
+                        );
+                    } else {
+                        ui.vertical(|ui| {
+                            self.dashboard_header_text(
+                                ui,
+                                &attention,
+                                &core_status,
+                                &ai_status,
+                                core_color,
+                                ai_color,
+                                &version,
+                            );
+                        });
+                    }
+                });
+                ui.add_space(10.0);
+                ui.horizontal_wrapped(|ui| {
+                    for (label, page) in [
+                        ("Nuova chat", "chat"),
+                        ("Attività", "tasks"),
+                        ("Missioni", "missions"),
+                        ("Memoria", "memory"),
+                        ("Sistema", "system"),
+                    ] {
+                        let primary = page == "chat";
+                        let button = egui::Button::new(egui::RichText::new(label).strong().color(
+                            if primary {
+                                ACCENT
+                            } else {
+                                egui::Color32::from_rgb(210, 224, 235)
+                            },
+                        ))
+                        .fill(if primary { SELECTED } else { RAISED })
+                        .corner_radius(10)
+                        .min_size(egui::vec2(104.0, 34.0));
+                        if ui.add(button).clicked() {
+                            if page == "chat" {
+                                self.current = "chat".into();
+                            } else {
+                                self.go(ctx, page);
+                            }
+                        }
+                    }
+                });
+            });
+
+        // Attenzione.
+        ui.add_space(16.0);
+        ui.heading("Da guardare");
+        ui.add_space(6.0);
+        if attention.iter().all(|a| a.4.is_empty()) && attention.is_empty() {
+            dashboard_row(
+                ui,
+                POSITIVE,
+                "Nessuna azione richiesta",
+                "Servizi attivi e nessuna conferma in sospeso.",
+            );
+        }
+        let mut target: Option<&'static str> = None;
+        for (color, title, detail, page, action) in &attention {
+            ui.horizontal(|ui| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2((ui.available_width() - 120.0).max(160.0), 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| dashboard_row(ui, *color, title, detail),
+                );
+                if !action.is_empty()
+                    && ui
+                        .add(egui::Button::new(*action).min_size(egui::vec2(104.0, 32.0)))
+                        .clicked()
+                {
+                    target = Some(page);
+                }
+            });
+            ui.add_space(4.0);
+        }
+        if let Some(page) = target {
+            self.go(ctx, page);
+        }
+
+        // Metriche.
+        ui.add_space(14.0);
+        ui.heading("Panoramica");
+        ui.add_space(6.0);
+        let level = |value: &str| match value {
+            "0" => POSITIVE,
+            "—" => ACCENT,
+            _ => CAUTION,
+        };
+        let metrics: [(&str, String, String, egui::Color32, &str); 6] = [
+            (
+                "CORE",
+                core_status.clone(),
+                format!("Versione {version}"),
+                core_color,
+                "system",
+            ),
             (
                 "INTELLIGENZA ARTIFICIALE",
-                ai_status.as_str(),
-                "Stato del servizio",
+                ai_status.clone(),
+                "Stato del servizio".into(),
                 ai_color,
+                "models",
             ),
             (
                 "CONFERME",
-                confirmations.as_str(),
-                "Operazioni in attesa",
-                if confirmations == "0" {
-                    POSITIVE
-                } else if confirmations == "—" {
-                    ACCENT
-                } else {
-                    CAUTION
-                },
+                confirmations.clone(),
+                "In attesa di te".into(),
+                level(&confirmations),
+                "tasks",
             ),
             (
                 "NOTIFICHE",
-                unread.as_str(),
-                "Da leggere",
-                if unread == "0" {
-                    POSITIVE
-                } else if unread == "—" {
-                    ACCENT
-                } else {
-                    CAUTION
-                },
+                unread.clone(),
+                "Da leggere".into(),
+                level(&unread),
+                "",
             ),
-            ("AUTOMAZIONI", automations.as_str(), "Attive", ACCENT),
+            (
+                "AUTOMAZIONI",
+                automations.clone(),
+                "Configurate".into(),
+                ACCENT,
+                "automations",
+            ),
             (
                 "INTEGRITÀ AUDIT",
-                audit_status,
-                "Registro locale",
+                audit_status.to_owned(),
+                "Registro locale".into(),
                 audit_color,
+                "audit",
             ),
         ];
-        let metrics_width = ui.available_width();
-        let columns = if metrics_width >= 900.0 {
-            3
-        } else if metrics_width >= 560.0 {
-            2
-        } else {
-            1
-        };
-        let gap = 12.0;
-        let card_width = (metrics_width - gap * (columns - 1) as f32) / columns as f32;
+        let width = ui.available_width();
+        let gap = 10.0;
+        let columns = ((width + gap) / (210.0 + gap)).floor().clamp(1.0, 3.0) as usize;
+        let card_width = (width - gap * (columns as f32 - 1.0)) / columns as f32;
+        let mut go_to: Option<&str> = None;
         for row in metrics.chunks(columns) {
             ui.horizontal(|ui| {
-                for (label, value, detail, color) in row {
-                    egui::Frame::new()
-                        .fill(RAISED)
-                        .stroke(egui::Stroke::new(
+                ui.spacing_mut().item_spacing.x = gap;
+                for (label, value, detail, color, page) in row {
+                    let (rect, response) = ui.allocate_exact_size(
+                        egui::vec2(card_width, 82.0),
+                        if page.is_empty() {
+                            egui::Sense::hover()
+                        } else {
+                            egui::Sense::click()
+                        },
+                    );
+                    let hovered = response.hovered() && !page.is_empty();
+                    let painter = ui.painter_at(rect);
+                    painter.rect(
+                        rect,
+                        12.0,
+                        if hovered { SELECTED } else { RAISED },
+                        egui::Stroke::new(
                             1.0,
                             egui::Color32::from_rgba_unmultiplied(
                                 color.r(),
                                 color.g(),
                                 color.b(),
-                                92,
+                                if hovered { 170 } else { 80 },
                             ),
-                        ))
-                        .corner_radius(14)
-                        .inner_margin(13)
-                        .show(ui, |ui| {
-                            ui.set_width((card_width - 28.0).max(80.0));
-                            ui.horizontal(|ui| {
-                                ui.label(egui::RichText::new("●").color(*color).small());
-                                ui.label(egui::RichText::new(*label).small().strong().weak());
-                            });
-                            ui.add_space(4.0);
-                            ui.label(
-                                egui::RichText::new(*value)
-                                    .size(23.0)
-                                    .strong()
-                                    .color(*color),
-                            );
-                            ui.small(egui::RichText::new(*detail).weak());
-                        });
+                        ),
+                        egui::StrokeKind::Inside,
+                    );
+                    painter.rect_filled(
+                        egui::Rect::from_min_size(
+                            rect.min + egui::vec2(0.0, 14.0),
+                            egui::vec2(3.0, 54.0),
+                        ),
+                        2.0,
+                        *color,
+                    );
+                    painter.text(
+                        rect.min + egui::vec2(16.0, 12.0),
+                        egui::Align2::LEFT_TOP,
+                        *label,
+                        egui::FontId::proportional(11.0),
+                        egui::Color32::from_rgb(150, 172, 190),
+                    );
+                    painter.text(
+                        rect.min + egui::vec2(16.0, 30.0),
+                        egui::Align2::LEFT_TOP,
+                        value,
+                        egui::FontId::proportional(22.0),
+                        *color,
+                    );
+                    painter.text(
+                        rect.min + egui::vec2(16.0, 60.0),
+                        egui::Align2::LEFT_TOP,
+                        detail,
+                        egui::FontId::proportional(11.5),
+                        egui::Color32::from_rgb(130, 150, 168),
+                    );
+                    if response.clicked() {
+                        go_to = Some(page);
+                    }
                 }
             });
             ui.add_space(gap);
+        }
+        if let Some(page) = go_to {
+            self.go(ctx, page);
         }
 
         self.show_dashboard_backends(ui, ctx);
@@ -1583,6 +1683,62 @@ impl JarvisApp {
             ui.add_space(12.0);
             self.show_dashboard_notifications(ui, ctx);
         }
+        ui.add_space(8.0);
+        ui.checkbox(&mut self.reduce_motion, "Riduci animazioni");
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn dashboard_header_text(
+        &mut self,
+        ui: &mut egui::Ui,
+        attention: &[(egui::Color32, String, String, &'static str, &'static str)],
+        core_status: &str,
+        ai_status: &str,
+        core_color: egui::Color32,
+        ai_color: egui::Color32,
+        version: &str,
+    ) {
+        ui.label(
+            egui::RichText::new("JARVIS · PLANCIA")
+                .small()
+                .strong()
+                .color(ACCENT),
+        );
+        ui.add_space(4.0);
+        let urgent = attention.iter().filter(|a| a.0 != ACCENT).count();
+        let headline = match urgent {
+            0 => "Tutto in ordine.".to_string(),
+            1 => "Una cosa richiede la tua attenzione.".to_string(),
+            n => format!("{n} cose richiedono la tua attenzione."),
+        };
+        ui.label(egui::RichText::new(headline).size(26.0).strong());
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            for (label, value, color) in [
+                ("Core", core_status, core_color),
+                ("AI", ai_status, ai_color),
+            ] {
+                egui::Frame::new()
+                    .fill(RAISED)
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 100),
+                    ))
+                    .corner_radius(12)
+                    .inner_margin(egui::Margin::symmetric(10, 5))
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new(format!("● {label}  {value}"))
+                                .small()
+                                .strong()
+                                .color(color),
+                        );
+                    });
+            }
+            if version != "—" {
+                ui.label(egui::RichText::new(format!("v{version}")).small().weak());
+            }
+        });
     }
 
     fn show_dashboard_backends(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -1874,139 +2030,6 @@ impl JarvisApp {
                 ui.add_space(4.0);
                 self.show_notifications(ui);
             });
-    }
-
-    fn dashboard_intro(
-        &mut self,
-        ui: &mut egui::Ui,
-        ctx: &egui::Context,
-        core_status: &str,
-        ai_status: &str,
-        core_color: egui::Color32,
-        ai_color: egui::Color32,
-    ) {
-        ui.label(
-            egui::RichText::new("JARVIS  /  CENTRO DI CONTROLLO")
-                .small()
-                .strong()
-                .color(ACCENT),
-        );
-        ui.add_space(10.0);
-        ui.heading(egui::RichText::new("JARVIS, in un colpo d'occhio.").size(29.0));
-        ui.label(
-            egui::RichText::new(
-                "Un quadro chiaro dei tuoi Core, delle attività e delle notifiche.",
-            )
-            .size(15.0)
-            .color(egui::Color32::from_rgb(180, 203, 222)),
-        );
-        ui.add_space(14.0);
-        ui.horizontal_wrapped(|ui| {
-            for (label, value, color) in [
-                ("CORE", core_status, core_color),
-                ("AI", ai_status, ai_color),
-            ] {
-                egui::Frame::new()
-                    .fill(RAISED)
-                    .stroke(egui::Stroke::new(
-                        1.0,
-                        egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 100),
-                    ))
-                    .corner_radius(egui::CornerRadius::same(12))
-                    .inner_margin(egui::Margin::symmetric(10, 6))
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(egui::RichText::new("●").color(color).small());
-                            ui.label(
-                                egui::RichText::new(format!("{label}  {value}"))
-                                    .small()
-                                    .strong(),
-                            );
-                        });
-                    });
-            }
-        });
-        ui.add_space(8.0);
-        ui.checkbox(&mut self.reduce_motion, "Riduci animazioni");
-        if self
-            .data
-            .as_ref()
-            .is_some_and(|data| data["first_run"] == true)
-            && ui.button("Completa la configurazione iniziale").clicked()
-        {
-            self.current = "system".into();
-            self.data = None;
-            self.refresh(ctx);
-        }
-    }
-
-    fn dashboard_actions(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
-        ui.label(
-            egui::RichText::new("AZIONI RAPIDE")
-                .small()
-                .strong()
-                .color(ACCENT),
-        );
-        ui.add_space(6.0);
-
-        let stacked = ui.available_width() < 230.0;
-        if stacked {
-            if ui
-                .add_sized(
-                    [ui.available_width(), 40.0],
-                    egui::Button::new(egui::RichText::new("Nuova chat").strong().color(ACCENT))
-                        .fill(SELECTED),
-                )
-                .clicked()
-            {
-                self.current = "chat".into();
-            }
-            if ui
-                .add_sized([ui.available_width(), 38.0], egui::Button::new("Attività"))
-                .clicked()
-            {
-                self.current = "tasks".into();
-                self.data = None;
-                self.refresh(ctx);
-            }
-            if ui
-                .add_sized([ui.available_width(), 38.0], egui::Button::new("Sistema"))
-                .clicked()
-            {
-                self.current = "system".into();
-                self.data = None;
-                self.refresh(ctx);
-            }
-        } else {
-            ui.horizontal_wrapped(|ui| {
-                if ui
-                    .add(
-                        egui::Button::new(egui::RichText::new("Nuova chat").strong().color(ACCENT))
-                            .fill(SELECTED)
-                            .min_size(egui::vec2(132.0, 40.0)),
-                    )
-                    .clicked()
-                {
-                    self.current = "chat".into();
-                }
-                if ui
-                    .add(egui::Button::new("Attività").min_size(egui::vec2(112.0, 38.0)))
-                    .clicked()
-                {
-                    self.current = "tasks".into();
-                    self.data = None;
-                    self.refresh(ctx);
-                }
-                if ui
-                    .add(egui::Button::new("Sistema").min_size(egui::vec2(112.0, 38.0)))
-                    .clicked()
-                {
-                    self.current = "system".into();
-                    self.data = None;
-                    self.refresh(ctx);
-                }
-            });
-        }
     }
 
     fn show_memory(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -2699,11 +2722,19 @@ impl JarvisApp {
             "downloading" => {
                 let bytes = download["bytes"].as_u64().unwrap_or(0) as f32;
                 let total = download["total"].as_u64().unwrap_or(0) as f32;
-                let fraction = if total > 0.0 { (bytes / total).clamp(0.0, 1.0) } else { 0.0 };
+                let fraction = if total > 0.0 {
+                    (bytes / total).clamp(0.0, 1.0)
+                } else {
+                    0.0
+                };
                 ui.add(
                     egui::ProgressBar::new(fraction)
                         .show_percentage()
-                        .text(format!("Scarico {version}: {:.0} / {:.0} MB", bytes / 1.0e6, total / 1.0e6)),
+                        .text(format!(
+                            "Scarico {version}: {:.0} / {:.0} MB",
+                            bytes / 1.0e6,
+                            total / 1.0e6
+                        )),
                 );
                 ctx.request_repaint_after(Duration::from_secs(1));
                 if self.last_load.elapsed() > Duration::from_secs(1) && !self.loading {
@@ -2729,7 +2760,9 @@ impl JarvisApp {
                         let tx = self.tx.clone();
                         self.loading = true;
                         std::thread::spawn(move || {
-                            let _ = tx.send(Event::UpdateInstalling(client.post("/api/updates/install", None)));
+                            let _ = tx.send(Event::UpdateInstalling(
+                                client.post("/api/updates/install", None),
+                            ));
                         });
                     }
                 }
@@ -2737,7 +2770,10 @@ impl JarvisApp {
             _ => {
                 if status == "failed" {
                     if let Some(error) = download["error"].as_str() {
-                        ui.colored_label(egui::Color32::LIGHT_RED, format!("Download non riuscito: {error}"));
+                        ui.colored_label(
+                            egui::Color32::LIGHT_RED,
+                            format!("Download non riuscito: {error}"),
+                        );
                     }
                 }
                 if available
@@ -3384,6 +3420,10 @@ fn load_dashboard(
     if let Ok(setup) = client.get("/api/setup") {
         data["first_run"] = setup["first_run"].clone();
     }
+    // Nuova versione disponibile (esito dell'ultimo controllo, senza nuove richieste a GitHub).
+    if let Ok(updates) = client.get("/api/updates") {
+        data["update_available"] = updates["update_available"].clone();
+    }
     let primary_tasks = client.get("/api/tasks?limit=4")?;
     let primary_tasks = primary_tasks["items"]
         .as_array()
@@ -3636,8 +3676,31 @@ fn dashboard_task_state(state: &str) -> (&'static str, egui::Color32) {
     }
 }
 
-fn show_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool) {
-    let side = ui.available_width().clamp(132.0, 280.0);
+/// Riga informativa con barretta colorata, usata da «Da guardare».
+fn dashboard_row(ui: &mut egui::Ui, color: egui::Color32, title: &str, detail: &str) {
+    egui::Frame::new()
+        .fill(RAISED)
+        .stroke(egui::Stroke::new(
+            1.0,
+            egui::Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), 70),
+        ))
+        .corner_radius(10)
+        .inner_margin(egui::Margin::symmetric(12, 8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("●").color(color));
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new(title).strong());
+                    if !detail.is_empty() {
+                        ui.label(egui::RichText::new(detail).small().weak());
+                    }
+                });
+            });
+        });
+}
+
+fn draw_avatar(ui: &mut egui::Ui, ctx: &egui::Context, reduce_motion: bool, side: f32) {
     let (rect, _) = ui.allocate_exact_size(egui::Vec2::splat(side), egui::Sense::hover());
     let painter = ui.painter_at(rect);
     let time = if reduce_motion {

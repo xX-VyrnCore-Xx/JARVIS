@@ -1553,6 +1553,15 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** test del prompt di sistema.
 - **Documenti interessati:** ROADMAP.md.
 
+### ADR-0111 — Plancia rifatta da capo (desktop e macOS)
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («dashboard e grafica ancora brutta e buggata, rifalla da capo»).
+- **Problemi della versione precedente:** un riquadro con altezza fissa (292 px) in cui testo, avatar e pulsanti erano posizionati a mano e si sovrapponevano a certe larghezze; tre layout diversi per la stessa intestazione; metriche non cliccabili; nessuna indicazione di cosa fare.
+- **Decisione:** nuova Plancia con un solo flusso verticale e nessuna altezza fissa del contenuto: (1) intestazione con titolo di stato («Tutto in ordine» / «N cose richiedono la tua attenzione»), pillole Core e AI, avatar in uno spazio riservato e scorciatoie; (2) **«Da guardare»**: elenco ordinato di ciò che richiede il proprietario (conferme in attesa, registro di audit non integro, Core o AI non disponibili, Core collegato offline, nuova versione, notifiche, configurazione iniziale), ciascuna con il pulsante che porta alla pagina giusta, oppure «nessuna azione richiesta»; (3) sei metriche in una griglia che si adatta alla larghezza (1–3 colonne), cliccabili; (4) Core collegati, attività e notifiche recenti come prima. L'opzione «Riduci animazioni» scende in fondo.
+- **Dati:** la Plancia legge anche l'esito dell'ultimo controllo aggiornamenti (nessuna nuova richiesta a GitHub). Su macOS si aggiungono le metriche Intelligenza artificiale e Notifiche.
+- **Non verificato:** la resa a schermo (nessuna schermata vista in questo ambiente: clippy e test egui passano, Swift si compila solo in CI); Android non è stato toccato in questa fase.
+- **Documenti interessati:** INTERFACE_AND_DEVICES.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.
