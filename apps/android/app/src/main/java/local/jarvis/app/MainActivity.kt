@@ -110,12 +110,6 @@ class MainActivity : ComponentActivity() {
     /** Collegamento di associazione aperto da fuori (messaggio, AirDrop, browser). */
     private val pendingLink = mutableStateOf<PairingLink?>(null)
 
-    override fun onNewIntent(intent: Intent) {
-        super.onNewIntent(intent)
-        setIntent(intent)
-        PairingLink.parse(intent.dataString)?.let { pendingLink.value = it }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         pendingLink.value = PairingLink.parse(intent?.dataString)
@@ -154,6 +148,7 @@ class MainActivity : ComponentActivity() {
         setIntent(intent)
         openNotificationId.value =
             intent.getStringExtra(PushMessagingService.NOTIFICATION_ID_EXTRA)
+        PairingLink.parse(intent.dataString)?.let { pendingLink.value = it }
     }
 
     override fun onStart() {
