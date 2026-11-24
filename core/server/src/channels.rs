@@ -145,10 +145,7 @@ pub fn send(
     let (title, body) = text_of(channel, n);
     let server = channel["server"].as_str().unwrap_or_default();
     let target = channel["target"].as_str().unwrap_or_default();
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(10))
-        .redirects(0)
-        .build();
+    let agent = crate::net::builder(Duration::from_secs(10)).build();
     let result = match channel["kind"].as_str() {
         Some("ntfy") => {
             let priority = match n["severity"].as_str() {

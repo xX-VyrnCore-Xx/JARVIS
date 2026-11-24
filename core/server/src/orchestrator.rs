@@ -3118,7 +3118,35 @@ impl Jarvis {
             .map_err(internal)?
             .is_some()
             .into();
+        state["download"] = crate::selfupdate::status();
         Ok(state)
+    }
+
+    /// Piano di download dell'aggiornamento (ADR-0109): solo se il controllo ha trovato una versione più recente.
+    pub fn updates_download_plan(
+        &mut self,
+    ) -> Result<(crate::selfupdate::Plan, Option<String>, std::path::PathBuf), CoreError> {
+        let state = self.updates.state();
+        if state["update_available"] != true {
+            return Err(CoreError::BadRequest(
+                "nessun aggiornamento disponibile: controlla prima gli aggiornamenti".into(),
+            ));
+        }
+        let plan = crate::selfupdate::plan(
+            &state["latest"],
+            std::env::consts::OS,
+            std::env::consts::ARCH,
+        )
+        .map_err(CoreError::BadRequest)?;
+        self.record_owner_action("updates.download")?;
+        let token = self.secrets.get("updates:github_token").map_err(internal)?;
+        Ok((plan, token, self.cfg.data_dir.clone()))
+    }
+
+    /// Applica l'aggiornamento scaricato e verificato; l'app deve chiudersi subito dopo.
+    pub fn updates_install(&mut self) -> Result<Value, CoreError> {
+        self.record_owner_action("updates.install")?;
+        crate::selfupdate::apply(&self.cfg.data_dir).map_err(CoreError::BadRequest)
     }
 
     pub fn updates_configure(

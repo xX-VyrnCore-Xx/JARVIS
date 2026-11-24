@@ -474,7 +474,7 @@ pub enum Failure {
     Forbidden,
     Quota,
     Rejected(u16),
-    Connection,
+    Connection(crate::net::Cause),
     InvalidTool,
     ModelUnavailable,
     Incomplete,
@@ -489,7 +489,7 @@ impl Failure {
             Self::Forbidden => "cloud.permission",
             Self::Quota => "cloud.quota",
             Self::Rejected(_) => "cloud.request_rejected",
-            Self::Connection => "cloud.connection",
+            Self::Connection(_) => "cloud.connection",
             Self::InvalidTool => "cloud.invalid_tool",
             Self::RateLimited(_) => "cloud.rate_limited",
             Self::ModelUnavailable => "cloud.model_unavailable",
@@ -505,7 +505,7 @@ impl Failure {
             Self::Forbidden => (format!("{label} ha negato l’accesso (HTTP 403). Controlla i permessi o il piano dell’account."), false),
             Self::Quota => (format!("{label} richiede credito o un piano abilitato (HTTP 402)."), false),
             Self::Rejected(status) => (format!("{label} ha rifiutato la richiesta (HTTP {status}). Verifica il modello con Testa chiave in Modelli AI."), false),
-            Self::Connection => (format!("Connessione HTTPS a {label} non riuscita. Controlla rete, certificati e proxy."), true),
+            Self::Connection(cause) => (format!("Connessione HTTPS a {label} non riuscita: {}.", cause.hint()), !matches!(cause, crate::net::Cause::Certificate | crate::net::Cause::Proxy)),
             Self::InvalidTool => ("Il modello ha proposto un calcolo non valido. Riformula la richiesta oppure usa un comando esplicito.".into(), false),
             Self::RateLimited(wait) => (format!("Limite del provider raggiunto. Riprova tra {} s o scegli un altro provider.", wait.as_secs_f64().ceil() as u64), true),
             Self::ModelUnavailable => (format!("I modelli selezionati non sono disponibili presso {label}. Verifica il modello in Modelli AI."), true),
@@ -781,7 +781,7 @@ fn payload(
     let output_tokens = (base_tokens + (base_tokens / 4) * usize::from(level))
         .min(32_000usize.saturating_sub(input_tokens + 1_500).max(256));
     let mut messages = vec![
-        json!({"role": "system", "content": format!("{} {} {}{}", concat!(
+        json!({"role": "system", "content": format!("{} {} {} {}{}", concat!(
         "Sei JARVIS, un assistente originale dal tono calmo, competente e cordiale: professionale, conciso, mai servile, con ironia discreta solo quando naturale. ",
         "Rispondi nella lingua dell’utente, inizia dal risultato e approfondisci quanto serve. Il formato e il livello di dettaglio richiesti esplicitamente hanno priorità sulle preferenze di stile. ",
         "Usa i turni precedenti solo se pertinenti. Una correzione esplicita dell’utente aggiorna il requisito corrispondente. ",
@@ -797,8 +797,11 @@ fn payload(
         "Cita fonti e collegamenti pertinenti solo se ne conosci l’indirizzo esatto. Non inventare URL, fonti o risultati. ",
         "Per compiti composti procedi per passi: proponi uno strumento alla volta, controlla il suo esito e continua solo quando serve. ",
         "Non dichiarare di aver completato un’azione senza un esito riuscito; se una capacità o un collegamento non è disponibile, spiega il limite e offri un’alternativa concreta. ",
+        "Scrivi testo semplice e leggibile in una finestra di chat: frasi brevi, elenchi puntati solo per passaggi o confronti, niente tabelle Markdown né intestazioni decorative; il codice sta in blocchi delimitati. ",
+        "Se una richiesta è vaga ma una lettura è chiaramente la più probabile, rispondi su quella dichiarandola in una riga invece di fare domande a vuoto. ",
+        "Per errori e limiti degli strumenti spiega in italiano semplice cosa è successo e cosa fare ora, senza codici tecnici né scuse. ",
         "JARVIS compone la risposta dopo la verifica della chiamata."
-    ), route.guidance(), preference.length_guidance(), preference.precision_guidance())}),
+    ), format!("Data e ora locali: {}.", chrono::Local::now().format("%d/%m/%Y %H:%M")), route.guidance(), preference.length_guidance(), preference.precision_guidance())}),
     ];
     for turn in history {
         messages.push(json!({"role": "user", "content": turn.user}));
@@ -927,6 +930,10 @@ pub(crate) fn may_need_calculation(message: &str) -> bool {
         })
 }
 
+/// Tempo massimo di una richiesta ai modelli: i modelli di ragionamento possono impiegare più di 45 s.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(90);
+const CONNECT_RETRIES: u32 = 2;
+
 fn chat_at(
     endpoint: &str,
     provider: Provider,
@@ -950,16 +957,28 @@ fn chat_at(
         }
     }
     // Gli endpoint sono fissi e il bearer token non viene inoltrato su redirect.
-    let agent = ureq::AgentBuilder::new()
-        .timeout(Duration::from_secs(45))
+    let agent = crate::net::builder(REQUEST_TIMEOUT)
         .try_proxy_from_env(endpoint.starts_with("https://"))
-        .redirects(0)
         .build();
-    let response = agent
-        .post(endpoint)
-        .set("Authorization", &format!("Bearer {key}"))
-        .set("Content-Type", "application/json")
-        .send_string(&body.to_string());
+    let payload = body.to_string();
+    let mut attempt = 0;
+    let response = loop {
+        let result = agent
+            .post(endpoint)
+            .set("Authorization", &format!("Bearer {key}"))
+            .set("Content-Type", "application/json")
+            .send_string(&payload);
+        match &result {
+            // Errori di rete transitori (DNS, connessione rifiutata o interrotta): fino a due nuovi tentativi.
+            Err(ureq::Error::Transport(t))
+                if attempt < CONNECT_RETRIES && crate::net::classify(t).transient() =>
+            {
+                std::thread::sleep(Duration::from_millis(400 * 3u64.pow(attempt)));
+                attempt += 1;
+            }
+            _ => break result,
+        }
+    };
     let response = match response {
         Ok(response) => response,
         Err(ureq::Error::Status(429, response)) => {
@@ -981,7 +1000,9 @@ fn chat_at(
             return Err(Failure::Rejected(status))
         }
         Err(ureq::Error::Status(_, _)) => return Err(Failure::Unavailable),
-        Err(ureq::Error::Transport(_)) => return Err(Failure::Connection),
+        Err(ureq::Error::Transport(t)) => {
+            return Err(Failure::Connection(crate::net::classify(&t)))
+        }
     };
     if !(200..300).contains(&response.status()) {
         return Err(Failure::Rejected(response.status()));
@@ -1380,6 +1401,8 @@ mod tests {
             "distingui fatti, inferenze e stime",
             "controlla il suo esito",
             "Non dichiarare di aver completato un’azione",
+            "Data e ora locali:",
+            "testo semplice e leggibile",
         ] {
             assert!(
                 system.contains(instruction),
@@ -1531,5 +1554,27 @@ mod agent_tests {
             matches!(&answer, Answer::Call(c) if c["tool"] == "time.now" && c["version"] == "1.0.0")
         );
         server.join().unwrap();
+    }
+
+    #[test]
+    fn an_unreachable_endpoint_reports_the_network_cause_after_retrying() {
+        let port = {
+            let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            l.local_addr().unwrap().port()
+        };
+        let started = Instant::now();
+        let Err(failure) = request(Provider::Ollama, false)
+            .execute_at(&format!("http://127.0.0.1:{port}/api/chat"))
+        else {
+            panic!("la connessione doveva fallire");
+        };
+        assert!(matches!(
+            failure,
+            Failure::Connection(crate::net::Cause::Refused)
+        ));
+        // Due nuovi tentativi con attesa 0,4 s + 1,2 s.
+        assert!(started.elapsed() >= Duration::from_millis(1500));
+        let (text, retryable) = failure.user_message(Provider::Ollama);
+        assert!(text.contains("server non accetta") && retryable);
     }
 }

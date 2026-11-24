@@ -314,7 +314,10 @@ fn a_cloud_guided_mission_advances_one_checked_tool_at_a_time() {
         .to_string();
     let mut run = j.mission_begin(&id2).unwrap().unwrap();
     let Next::Done(doc) = j
-        .mission_advance(&mut run, Some(Err(Failure::Connection)))
+        .mission_advance(
+            &mut run,
+            Some(Err(Failure::Connection(jarvis_core::net::Cause::Other))),
+        )
         .unwrap()
     else {
         panic!("un errore chiude l'esecuzione");
