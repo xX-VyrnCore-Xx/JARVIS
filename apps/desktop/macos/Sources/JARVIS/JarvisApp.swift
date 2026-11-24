@@ -127,6 +127,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var confirmKeyRemoval = false
     /// Turni recenti inviati al provider scelto (ADR-0130): attivo di default, il proprietario può spegnerlo qui.
     @AppStorage("jarvis.shareContext") private var useCloudContext = true
+    @AppStorage("jarvis.chatBackground") private var chatInBackground = false
     @State private var cloudModel = ""
     @State private var provider = "ollama_cloud"
     @State private var apiKey = ""
@@ -992,6 +993,47 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         return outgoingMessage != nil && lastReply == nil ? "pending-message" : records(payload).last?.id
     }
 
+    /// Chat multiple e lavoro in background (ADR-0143, ADR-0144).
+    private var chatControls: some View {
+        let chats = (payload["chats"] as? [[String: Any]]) ?? []
+        return HStack(spacing: 8) {
+            Menu {
+                ForEach(chats.indices, id: \.self) { index in
+                    let item = chats[index]
+                    Button {
+                        changeChat("/api/conversations/select", body: ["id": item["id"] as? String ?? ""])
+                    } label: {
+                        Label(item["title"] as? String ?? "Chat",
+                              systemImage: item["active"] as? Bool == true ? "checkmark" : "bubble.left")
+                    }
+                }
+            } label: {
+                Label("Chat", systemImage: "clock.arrow.circlepath")
+            }
+            .menuStyle(.borderlessButton).fixedSize()
+            Button("Nuova chat", systemImage: "square.and.pencil") {
+                changeChat("/api/conversations", body: [:])
+            }
+            Toggle(isOn: $chatInBackground) {
+                Label("In background", systemImage: "moon.zzz")
+            }
+            .toggleStyle(.button)
+            .help("JARVIS lavora nel cloud anche se l'app è in secondo piano o chiusa e ti avvisa alla fine.")
+        }
+    }
+
+    private func changeChat(_ path: String, body: [String: Any]) {
+        Task {
+            do {
+                _ = try await core.request(path, method: "POST", body: body)
+                error = nil
+                await load(.chat)
+            } catch {
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
     private var chat: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 15) {
@@ -1003,11 +1045,13 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                         Label("Elaborazione in corso", systemImage: "waveform")
                             .foregroundStyle(.cyan)
                     } else {
-                        Label("Inferenza cloud", systemImage: "cloud")
+                        Label(chatInBackground ? "Lavoro in background" : "Inferenza cloud",
+                              systemImage: chatInBackground ? "moon.zzz" : "cloud")
                             .foregroundStyle(.secondary)
                     }
                 }
                 Spacer()
+                chatControls
             }
             .padding(14).frame(maxWidth: .infinity, alignment: .leading)
             .background(LinearGradient(colors: [panel, base], startPoint: .leading, endPoint: .trailing),
@@ -1252,6 +1296,21 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !sending else { return }
         let includeContext = useCloudContext
+        if chatInBackground {
+            message = ""
+            Task {
+                do {
+                    _ = try await core.request("/api/cloud/background", method: "POST",
+                                               body: ["message": text, "provider": "auto", "use_context": includeContext])
+                    info = "Lavoro avviato in background: ti avviso con una notifica quando ha finito. La risposta resterà in questa chat."
+                    error = nil
+                } catch {
+                    self.error = error.localizedDescription
+                    if message.isEmpty { message = text }
+                }
+            }
+            return
+        }
         sending = true
         error = nil
         lastReply = nil
@@ -1628,6 +1687,10 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         case .memory:
             HStack {
                 Button("Modifica") { memoryText = item["text"] ?? ""; memoryEdit = item }
+                let pinned = item.data["pinned"] as? Bool ?? false
+                Button(pinned ? "Libera" : "Fissa", systemImage: pinned ? "pin.slash" : "pin") {
+                    mutate("/api/memory/\(urlSegment(item.id))/pin", body: ["pinned": !pinned])
+                }
                 Button("Chiedi di dimenticare") { select(.chat); message = "dimentica \(item.id)" }
             }
         case .tasks:
@@ -2115,6 +2178,10 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             if page == .dashboard {
                 let status = try? await core.request("/api/cloud", timeout: 3)
                 result["providers"] = status?["providers"]
+            }
+            if page == .chat {
+                let chats = try? await core.request("/api/conversations", timeout: 5)
+                result["chats"] = chats?["items"]
             }
             if page == .connectors {
                 let catalog = try await core.request("/api/connectors/templates")

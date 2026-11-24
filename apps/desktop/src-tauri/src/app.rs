@@ -238,6 +238,14 @@ enum Event {
     Profile(Result<Value, String>),
     /// Stato della voce di sistema maschile (ADR-0123).
     VoiceStatus(Result<Value, String>),
+    /// Chat recenti (ADR-0143).
+    Conversations(Result<Value, String>),
+    /// Una chat è stata aperta, scelta o eliminata: si ricarica la cronologia.
+    ChatChanged(Result<Value, String>),
+    /// Lavoro cloud avviato in background (ADR-0144).
+    BackgroundStarted(Result<Value, String>),
+    /// Lavori in background ancora in corso.
+    BackgroundRunning(usize),
     /// Comando pronunciato dopo «Hey Jarvis» (ADR-0140).
     #[cfg_attr(not(windows), allow(dead_code))]
     WakeCommand(String),
@@ -287,6 +295,11 @@ pub struct JarvisApp {
     history_loading: bool,
     chat_busy: bool,
     chat_cloud_context: bool,
+    chat_background: bool,
+    background_running: usize,
+    background_polled: Instant,
+    conversations: Vec<Value>,
+    conversations_loaded: bool,
     notifications: Vec<Value>,
     notifications_error: Option<String>,
     confirmations: Vec<Value>,
@@ -431,6 +444,11 @@ impl JarvisApp {
             history_loading: false,
             chat_busy: false,
             chat_cloud_context: true,
+            chat_background: false,
+            background_running: 0,
+            background_polled: Instant::now(),
+            conversations: Vec::new(),
+            conversations_loaded: false,
             notifications: Vec::new(),
             notifications_error: None,
             confirmations: Vec::new(),
@@ -549,6 +567,50 @@ impl JarvisApp {
                 Event::History(Ok(history)) => {
                     self.history_loading = false;
                     self.chat = parse_history(&history);
+                    ctx.request_repaint();
+                }
+                Event::Conversations(result) => {
+                    if let Ok(doc) = result {
+                        self.conversations = doc["items"].as_array().cloned().unwrap_or_default();
+                    }
+                }
+                Event::ChatChanged(result) => {
+                    match result {
+                        Ok(_) => {
+                            self.chat.clear();
+                            self.confirmations.clear();
+                            self.error = None;
+                            self.load_history();
+                            self.load_conversations();
+                        }
+                        Err(error) => self.error = Some(error),
+                    }
+                    ctx.request_repaint();
+                }
+                Event::BackgroundRunning(count) => {
+                    if self.background_running > 0 && count == 0 {
+                        // Finito: la risposta è nella chat, si ricarica la cronologia.
+                        self.load_history();
+                        self.load_conversations();
+                    }
+                    self.background_running = count;
+                    ctx.request_repaint();
+                }
+                Event::BackgroundStarted(result) => {
+                    match result {
+                        Ok(_) => {
+                            self.background_running = self.background_running.max(1);
+                            self.background_polled = Instant::now() - Duration::from_secs(60);
+                            self.chat.push(ChatMessage {
+                            role: "assistant",
+                            text: "Lavoro avviato in background: continua anche se chiudi o nascondi l'app e ti avviso con una notifica quando ha finito. La risposta resterà in questa chat.".into(),
+                            });
+                        }
+                        Err(error) => self.chat.push(ChatMessage {
+                            role: "assistant",
+                            text: format!("Errore: {error}"),
+                        }),
+                    }
                     ctx.request_repaint();
                 }
                 Event::History(Err(error)) => {
@@ -854,6 +916,27 @@ impl JarvisApp {
         });
     }
 
+    fn load_conversations(&self) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(Event::Conversations(client.get("/api/conversations")));
+        });
+    }
+
+    /// Chiede al Core di aprire, scegliere o eliminare una chat e poi ricarica la cronologia.
+    fn change_chat(&self, path: &'static str, body: Option<Value>) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(Event::ChatChanged(client.post(path, body.as_ref())));
+        });
+    }
+
     fn load_history(&self) {
         let Some(client) = self.client.clone() else {
             return;
@@ -1025,6 +1108,32 @@ impl JarvisApp {
     #[cfg(not(target_os = "windows"))]
     fn sync_wake(&mut self, _ctx: &egui::Context) {}
 
+    /// Finché un lavoro in background è in corso controlla ogni pochi secondi se ha finito.
+    fn poll_background(&mut self, ctx: &egui::Context) {
+        if self.background_running == 0
+            || self.remote
+            || self.background_polled.elapsed() < Duration::from_secs(5)
+        {
+            return;
+        }
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        self.background_polled = Instant::now();
+        let tx = self.tx.clone();
+        let repaint = ctx.clone();
+        std::thread::spawn(move || {
+            if let Ok(doc) = client.get("/api/cloud/jobs") {
+                let running = doc["items"].as_array().map_or(0, |jobs| {
+                    jobs.iter().filter(|j| j["status"] == "running").count()
+                });
+                let _ = tx.send(Event::BackgroundRunning(running));
+                repaint.request_repaint();
+            }
+        });
+        ctx.request_repaint_after(Duration::from_secs(5));
+    }
+
     fn send_chat(&mut self) {
         let message = self.chat_input.trim().to_string();
         if message.is_empty() || self.chat_busy || self.history_loading {
@@ -1045,6 +1154,19 @@ impl JarvisApp {
         self.chat_busy = true;
         let tx = self.tx.clone();
         let use_context = self.chat_cloud_context && !self.remote;
+        if self.chat_background && !self.remote {
+            // Lavoro in background (ADR-0144): parte subito e prosegue nel Core anche con l'app in secondo piano.
+            self.chat.pop();
+            self.chat_busy = false;
+            std::thread::spawn(move || {
+                let result = client.post(
+                    "/api/cloud/background",
+                    Some(&json!({"message": message, "provider": "auto", "use_context": use_context})),
+                );
+                let _ = tx.send(Event::BackgroundStarted(result));
+            });
+            return;
+        }
         std::thread::spawn(move || {
             let deltas = tx.clone();
             let result = client.cloud_chat_stream(&message, use_context, &mut |piece| {
@@ -1371,6 +1493,44 @@ impl JarvisApp {
 
     fn show_chat(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         if !self.remote {
+            if !self.conversations_loaded {
+                self.conversations_loaded = true;
+                self.load_conversations();
+            }
+            ui.horizontal_wrapped(|ui| {
+                if ui.button("＋ Nuova chat").clicked() {
+                    self.change_chat("/api/conversations", Some(json!({})));
+                }
+                let active = self
+                    .conversations
+                    .iter()
+                    .find(|c| c["active"] == true)
+                    .and_then(|c| c["title"].as_str())
+                    .unwrap_or("Chat principale")
+                    .to_owned();
+                egui::ComboBox::from_id_salt("chat-picker")
+                    .selected_text(active)
+                    .width(220.0)
+                    .show_ui(ui, |ui| {
+                        for chat in self.conversations.clone() {
+                            let title = chat["title"].as_str().unwrap_or("Chat");
+                            if ui
+                                .selectable_label(chat["active"] == true, title)
+                                .clicked()
+                                && chat["active"] != true
+                            {
+                                self.change_chat(
+                                    "/api/conversations/select",
+                                    Some(json!({"id": chat["id"]})),
+                                );
+                            }
+                        }
+                    });
+                ui.checkbox(&mut self.chat_background, "In background")
+                    .on_hover_text(
+                        "JARVIS lavora nel cloud anche se l'app è in secondo piano o chiusa e ti avvisa alla fine.",
+                    );
+            });
             ui.checkbox(
                 &mut self.chat_cloud_context,
                 "Ricorda la conversazione recente",
@@ -2098,6 +2258,7 @@ impl JarvisApp {
                                     talking: self
                                         .speaking_until
                                         .is_some_and(|end| end > Instant::now()),
+                                    working: self.background_running > 0,
                                 };
                                 crate::avatar::draw(ui, ctx, self.reduce_motion, side, mood);
                             },
@@ -4009,6 +4170,7 @@ impl eframe::App for JarvisApp {
         let ctx = ui.ctx().clone();
         self.receive_events(&ctx);
         self.sync_wake(&ctx);
+        self.poll_background(&ctx);
         if self.current != "models" {
             self.cloud_api_key.clear();
             self.cloud_action_error = None;

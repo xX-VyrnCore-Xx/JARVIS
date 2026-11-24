@@ -199,6 +199,18 @@ function check(condition, message) {
   check(badDay.status === 400, "giorno del briefing settimanale non valido rifiutato");
   const inbox = await request("/api/notifications?limit=20", { token: ownerToken });
   check(inbox.json?.items?.some((n) => n.category === "briefing"), "il briefing arriva fra le notifiche");
+  const spec = await request("/api/openapi.json", { token: ownerToken });
+  check(spec.status === 200 && spec.json?.openapi === "3.1.0" && Object.keys(spec.json?.paths || {}).length > 30, "documento OpenAPI");
+  const newChat = await request("/api/conversations", { method: "POST", token: ownerToken, body: {} });
+  check(newChat.status === 200 && typeof newChat.json?.id === "string", "nuova chat");
+  const chats = await request("/api/conversations", { token: ownerToken });
+  check(chats.json?.active === newChat.json?.id && chats.json?.items?.length >= 2, "chat attiva e chat recenti");
+  const backToMain = await request("/api/conversations/select", { method: "POST", token: ownerToken, body: { id: "main" } });
+  check(backToMain.status === 200, "ritorno alla chat principale");
+  const job = await request("/api/cloud/background", { method: "POST", token: ownerToken, body: { message: "che ore sono" } });
+  check(job.status === 202 && job.json?.status === "running", "lavoro in background avviato");
+  const jobs = await request("/api/cloud/jobs", { token: ownerToken });
+  check(Array.isArray(jobs.json?.items) && jobs.json.items.length >= 1, "elenco dei lavori in background");
   const tailscale = await request("/api/tailscale", { token: ownerToken });
   check(tailscale.status === 200 && typeof tailscale.json?.installed === "boolean" && tailscale.json?.allowed === false, "stato di Tailscale senza autorizzare indirizzi");
 })().catch((error) => {

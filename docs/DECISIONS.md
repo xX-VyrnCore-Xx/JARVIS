@@ -1814,6 +1814,34 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** test unitari del testo e della validazione, test di integrazione con orologio simulato (non scatta prima dell'orario, una sola volta a settimana, non negli altri giorni, giorno scelto, su richiesta), smoke E2E; Clippy e `cargo test --locked` verdi.
 - **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ROADMAP.md.
 
+### ADR-0143 — Chat multiple
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout (Core, app macOS e Windows; Android usa la chat attiva) · **Fonte:** richiesta del proprietario («permettigli di poter avviare nuove chat ogni volta»).
+- **Decisione:** tabella `conversations` e colonna `messages.conversation` (migrazione additiva: tutta la cronologia esistente resta nella chat `main`). Il Core tiene una chat attiva; messaggi, contesto del modello e cronologia riguardano solo quella. `GET/POST /api/conversations` (elenco, nuova), `POST /api/conversations/select`, `POST /api/conversations/delete`. Il titolo è il primo messaggio (48 caratteri), ricavato alla lettura e **mai salvato in chiaro**: la cifratura della chat resta intatta.
+- **Controlli:** rotte riservate al proprietario; apertura ed eliminazione nel registro di audit; eliminare una chat rimuove solo i suoi messaggi (la principale viene svuotata); la memoria a lungo termine non dipende dalla chat.
+- **Evidenza:** test API (chat separate, ritorno alla principale, 404, eliminazione) e smoke E2E.
+
+### ADR-0144 — Lavori cloud in background
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («lavorare in background sul Cloud anche se l'app non è in primo piano»).
+- **Decisione:** `POST /api/cloud/background` accetta lo stesso corpo della chat cloud e risponde subito `202` con un lavoro; l'esecuzione prosegue **nel Core** (non nell'app), quindi anche con l'app nascosta o chiusa. La risposta è scritta nella chat da cui è partito il lavoro anche se nel frattempo se ne è aperta un'altra (`conversation_id`, riservato al proprietario) e arriva una notifica (`category: mission`, anche push). `GET /api/cloud/jobs` elenca gli ultimi 30 lavori (solo in memoria; la risposta resta comunque nella chat). Al massimo quattro lavori in corso e due richieste cloud simultanee.
+- **Controlli:** stessi controlli della chat cloud (credenziali rifiutate, policy, audit, conferme); un'azione che richiede conferma resta in attesa nella chat. Rotta riservata al proprietario. Il Core deve restare acceso: se si chiude il computer il lavoro si ferma.
+- **Evidenza:** test API (202, completamento senza app, chat attiva intatta, risposta nella chat di partenza, notifica); nelle app: casella «In background» e avatar con satelliti (Windows).
+
+### ADR-0145 — Memoria: ricordi fissati ed episodi di chat
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora anche la memoria e come viene salvata e i ricordi»).
+- **Decisione:** (1) un ricordo si **fissa** (`POST /api/memory/{id}/pin`): non scade, compare per primo nel contesto del modello come «[importante]» (fino a 12) ed è mostrato come `pinned`; la marca sta nel campo `source` (nessuna migrazione). (2) Quando si apre una chat nuova, la chat appena chiusa lascia un **episodio** («Chat del …: N richieste, le ultime …») con scadenza come ogni episodio (`JARVIS_EPISODIC_DAYS`), così resta ritrovabile anche se la nuova chat parte vuota; non si registra se contiene credenziali o ha meno di due richieste.
+- **Invariato:** ricerca ibrida BM25 + vettori locali, grafo, duplicati e reindicizzazione (ADR-0022); i ricordi con credenziali non entrano mai nel contesto.
+- **Evidenza:** test API (fissare, scadenza assente, 404, liberare, episodio alla chiusura).
+
+### ADR-0146 — Sviluppo di applicazioni, competenze e documento OpenAPI
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario (coding, «super applicazioni», nuove competenze, API, «addestra i modelli»).
+- **Decisione:** nuovi ruoli del prompt (ADR-0136) `AppBuilder` (costruzione di applicazioni con interfaccia contemporanea: token di design, tema chiaro/scuro, responsive, accessibilità, movimento sobrio, test) e `CodeReview`; nove competenze incluse: Applicazione completa, Interfaccia moderna, Revisione del codice, Diagnosi dei difetti, Test del software, Progettazione di API, Basi di dati, Rilascio e infrastruttura, Sicurezza del codice (24 in tutto). Nuovo `GET /api/openapi.json` (OpenAPI 3.1, 50 rotte con accesso e formato degli errori) generato da una tabella unica; un test verifica che ogni rotta in sola lettura dichiarata esista.
+- **«Addestramento dei modelli»:** i modelli sono servizi di terzi (cloud) o locali già addestrati; **il Core non può modificarne i pesi**. La specializzazione avviene nel contesto: ruoli, competenze, stile per famiglia di modello, feedback e profili di risposta (ADR-0095) già presenti. Un vero fine-tuning richiederebbe dataset, GPU e un provider che lo offra: resta una decisione separata.
+- **Evidenza:** test dei ruoli, delle competenze con richieste naturali, del documento OpenAPI e delle rotte dichiarate.
+
 ### ADR-0135 — Correttore dei messaggi scritti
 
 - **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora il correttore grammaticale di prompt»).

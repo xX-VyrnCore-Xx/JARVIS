@@ -19,6 +19,8 @@ const INDIGO: Color32 = Color32::from_rgb(92, 96, 214);
 pub struct Mood {
     pub thinking: bool,
     pub talking: bool,
+    /// Un lavoro cloud prosegue in background: quattro satelliti orbitano attorno all'avatar.
+    pub working: bool,
 }
 
 /// Valori che si avvicinano piano al bersaglio, così gli stati si fondono invece di scattare.
@@ -27,6 +29,7 @@ struct Blend {
     think: f32,
     talk: f32,
     hover: f32,
+    work: f32,
 }
 
 pub(crate) fn alpha(color: Color32, value: f32) -> Color32 {
@@ -50,6 +53,13 @@ fn hash(value: f32) -> f32 {
 fn smooth(value: f32) -> f32 {
     let clamped = value.clamp(0.0, 1.0);
     clamped * clamped * (3.0 - 2.0 * clamped)
+}
+
+const SATELLITES: usize = 4;
+
+/// Angolo del satellite `index` al tempo `t`: orbita lenta, i quattro satelliti sono sfasati di un quarto di giro.
+fn satellite_angle(t: f32, index: usize) -> f32 {
+    (t * 0.9 + index as f32 * TAU / SATELLITES as f32).rem_euclid(TAU)
 }
 
 /// Altezza relativa della palpebra: 1 aperta, vicino a 0 a metà ammiccamento (ogni 4,9 s).
@@ -152,12 +162,14 @@ pub fn draw(
             think: if mood.thinking { 1.0 } else { 0.0 },
             talk: if mood.talking { 1.0 } else { 0.0 },
             hover: 0.0,
+            work: if mood.working { 1.0 } else { 0.0 },
         };
     } else {
         let step = 1.0 - (-ctx.input(|input| input.stable_dt).min(0.1) * 3.5).exp();
         blend.think += ((mood.thinking as u8 as f32) - blend.think) * step;
         blend.talk += ((mood.talking as u8 as f32) - blend.talk) * step;
         blend.hover += ((response.hovered() as u8 as f32) - blend.hover) * step * 1.6;
+        blend.work += ((mood.working as u8 as f32) - blend.work) * step;
     }
     ctx.data_mut(|data| data.insert_temp(blend_id, blend));
 
@@ -245,6 +257,21 @@ fn scene(
                 (0.012 + 0.020 * energy + 0.006 * breath) * (1.0 - fraction * 0.35),
             ),
         );
+    }
+
+    // Lavoro in background: satelliti con scia che orbitano attorno all'avatar.
+    if blend.work > 0.02 {
+        for index in 0..SATELLITES {
+            for trail in 0..6 {
+                let angle = satellite_angle(t, index) - trail as f32 * 0.07;
+                let at_orbit = center + Vec2::new(angle.cos(), angle.sin()) * 128.0 * scale;
+                painter.circle_filled(
+                    at_orbit,
+                    (3.4 - trail as f32 * 0.45).max(0.8) * scale.max(0.6),
+                    alpha(INDIGO, blend.work * (0.9 - trail as f32 * 0.15).max(0.05)),
+                );
+            }
+        }
     }
 
     // Onde dal centro e onda al clic.
@@ -596,6 +623,18 @@ const EYE_BAND: [(f32, f32); 6] = [
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn satellites_are_evenly_spaced_and_stay_on_the_circle() {
+        for step in 0..50 {
+            let t = step as f32 * 0.37;
+            let first = satellite_angle(t, 0);
+            let second = satellite_angle(t, 1);
+            assert!((0.0..TAU).contains(&first));
+            let gap = (second - first).rem_euclid(TAU);
+            assert!((gap - PI / 2.0).abs() < 1e-3, "{gap}");
+        }
+    }
 
     #[test]
     fn hash_is_deterministic_and_in_range() {
