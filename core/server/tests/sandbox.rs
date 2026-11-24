@@ -59,3 +59,13 @@ fn the_owner_switch_blocks_the_terminal() {
     );
     assert!(j.sandbox_update(&json!({"enabled": "sì"})).is_err());
 }
+
+#[test]
+fn import_and_export_descriptors_have_the_expected_consent() {
+    let catalog = jarvis_core::catalog::Catalog::load().unwrap();
+    let get = |n: &str| catalog.iter().find(|t| t.name() == n).unwrap();
+    assert!(!get("sandbox.import").needs_confirmation());
+    assert!(get("sandbox.export").needs_confirmation());
+    assert!(get("sandbox.reset").needs_confirmation());
+    assert!(!get("sandbox.run").needs_confirmation());
+}

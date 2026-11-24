@@ -1,0 +1,54 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "sandbox.import",
+  "version": "1.0.0",
+  "summary": "Copia un file della workspace in una sessione del terminale sandbox (max 8 MiB)",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "from"
+    ],
+    "properties": {
+      "from": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300
+      },
+      "to": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300
+      },
+      "session": {
+        "type": "string",
+        "pattern": "^[a-z0-9-]{1,32}$"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "write_local",
+  "risk": "medium",
+  "permissions": [
+    "core.sandbox:execute"
+  ],
+  "errors": [
+    "sandbox.disabled",
+    "sandbox.invalid_session",
+    "sandbox.invalid_path",
+    "sandbox.too_large",
+    "sandbox.session_full",
+    "sandbox.unavailable",
+    "fs.outside_workspace",
+    "fs.not_found"
+  ],
+  "timeout_ms": 10000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "none"
+}

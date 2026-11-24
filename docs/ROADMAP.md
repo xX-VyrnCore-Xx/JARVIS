@@ -226,4 +226,6 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Terminale sandbox (2026-11-24, base `e509ffd`).** ADR-0105. Nuovi strumenti `sandbox.run`/`sandbox.status`/`sandbox.reset`, container Docker senza rete con sessioni persistenti, interruttore del proprietario (`/api/sandbox`, `JARVIS_SANDBOX=off`), regole offline, immagine in `infra/sandbox/`. Verifiche: fmt, clippy, `cargo test --locked`, suite Python contratti e AI. **Sospeso:** esecuzione reale nel container (nessun Docker nel container di sessione; test `#[ignore]` pronto). Prossimo passo: provare con Docker `sandbox: python3 -V` dopo `infra/sandbox/build.sh`.
 
+**Sandbox: file e avviso (2026-11-24, base `24e9e25`).** ADR-0106 e ADR-0107. `sandbox.import`/`sandbox.export` (esportazione con conferma, nessun link simbolico seguito) e iniziativa proattiva per sessioni quasi piene. Verifiche: fmt, clippy, `cargo test --locked`, unittest AI e contratti, build egui. **Sospeso:** esecuzione reale nel container e resa Swift (solo CI).
+
 Per ogni ripresa registrare data, revisione, lavoro completato, verifiche eseguite, blocchi, ipotesi e prossimo passo concreto. Conservare il checkpoint con le modifiche alle quali si riferisce.

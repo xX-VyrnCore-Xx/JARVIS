@@ -163,6 +163,10 @@ def _describe_tool_result(result: dict) -> str:
         sessions = ", ".join(f"{x['session']} ({x['bytes']} B)" for x in output.get("sessions", [])) or "nessuna"
         return (f"Sandbox {state}; {avail}. Limiti: {lim.get('memory_mb')} MB, {lim.get('cpus')} CPU, "
                 f"max {lim.get('timeout_s_max')} s, rete {lim.get('network')}. Sessioni: {sessions}.")
+    if tool == "sandbox.import":
+        return f"Copiato «{output.get('path')}» nella sandbox «{output.get('session')}» ({output.get('bytes')} byte)."
+    if tool == "sandbox.export":
+        return f"Esportato «{output.get('from')}» dalla sandbox in «{output.get('path')}» ({output.get('bytes')} byte)."
     if tool == "sandbox.reset":
         return f"Sessione sandbox «{output.get('session')}» azzerata." if output.get("reset") else "Quella sessione non esisteva."
     if tool == "agent.delegate":
@@ -397,6 +401,10 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
     # Terminale sandbox (ADR-0105): isolato, senza conferma per comando.
     (re.compile(r"^\s*(?:esegui\s+(?:nella|in)\s+sandbox|sandbox)\s*:\s*(\S.*)$", re.I | re.S), "sandbox.run",
      lambda m: {"command": m[1].strip()[:4000]}),
+    (re.compile(r"^\s*(?:importa|copia)\s+(?:nella|in)\s+sandbox\s*:\s*(\S+)(?:\s+(?:come|in|->)\s+(\S+))?\s*$", re.I), "sandbox.import",
+     lambda m: {"from": m[1], **({"to": m[2]} if m[2] else {})}),
+    (re.compile(r"^\s*(?:esporta|copia)\s+dalla\s+sandbox\s*:\s*(\S+)\s+(?:come|in|->)\s+(\S+)\s*$", re.I), "sandbox.export",
+     lambda m: {"from": m[1], "to": m[2]}),
     (re.compile(r"^\s*(?:stato (?:della )?sandbox|sandbox\s+status)\s*\??\s*$", re.I), "sandbox.status", lambda m: {}),
     (re.compile(r"^\s*(?:azzera|resetta|svuota)\s+(?:la\s+)?sandbox(?:\s+([a-z0-9-]{1,32}))?\s*$", re.I), "sandbox.reset",
      lambda m: {"session": m[1].lower()} if m[1] else {}),

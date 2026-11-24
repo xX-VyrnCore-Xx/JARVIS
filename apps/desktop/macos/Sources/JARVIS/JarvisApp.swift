@@ -1165,7 +1165,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 let toggles: [(key: String, label: String)] = [
                     ("enabled", "Iniziative attive"), ("briefing", "Briefing quotidiano"),
                     ("disk", "Avvisi sullo spazio disco"), ("confirmations", "Promemoria delle conferme in attesa"),
-                    ("workflows", "Automazioni che continuano a fallire"), ("stale_todos", "Cose da fare lasciate indietro")
+                    ("workflows", "Automazioni che continuano a fallire"), ("stale_todos", "Cose da fare lasciate indietro"), ("sandbox", "Sandbox quasi piena")
                 ]
                 ForEach(toggles.indices, id: \.self) { index in
                     let entry = toggles[index]

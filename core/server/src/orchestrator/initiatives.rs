@@ -75,6 +75,21 @@ impl Jarvis {
             }
         }
 
+        if s["sandbox"] == true && crate::sandbox::enabled(&self.cfg.data_dir) {
+            let sizes = crate::sandbox::session_sizes(&self.cfg.data_dir);
+            for (session, mib) in proactive::sandbox_alerts(&sizes) {
+                if self.proactive_once(&format!("sandbox:{session}:{date}"), &now) {
+                    self.notify(json!({
+                        "severity": "info", "category": "suggestion",
+                        "title": format!("La sessione sandbox «{session}» è quasi piena"),
+                        "body": format!("Usa {mib} MiB su 256: con il limite i nuovi comandi vengono rifiutati. Posso esportare i file utili e azzerarla."),
+                        "source": {"kind": "module", "id": "proactive"}, "link": {"view": "chat"},
+                    }))?;
+                    fired.push("sandbox");
+                }
+            }
+        }
+
         if s["confirmations"] == true {
             let limit = chrono::Duration::minutes(proactive::CONFIRMATION_NUDGE_MINUTES);
             let waiting: Vec<(String, String)> = self

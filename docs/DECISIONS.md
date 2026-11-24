@@ -1508,6 +1508,24 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** test unitari (nomi di sessione, argomenti di isolamento, interruttore, validazione prima di Docker), `core/server/tests/sandbox.rs`, test del gateway, schema dei descrittori.
 - **Documenti interessati:** AUTONOMY_AND_TOOLS.md, SECURITY_AND_PRIVACY.md, ROADMAP.md, `infra/sandbox/`.
 
+### ADR-0106 — Trasferimento file fra workspace e sandbox
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («altre ADR»), seguito di ADR-0105.
+- **Problema:** il terminale sandbox non vede la workspace: JARVIS non poteva provare un file del progetto né riportare un risultato.
+- **Decisione:** due strumenti. `sandbox.import {from, to?, session?}` copia un file della workspace (max 8 MiB) nella sessione, senza conferma perché legge soltanto. `sandbox.export {from, to, session?}` copia un file della sessione (max 1 MiB) nella workspace e **richiede conferma** perché scrive sul computer. Solo file singoli; percorsi relativi senza «..».
+- **Sicurezza:** il codice nel container può creare collegamenti simbolici che sul computer punterebbero altrove. Ogni percorso nella sessione è risolto componente per componente rifiutando qualunque collegamento già presente (`sandbox.invalid_path`); la destinazione in workspace usa la stessa risoluzione confinata di `fs.write`. Rispettano l'interruttore del proprietario; `sandbox.export` è escluso da automazioni e nodi; `sandbox.import` è consentito alle missioni.
+- **Regole offline:** «importa nella sandbox: file [come percorso]», «esporta dalla sandbox: origine in destinazione».
+- **Evidenza:** test unitario con collegamenti verso file e cartelle esterni (nessuna perdita, nessuna scrittura fuori ambito), test dei descrittori (consenso), test del gateway.
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, SECURITY_AND_PRIVACY.md, ROADMAP.md.
+
+### ADR-0107 — Avviso proattivo di sandbox quasi piena
+
+- **Data:** 2026-11-24 · **Stato:** implementata nel checkout.
+- **Decisione:** una nuova iniziativa proattiva (`sandbox`, attiva per impostazione predefinita, spegnibile in Proattività) avvisa una volta al giorno per ogni sessione sandbox oltre 200 MiB, prima del limite di 256 MiB oltre il quale i comandi vengono rifiutati. Non parte se il terminale sandbox è disattivato; rispetta ore di silenzio e `proactive_sent`. Il testo propone di esportare i file utili e azzerare la sessione, senza farlo da sola.
+- **Evidenza:** test della soglia (`sandbox_alerts`), impostazione predefinita, build egui.
+- **Non verificato:** resa dell'interruttore nella schermata Swift (compilata solo in CI).
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ROADMAP.md.
+
 ### Decisione operativa — Merge automatico con CI verde
 
 - **Data:** 2026-11-17 · **Fonte:** decisione di manutenzione del progetto.

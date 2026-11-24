@@ -87,3 +87,5 @@ Il servizio usa l'immagine versionata `docker.n8n.io/n8nio/n8n:2.48.7`, l'utente
 ## Terminale sandbox (ADR-0105)
 
 `sandbox.run`, `sandbox.status` e `sandbox.reset` danno a JARVIS un terminale isolato: container Docker senza rete, radice in sola lettura, una cartella di sessione persistente in `<cartella dati>/sandbox/<sessione>`. Immagine consigliata: `infra/sandbox/build.sh` (Python, Node, compilatori, git, jq, ripgrep). Comandi senza conferma perché isolati; interruttore del proprietario `PATCH /api/sandbox` o `JARVIS_SANDBOX=off`. Esempi: «esegui nella sandbox: python3 -V», «stato sandbox», «azzera la sandbox».
+
+**File (ADR-0106).** `sandbox.import` copia un file della workspace nella sessione; `sandbox.export` riporta un file nella workspace e chiede conferma. Esempi: «importa nella sandbox: dati.csv», «esporta dalla sandbox: out.txt in risultati/out.txt». **Avviso (ADR-0107):** JARVIS segnala una sessione oltre 200 MiB.
