@@ -37,6 +37,8 @@ pub struct AppState {
     remote_failures: Mutex<(std::time::Instant, u32)>,
     /// Flussi di notifiche aperti contemporaneamente (ADR-0098).
     live_streams: Arc<std::sync::atomic::AtomicUsize>,
+    /// Lavori cloud in background (ADR-0144): gli ultimi, solo in memoria; la risposta è comunque nella chat.
+    jobs: Mutex<Vec<Value>>,
 }
 
 /// Dopo `REMOTE_FAILURE_LIMIT` autenticazioni remote fallite in `REMOTE_FAILURE_WINDOW` le richieste remote con
@@ -414,12 +416,21 @@ pub fn router(state: Shared) -> Router {
         .route("/api/tasks/{id}/trace", get(task_trace))
         .route("/api/chat/sync", get(chat_sync))
         .route("/api/conversation", get(conversation))
+        .route(
+            "/api/conversations",
+            get(conversations_list).post(conversation_new),
+        )
+        .route("/api/cloud/background", post(cloud_background))
+        .route("/api/cloud/jobs", get(cloud_jobs))
+        .route("/api/conversations/select", post(conversation_select))
+        .route("/api/conversations/delete", post(conversation_delete))
         .route("/api/memory", get(memory))
         .route("/api/memory/graph", get(memory_graph))
         .route("/api/memory/stats", get(memory_stats))
         .route("/api/system/stats", get(system_stats))
         .route("/api/memory/duplicates", get(memory_duplicates))
         .route("/api/memory/reindex", post(memory_reindex))
+        .route("/api/memory/{id}/pin", post(memory_pin))
         .route("/api/memory/{id}", delete(forget).patch(memory_correct))
         .route("/api/audit", get(audit))
         .route("/api/workspace", get(workspace))
@@ -816,6 +827,107 @@ async fn cloud_chat_stream(
         .into_response()
 }
 
+/// Lavoro cloud in background (ADR-0144): parte subito, prosegue nel Core anche se l'app passa in secondo piano
+/// o si chiude, scrive la risposta nella chat di partenza e avvisa con una notifica (anche push).
+async fn cloud_background(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Json(mut body): Json<Value>,
+) -> Response {
+    let Some(message) = body["message"]
+        .as_str()
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty())
+    else {
+        return CoreError::BadRequest("campo 'message' mancante".into()).into_response();
+    };
+    let is_device = device.is_some();
+    let active = with_core(&state, |j| {
+        Ok::<_, CoreError>(j.conversations()?["active"].clone())
+    })
+    .await
+    .unwrap_or(Value::Null);
+    if body["conversation_id"].as_str().is_none() || is_device {
+        body["conversation_id"] = if is_device {
+            Value::Null
+        } else {
+            active.clone()
+        };
+    }
+    let job = json!({
+        "id": uuid::Uuid::new_v4().simple().to_string(),
+        "status": "running",
+        "message": message.chars().take(120).collect::<String>(),
+        "conversation_id": body["conversation_id"],
+        "created_at": crate::automation::ts(chrono::Utc::now()),
+    });
+    {
+        let mut jobs = state.jobs.lock().unwrap_or_else(|e| e.into_inner());
+        if jobs.iter().filter(|j| j["status"] == "running").count() >= 4 {
+            return error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "busy",
+                "Ci sono già quattro lavori in background: attendi che uno finisca.",
+            );
+        }
+        jobs.push(job.clone());
+        let extra = jobs.len().saturating_sub(30);
+        jobs.drain(..extra);
+    }
+    let id = job["id"].as_str().unwrap_or_default().to_string();
+    let worker = state.clone();
+    tokio::spawn(async move {
+        let result = run_cloud_chat(&worker, is_device, body, None).await;
+        let (status, summary, detail, outcome) = match result {
+            Ok(out) => {
+                let reply = out["reply"].as_str().unwrap_or("Fatto.").to_string();
+                (
+                    "done",
+                    "JARVIS ha finito il lavoro in background".to_string(),
+                    reply.clone(),
+                    Ok(reply),
+                )
+            }
+            Err(error) => {
+                let (_, text) = error.parts();
+                (
+                    "error",
+                    "Il lavoro in background non è riuscito".to_string(),
+                    text.clone(),
+                    Err(text),
+                )
+            }
+        };
+        {
+            let mut jobs = worker.jobs.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(entry) = jobs.iter_mut().find(|j| j["id"] == id.as_str()) {
+                entry["status"] = json!(status);
+                entry["finished_at"] = json!(crate::automation::ts(chrono::Utc::now()));
+                match outcome {
+                    Ok(reply) => entry["reply"] = json!(reply),
+                    Err(text) => entry["error"] = json!(text),
+                }
+            }
+        }
+        let note = json!({
+            "severity": if status == "done" { "success" } else { "warning" },
+            "category": "mission",
+            "title": summary,
+            "body": detail.chars().take(500).collect::<String>(),
+            "source": {"kind": "module", "id": "cloud-background"},
+            "dedupe_key": format!("job:{id}"),
+            "link": {"view": "chat"},
+        });
+        let _ = with_core(&worker, move |j| j.notify(note)).await;
+    });
+    (StatusCode::ACCEPTED, Json(job)).into_response()
+}
+
+async fn cloud_jobs(State(state): State<Shared>) -> Response {
+    let jobs = state.jobs.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    Json(json!({"items": jobs.into_iter().rev().collect::<Vec<_>>()})).into_response()
+}
+
 async fn run_cloud_chat(
     state: &Shared,
     is_device: bool,
@@ -846,6 +958,12 @@ async fn run_cloud_chat_inner(
         return Err(CoreError::BadRequest("Rimuovi le credenziali dalla richiesta.".into()).into());
     }
     let local = message.to_owned();
+    // Chat di destinazione: solo il proprietario può indicarla (lavori in background, ADR-0144).
+    let conversation = if is_device {
+        None
+    } else {
+        body["conversation_id"].as_str().map(str::to_owned)
+    };
     let local_only = crate::orchestrator::is_source_followup(message)
         || crate::orchestrator::is_local_fact_request(message)
         || (crate::desktop::Target::from_request(message).is_some()
@@ -854,7 +972,12 @@ async fn run_cloud_chat_inner(
         body["provider"] = json!("auto");
         body["use_context"] = json!(false);
     }
-    match with_core(state, move |j| j.local_command(&local)).await {
+    let target = conversation.clone();
+    match with_core(state, move |j| {
+        j.in_conversation(target.as_deref(), |j| j.local_command(&local))
+    })
+    .await
+    {
         Ok(Some(out)) => return Ok(out.to_json()),
         Ok(None) => (),
         Err(CoreError::Unavailable(_)) if !local_only => {
@@ -870,7 +993,11 @@ async fn run_cloud_chat_inner(
     let Ok(permit) = state.cloud_slots.clone().try_acquire_owned() else {
         return Err(CloudChatError::Busy);
     };
-    let request = with_core(state, move |j| j.prepare_cloud_chat(&body)).await?;
+    let target = conversation.clone();
+    let request = with_core(state, move |j| {
+        j.in_conversation(target.as_deref(), |j| j.prepare_cloud_chat(&body))
+    })
+    .await?;
     let timer = crate::observability::Timer::start();
     let completed = tokio::task::spawn_blocking(move || {
         let _permit = permit;
@@ -887,7 +1014,9 @@ async fn run_cloud_chat_inner(
         return Err(CoreError::Internal("richiesta cloud interrotta".into()).into());
     };
     let out = with_core(state, move |j| {
-        j.finish_cloud_chat(message, completed, timer)
+        j.in_conversation(conversation.as_deref(), |j| {
+            j.finish_cloud_chat(message, completed, timer)
+        })
     })
     .await?;
     Ok(out.to_json())
@@ -1757,6 +1886,24 @@ async fn conversation(
     }
 }
 
+async fn conversations_list(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.conversations()).await)
+}
+
+async fn conversation_new(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.conversation_new()).await)
+}
+
+async fn conversation_select(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let id = body["id"].as_str().unwrap_or_default().to_string();
+    reply(with_core(&state, move |j| j.conversation_select(&id)).await)
+}
+
+async fn conversation_delete(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let id = body["id"].as_str().unwrap_or_default().to_string();
+    reply(with_core(&state, move |j| j.conversation_delete(&id)).await)
+}
+
 async fn memory(
     State(state): State<Shared>,
     Query(q): Query<std::collections::HashMap<String, String>>,
@@ -1827,6 +1974,15 @@ async fn memory_correct(
         Ok(()) => Json(json!({"updated": true})).into_response(),
         Err(e) => e.into_response(),
     }
+}
+
+async fn memory_pin(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    let pinned = body["pinned"].as_bool().unwrap_or(true);
+    reply(with_core(&state, move |j| j.memory_pin(&id, pinned)).await)
 }
 
 async fn forget(State(state): State<Shared>, Path(id): Path<String>) -> Response {
@@ -2870,5 +3026,6 @@ pub fn state_with_remote(
         challenges: Mutex::new(std::collections::HashMap::new()),
         remote_failures: Mutex::new((std::time::Instant::now(), 0)),
         live_streams: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        jobs: Mutex::new(Vec::new()),
     })
 }
