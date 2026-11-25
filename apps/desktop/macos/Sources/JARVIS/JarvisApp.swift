@@ -112,6 +112,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var profileDraft: [String: String] = [:]
     @State private var planGoal = ""
     @State private var agentLimits: [String: String] = [:]
+    /// Incrementato a ogni operazione riuscita: l'avatar risponde con un'onda verde.
+    @State private var celebrateTick = 0
     @State private var pluginJSON = ""
     @State private var profileShare = true
     @State private var changingInvite = false
@@ -119,6 +121,9 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var section: Section = .dashboard
     @Namespace private var navigationNamespace
     @State private var hoveredEntry: Section?
+    /// Larghezza della barra laterale, scelta dal proprietario e conservata fra un avvio e l'altro.
+    @AppStorage("sidebarWidth") private var sidebarWidth = 256.0
+    @State private var sidebarDragStart: Double?
     @State private var memoryStats: [String: Any] = [:]
     @State private var speakReplies = false
     @State private var systemStats: [String: Any] = [:]
@@ -170,8 +175,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         Group {
             if core.phase == .ready && !core.uiLocked {
                 GeometryReader { geometry in
-                    if geometry.size.width >= 860 {
-                        HStack(spacing: 0) { sidebar.frame(width: 192); Divider(); content }
+                    if geometry.size.width >= 940 {
+                        HStack(spacing: 0) { sidebar.frame(width: sidebarWidth); sidebarResizer; content }
                     } else {
                         VStack(spacing: 0) { compactNavigation; Divider(); content }
                     }
@@ -263,6 +268,9 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         }
     }
 
+    /// L'avatar vira al caldo con l'arresto di emergenza attivo o un errore visibile.
+    private var avatarAlert: Bool { (payload["emergency_stop"] as? Bool ?? false) || error != nil }
+
     private func select(_ value: Section) {
         guard section != value else { return }
         activeLoad = nil
@@ -289,19 +297,20 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             }
             .padding(.horizontal, 6).padding(.top, 6)
             .accessibilityElement(children: .combine)
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(Section.navigation.indices, id: \.self) { index in
                         let group = Section.navigation[index]
                         VStack(alignment: .leading, spacing: 3) {
                             Text(group.title.uppercased())
-                                .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                                .padding(.horizontal, 10).padding(.bottom, 2)
+                                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                .padding(.horizontal, 12).padding(.bottom, 3)
                             ForEach(group.entries) { entry in
                                 Button { select(entry) } label: {
-                                    HStack(spacing: 9) {
-                                        Image(systemName: entry.icon).frame(width: 18)
-                                        Text(entry.rawValue).font(.callout.weight(section == entry ? .semibold : .regular))
+                                    HStack(spacing: 11) {
+                                        Image(systemName: entry.icon).font(.system(size: 15)).frame(width: 24)
+                                        Text(entry.rawValue).font(.system(size: 15, weight: section == entry ? .semibold : .regular))
                                         Spacer(minLength: 2)
                                         if let badge = sidebarBadge(entry) {
                                             Text(badge > 99 ? "99+" : "\(badge)")
@@ -314,7 +323,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                                         }
                                     }
                                     .foregroundStyle(section == entry ? Color.white : Color.primary.opacity(0.88))
-                                    .padding(.horizontal, 10).padding(.vertical, 8)
+                                    .padding(.horizontal, 12).padding(.vertical, 11)
                                     .background {
                                         ZStack {
                                             if section == entry {
@@ -336,15 +345,54 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                                     if inside { hoveredEntry = entry } else if hoveredEntry == entry { hoveredEntry = nil }
                                 }
                                 .accessibilityAddTraits(section == entry ? .isSelected : [])
+                                .id(entry)
                             }
                         }
                     }
                 }
+                .padding(.vertical, 14)
+            }
+            .scrollIndicators(.visible)
+            // Sfumatura ai bordi: lascia intuire che l'elenco continua senza tagliare la prima voce a riposo.
+            .mask(
+                VStack(spacing: 0) {
+                    LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 14)
+                    Rectangle()
+                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 14)
+                }
+            )
+            // La pagina attiva si porta in vista quando cambia da un'altra parte dell'app.
+            .onChange(of: section) { _, value in
+                withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo(value, anchor: .center) }
+            }
             }
             sidebarStatus
         }
         .padding(12).background(panel.opacity(0.56))
         .animation(.snappy(duration: 0.28), value: section)
+    }
+
+    /// Maniglia fra barra laterale e contenuto: trascinandola si regola la larghezza (da 232 a 360 punti).
+    private var sidebarResizer: some View {
+        ZStack {
+            Divider()
+            Rectangle().fill(Color.clear).frame(width: 9)
+                .contentShape(Rectangle())
+                .onHover { inside in
+                    if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                }
+                .gesture(
+                    DragGesture(minimumDistance: 1)
+                        .onChanged { drag in
+                            let start = sidebarDragStart ?? sidebarWidth
+                            sidebarDragStart = start
+                            sidebarWidth = min(360, max(232, start + drag.translation.width))
+                        }
+                        .onEnded { _ in sidebarDragStart = nil }
+                )
+                .accessibilityHidden(true)
+        }
+        .frame(width: 9)
     }
 
     /// Contatore accanto alla voce: conferme in attesa e notifiche da leggere (solo se maggiori di zero).
@@ -660,7 +708,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             ZStack {
                 OrbitRings().frame(width: size, height: size)
                 Avatar(thinking: sending && streamingReply.isEmpty, speaking: avatarSpeaking || !streamingReply.isEmpty,
-                       listening: wake.phase == .capturing, level: wake.level).frame(width: size * 0.78, height: size * 0.78)
+                       listening: wake.phase == .capturing, level: wake.level, alert: avatarAlert,
+                       celebrate: celebrateTick).frame(width: size * 0.78, height: size * 0.78)
             }
             .frame(width: size, height: size)
             WaveformView(active: sending || avatarSpeaking, barCount: 26).frame(maxWidth: size)
@@ -1109,7 +1158,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 15) {
                 Avatar(thinking: sending && streamingReply.isEmpty, speaking: avatarSpeaking || !streamingReply.isEmpty,
-                       listening: wake.phase == .capturing, level: wake.level).frame(width: 76)
+                       listening: wake.phase == .capturing, level: wake.level, alert: avatarAlert,
+                       celebrate: celebrateTick).frame(width: 76)
                 VStack(alignment: .leading, spacing: 5) {
                     Text("JARVIS").font(.title2.weight(.semibold))
                     if sending {
@@ -2550,6 +2600,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             do {
                 let result = try await core.request(path, method: method, body: body)
                 info = result["message"] as? String ?? result["reply"] as? String ?? doneMessage(path, method: method)
+                celebrateTick += 1
                 await load(section)
                 await core.refreshHealth()
             } catch { self.error = error.localizedDescription }

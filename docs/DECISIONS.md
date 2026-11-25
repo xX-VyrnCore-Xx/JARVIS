@@ -1897,6 +1897,12 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** `GET /api/agents` descrive i sette specialisti e il generalista (competenze dagli strumenti, rischio massimo, contesto isolato o condiviso, risorse); `GET /api/agents/route?q=` mostra quale agente riceverebbe una richiesta e per quali parole chiave; `GET /api/models/route?q=` mostra la rotta per compito, il modello per provider, il ripiego e la riservatezza (credenziali bloccate, dati personali rilevati, profilo condiviso) **senza inviare nulla**. Non si introducono nuovi agenti: si riusano quelli esistenti.
 - **Evidenza:** test API del registro e dell'instradamento.
 
+### ADR-0168 — Barra laterale, avatar e resa delle risposte
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout.
+- **Decisione:** **barra laterale** più grande (voci da 44 punti con testo da 15,5, riquadro dell'icona da 30; su macOS testo da 15 e margini più ampi), **ridimensionabile** (da 232 a 360 punti, la larghezza resta fra un avvio e l'altro) con maniglia sul bordo; **scorrimento** con barra piena e visibile, sfumature in alto e in basso quando c'è altro da vedere e voce attiva portata in vista (con animazione) quando la pagina cambia da un'altra parte dell'app. **Avatar**: stato di *allerta* (arresto di emergenza o errore: colori caldi e anello che pulsa piano), *onda verde* a ogni operazione riuscita e **colore d'accento** per personalità (egui; su macOS tonalità regolabile con la stessa interfaccia); «Riduci animazioni» lascia il disegno fermo. **Risposte**: i messaggi di chat in egui ora mostrano Markdown leggero (blocchi di codice con «Copia», grassetto, codice in linea, elenchi, titoli; blocco non chiuso trattato come codice mentre la risposta arriva, come già su macOS) e le istruzioni ai modelli chiedono lunghezza calibrata sulla domanda, **grassetto** per il dato chiave nelle risposte lunghe e comandi, file e funzioni fra apici inversi.
+- **Evidenza:** test del renderer (blocchi, grassetto, codice in linea, elenchi, titoli, segni isolati) e del colore dell'avatar; Clippy Linux e Windows e test del client; test del prompt. **Sospeso:** resa visiva e animazioni (nessuno schermo qui) e compilazione dello Swift (solo CI).
+
 ### ADR-0167 — Pagine «Agenti» e «Pacchetti» nelle app macOS e Windows
 
 - **Data:** 2026-11-25 · **Stato:** implementata nel checkout (fase L, parte).

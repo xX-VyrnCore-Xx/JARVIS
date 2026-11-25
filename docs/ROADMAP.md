@@ -244,6 +244,8 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Database, memoria e animazioni macOS (2026-11-24, base `013b7b5`).** ADR-0124, ADR-0125. Pragma e manutenzione del database, indici di memoria verificati e ricostruiti, ricerca a candidati con recenza, statistiche e doppioni; animazioni SwiftUI. Verifiche: fmt, clippy, `cargo test --locked`, test Python e contratti. **Sospeso:** resa e fluidità delle animazioni (Swift solo CI).
 
+**Interfaccia: barra laterale, avatar e risposte (2026-11-25, ADR-0168).** Barra laterale ridimensionabile con scorrimento migliore, avatar con allerta e onda di successo, Markdown nella chat di Windows.
+
 **Pagine Agenti e Pacchetti (2026-11-25, ADR-0167).** Supervisione e pacchetti di estensione gestibili dalle app macOS e Windows; Swift compilato solo in CI. Restano: editor di workflow, cronologia unificata, monitor di infrastruttura.
 
 **Hugging Face via MCP (2026-11-25, ADR-0166).** Il client MCP segue Streamable HTTP (sessione, `Accept` completo, SSE concluso); guida in `docs/MCP_INTEGRATION.md`. Nessun provider Hugging Face nel Core.

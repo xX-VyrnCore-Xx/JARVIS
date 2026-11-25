@@ -11,9 +11,16 @@ struct Avatar: View {
     var listening = false
     /// Livello del microfono (0–1): fa vibrare gli anelli in ascolto.
     var level = 0.0
+    /// Allerta (arresto di emergenza o errore): i colori virano al caldo.
+    var alert = false
+    /// Contatore dei successi: a ogni incremento un'onda verde si espande dal centro.
+    var celebrate = 0
+    /// Tonalità (0–360°) dell'accento scelto dall'utente; senza, il ciano di JARVIS (circa 190°).
+    var accentHue: Double?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovering = false
     @State private var tapped: TimeInterval = -1_000
+    @State private var wave = 1.0
 
     var body: some View {
         AvatarCanvas(think: thinking ? 1 : 0, talk: speaking ? 1 : 0, listen: listening ? 1 : 0, level: level,
@@ -21,6 +28,22 @@ struct Avatar: View {
             .animation(.easeInOut(duration: 0.7), value: thinking)
             .animation(.easeInOut(duration: 0.5), value: speaking)
             .animation(.easeInOut(duration: 0.4), value: listening)
+            .hueRotation(.degrees(alert ? -165 : (accentHue.map { $0 - 190 } ?? 0)))
+            .animation(.easeInOut(duration: 0.7), value: alert)
+            .overlay {
+                // Successo: un'anello verde si allarga e svanisce (fermo con «Riduci movimento»).
+                Circle()
+                    .stroke(Color(red: 0.41, green: 0.86, blue: 0.68), lineWidth: max(0.5, 3 * (1 - wave)))
+                    .scaleEffect(0.18 + 0.82 * wave)
+                    .opacity(reduceMotion ? 0 : max(0, 0.85 * (1 - wave)))
+                    .allowsHitTesting(false)
+            }
+            .onChange(of: celebrate) { _, _ in
+                var reset = Transaction(animation: nil)
+                reset.disablesAnimations = true
+                withTransaction(reset) { wave = 0 }
+                DispatchQueue.main.async { withAnimation(.easeOut(duration: 1.5)) { wave = 1 } }
+            }
             .scaleEffect(hovering && !reduceMotion ? 1.045 : 1)
             .animation(.spring(response: 0.45, dampingFraction: 0.55), value: hovering)
             .aspectRatio(1, contentMode: .fit)

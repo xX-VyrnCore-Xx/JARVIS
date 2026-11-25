@@ -45,6 +45,35 @@ const NAV: [(&str, &str, bool); 20] = [
     ("updates", "Aggiornamenti", true),
 ];
 
+/// Sfumatura ai bordi di un elenco che scorre: dal colore del pannello alla trasparenza, in cima o in fondo.
+fn scroll_fade(ui: &egui::Ui, view: egui::Rect, fill: egui::Color32, top: bool) {
+    let height = 22.0_f32.min(view.height() / 3.0);
+    let (solid, clear) = (fill, crate::avatar::alpha(fill, 0.0));
+    let rect = if top {
+        egui::Rect::from_min_size(view.min, egui::vec2(view.width(), height))
+    } else {
+        egui::Rect::from_min_size(
+            egui::pos2(view.left(), view.bottom() - height),
+            egui::vec2(view.width(), height),
+        )
+    };
+    let (upper, lower) = if top { (solid, clear) } else { (clear, solid) };
+    let mut mesh = egui::Mesh::default();
+    let at = |mesh: &mut egui::Mesh, pos: egui::Pos2, color: egui::Color32| {
+        mesh.vertices.push(egui::epaint::Vertex {
+            pos,
+            uv: egui::epaint::WHITE_UV,
+            color,
+        });
+    };
+    at(&mut mesh, rect.left_top(), upper);
+    at(&mut mesh, rect.right_top(), upper);
+    at(&mut mesh, rect.right_bottom(), lower);
+    at(&mut mesh, rect.left_bottom(), lower);
+    mesh.indices.extend_from_slice(&[0, 1, 2, 0, 2, 3]);
+    ui.painter().add(egui::Shape::mesh(mesh));
+}
+
 /// Gruppo della barra laterale di ogni pagina (stessi titoli dell'app macOS).
 fn nav_group(id: &str) -> &'static str {
     match id {
@@ -345,6 +374,12 @@ pub struct JarvisApp {
     improvements: Vec<Value>,
     template_params: std::collections::HashMap<String, String>,
     plan_goal: String,
+    nav_scroll_pending: bool,
+    /// Istante dell'ultima operazione riuscita: l'avatar risponde con un'onda verde.
+    celebrate_at: f64,
+    /// Colore d'accento della personalità dell'utente connesso (RGB).
+    accent: Option<[u8; 3]>,
+    nav_last_page: String,
     agent_limits: std::collections::HashMap<String, String>,
     plugin_json: String,
     plan_detail: Option<Value>,
@@ -511,6 +546,10 @@ impl JarvisApp {
             improvements: Vec::new(),
             template_params: std::collections::HashMap::new(),
             plan_goal: String::new(),
+            nav_scroll_pending: true,
+            celebrate_at: 0.0,
+            accent: None,
+            nav_last_page: String::new(),
             agent_limits: std::collections::HashMap::new(),
             plugin_json: String::new(),
             plan_detail: None,
@@ -757,6 +796,7 @@ impl JarvisApp {
                     match result {
                         Ok(doc) => {
                             self.error = None;
+                            self.celebrate_at = ctx.input(|input| input.time);
                             if let Some(message) = doc["message"].as_str() {
                                 self.action_notice = Some((message.to_owned(), Instant::now()));
                             }
@@ -1468,10 +1508,10 @@ impl JarvisApp {
             if !compact {
                 let group = nav_group(id);
                 if group != last_group {
-                    ui.add_space(if last_group.is_empty() { 2.0 } else { 12.0 });
+                    ui.add_space(if last_group.is_empty() { 2.0 } else { 16.0 });
                     ui.label(
                         egui::RichText::new(group.to_uppercase())
-                            .size(10.5)
+                            .size(11.5)
                             .strong()
                             .color(egui::Color32::from_rgb(102, 130, 152)),
                     );
@@ -1481,9 +1521,9 @@ impl JarvisApp {
             }
             let selected = self.current == id;
             let size = if compact {
-                egui::vec2(132.0, 38.0)
+                egui::vec2(148.0, 40.0)
             } else {
-                egui::vec2(ui.available_width(), 38.0)
+                egui::vec2(ui.available_width(), 44.0)
             };
             let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
             let speed = if self.reduce_motion { 0.0 } else { 0.14 };
@@ -1542,25 +1582,30 @@ impl JarvisApp {
             // Piastrella dietro l'icona: si accende con il passaggio del puntatore e con la pagina attiva.
             painter.rect_filled(
                 egui::Rect::from_center_size(
-                    egui::pos2(rect.left() + 22.0, rect.center().y),
-                    egui::vec2(26.0, 26.0),
+                    egui::pos2(rect.left() + 25.0, rect.center().y),
+                    egui::vec2(30.0, 30.0),
                 ),
-                egui::CornerRadius::same(8),
+                egui::CornerRadius::same(9),
                 crate::avatar::alpha(ACCENT, 0.05 + 0.07 * hover + 0.12 * active),
             );
             draw_nav_icon(
                 painter,
-                egui::pos2(rect.left() + 22.0, rect.center().y),
+                egui::pos2(rect.left() + 25.0, rect.center().y),
                 id,
                 ink,
             );
             painter.text(
-                egui::pos2(rect.left() + 40.0, rect.center().y),
+                egui::pos2(rect.left() + 48.0, rect.center().y),
                 egui::Align2::LEFT_CENTER,
                 label,
-                egui::FontId::proportional(14.0),
+                egui::FontId::proportional(15.5),
                 ink,
             );
+            // La pagina attiva si porta in vista quando cambia da un'altra parte dell'app.
+            if selected && self.nav_scroll_pending {
+                ui.scroll_to_rect(rect.expand2(egui::vec2(0.0, 18.0)), None);
+                self.nav_scroll_pending = false;
+            }
             if response.clicked() {
                 self.connector_credential.clear();
                 self.current = id.into();
@@ -1780,11 +1825,12 @@ impl JarvisApp {
                         .show(ui, |ui| {
                             ui.set_min_width(ui.available_width());
                             ui.label(egui::RichText::new(label).small().strong().color(color));
-                            ui.add(
-                                egui::Label::new(message.text.as_str())
-                                    .wrap()
-                                    .selectable(true),
-                            );
+                            let ink = if message.role == "user" {
+                                egui::Color32::from_rgb(222, 244, 246)
+                            } else {
+                                egui::Color32::from_rgb(214, 226, 236)
+                            };
+                            crate::markdown::show(ui, ctx, &message.text, ink);
                         });
                     ui.add_space(10.0);
                 }
@@ -3210,6 +3256,9 @@ impl JarvisApp {
                                         .speaking_until
                                         .is_some_and(|end| end > Instant::now()),
                                     working: self.background_running > 0,
+                                    alert: self.emergency_active || self.error.is_some(),
+                                    celebrate: self.celebrate_at,
+                                    accent: self.accent,
                                 };
                                 crate::avatar::draw(ui, ctx, self.reduce_motion, side, mood);
                             },
@@ -5393,11 +5442,17 @@ impl eframe::App for JarvisApp {
                         .show(ui, |ui| ui.horizontal(|ui| self.navigation(ui, true, &ctx)));
                 });
         } else {
+            if self.nav_last_page != self.current {
+                self.nav_last_page = self.current.clone();
+                self.nav_scroll_pending = true;
+            }
+            // Barra laterale ampia e ridimensionabile (la larghezza scelta resta fra un avvio e l'altro).
             egui::Panel::left("navigation")
-                .resizable(false)
-                .exact_size(204.0)
+                .resizable(true)
+                .default_size(256.0)
+                .size_range(232.0..=360.0)
                 .show(ui, |ui| {
-                    let footer_height = 104.0;
+                    let footer_height = 112.0;
                     let navigation_height = (ui.available_height() - footer_height).max(0.0);
                     ui.allocate_ui_with_layout(
                         egui::vec2(ui.available_width(), navigation_height),
@@ -5406,10 +5461,28 @@ impl eframe::App for JarvisApp {
                             ui.add_space(10.0);
                             self.sidebar_brand(ui, &ctx);
                             ui.add_space(8.0);
-                            egui::ScrollArea::vertical()
+                            // Barra di scorrimento piena e ben visibile, con sfumature ai bordi quando c'è altro da vedere.
+                            let mut scroll = egui::style::ScrollStyle::solid();
+                            scroll.bar_width = 9.0;
+                            scroll.handle_min_length = 36.0;
+                            scroll.bar_inner_margin = 2.0;
+                            ui.spacing_mut().scroll = scroll;
+                            let area = egui::ScrollArea::vertical()
                                 .id_salt("navigation-list")
                                 .auto_shrink([false, false])
+                                .scroll_bar_visibility(
+                                    egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded,
+                                )
                                 .show(ui, |ui| self.navigation(ui, false, &ctx));
+                            let view = area.inner_rect;
+                            let fade = ui.visuals().panel_fill;
+                            let offset = area.state.clamped_offset().y;
+                            if offset > 1.0 {
+                                scroll_fade(ui, view, fade, true);
+                            }
+                            if offset + view.height() < area.content_size.y - 1.0 {
+                                scroll_fade(ui, view, fade, false);
+                            }
                         },
                     );
                     ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {

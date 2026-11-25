@@ -21,6 +21,12 @@ pub struct Mood {
     pub talking: bool,
     /// Un lavoro cloud prosegue in background: quattro satelliti orbitano attorno all'avatar.
     pub working: bool,
+    /// Allerta (arresto di emergenza o Core in errore): colori caldi e respiro lento.
+    pub alert: bool,
+    /// Istante (tempo di egui) dell'ultimo successo: un'onda verde si espande dal centro. 0 = nessuno.
+    pub celebrate: f64,
+    /// Colore d'accento della personalità dell'utente (RGB); senza, il ciano di JARVIS.
+    pub accent: Option<[u8; 3]>,
 }
 
 /// Valori che si avvicinano piano al bersaglio, così gli stati si fondono invece di scattare.
@@ -30,6 +36,7 @@ struct Blend {
     talk: f32,
     hover: f32,
     work: f32,
+    alert: f32,
 }
 
 pub(crate) fn alpha(color: Color32, value: f32) -> Color32 {
@@ -53,6 +60,14 @@ fn hash(value: f32) -> f32 {
 fn smooth(value: f32) -> f32 {
     let clamped = value.clamp(0.0, 1.0);
     clamped * clamped * (3.0 - 2.0 * clamped)
+}
+
+const ALERT: Color32 = Color32::from_rgb(255, 150, 84);
+
+/// Colore principale della scena: il ciano di JARVIS o l'accento dell'utente, che vira al caldo in allerta.
+fn tint(accent: Option<[u8; 3]>, alert: f32) -> Color32 {
+    let base = accent.map_or(CYAN, |[r, g, b]| Color32::from_rgb(r, g, b));
+    mix(base, ALERT, alert)
 }
 
 const SATELLITES: usize = 4;
@@ -163,6 +178,7 @@ pub fn draw(
             talk: if mood.talking { 1.0 } else { 0.0 },
             hover: 0.0,
             work: if mood.working { 1.0 } else { 0.0 },
+            alert: if mood.alert { 1.0 } else { 0.0 },
         };
     } else {
         let step = 1.0 - (-ctx.input(|input| input.stable_dt).min(0.1) * 3.5).exp();
@@ -170,6 +186,7 @@ pub fn draw(
         blend.talk += ((mood.talking as u8 as f32) - blend.talk) * step;
         blend.hover += ((response.hovered() as u8 as f32) - blend.hover) * step * 1.6;
         blend.work += ((mood.working as u8 as f32) - blend.work) * step;
+        blend.alert += ((mood.alert as u8 as f32) - blend.alert) * step * 0.7;
     }
     ctx.data_mut(|data| data.insert_temp(blend_id, blend));
 
@@ -183,6 +200,8 @@ pub fn draw(
         tapped,
         blend,
         reduce_motion,
+        tint(mood.accent, blend.alert),
+        mood.celebrate,
     );
     if !reduce_motion {
         ctx.request_repaint_after(Duration::from_millis(33));
@@ -239,6 +258,8 @@ fn scene(
     tapped: f64,
     blend: Blend,
     still: bool,
+    cyan: Color32,
+    celebrate: f64,
 ) {
     let scale = side / 276.0 * (1.0 + 0.045 * blend.hover);
     let energy = 0.28 + 0.45 * blend.think + 0.30 * blend.talk + 0.12 * blend.hover;
@@ -253,7 +274,7 @@ fn scene(
             center,
             140.0 * scale * (0.35 + 0.65 * fraction),
             alpha(
-                CYAN,
+                cyan,
                 (0.012 + 0.020 * energy + 0.006 * breath) * (1.0 - fraction * 0.35),
             ),
         );
@@ -283,7 +304,7 @@ fn scene(
                 (46.0 + 86.0 * phase) * scale,
                 Stroke::new(
                     line(1.2 + blend.talk),
-                    alpha(CYAN, (1.0 - phase) * (0.05 + 0.20 * energy)),
+                    alpha(cyan, (1.0 - phase) * (0.05 + 0.20 * energy)),
                 ),
             );
         }
@@ -301,9 +322,45 @@ fn scene(
             painter.circle_stroke(
                 center,
                 (20.0 + 100.0 * smooth(p)) * scale,
-                Stroke::new(line(2.0 * (1.0 - p) + 0.4), alpha(CYAN, (1.0 - p) * 0.9)),
+                Stroke::new(line(2.0 * (1.0 - p) + 0.4), alpha(cyan, (1.0 - p) * 0.9)),
             );
         }
+    }
+
+    // Successo: due onde verdi si espandono dal centro (una volta sola, con «Riduci animazioni» restano ferme).
+    if !still {
+        let age = (now - celebrate) as f32;
+        if celebrate > 0.0 && (0.0..1.8).contains(&age) {
+            let p = age / 1.8;
+            for (k, delay) in [0.0_f32, 0.18].into_iter().enumerate() {
+                let q = ((p - delay) / (1.0 - delay)).clamp(0.0, 1.0);
+                if q > 0.0 {
+                    painter.circle_stroke(
+                        center,
+                        (24.0 + 120.0 * smooth(q)) * scale,
+                        Stroke::new(
+                            line(3.2 * (1.0 - q) + 0.4),
+                            alpha(
+                                Color32::from_rgb(105, 220, 174),
+                                (1.0 - q) * (0.85 - 0.3 * k as f32),
+                            ),
+                        ),
+                    );
+                }
+            }
+        }
+    }
+    // Allerta: anello che pulsa piano, diverso dal respiro normale.
+    if blend.alert > 0.02 {
+        let beat = 0.5 + 0.5 * (t * 2.1).sin();
+        painter.circle_stroke(
+            center,
+            (134.0 + 4.0 * beat) * scale,
+            Stroke::new(
+                line(2.0 + beat),
+                alpha(cyan, blend.alert * (0.35 + 0.4 * beat)),
+            ),
+        );
     }
 
     // Anelli.
@@ -316,7 +373,7 @@ fn scene(
             128.0 * scale,
             a0,
             a0 + 360.0 / dashes as f32 * 0.4,
-            Stroke::new(line(1.0), alpha(CYAN, 0.22 + 0.2 * energy)),
+            Stroke::new(line(1.0), alpha(cyan, 0.22 + 0.2 * energy)),
         ));
     }
     for k in 0..3 {
@@ -326,7 +383,7 @@ fn scene(
             120.0 * scale,
             base,
             base + 46.0,
-            Stroke::new(line(2.2), alpha(CYAN, 0.5 + 0.4 * energy)),
+            Stroke::new(line(2.2), alpha(cyan, 0.5 + 0.4 * energy)),
         ));
     }
     for k in 0..2 {
@@ -352,7 +409,7 @@ fn scene(
             ],
             Stroke::new(
                 line(if index % 6 == 0 { 1.6 } else { 0.9 }),
-                alpha(CYAN, 0.18 + 0.75 * glow),
+                alpha(cyan, 0.18 + 0.75 * glow),
             ),
         );
     }
@@ -370,7 +427,7 @@ fn scene(
             132.0 * scale,
             start + 180.0,
             start + 214.0,
-            Stroke::new(line(2.0), alpha(CYAN, 0.9 * blend.think)),
+            Stroke::new(line(2.0), alpha(cyan, 0.9 * blend.think)),
         ));
     }
 
@@ -385,7 +442,7 @@ fn scene(
         let twinkle = 0.25 + 0.75 * (t * (0.8 + hash(seed + 4.0) * 1.6) + seed).sin().abs();
         let size = 0.8 + 1.7 * hash(seed + 5.0);
         let spot = at(angle.cos() * radius, angle.sin() * radius * 0.96);
-        painter.circle_filled(spot, size * 2.4 * scale, alpha(CYAN, 0.07 * twinkle));
+        painter.circle_filled(spot, size * 2.4 * scale, alpha(cyan, 0.07 * twinkle));
         painter.circle_filled(
             spot,
             size * scale.max(0.45),
@@ -422,7 +479,7 @@ fn scene(
             painter.add(Shape::line(path, Stroke::new(line(1.3), alpha(color, 0.7))));
         };
         ghost(&HEAD, Color32::from_rgb(255, 80, 170));
-        ghost(&SHOULDERS, CYAN);
+        ghost(&SHOULDERS, cyan);
     }
 
     let polygon = |points: &[(f32, f32)], fill: Color32, edge: f32, width: f32| {
@@ -430,7 +487,7 @@ fn scene(
         painter.add(Shape::convex_polygon(
             path,
             fill,
-            Stroke::new(line(width), alpha(CYAN, edge)),
+            Stroke::new(line(width), alpha(cyan, edge)),
         ));
     };
     polygon(&SHOULDERS, mix(ALLOY, DEEP, 0.55), 0.5, 1.0);
@@ -444,14 +501,14 @@ fn scene(
                 head_at(side_sign * 36.0, -66.0),
                 head_at(side_sign * 45.0, -58.0),
             ],
-            Stroke::new(line(1.0), alpha(CYAN, 0.4)),
+            Stroke::new(line(1.0), alpha(cyan, 0.4)),
         ));
         painter.line_segment(
             [
                 head_at(side_sign * 44.0, -8.0),
                 head_at(side_sign * 30.0, 28.0),
             ],
-            Stroke::new(line(1.0), alpha(CYAN, 0.3)),
+            Stroke::new(line(1.0), alpha(cyan, 0.3)),
         );
     }
 
@@ -476,7 +533,7 @@ fn scene(
                 [head_at(-half, y), head_at(half, y)],
                 Stroke::new(
                     line(if offset == 0.0 { 1.2 } else { 4.0 }),
-                    alpha(CYAN, glow),
+                    alpha(cyan, glow),
                 ),
             );
         }
@@ -509,14 +566,14 @@ fn scene(
         painter.rect_filled(
             eye.expand(4.0 * scale),
             egui::CornerRadius::same(6),
-            alpha(CYAN, 0.10 * pulse),
+            alpha(cyan, 0.10 * pulse),
         );
         painter.rect_filled(
             eye.expand(2.0 * scale),
             egui::CornerRadius::same(4),
-            alpha(CYAN, 0.22 * pulse),
+            alpha(cyan, 0.22 * pulse),
         );
-        painter.rect_filled(eye, egui::CornerRadius::same(2), alpha(CYAN, pulse));
+        painter.rect_filled(eye, egui::CornerRadius::same(2), alpha(cyan, pulse));
         painter.rect_filled(
             eye.shrink2(Vec2::new(3.0 * scale, height * 0.28 * scale)),
             egui::CornerRadius::same(1),
@@ -538,15 +595,15 @@ fn scene(
         painter.rect_filled(
             bar,
             egui::CornerRadius::same(1),
-            alpha(CYAN, 0.40 + 0.5 * blend.think.max(blend.talk)),
+            alpha(cyan, 0.40 + 0.5 * blend.think.max(blend.talk)),
         );
     }
 
     // Nucleo sul petto.
     let core = head_at(0.0, 92.0);
     let pulse_core = 0.5 + 0.5 * (t * (2.0 + 4.0 * energy)).sin();
-    painter.circle_filled(core, 24.0 * scale, alpha(CYAN, 0.06 + 0.08 * pulse_core));
-    painter.circle_filled(core, 15.0 * scale, alpha(CYAN, 0.10 + 0.14 * pulse_core));
+    painter.circle_filled(core, 24.0 * scale, alpha(cyan, 0.06 + 0.08 * pulse_core));
+    painter.circle_filled(core, 15.0 * scale, alpha(cyan, 0.10 + 0.14 * pulse_core));
     let ring_turn = t * 6.0 * (1.0 + energy) * 12.0;
     for k in 0..6 {
         let base = ring_turn + k as f32 * 60.0;
@@ -555,7 +612,7 @@ fn scene(
             10.0 * scale,
             base,
             base + 34.0,
-            Stroke::new(line(1.4), alpha(CYAN, 0.9)),
+            Stroke::new(line(1.4), alpha(cyan, 0.9)),
         ));
     }
     let spin_core = t * (1.4 + 2.6 * energy);
@@ -681,5 +738,14 @@ mod tests {
         assert_eq!(smooth(-1.0), 0.0);
         assert_eq!(smooth(2.0), 1.0);
         assert!((smooth(0.5) - 0.5).abs() < 1e-6);
+    }
+
+    #[test]
+    fn tint_follows_the_accent_and_turns_warm_on_alert() {
+        assert_eq!(tint(None, 0.0), CYAN);
+        assert_eq!(tint(None, 1.0), ALERT);
+        assert_eq!(tint(Some([10, 20, 30]), 0.0), Color32::from_rgb(10, 20, 30));
+        let half = tint(None, 0.5);
+        assert!(half.r() > CYAN.r() && half.r() < ALERT.r());
     }
 }
