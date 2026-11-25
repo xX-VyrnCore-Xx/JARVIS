@@ -459,11 +459,17 @@ mod tests {
         .unwrap();
         doc["steps"][0]["status"] = json!("done");
         doc["steps"][0]["output"] = json!({"result": 42, "list": [{"v": "x"}]});
-        let args = resolve(&json!({"n": "${calc.result}", "t": "${calc.list.0.v}", "fixed": "testo ${non riferimento}", "all": ["${calc.result}"]}), &doc).unwrap();
+        let args = resolve(&json!({"n": "${calc.result}", "t": "${calc.list.0.v}", "mixed": "risultato ${calc.result} per ${calc.list.0.v}!", "plain": "nessun riferimento", "all": ["${calc.result}"]}), &doc).unwrap();
         assert_eq!(
             args,
-            json!({"n": 42, "t": "x", "fixed": "testo ${non riferimento}", "all": [42]})
+            json!({"n": 42, "t": "x", "mixed": "risultato 42 per x!", "plain": "nessun riferimento", "all": [42]})
         );
+        assert!(resolve(&json!("aperto ${calc.result"), &doc)
+            .unwrap_err()
+            .contains("non chiuso"));
+        assert!(resolve(&json!("testo ${non riferimento}"), &doc)
+            .unwrap_err()
+            .contains("inesistente"));
         assert!(resolve(&json!({"n": "${calc.assente}"}), &doc)
             .unwrap_err()
             .contains("campo"));
