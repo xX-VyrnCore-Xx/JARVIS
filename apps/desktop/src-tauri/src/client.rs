@@ -15,6 +15,11 @@ impl ApiClient {
         Self::new(base, Some(("X-Jarvis-Token", token)))
     }
 
+    /// Sessione di un utente (ADR-0169): intestazione dedicata, mai quella del proprietario.
+    pub fn user(base: &str, token: String) -> Result<Self, String> {
+        Self::new(base, Some(("X-Jarvis-User", token)))
+    }
+
     pub fn device(base: &str, token: String) -> Result<Self, String> {
         Self::new(base, Some(("X-Jarvis-Device", token)))
     }
@@ -124,6 +129,10 @@ impl ApiClient {
             .map_err(read_error)?
             .into_json()
             .map_err(|error| error.to_string())
+    }
+
+    pub fn put(&self, path: &str, body: &Value) -> Result<Value, String> {
+        self.request("PUT", path, Some(body))
     }
 
     pub fn patch(&self, path: &str, body: &Value) -> Result<Value, String> {

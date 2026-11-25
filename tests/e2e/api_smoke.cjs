@@ -280,6 +280,16 @@ function check(condition, message) {
   check(plugins.status === 200 && Array.isArray(plugins.json?.items), "elenco dei pacchetti di estensione");
   const badPlugin = await request("/api/plugins", { method: "POST", token: ownerToken, body: { contract: "jarvis.plugin/1", name: "prova", version: "1.0.0", scripts: { postinstall: "x" }, skills: [] } });
   check(badPlugin.status === 400, "pacchetto con campi eseguibili rifiutato");
+  const userList = await request("/api/users", { token: ownerToken });
+  check(userList.status === 200 && Array.isArray(userList.json?.items) && !JSON.stringify(userList.json).includes("argon2"), "elenco degli utenti senza impronte");
+  const noSession = await request("/api/me", {});
+  check(noSession.status === 401, "area utente senza sessione rifiutata");
+  const ownerNotUser = await request("/api/me", { token: ownerToken });
+  check(noSession.status === 401 && ownerNotUser.status === 401, "il token del proprietario non apre l'area utente");
+  const noInvite = await request("/api/auth/register", { method: "POST", body: { username: "prova-e2e", password: "una frase lunga e strana" } });
+  check(noInvite.status === 401, "registrazione senza invito rifiutata");
+  const badLogin = await request("/api/auth/login", { method: "POST", body: { username: "nessuno", password: "una frase sbagliata" } });
+  check(badLogin.status === 401, "accesso con credenziali sbagliate rifiutato");
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

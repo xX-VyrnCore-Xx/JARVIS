@@ -26,7 +26,9 @@ mod initiatives;
 mod mission_runner;
 mod plan_runner;
 mod plugin_runner;
+mod user_runner;
 pub use mission_runner::{MissionRun, Next};
+pub use user_runner::UserTurn;
 
 /// Memoria nel contesto dell'agente (ADR-0022).
 const MEMORY_PROCEDURAL: usize = 20;

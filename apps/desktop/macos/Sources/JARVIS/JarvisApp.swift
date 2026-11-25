@@ -33,13 +33,13 @@ private enum Section: String, Identifiable {
     case devices = "Dispositivi", skills = "Competenze", security = "Sicurezza", audit = "Audit"
     case system = "Sistema", models = "Modelli AI", updates = "Aggiornamenti", notifications = "Notifiche"
     case missions = "Missioni", profile = "Profilo", plans = "Piani", tools = "Strumenti"
-    case agents = "Agenti", plugins = "Pacchetti"
+    case agents = "Agenti", plugins = "Pacchetti", users = "Utenti"
 
     static let navigation: [(title: String, entries: [Section])] = [
         ("Assistente", [.dashboard, .chat, .tasks, .models, .notifications, .profile]),
         ("Organizzazione", [.missions, .plans, .workflows, .workspace, .memory, .skills, .agents]),
         ("Collegamenti", [.devices, .tools, .plugins, .connectors]),
-        ("Amministrazione", [.confirmations, .security, .audit, .system, .updates])
+        ("Amministrazione", [.confirmations, .users, .security, .audit, .system, .updates])
     ]
 
     var id: Self { self }
@@ -67,6 +67,7 @@ private enum Section: String, Identifiable {
         case .tools: "wrench.and.screwdriver"
         case .agents: "person.3"
         case .plugins: "shippingbox"
+        case .users: "person.2"
         }
     }
     var endpoint: String {
@@ -92,6 +93,7 @@ private enum Section: String, Identifiable {
         case .tools: "/api/tools/registry"
         case .agents: "/api/agents/supervisor"
         case .plugins: "/api/plugins"
+        case .users: "/api/users"
         }
     }
 }
@@ -115,6 +117,9 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     /// Incrementato a ogni operazione riuscita: l'avatar risponde con un'onda verde.
     @State private var celebrateTick = 0
     @State private var pluginJSON = ""
+    @State private var inviteCode: String?
+    @State private var inviteExpires = ""
+    @State private var deleteUserID: String?
     @State private var profileShare = true
     @State private var changingInvite = false
 
@@ -1566,6 +1571,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             planTemplates
         case .agents: agentsIntro
         case .plugins: pluginInstaller
+        case .users: userAdmin
         case .profile: profileEditor
         case .connectors: connectorSetup
         case .devices:
@@ -1911,6 +1917,30 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     }
                 }
             }
+        case .users:
+            let disabled = item.data["disabled"] as? Bool ?? false
+            let messages = item.data["messages"] as? Int ?? 0
+            let sessions = item.data["sessions"] as? Int ?? 0
+            let last = String((item["last_login_at"] ?? "mai").prefix(16))
+            VStack(alignment: .leading, spacing: 6) {
+                Text("@\(item["username"] ?? "") · \(messages) messaggi · \(sessions) sessioni attive · ultimo accesso \(last)")
+                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Button(disabled ? "Riattiva" : "Disattiva", systemImage: disabled ? "play.fill" : "pause.fill") {
+                        mutate("/api/users/\(urlSegment(item.id))/\(disabled ? "enable" : "disable")", body: [:])
+                    }
+                    if deleteUserID == item.id {
+                        Text("Elimina l'account e tutti i suoi dati?").font(.caption).foregroundStyle(.red)
+                        Button("Sì, elimina", role: .destructive) {
+                            deleteUserID = nil
+                            mutate("/api/users/\(urlSegment(item.id))/delete", body: [:])
+                        }
+                        Button("Annulla") { deleteUserID = nil }
+                    } else {
+                        Button("Elimina…", role: .destructive) { deleteUserID = item.id }
+                    }
+                }
+            }
         case .plugins:
             let skills = (item.data["skills"] as? [Any])?.count ?? 0
             let templates = (item.data["templates"] as? [Any])?.count ?? 0
@@ -1996,6 +2026,61 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     }
                 }
             }
+        }
+    }
+
+    /// Utenti (ADR-0169): chi può registrarsi, inviti e uso del modello cloud. Il testo dei messaggi non si vede.
+    private var userAdmin: some View {
+        let settings = payload["settings"] as? [String: Any] ?? [:]
+        let registration = settings["registration"] as? String ?? "invite"
+        let cloud = settings["cloud"] as? Bool ?? false
+        return VStack(spacing: 14) {
+            card("Utenti e accesso", icon: "person.2") {
+                Text("Le persone che inviti hanno un account con la loro conversazione, i loro ricordi e la loro personalità. Non hanno strumenti e non vedono i tuoi dati; il testo dei loro messaggi non è visibile da qui. Accedono con l'app JARVIS per Windows e macOS (egui) o dal client web, non da questa console.")
+                    .font(.callout).foregroundStyle(.secondary)
+                Picker("Chi può registrarsi", selection: Binding(
+                    get: { registration },
+                    set: { mutate("/api/users/settings", body: ["registration": $0]) }
+                )) {
+                    Text("Nessuno").tag("closed")
+                    Text("Solo su invito").tag("invite")
+                    Text("Chiunque").tag("open")
+                }
+                .pickerStyle(.segmented)
+                Toggle("Gli utenti possono usare il mio modello cloud (costo tuo; i loro messaggi vanno al fornitore)", isOn: Binding(
+                    get: { cloud },
+                    set: { mutate("/api/users/settings", body: ["cloud": $0]) }
+                ))
+            }
+            card("Inviti", icon: "ticket") {
+                Button("Crea un invito", systemImage: "plus") { createInvite() }
+                    .buttonStyle(.borderedProminent)
+                if let code = inviteCode {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Codice di invito (si vede solo ora)").font(.caption.weight(.semibold))
+                        Text(code).font(.system(.body, design: .monospaced)).textSelection(.enabled)
+                        Text("Vale una volta e scade: \(inviteExpires)").font(.caption).foregroundStyle(.secondary)
+                        Button("Copia", systemImage: "doc.on.doc") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(code, forType: .string)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func createInvite() {
+        error = nil
+        info = nil
+        Task {
+            do {
+                let result = try await core.request("/api/users/invites", method: "POST", body: [:])
+                inviteCode = result["code"] as? String
+                inviteExpires = result["expires_at"] as? String ?? ""
+                info = result["message"] as? String ?? "Invito creato."
+                celebrateTick += 1
+            } catch { self.error = error.localizedDescription }
         }
     }
 
@@ -2587,7 +2672,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             ("/api/cloud", "Impostazioni dei modelli salvate."), ("/api/updates", "Aggiornamenti controllati."),
             ("/api/permissions", "Permessi aggiornati."), ("/api/backup", "Copia di sicurezza creata."),
             ("/api/missions", "Missione aggiornata."), ("/api/agents/limits", "Regole dell’agente aggiornate."),
-            ("/api/plugins", "Pacchetti aggiornati."),
+            ("/api/plugins", "Pacchetti aggiornati."), ("/api/users", "Utenti aggiornati."),
         ]
         if let hit = table.first(where: { path.hasPrefix($0.0) }) { return hit.1 }
         return method == "DELETE" ? "Elemento rimosso." : "Modifica salvata."
