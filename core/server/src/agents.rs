@@ -99,6 +99,71 @@ pub fn route(message: &str) -> Option<&'static Agent> {
     }
 }
 
+/// Registro degli agenti (ADR-0153): competenze, ambito di strumenti, rischio massimo e risorse. `risk_of` dà il
+/// rischio di uno strumento del catalogo.
+pub fn registry(risk_of: &dyn Fn(&str) -> Option<String>) -> Vec<serde_json::Value> {
+    let rank = |risk: &str| match risk {
+        "low" => 0,
+        "medium" => 1,
+        "high" => 2,
+        _ => 3,
+    };
+    let mut out: Vec<serde_json::Value> = SPECIALISTS
+        .iter()
+        .map(|agent| {
+            let tools: Vec<&str> = agent.tools.iter().chain(COMMON.iter()).copied().collect();
+            let mut categories: Vec<&str> =
+                tools.iter().map(|t| crate::toolsys::category(t)).collect();
+            categories.sort_unstable();
+            categories.dedup();
+            let max_risk = tools
+                .iter()
+                .filter_map(|t| risk_of(t))
+                .max_by_key(|r| rank(r))
+                .unwrap_or_else(|| "low".into());
+            serde_json::json!({
+                "name": agent.name, "role": agent.role, "kind": "specialist",
+                "capabilities": categories, "tools": tools, "keywords": agent.keywords.len(),
+                "max_risk": max_risk, "context": "isolated",
+                "resources": {"max_steps": 6, "tool_scope": "only_granted"},
+            })
+        })
+        .collect();
+    out.push(serde_json::json!({
+        "name": GENERAL, "role": "Generalista: riceve le richieste che toccano più ambiti o nessuno, con tutti gli strumenti entro policy e conferme.",
+        "kind": "generalist", "capabilities": ["all"], "tools": "all", "keywords": 0, "max_risk": "critical",
+        "context": "shared", "resources": {"max_steps": 8, "tool_scope": "catalog"},
+    }));
+    out
+}
+
+/// Perché una richiesta va a un agente: specializzazione scelta e parole chiave che l'hanno attivata.
+pub fn explain(message: &str) -> serde_json::Value {
+    let text = format!(" {} ", fold(message));
+    let hits: Vec<serde_json::Value> = SPECIALISTS
+        .iter()
+        .map(|agent| {
+            let matched: Vec<&str> = agent
+                .keywords
+                .iter()
+                .copied()
+                .filter(|k| text.contains(k))
+                .collect();
+            serde_json::json!({"agent": agent.name, "matched": matched})
+        })
+        .filter(|v| v["matched"].as_array().is_some_and(|m| !m.is_empty()))
+        .collect();
+    let chosen = route(message).map_or(GENERAL, |a| a.name);
+    let reason = match (chosen == GENERAL, hits.len()) {
+        (true, 0) => "nessuna parola chiave di una specializzazione: va al generalista",
+        (true, _) => "la richiesta tocca più ambiti: va al generalista con tutti gli strumenti",
+        (false, _) => {
+            "un solo ambito riconosciuto: va alla specializzazione con i soli strumenti concessi"
+        }
+    };
+    serde_json::json!({"agent": chosen, "reason": reason, "candidates": hits})
+}
+
 /// Lo strumento rientra nell'ambito concesso alla specializzazione.
 pub fn allows(agent: &Agent, tool: &str) -> bool {
     COMMON.contains(&tool) || agent.tools.contains(&tool)

@@ -37,6 +37,7 @@ pub mod orchestrator;
 pub mod passkeys;
 pub mod permissions;
 pub mod persona;
+pub mod plans;
 pub mod policy;
 pub mod privacy;
 pub mod proactive;
@@ -70,6 +71,7 @@ pub mod store;
 pub mod tls;
 pub mod toolbox;
 pub mod tools;
+pub mod toolsys;
 pub mod updates;
 pub mod web;
 

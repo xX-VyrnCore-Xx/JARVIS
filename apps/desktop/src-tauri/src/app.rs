@@ -22,16 +22,18 @@ const POSITIVE: egui::Color32 = egui::Color32::from_rgb(105, 220, 174);
 const CAUTION: egui::Color32 = egui::Color32::from_rgb(245, 190, 96);
 const NEGATIVE: egui::Color32 = egui::Color32::from_rgb(255, 125, 135);
 
-const NAV: [(&str, &str, bool); 16] = [
+const NAV: [(&str, &str, bool); 18] = [
     ("dashboard", "Plancia", true),
     ("chat", "Chat", false),
     ("tasks", "Attività", false),
     ("models", "Modelli AI", true),
     ("missions", "Missioni", true),
     ("automations", "Automazioni", true),
+    ("plans", "Piani", true),
     ("workspace", "Workspace", true),
     ("memory", "Memoria", true),
     ("skills", "Competenze", true),
+    ("tools", "Strumenti", true),
     ("connectors", "Connettori", true),
     ("devices", "Dispositivi", true),
     ("security", "Sicurezza", true),
@@ -45,8 +47,10 @@ const NAV: [(&str, &str, bool); 16] = [
 fn nav_group(id: &str) -> &'static str {
     match id {
         "dashboard" | "chat" | "tasks" | "models" => "Assistente",
-        "missions" | "automations" | "workspace" | "memory" | "skills" => "Organizzazione",
-        "connectors" | "devices" => "Connessioni",
+        "missions" | "plans" | "automations" | "workspace" | "memory" | "skills" => {
+            "Organizzazione"
+        }
+        "connectors" | "tools" | "devices" => "Connessioni",
         "security" | "permissions" | "audit" => "Protezione",
         _ => "Sistema",
     }
@@ -88,6 +92,19 @@ fn draw_nav_icon(painter: &egui::Painter, center: egui::Pos2, id: &str, color: e
                 vec![p(-3.0, 3.5), p(-4.5, 7.5), p(1.0, 3.5)],
                 stroke,
             ));
+        }
+        "plans" => {
+            let nodes = [p(-6.5, -5.0), p(6.5, -5.0), p(0.0, 6.0)];
+            painter.line_segment([nodes[0], nodes[2]], stroke);
+            painter.line_segment([nodes[1], nodes[2]], stroke);
+            for node in nodes {
+                painter.circle_stroke(node, 2.6, stroke);
+            }
+        }
+        "tools" => {
+            painter.line_segment([p(-6.5, 6.5), p(2.0, -2.0)], egui::Stroke::new(2.2, color));
+            painter.circle_stroke(p(4.5, -4.5), 3.6, stroke);
+            painter.line_segment([p(3.0, -6.0), p(6.0, -3.0)], stroke);
         }
         "tasks" => {
             for row in 0..3 {
@@ -248,6 +265,8 @@ enum Event {
     BackgroundRunning(usize),
     /// Chat esportata in Markdown, pronta da copiare (ADR-0150).
     ChatExported(Result<Value, String>),
+    /// Dettaglio di un piano di esecuzione (ADR-0152).
+    PlanDetail(Result<Value, String>),
     /// Comando pronunciato dopo «Hey Jarvis» (ADR-0140).
     #[cfg_attr(not(windows), allow(dead_code))]
     WakeCommand(String),
@@ -298,6 +317,12 @@ pub struct JarvisApp {
     chat_busy: bool,
     chat_cloud_context: bool,
     chat_background: bool,
+    tools_query: String,
+    tools_category: String,
+    plan_selected: Option<String>,
+    plan_detail: Option<Value>,
+    plan_polled: Instant,
+    emergency_active: bool,
     /// Conferma dell'ultima azione riuscita, mostrata per qualche secondo (ADR-0148).
     action_notice: Option<(String, Instant)>,
     background_running: usize,
@@ -451,6 +476,12 @@ impl JarvisApp {
             chat_busy: false,
             chat_cloud_context: true,
             chat_background: false,
+            tools_query: String::new(),
+            tools_category: String::new(),
+            plan_selected: None,
+            plan_detail: None,
+            plan_polled: Instant::now(),
+            emergency_active: false,
             action_notice: None,
             background_running: 0,
             background_polled: Instant::now(),
@@ -592,6 +623,13 @@ impl JarvisApp {
                             self.load_history();
                             self.load_conversations();
                         }
+                        Err(error) => self.error = Some(error),
+                    }
+                    ctx.request_repaint();
+                }
+                Event::PlanDetail(result) => {
+                    match result {
+                        Ok(doc) => self.plan_detail = Some(doc),
                         Err(error) => self.error = Some(error),
                     }
                     ctx.request_repaint();
@@ -1180,6 +1218,23 @@ impl JarvisApp {
 
     #[cfg(not(target_os = "windows"))]
     fn sync_wake(&mut self, _ctx: &egui::Context) {}
+
+    /// Aggiorna lo stato dell'arresto di emergenza dai dati della pagina corrente, quando li riporta.
+    fn sync_emergency(&mut self) {
+        let Some(data) = self.data.as_ref() else {
+            return;
+        };
+        let flag = [
+            &data["security"]["emergency_stop"],
+            &data["emergency_stop"],
+            &data["emergency"],
+        ]
+        .into_iter()
+        .find_map(|v| v.as_bool());
+        if let Some(active) = flag {
+            self.emergency_active = active;
+        }
+    }
 
     /// Finché un lavoro in background è in corso controlla ogni pochi secondi se ha finito.
     fn poll_background(&mut self, ctx: &egui::Context) {
@@ -1815,6 +1870,24 @@ impl JarvisApp {
     }
 
     fn show_data(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if self.emergency_active && !self.remote {
+            egui::Frame::new()
+                .fill(egui::Color32::from_rgb(58, 18, 24))
+                .stroke(egui::Stroke::new(1.0, NEGATIVE))
+                .corner_radius(12)
+                .inner_margin(egui::Margin::symmetric(12, 8))
+                .show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.horizontal_wrapped(|ui| {
+                        ui.colored_label(NEGATIVE, "⏻ Arresto di emergenza attivo");
+                        ui.label("JARVIS non esegue né modifica nulla.");
+                        if ui.button("Disattiva").clicked() {
+                            self.act(ctx, "/api/emergency".into(), Some(json!({"active": false})));
+                        }
+                    });
+                });
+            ui.add_space(6.0);
+        }
         if let Some((message, shown)) = self.action_notice.clone() {
             if shown.elapsed() < Duration::from_secs(7) {
                 egui::Frame::new()
@@ -1846,6 +1919,8 @@ impl JarvisApp {
             "connectors" => self.show_connectors(ui, ctx),
             "memory" => self.show_memory(ui, ctx),
             "missions" => self.show_missions(ui, ctx),
+            "plans" => self.show_plans(ui, ctx),
+            "tools" => self.show_tools(ui, ctx),
             "permissions" => self.show_permissions(ui, ctx),
             "tasks" | "automations" | "skills" | "workspace" | "devices" | "security" | "audit" => {
                 ui.horizontal(|ui| {
@@ -1853,6 +1928,17 @@ impl JarvisApp {
                     if ui.button("Aggiorna").clicked() {
                         self.data = None;
                         self.refresh(ctx);
+                    }
+                    if self.current == "security"
+                        && !self.emergency_active
+                        && ui
+                            .add(egui::Button::new(
+                                egui::RichText::new("⏻ Arresto di emergenza").color(NEGATIVE),
+                            ))
+                            .on_hover_text("Ferma subito ogni modifica, i lavori in background e le automazioni")
+                            .clicked()
+                    {
+                        self.act(ctx, "/api/emergency".into(), Some(json!({"active": true})));
                     }
                 });
                 if self.loading {
@@ -1879,6 +1965,337 @@ impl JarvisApp {
             }
             _ => {}
         }
+    }
+
+    /// Gestione degli strumenti (ADR-0151): registro con categoria, rischio, salute e regola del proprietario.
+    fn show_tools(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.horizontal(|ui| {
+            ui.heading("Strumenti");
+            if ui.button("Aggiorna").clicked() {
+                self.data = None;
+                self.refresh(ctx);
+            }
+            if self.loading {
+                ui.add(egui::Spinner::new());
+            }
+        });
+        if let Some(error) = &self.error {
+            ui.colored_label(NEGATIVE, error);
+        }
+        let Some(data) = self.data.clone() else {
+            return;
+        };
+        ui.label(
+            "Ogni strumento dichiara rischio, permessi, piattaforme e dipendenze. Qui li vedi con la loro salute e \
+             puoi bloccarli: il blocco restringe sempre, non allarga mai i permessi.",
+        );
+        ui.horizontal_wrapped(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.tools_query)
+                    .hint_text("Cerca uno strumento")
+                    .desired_width(200.0),
+            );
+            if ui
+                .selectable_label(self.tools_category.is_empty(), "Tutte")
+                .clicked()
+            {
+                self.tools_category.clear();
+            }
+            for category in data["categories"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+            {
+                if ui
+                    .selectable_label(self.tools_category == category, category)
+                    .clicked()
+                {
+                    self.tools_category = category.to_owned();
+                }
+            }
+        });
+        let query = self.tools_query.trim().to_lowercase();
+        let mut shown = 0;
+        for tool in data["items"].as_array().into_iter().flatten() {
+            let name = tool["name"].as_str().unwrap_or("");
+            let category = tool["category"].as_str().unwrap_or("");
+            if (!self.tools_category.is_empty() && category != self.tools_category)
+                || (!query.is_empty()
+                    && !name.to_lowercase().contains(&query)
+                    && !tool["summary"]
+                        .as_str()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .contains(&query))
+            {
+                continue;
+            }
+            shown += 1;
+            let risk_color = match tool["risk"].as_str() {
+                Some("low") => POSITIVE,
+                Some("medium") => ACCENT,
+                Some("high") => CAUTION,
+                _ => NEGATIVE,
+            };
+            let health = tool["health"]["state"].as_str().unwrap_or("unknown");
+            let (health_label, health_color) = match health {
+                "healthy" => ("in salute", POSITIVE),
+                "degraded" => ("instabile", CAUTION),
+                "failing" => ("in errore", NEGATIVE),
+                _ => ("senza dati", ACCENT),
+            };
+            let rule = tool["owner_rule"].as_str();
+            egui::Frame::new()
+                .fill(SURFACE)
+                .corner_radius(10)
+                .inner_margin(10)
+                .show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(egui::RichText::new(name).strong());
+                        ui.colored_label(
+                            risk_color,
+                            format!("rischio {}", tool["risk"].as_str().unwrap_or("?")),
+                        );
+                        ui.label(egui::RichText::new(category).weak());
+                        ui.colored_label(health_color, health_label);
+                        if tool["offline"] == true {
+                            ui.label(egui::RichText::new("offline").small().weak());
+                        }
+                        match rule {
+                            Some("deny") => {
+                                ui.colored_label(NEGATIVE, "bloccato");
+                            }
+                            Some("ask") => {
+                                ui.colored_label(CAUTION, "chiede conferma");
+                            }
+                            _ => {}
+                        }
+                    });
+                    ui.label(
+                        egui::RichText::new(tool["summary"].as_str().unwrap_or(""))
+                            .small()
+                            .weak(),
+                    );
+                    ui.horizontal_wrapped(|ui| {
+                        let runs = tool["health"]["runs"].as_u64().unwrap_or(0);
+                        if runs > 0 {
+                            ui.small(format!(
+                                "{runs} esecuzioni · {} ms in media",
+                                tool["health"]["avg_ms"].as_f64().unwrap_or(0.0)
+                            ));
+                        }
+                        let blocked = rule == Some("deny");
+                        if ui
+                            .small_button(if blocked { "Sblocca" } else { "Blocca" })
+                            .clicked()
+                        {
+                            let value = if blocked { Value::Null } else { json!("deny") };
+                            self.mutate(
+                                ctx,
+                                Mutation::Patch,
+                                "/api/permissions".into(),
+                                Some(json!({"rules": {name: value}})),
+                            );
+                        }
+                    });
+                });
+            ui.add_space(4.0);
+        }
+        ui.small(format!(
+            "{shown} di {} strumenti",
+            data["total"].as_u64().unwrap_or(0)
+        ));
+    }
+
+    /// Piani di esecuzione (ADR-0152): attività a passi con dipendenze, conferme, annullamento, rollback e replay.
+    fn show_plans(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.horizontal(|ui| {
+            ui.heading("Piani");
+            if ui.button("Aggiorna").clicked() {
+                self.data = None;
+                self.refresh(ctx);
+            }
+            if self.loading {
+                ui.add(egui::Spinner::new());
+            }
+        });
+        if let Some(error) = &self.error {
+            ui.colored_label(NEGATIVE, error);
+        }
+        ui.label(
+            "Attività complesse eseguite un passo alla volta, con dipendenze, budget di tempo, conferme del \
+             proprietario, annullamento degli effetti e cronologia. Si creano da API o dall'assistente.",
+        );
+        let Some(data) = self.data.clone() else {
+            return;
+        };
+        let items = data["items"].as_array().cloned().unwrap_or_default();
+        if items.is_empty() {
+            ui.label("Nessun piano. Crea il primo con POST /api/plans.");
+        }
+        for plan in items {
+            let id = plan["id"].as_str().unwrap_or("").to_owned();
+            let status = plan["status"].as_str().unwrap_or("");
+            let (label, color) = match status {
+                "succeeded" => ("completato", POSITIVE),
+                "running" => ("in esecuzione", ACCENT),
+                "waiting" => ("attende conferma", CAUTION),
+                "pending" => ("pronto", ACCENT),
+                "interrupted" => ("interrotto", CAUTION),
+                "cancelled" => ("annullato", CAUTION),
+                "budget_exceeded" => ("budget esaurito", NEGATIVE),
+                _ => ("non riuscito", NEGATIVE),
+            };
+            egui::Frame::new()
+                .fill(SURFACE)
+                .corner_radius(10)
+                .inner_margin(10)
+                .show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(egui::RichText::new(plan["goal"].as_str().unwrap_or("")).strong());
+                        ui.colored_label(color, label);
+                        ui.small(format!(
+                            "{}/{} passi",
+                            plan["done"].as_u64().unwrap_or(0),
+                            plan["steps"].as_u64().unwrap_or(0)
+                        ));
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        if matches!(status, "pending" | "interrupted" | "waiting")
+                            && ui.small_button("Esegui").clicked()
+                        {
+                            self.act(ctx, format!("/api/plans/{id}/run"), Some(json!({})));
+                        }
+                        if matches!(status, "pending" | "running" | "waiting" | "interrupted")
+                            && ui.small_button("Annulla").clicked()
+                        {
+                            self.act(ctx, format!("/api/plans/{id}/cancel"), Some(json!({})));
+                        }
+                        if ui.small_button("Replay").clicked() {
+                            self.act(ctx, format!("/api/plans/{id}/replay"), Some(json!({})));
+                        }
+                        if ui.small_button("Dettagli").clicked() {
+                            self.plan_selected = Some(id.clone());
+                            self.plan_polled = Instant::now() - Duration::from_secs(60);
+                        }
+                    });
+                });
+            ui.add_space(4.0);
+        }
+        self.show_plan_detail(ui, ctx);
+    }
+
+    fn show_plan_detail(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let Some(id) = self.plan_selected.clone() else {
+            return;
+        };
+        let running = self
+            .plan_detail
+            .as_ref()
+            .is_some_and(|d| d["id"] == id.as_str() && d["status"] == "running");
+        if (self
+            .plan_detail
+            .as_ref()
+            .is_none_or(|d| d["id"] != id.as_str())
+            || running)
+            && self.plan_polled.elapsed() >= Duration::from_secs(2)
+        {
+            if let Some(client) = self.client.clone() {
+                self.plan_polled = Instant::now();
+                let tx = self.tx.clone();
+                let path = format!("/api/plans/{id}");
+                std::thread::spawn(move || {
+                    let _ = tx.send(Event::PlanDetail(client.get(&path)));
+                });
+            }
+        }
+        if running {
+            ctx.request_repaint_after(Duration::from_secs(2));
+        }
+        let Some(detail) = self.plan_detail.clone().filter(|d| d["id"] == id.as_str()) else {
+            return;
+        };
+        ui.add_space(8.0);
+        egui::Frame::new()
+            .fill(RAISED)
+            .corner_radius(12)
+            .inner_margin(12)
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.strong(detail["goal"].as_str().unwrap_or("Piano"));
+                    if ui.small_button("Chiudi").clicked() {
+                        self.plan_selected = None;
+                    }
+                });
+                ui.label(egui::RichText::new("Passi").strong());
+                for step in detail["steps"].as_array().into_iter().flatten() {
+                    let status = step["status"].as_str().unwrap_or("");
+                    let (icon, color) = match status {
+                        "done" => ("✔", POSITIVE),
+                        "failed" => ("✖", NEGATIVE),
+                        "waiting_confirmation" => ("⏸", CAUTION),
+                        "rolled_back" => ("↩", ACCENT),
+                        "running" => ("▶", ACCENT),
+                        "skipped" | "cancelled" => ("–", egui::Color32::GRAY),
+                        _ => ("○", egui::Color32::GRAY),
+                    };
+                    ui.horizontal_wrapped(|ui| {
+                        ui.colored_label(color, icon);
+                        ui.label(format!(
+                            "{} · {}",
+                            step["id"].as_str().unwrap_or(""),
+                            step["tool"].as_str().unwrap_or("")
+                        ));
+                        if status == "waiting_confirmation" && ui.small_button("Approva").clicked()
+                        {
+                            self.act(
+                                ctx,
+                                format!("/api/plans/{id}/approve"),
+                                Some(json!({"steps": [step["id"]]})),
+                            );
+                        }
+                        if let Some(code) = step["error"]["code"].as_str() {
+                            ui.colored_label(NEGATIVE, code);
+                        }
+                    });
+                }
+                let undoable = detail["steps"].as_array().is_some_and(|s| {
+                    s.iter()
+                        .any(|s| s["status"] == "done" && s["undo"].is_object())
+                });
+                if undoable
+                    && detail["status"] != "running"
+                    && ui
+                        .small_button("Annulla gli effetti (con conferma)")
+                        .clicked()
+                {
+                    self.act(
+                        ctx,
+                        format!("/api/plans/{id}/rollback"),
+                        Some(json!({"confirm": true})),
+                    );
+                }
+                ui.add_space(4.0);
+                ui.label(egui::RichText::new("Cronologia").strong());
+                for event in detail["events"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .rev()
+                    .take(12)
+                {
+                    ui.small(format!(
+                        "{} · {} {}",
+                        event["at"].as_str().unwrap_or("").get(11..19).unwrap_or(""),
+                        event["kind"].as_str().unwrap_or(""),
+                        event["detail"].as_str().unwrap_or("")
+                    ));
+                }
+            });
     }
 
     /// Missioni autonome e iniziative proattive (ADR-0096, ADR-0097).
@@ -4399,6 +4816,7 @@ impl eframe::App for JarvisApp {
         self.receive_events(&ctx);
         self.sync_wake(&ctx);
         self.poll_background(&ctx);
+        self.sync_emergency();
         if self.current != "models" {
             self.cloud_api_key.clear();
             self.cloud_action_error = None;
@@ -5015,6 +5433,8 @@ fn endpoint(page: &str) -> &'static str {
         "skills" => "/api/skills",
         "missions" => "/api/missions",
         "permissions" => "/api/permissions",
+        "plans" => "/api/plans",
+        "tools" => "/api/tools/registry",
         "workspace" => "/api/workspace",
         "connectors" => "/api/connectors",
         "devices" => "/api/devices",

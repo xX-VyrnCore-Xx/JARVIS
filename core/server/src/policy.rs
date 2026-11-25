@@ -41,6 +41,9 @@ pub fn explain(reason: &str) -> &'static str {
         "policy.shell_disabled" => {
             "il terminale del sistema richiede JARVIS_SHELL=on; per Python puoi usare la sandbox"
         }
+        "policy.emergency_stop" => {
+            "arresto di emergenza attivo: JARVIS non esegue né modifica nulla finché il proprietario non lo disattiva"
+        }
         "policy.owner_rule_deny" => {
             "il proprietario ha vietato questo strumento nei permessi di JARVIS"
         }
@@ -381,7 +384,15 @@ pub fn decide(catalog: &Catalog, web: &WebConfig, req: &Request) -> Value {
                 t.descriptor["effects"].as_str().unwrap_or("write_local"),
             ) == Some(crate::permissions::Mode::Deny) =>
         {
-            ("deny", vec!["policy.owner_rule_deny"], t.risk().into())
+            (
+                "deny",
+                vec![if req.perms.emergency() {
+                    "policy.emergency_stop"
+                } else {
+                    "policy.owner_rule_deny"
+                }],
+                t.risk().into(),
+            )
         }
         Some(t)
             if !(t.needs_confirmation() || matches!(t.risk(), "high" | "critical"))

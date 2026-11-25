@@ -23,6 +23,7 @@ use crate::{automation, now, policy, tools};
 
 mod initiatives;
 mod mission_runner;
+mod plan_runner;
 pub use mission_runner::{MissionRun, Next};
 
 /// Memoria nel contesto dell'agente (ADR-0022).
@@ -301,6 +302,8 @@ impl Jarvis {
         store
             .protect_chat(secrets.chat_cipher.clone())
             .map_err(|e| format!("cifratura della conversazione: {e}"))?;
+        // Piani rimasti in esecuzione a Core chiuso (ADR-0152): si riprendono a mano.
+        let _ = store.plans_interrupt_running();
         let push = crate::push::PushSubscriptions::open(&cfg.data_dir.join("jarvis.sqlite3"))?;
         let cfg_logs = cfg.data_dir.join("logs");
         let (cfg_setup_dir, cfg_setup_python, cfg_setup_ai) =
@@ -2349,6 +2352,33 @@ impl Jarvis {
         Ok(json!({"id": id, "pinned": pinned}))
     }
 
+    /// Stato dell'arresto di emergenza (ADR-0151).
+    pub fn emergency_status(&self) -> Value {
+        json!({"active": crate::permissions::emergency_active(&self.cfg.data_dir)})
+    }
+
+    /// Attiva o disattiva l'arresto di emergenza: con l'arresto attivo ogni strumento che modifica o esegue è
+    /// negato dalla policy e lo scheduler non avvia nulla. Solo il proprietario, sempre nel registro di audit.
+    pub fn emergency_set(&mut self, active: bool) -> Result<Value, CoreError> {
+        let doc = crate::permissions::set_emergency(&self.cfg.data_dir, active)
+            .map_err(CoreError::Internal)?;
+        self.audit(json!({
+            "correlation_id": uuid::Uuid::new_v4().to_string(),
+            "actor": {"kind": "owner", "id": "owner"}, "node": "core-local",
+            "action": if active { "emergency.stop" } else { "emergency.resume" },
+            "outcome": "succeeded", "effect": "applied",
+        }))?;
+        self.notify(json!({
+            "severity": if active { "warning" } else { "info" }, "category": "security",
+            "title": if active { "Arresto di emergenza attivo" } else { "Arresto di emergenza disattivato" },
+            "body": if active {
+                "JARVIS non esegue né modifica nulla e ha fermato i lavori in background. Disattivalo dalla Sicurezza quando vuoi riprendere."
+            } else { "JARVIS può di nuovo lavorare entro i permessi concessi." },
+            "source": {"kind": "module", "id": "emergency"}, "link": {"view": "security"},
+        }))?;
+        Ok(doc)
+    }
+
     /// Ricerca nelle chat.
     pub fn conversation_search(&self, query: &str) -> Result<Value, CoreError> {
         let items = self.store.messages_search(query, 30).map_err(internal)?;
@@ -2557,6 +2587,7 @@ impl Jarvis {
             "secrets_store": self.secrets.location(), "devices_active": active,
             "pending_confirmations": self.pending.len(), "web_enabled": self.cfg.web.enabled,
             "web_private_addresses": self.cfg.web.allow_private, "shell_enabled": !policy::shell_disabled(),
+            "emergency_stop": crate::permissions::emergency_active(&self.cfg.data_dir),
             "encryption": {
                 "chat_at_rest": self.store.chat_protected(),
                 "algorithm": "XChaCha20-Poly1305",
@@ -2630,6 +2661,14 @@ impl Jarvis {
         let result = self.execute_tool_inner(tool, arguments, confirmed);
         self.obs
             .observe(&format!("tool {tool}"), timer.ms(), result.is_err());
+        // Cronologia e salute degli strumenti (ADR-0151): sempre, senza argomenti né risultati.
+        let _ = self.store.tool_run_add(
+            tool,
+            &now(),
+            timer.ms(),
+            result.is_ok(),
+            result.as_ref().err().map(|e| e.code),
+        );
         if let Err(e) = &result {
             self.obs.log("warn", "tool.failed", json!({"tool": tool, "code": e.code, "duration_ms": (timer.ms() * 10.0).round() / 10.0}));
         }
@@ -3104,6 +3143,10 @@ impl Jarvis {
     ) -> Result<Vec<Value>, CoreError> {
         let tolerance = chrono::Duration::seconds(self.cfg.scheduler_tick_s as i64 * 2 + 60);
         let mut runs = Vec::new();
+        // Arresto di emergenza: nessuna attività autonoma (automazioni, missioni, iniziative) finché è attivo.
+        if crate::permissions::emergency_active(&self.cfg.data_dir) {
+            return Ok(runs);
+        }
         self.proactive_poll(now_t);
         // Cose da fare scadute (ADR-0046): una notifica per ciascuna, una sola volta.
         let now_s = now_t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
@@ -3230,6 +3273,118 @@ impl Jarvis {
             .workflow_delete(doc["workflow_id"].as_str().unwrap_or_default())
             .map_err(internal)?;
         self.owner_audit("workflow.delete")
+    }
+
+    /// Registro universale (ADR-0151): voci normalizzate con salute e regola del proprietario, filtrabili.
+    pub fn tool_registry(
+        &self,
+        filter: &std::collections::HashMap<String, String>,
+    ) -> Result<Value, CoreError> {
+        let stats = self.store.tool_stats().map_err(internal)?;
+        let rules = crate::permissions::Rules::load(&self.cfg.data_dir);
+        let want = |key: &str| {
+            filter
+                .get(key)
+                .map(String::as_str)
+                .filter(|v| !v.is_empty())
+        };
+        let query = want("q").map(str::to_lowercase);
+        let mut items = Vec::new();
+        for tool in self.catalog.iter() {
+            let mut entry = crate::toolsys::entry(&tool.descriptor);
+            let effects = tool.descriptor["effects"].as_str().unwrap_or("write_local");
+            if want("category").is_some_and(|c| entry["category"] != c)
+                || want("risk").is_some_and(|r| entry["risk"] != r)
+                || want("platform").is_some_and(|p| {
+                    !entry["platforms"]
+                        .as_array()
+                        .is_some_and(|l| l.iter().any(|v| v == p))
+                })
+                || want("offline").is_some_and(|o| entry["offline"] != (o == "true"))
+                || query.as_deref().is_some_and(|q| {
+                    !tool.name().to_lowercase().contains(q)
+                        && !tool.descriptor["summary"]
+                            .as_str()
+                            .unwrap_or_default()
+                            .to_lowercase()
+                            .contains(q)
+                })
+            {
+                continue;
+            }
+            let health = stats.iter().find(|s| s["tool"] == tool.name());
+            entry["health"] = health
+                .cloned()
+                .unwrap_or_else(|| json!({"runs": 0, "state": "unknown"}));
+            entry["owner_rule"] = match rules.verdict(tool.name(), effects) {
+                Some(crate::permissions::Mode::Deny) => json!("deny"),
+                Some(crate::permissions::Mode::Ask) => json!("ask"),
+                None => Value::Null,
+            };
+            items.push(entry);
+        }
+        let mut categories: Vec<&str> = items
+            .iter()
+            .filter_map(|i| i["category"].as_str())
+            .collect();
+        categories.sort_unstable();
+        categories.dedup();
+        Ok(json!({
+            "total": items.len(), "categories": categories, "items": items,
+            "emergency": crate::permissions::emergency_active(&self.cfg.data_dir),
+        }))
+    }
+
+    /// Spiega l'instradamento di una richiesta ai modelli (ADR-0153) senza inviare nulla ai provider.
+    pub fn model_route(&self, message: &str) -> Value {
+        let settings = crate::cloud::settings(&self.cfg.data_dir);
+        let providers: Vec<Value> = crate::cloud::Provider::ALL
+            .into_iter()
+            .map(|provider| {
+                let configured = self.secrets.get(&provider.secret()).ok().flatten().is_some();
+                let target = provider.target(String::new(), message, Vec::new(), &settings);
+                json!({
+                    "id": provider.id(), "configured": configured, "route": target.route_name(),
+                    "model": target.model, "fallback_model": target.alternative, "quick": target.is_quick(),
+                })
+            })
+            .collect();
+        let (_, personal) = crate::privacy::redact(message);
+        let credentials = crate::cloud::contains_credentials(message);
+        let configured = providers.iter().any(|p| p["configured"] == true);
+        let decision = if credentials {
+            "blocked_credentials"
+        } else if configured {
+            "cloud_available"
+        } else {
+            "local_only"
+        };
+        json!({
+            "providers": providers,
+            "task": crate::prompts::role_label(crate::prompts::role_for(message)),
+            "privacy": {
+                "credentials": credentials, "personal_data": personal,
+                "profile_shared": crate::profile::load(&self.cfg.data_dir).share_with_cloud,
+                "policy": "Le credenziali non lasciano mai il computer; il profilo e il contesto vanno al provider solo se il proprietario lo consente.",
+            },
+            "decision": decision,
+            "local": {"offline_rules": true, "note": "Senza provider cloud JARVIS risponde con i comandi locali a regole."},
+        })
+    }
+
+    /// Registro degli agenti con competenze, strumenti e rischio massimo (ADR-0153).
+    pub fn agent_registry(&self) -> Value {
+        let items =
+            crate::agents::registry(&|tool| self.catalog.get(tool).map(|t| t.risk().to_string()));
+        json!({"items": items, "max_delegated_tools": MAX_DELEGATED_TOOLS})
+    }
+
+    pub fn tool_health(&self) -> Result<Value, CoreError> {
+        Ok(json!({"items": self.store.tool_stats().map_err(internal)?}))
+    }
+
+    pub fn tool_history(&self, tool: Option<&str>, limit: u32) -> Result<Value, CoreError> {
+        Ok(json!({"items": self.store.tool_history(tool, limit).map_err(internal)?}))
     }
 
     pub fn tool_catalog(&self) -> Vec<Value> {

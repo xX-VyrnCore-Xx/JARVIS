@@ -227,6 +227,25 @@ function check(condition, message) {
   check(missingJob.status === 404, "annullamento di un lavoro sconosciuto");
   const mcpStats = await request("/api/mcp", { method: "POST", token: ownerToken, body: { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "data__stats", arguments: { values: [1, 2, 3, 4] } } } });
   check(mcpStats.status === 200 && /"mean": 2.5/.test(mcpStats.json?.result?.content?.[0]?.text || ""), "strumento data.stats via MCP");
+  const registry = await request("/api/tools/registry?category=analysis", { token: ownerToken });
+  check(registry.status === 200 && registry.json?.items?.length > 5 && registry.json.items.every((i) => i.category === "analysis" && Array.isArray(i.platforms)), "registro degli strumenti con filtri");
+  const agentList = await request("/api/agents", { token: ownerToken });
+  check(agentList.status === 200 && agentList.json?.items?.some((i) => i.name === "coding" && i.context === "isolated"), "registro degli agenti");
+  const modelRoute = await request("/api/models/route?q=Traduci%20in%20inglese%3A%20ciao", { token: ownerToken });
+  check(modelRoute.status === 200 && modelRoute.json?.providers?.[0]?.route === "translation", "instradamento dei modelli spiegato");
+  const plan = await request("/api/plans", { method: "POST", token: ownerToken, body: { goal: "Smoke", run: true, steps: [
+    { id: "calc", tool: "math.calc", arguments: { expression: "2+2" } },
+    { id: "words", tool: "text.count", depends_on: ["calc"], arguments: { text: "risultato ${calc.result}" } } ] } });
+  check(plan.status === 200 && plan.json?.id, "piano creato e avviato");
+  let planDone = null;
+  for (let i = 0; i < 80 && !planDone; i++) {
+    const current = await request(`/api/plans/${plan.json.id}`, { token: ownerToken });
+    if (["succeeded", "failed"].includes(current.json?.status)) planDone = current.json;
+    else await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  check(planDone?.status === "succeeded" && planDone.steps?.[1]?.output?.words === 2, "piano eseguito con valori passati fra i passi");
+  const emergency = await request("/api/emergency", { token: ownerToken });
+  check(emergency.status === 200 && emergency.json?.active === false, "arresto di emergenza spento");
   const tailscale = await request("/api/tailscale", { token: ownerToken });
   check(tailscale.status === 200 && typeof tailscale.json?.installed === "boolean" && tailscale.json?.allowed === false, "stato di Tailscale senza autorizzare indirizzi");
 })().catch((error) => {

@@ -32,12 +32,12 @@ private enum Section: String, Identifiable {
     case workflows = "Automazioni", memory = "Memoria", workspace = "Workspace", connectors = "Connettori"
     case devices = "Dispositivi", skills = "Competenze", security = "Sicurezza", audit = "Audit"
     case system = "Sistema", models = "Modelli AI", updates = "Aggiornamenti", notifications = "Notifiche"
-    case missions = "Missioni", profile = "Profilo"
+    case missions = "Missioni", profile = "Profilo", plans = "Piani", tools = "Strumenti"
 
     static let navigation: [(title: String, entries: [Section])] = [
         ("Assistente", [.dashboard, .chat, .tasks, .models, .notifications, .profile]),
-        ("Organizzazione", [.missions, .workflows, .workspace, .memory, .skills]),
-        ("Collegamenti", [.devices, .connectors]),
+        ("Organizzazione", [.missions, .plans, .workflows, .workspace, .memory, .skills]),
+        ("Collegamenti", [.devices, .tools, .connectors]),
         ("Amministrazione", [.confirmations, .security, .audit, .system, .updates])
     ]
 
@@ -62,6 +62,8 @@ private enum Section: String, Identifiable {
         case .notifications: "bell"
         case .missions: "scope"
         case .profile: "person.crop.circle"
+        case .plans: "point.3.connected.trianglepath.dotted"
+        case .tools: "wrench.and.screwdriver"
         }
     }
     var endpoint: String {
@@ -83,6 +85,8 @@ private enum Section: String, Identifiable {
         case .notifications: "/api/notifications"
         case .missions: "/api/missions"
         case .profile: "/api/profile"
+        case .plans: "/api/plans"
+        case .tools: "/api/tools/registry"
         }
     }
 }
@@ -1497,6 +1501,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             }
             memoryOverview
         case .missions: missionTools
+        case .security: emergencyCard
         case .profile: profileEditor
         case .connectors: connectorSetup
         case .devices:
@@ -1543,7 +1548,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         } else {
             ForEach(items) { item in
                 card(item.title, icon: section.icon) {
-                    if let subtitle = item["state"] ?? item["description"] ?? item["body"] ?? item["kind"] {
+                    if let subtitle = item["state"] ?? item["status"] ?? item["description"] ?? item["summary"] ?? item["body"] ?? item["kind"] {
                         Text(subtitle).foregroundStyle(.secondary)
                     }
                     rowActions(item)
@@ -1791,6 +1796,35 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             Button("Segna come letta") {
                 mutate("/api/notifications/\(urlSegment(item.id))/read", body: [:])
             }
+        case .tools:
+            let name = item.id
+            let rule = item["owner_rule"] ?? ""
+            let health = (item.data["health"] as? [String: Any])?["state"] as? String ?? "unknown"
+            HStack {
+                Text("Rischio \(item["risk"] ?? "?") · \(item["category"] ?? "")").font(.caption).foregroundStyle(.secondary)
+                Text(["healthy": "in salute", "degraded": "instabile", "failing": "in errore"][health] ?? "senza dati")
+                    .font(.caption).foregroundStyle(health == "failing" ? .red : (health == "degraded" ? .orange : .green))
+                Spacer()
+                Button(rule == "deny" ? "Sblocca" : "Blocca") {
+                    let value: Any = rule == "deny" ? NSNull() : "deny"
+                    mutate("/api/permissions", method: "PATCH", body: ["rules": [name: value]])
+                }
+            }
+        case .plans:
+            let id = urlSegment(item.id)
+            let status = item["status"] ?? ""
+            HStack {
+                if ["pending", "interrupted", "waiting"].contains(status) {
+                    Button("Esegui") { mutate("/api/plans/\(id)/run", body: [:]) }.buttonStyle(.borderedProminent)
+                }
+                if status == "waiting" {
+                    Button("Approva i passi in attesa") { mutate("/api/plans/\(id)/approve", body: [:]) }
+                }
+                if ["pending", "running", "waiting", "interrupted"].contains(status) {
+                    Button("Annulla") { mutate("/api/plans/\(id)/cancel", body: [:]) }
+                }
+                Button("Replay") { mutate("/api/plans/\(id)/replay", body: [:]) }
+            }
         case .missions:
             let id = urlSegment(item.id)
             let status = item["status"] ?? ""
@@ -1822,6 +1856,21 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     }
 
     /// Missioni autonome e iniziative proattive (ADR-0096, ADR-0097).
+    /// Arresto di emergenza (ADR-0151): ferma ogni modifica, i lavori in background e le automazioni.
+    private var emergencyCard: some View {
+        let active = payload["emergency_stop"] as? Bool ?? false
+        return card("Arresto di emergenza", icon: "power") {
+            Text(active
+                 ? "Attivo: JARVIS non esegue né modifica nulla e le attività autonome sono ferme."
+                 : "Ferma subito ogni modifica, i lavori in background, le missioni e le automazioni. Si disattiva da qui.")
+                .font(.callout).foregroundStyle(active ? .red : .secondary)
+            Button(active ? "Disattiva l'arresto" : "Arresto di emergenza", systemImage: "power") {
+                mutate("/api/emergency", body: ["active": !active])
+            }
+            .buttonStyle(.borderedProminent).tint(active ? .green : .red)
+        }
+    }
+
     private var missionTools: some View {
         VStack(spacing: 14) {
             card("Nuova missione", icon: "scope") {

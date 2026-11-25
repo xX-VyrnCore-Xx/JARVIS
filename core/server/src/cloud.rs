@@ -909,6 +909,18 @@ pub struct Target {
     route: Route,
 }
 
+impl Target {
+    /// Nome della rotta per compito scelta (veloce, ragionamento, codice, contesto lungo, scrittura, traduzione, analisi).
+    pub fn route_name(&self) -> &'static str {
+        self.route.name()
+    }
+
+    /// Vero se la rotta usa il modello veloce.
+    pub fn is_quick(&self) -> bool {
+        self.route.is_quick()
+    }
+}
+
 pub struct Request {
     pub message: String,
     pub tools: Vec<Function>,
