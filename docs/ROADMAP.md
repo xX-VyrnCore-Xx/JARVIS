@@ -244,6 +244,8 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Database, memoria e animazioni macOS (2026-11-24, base `013b7b5`).** ADR-0124, ADR-0125. Pragma e manutenzione del database, indici di memoria verificati e ricostruiti, ricerca a candidati con recenza, statistiche e doppioni; animazioni SwiftUI. Verifiche: fmt, clippy, `cargo test --locked`, test Python e contratti. **Sospeso:** resa e fluidità delle animazioni (Swift solo CI).
 
+**Utenti con login e personalità (2026-11-25, ADR-0169).** Account su invito, sessioni, chat isolata senza strumenti, personalità per utente; guida in `docs/USERS.md`. Interfacce di accesso e pagina Utenti: ADR-0170.
+
 **Interfaccia: barra laterale, avatar e risposte (2026-11-25, ADR-0168).** Barra laterale ridimensionabile con scorrimento migliore, avatar con allerta e onda di successo, Markdown nella chat di Windows.
 
 **Pagine Agenti e Pacchetti (2026-11-25, ADR-0167).** Supervisione e pacchetti di estensione gestibili dalle app macOS e Windows; Swift compilato solo in CI. Restano: editor di workflow, cronologia unificata, monitor di infrastruttura.

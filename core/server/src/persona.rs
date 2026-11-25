@@ -103,6 +103,18 @@ pub fn to_json(persona: &Persona) -> Value {
 
 /// Aggiorna lo stile e/o la forma di rivolgersi; valida tutto prima di scrivere.
 pub fn update(dir: &Path, patch: &Value) -> Result<Value, String> {
+    let (doc, persona) = update_in(dir, patch)?;
+    set_current(&persona);
+    Ok(doc)
+}
+
+/// Come `update`, ma **senza** attivare la personalità per il Core: serve alle personalità degli utenti
+/// (ADR-0169), che non devono mai sostituire quella del proprietario.
+pub fn update_for(dir: &Path, patch: &Value) -> Result<Value, String> {
+    update_in(dir, patch).map(|(doc, _)| doc)
+}
+
+fn update_in(dir: &Path, patch: &Value) -> Result<(Value, Persona), String> {
     let mut persona = load(dir);
     if let Some(style) = patch.get("style") {
         persona.style = match style.as_str() {
@@ -133,8 +145,7 @@ pub fn update(dir: &Path, patch: &Value) -> Result<Value, String> {
         persona.formal = value.as_bool().ok_or("«formal» deve essere vero o falso")?;
     }
     std::fs::write(dir.join(FILE), to_json(&persona).to_string()).map_err(|e| e.to_string())?;
-    set_current(&persona);
-    Ok(to_json(&persona))
+    Ok((to_json(&persona), persona))
 }
 
 /// Momento della giornata per l'ora locale, usato per il tono del saluto.

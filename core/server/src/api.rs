@@ -23,6 +23,10 @@ pub struct AppState {
     pub port: u16,
     pub last_health: Mutex<Value>,
     cloud_slots: Arc<tokio::sync::Semaphore>,
+    /// Calcoli Argon2 contemporanei (ADR-0169): costano memoria di proposito, quindi non si lasciano scatenare.
+    hash_slots: Arc<tokio::sync::Semaphore>,
+    /// Chat degli utenti verso il modello cloud: separate da quelle del proprietario, che non devono mai restare senza.
+    user_slots: Arc<tokio::sync::Semaphore>,
     /// Host pubblicati da un proxy fidato (es. `tailscale serve`) per i dispositivi associati (RF-11).
     pub remote_hosts: std::sync::RwLock<Vec<String>>,
     /// Assegnazioni ai nodi esecutori: le loro richieste non passano dal blocco del Core.
@@ -41,6 +45,8 @@ pub struct AppState {
     jobs: Mutex<Vec<Value>>,
     /// Per annullare un lavoro in background (ADR-0150).
     job_handles: Mutex<std::collections::HashMap<String, tokio::task::AbortHandle>>,
+    /// Accessi e registrazioni falliti (ADR-0169): per nome utente e in totale, in finestre che scorrono.
+    auth_failures: Mutex<std::collections::HashMap<String, (std::time::Instant, u32)>>,
 }
 
 /// Dopo `REMOTE_FAILURE_LIMIT` autenticazioni remote fallite in `REMOTE_FAILURE_WINDOW` le richieste remote con
@@ -90,6 +96,86 @@ struct Challenge {
 /// Dispositivo associato autenticato dal middleware (assente per il proprietario sul computer del Core).
 #[derive(Clone)]
 struct DeviceCtx(Value);
+
+/// Utente autenticato dal middleware con il suo token di sessione (ADR-0169).
+#[derive(Clone)]
+struct UserCtx {
+    user: crate::accounts::UserRow,
+    token: String,
+}
+
+/// Rotte degli account: registrazione e accesso (pubbliche, con limiti) e area dell'utente (token di sessione).
+fn is_user_route(path: &str) -> bool {
+    path.starts_with("/api/auth/") || path == "/api/me" || path.starts_with("/api/me/")
+}
+
+fn needs_user_session(path: &str) -> bool {
+    path != "/api/auth/register" && path != "/api/auth/login"
+}
+
+const AUTH_USER_LIMIT: u32 = 5;
+const AUTH_GLOBAL_LIMIT: u32 = 120;
+const AUTH_USER_WINDOW: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+const AUTH_GLOBAL_WINDOW: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+fn auth_blocked(state: &AppState, key: &str) -> bool {
+    let failures = state
+        .auth_failures
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let over = |k: &str, limit: u32, window: std::time::Duration| {
+        failures
+            .get(k)
+            .is_some_and(|(at, n)| at.elapsed() < window && *n >= limit)
+    };
+    over(key, AUTH_USER_LIMIT, AUTH_USER_WINDOW) || over("*", AUTH_GLOBAL_LIMIT, AUTH_GLOBAL_WINDOW)
+}
+
+fn auth_failed(state: &AppState, key: &str) {
+    let mut failures = state
+        .auth_failures
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if failures.len() > 2_000 {
+        failures.retain(|_, (at, _)| at.elapsed() < AUTH_USER_WINDOW);
+    }
+    for (k, window) in [(key, AUTH_USER_WINDOW), ("*", AUTH_GLOBAL_WINDOW)] {
+        let entry = failures
+            .entry(k.to_string())
+            .or_insert((std::time::Instant::now(), 0));
+        if entry.0.elapsed() >= window {
+            *entry = (std::time::Instant::now(), 0);
+        }
+        entry.1 = entry.1.saturating_add(1);
+    }
+}
+
+fn auth_cleared(state: &AppState, key: &str) {
+    state
+        .auth_failures
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(key);
+}
+
+fn auth_busy() -> Response {
+    error(
+        StatusCode::TOO_MANY_REQUESTS,
+        "busy",
+        "JARVIS sta verificando altri accessi: riprova fra un attimo.",
+    )
+}
+
+fn too_many_auth() -> Response {
+    let mut res = error(
+        StatusCode::TOO_MANY_REQUESTS,
+        "too_many_attempts",
+        "Troppi tentativi: riprova fra qualche minuto.",
+    );
+    res.headers_mut()
+        .insert(header::RETRY_AFTER, HeaderValue::from_static("60"));
+    res
+}
 
 /// Nome RP e origini ammesse per una passkey: l'host della richiesta, senza porta per l'RP.
 fn webauthn_site(headers: &axum::http::HeaderMap) -> (String, Vec<String>) {
@@ -228,7 +314,8 @@ async fn guard(State(state): State<Shared>, mut req: Request, next: Next) -> Res
         .map(|m| m.as_str().to_string())
         .unwrap_or_else(|| "non trovato".into());
     let method = req.method().to_string();
-    if remote {
+    let user_route = is_user_route(&path);
+    if remote && !user_route {
         // Dispositivo associato (RF-11): token del dispositivo, solo le rotte dei suoi permessi.
         let public = !path.starts_with("/api/")
             || path == "/api/connectivity"
@@ -297,6 +384,7 @@ async fn guard(State(state): State<Shared>, mut req: Request, next: Next) -> Res
         && !path.starts_with("/api/nodes/")
         // Ritorno da OAuth (ADR-0027): navigazione del browser senza token, autenticata dallo `state` monouso.
         && path != "/api/connectors/oauth/callback"
+        && !user_route
     {
         // I client MCP inviano il segreto come «Authorization: Bearer»: stesso token del proprietario.
         let token = req
@@ -316,6 +404,43 @@ async fn guard(State(state): State<Shared>, mut req: Request, next: Next) -> Res
                 "token di sessione mancante o errato",
             );
         }
+    }
+    if user_route && needs_user_session(&path) {
+        // Area dell'utente: token di sessione dedicato, mai quello del proprietario né dei dispositivi.
+        let token = req
+            .headers()
+            .get("x-jarvis-user")
+            .and_then(|t| t.to_str().ok())
+            .unwrap_or_default()
+            .to_string();
+        let unauthorized = || {
+            error(
+                StatusCode::UNAUTHORIZED,
+                "unauthorized",
+                "sessione utente mancante, scaduta o revocata",
+            )
+        };
+        if token.len() != 64 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
+            if remote {
+                note_remote_failure(&state);
+            }
+            return unauthorized();
+        }
+        if remote && remote_throttled(&state) {
+            return error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "too_many_failures",
+                "troppi tentativi di accesso falliti: riprova fra poco",
+            );
+        }
+        let lookup = token.clone();
+        let Some(user) = with_core(&state, move |j| j.user_for_session(&lookup)).await else {
+            if remote {
+                note_remote_failure(&state);
+            }
+            return unauthorized();
+        };
+        req.extensions_mut().insert(UserCtx { user, token });
     }
     let timer = crate::observability::Timer::start();
     let mut res = next.run(req).await;
@@ -399,6 +524,22 @@ pub fn router(state: Shared) -> Router {
             "/api/connectivity",
             get(|| async { Json(json!({"service": "jarvis-core", "protocol": 1})) }),
         )
+        .route("/api/auth/register", post(auth_register))
+        .route("/api/auth/login", post(auth_login))
+        .route("/api/auth/logout", post(auth_logout))
+        .route("/api/me", get(me_get).delete(me_delete))
+        .route("/api/me/personality", axum::routing::put(me_personality))
+        .route("/api/me/password", post(me_password))
+        .route("/api/me/history", get(me_history).delete(me_history_clear))
+        .route("/api/me/memory", get(me_memory))
+        .route("/api/me/memory/{id}", delete(me_memory_delete))
+        .route("/api/me/chat", post(me_chat))
+        .route("/api/users", get(users_list))
+        .route("/api/users/settings", post(users_settings))
+        .route("/api/users/invites", post(users_invite))
+        .route("/api/users/{id}/disable", post(user_disable))
+        .route("/api/users/{id}/enable", post(user_enable))
+        .route("/api/users/{id}/delete", post(user_delete))
         .route("/api/chat", post(chat))
         .route("/api/security", get(security_status))
         .route("/api/n8n", get(n8n_status).post(n8n_runtime))
@@ -2901,6 +3042,300 @@ async fn agent_limits(State(state): State<Shared>, Json(body): Json<Value>) -> R
     reply(with_core(&state, move |j| j.agent_limits_set(&body)).await)
 }
 
+// ------------------------------------------------------------------ Utenti (ADR-0169)
+
+/// Messaggio neutro per l'area utenti: non usa la forma di rivolgersi del proprietario.
+fn plain(mut value: Value, text: &str) -> Value {
+    if value.is_object() && value.get("message").is_none() {
+        value["message"] = json!(text);
+    }
+    value
+}
+
+fn text_field(body: &Value, key: &str, max: usize) -> String {
+    body[key]
+        .as_str()
+        .unwrap_or_default()
+        .chars()
+        .take(max)
+        .collect()
+}
+
+async fn auth_register(State(state): State<Shared>, Json(mut body): Json<Value>) -> Response {
+    if auth_blocked(&state, "register") {
+        return too_many_auth();
+    }
+    let username = text_field(&body, "username", 64).trim().to_lowercase();
+    let password = text_field(&body, "password", 257);
+    body["password"] = Value::Null;
+    if !crate::accounts::valid_username(&username) {
+        return CoreError::BadRequest(
+            "Nome utente: da 3 a 32 caratteri a-z, 0-9, punto, trattino e trattino basso".into(),
+        )
+        .into_response();
+    }
+    if let Err(message) = crate::accounts::check_password(&password, &username) {
+        return CoreError::BadRequest(message).into_response();
+    }
+    body["username"] = json!(username);
+    // Controlli economici prima di quello costoso: invito, nome e limiti non valgono un calcolo di Argon2.
+    let probe = body.clone();
+    if let Err(e) = with_core(&state, move |j| j.user_register_precheck(&probe)).await {
+        if matches!(e, CoreError::Unauthorized(_)) {
+            auth_failed(&state, "register");
+        }
+        return e.into_response();
+    }
+    let Ok(permit) = state.hash_slots.clone().try_acquire_owned() else {
+        return auth_busy();
+    };
+    // L'impronta si calcola fuori dal blocco del Core: costa memoria e tempo di proposito.
+    let hash = match tokio::task::spawn_blocking(move || crate::accounts::hash_password(&password))
+        .await
+    {
+        Ok(Ok(hash)) => hash,
+        _ => {
+            return CoreError::Internal("impossibile proteggere la password".into()).into_response()
+        }
+    };
+    drop(permit);
+    let result = with_core(&state, move |j| j.user_register(&body, &hash)).await;
+    if matches!(result, Err(CoreError::Unauthorized(_))) {
+        auth_failed(&state, "register");
+    }
+    reply(result.map(|v| {
+        plain(
+            v,
+            "Account creato: benvenuto. Da ora JARVIS ti conosce e si adatta a te.",
+        )
+    }))
+}
+
+async fn auth_login(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let username = text_field(&body, "username", 64).trim().to_lowercase();
+    let password = text_field(&body, "password", 257);
+    let key = format!("login:{username}");
+    if auth_blocked(&state, &key) {
+        return too_many_auth();
+    }
+    let lookup = username.clone();
+    let user = match with_core(&state, move |j| j.user_login_lookup(&lookup)).await {
+        Ok(user) => user,
+        Err(e) => return e.into_response(),
+    };
+    let Ok(permit) = state.hash_slots.clone().try_acquire_owned() else {
+        return auth_busy();
+    };
+    // Un nome inesistente o disattivato costa quanto una password sbagliata: nessuna enumerazione degli account.
+    let checked = tokio::task::spawn_blocking({
+        let candidate = user.clone();
+        move || match candidate {
+            Some(u) if !u.disabled => crate::accounts::verify_password(&u.pw_hash, &password),
+            _ => {
+                crate::accounts::verify_dummy(&password);
+                false
+            }
+        }
+    })
+    .await
+    .unwrap_or(false);
+    drop(permit);
+    let (Some(user), true) = (user, checked) else {
+        auth_failed(&state, &key);
+        let name = username.clone();
+        let _ = with_core(&state, move |j| j.user_login_failed(&name)).await;
+        return error(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "Credenziali non valide.",
+        );
+    };
+    auth_cleared(&state, &key);
+    let id = user.id;
+    reply(
+        with_core(&state, move |j| j.user_login_finish(&id))
+            .await
+            .map(|v| plain(v, "Accesso eseguito.")),
+    )
+}
+
+async fn auth_logout(
+    State(state): State<Shared>,
+    axum::Extension(ctx): axum::Extension<UserCtx>,
+) -> Response {
+    reply(with_core(&state, move |j| j.user_logout(&ctx.token, &ctx.user.id)).await)
+}
+
+async fn me_get(
+    State(state): State<Shared>,
+    axum::Extension(ctx): axum::Extension<UserCtx>,
+) -> Response {
+    reply(with_core(&state, move |j| Ok(j.user_me(&ctx.user))).await)
+}
+
+async fn me_personality(
+    State(state): State<Shared>,
+    axum::Extension(ctx): axum::Extension<UserCtx>,
+    Json(body): Json<Value>,
+) -> Response {
+    reply(
+        with_core(&state, move |j| j.user_personality_update(&ctx.user, &body))
+            .await
+            .map(|v| plain(v, "Personalità aggiornata: da ora ti parlo così.")),
+    )
+}
+
+async fn me_password(
+    State(state): State<Shared>,
+    axum::Extension(ctx): axum::Extension<UserCtx>,
+    Json(body): Json<Value>,
+) -> Response {
+    let (current, new) = (
+        text_field(&body, "current", 257),
+        text_field(&body, "new", 257),
+    );
+    let key = format!("password:{}", ctx.user.id);
+    if auth_blocked(&state, &key) {
+        return too_many_auth();
+    }
+    if let Err(message) = crate::accounts::check_password(&new, &ctx.user.username) {
+        return CoreError::BadRequest(message).into_response();
+    }
+    let Ok(permit) = state.hash_slots.clone().try_acquire_owned() else {
+        return auth_busy();
+    };
+    let stored = ctx.user.pw_hash.clone();
+    let verified = tokio::task::spawn_blocking(move || {
+        let ok = crate::accounts::verify_password(&stored, &current);
+        let hash = if ok {
+            crate::accounts::hash_password(&new).ok()
+        } else {
+            None
+        };
+        (ok, hash)
+    })
+    .await
+    .unwrap_or((false, None));
+    drop(permit);
+    let (true, Some(hash)) = verified else {
+        auth_failed(&state, &key);
+        return error(
+            StatusCode::UNAUTHORIZED,
+            "unauthorized",
+            "La password attuale non è corretta.",
+        );
+    };
+    auth_cleared(&state, &key);
+    reply(
+        with_core(&state, move |j| {
+            j.user_set_password(&ctx.user, &hash, &ctx.token)
+        })
+        .await
+        .map(|v| plain(v, "Password cambiata: le altre sessioni sono state chiuse.")),
+    )
+}
+
+async fn me_history(
+    State(state): State<Shared>,
+    axum::Extension(ctx): axum::Extension<UserCtx>,
+) -> Response {
+    reply(with_core(&state, move |j| j.user_history(&ctx.user)).await)
+}
+
+async fn me_history_clear(
+    State(state): State<Shared>,
+    axum::Extension(ctx): axum::Extension<UserCtx>,
+) -> Response {
+    reply(with_core(&state, move |j| j.user_history_clear(&ctx.user)).await)
+}
+
+async fn me_memory(
+    State(state): State<Shared>,
+    axum::Extension(ctx): axum::Extension<UserCtx>,
+) -> Response {
+    reply(with_core(&state, move |j| j.user_memories(&ctx.user)).await)
+}
+
+async fn me_memory_delete(
+    State(state): State<Shared>,
+    axum::Extension(ctx): axum::Extension<UserCtx>,
+    Path(id): Path<i64>,
+) -> Response {
+    reply(with_core(&state, move |j| j.user_memory_delete(&ctx.user, id)).await)
+}
+
+async fn me_delete(
+    State(state): State<Shared>,
+    axum::Extension(ctx): axum::Extension<UserCtx>,
+) -> Response {
+    reply(with_core(&state, move |j| j.user_delete_self(&ctx.user)).await)
+}
+
+/// Messaggio di un utente: comandi personali oppure il modello cloud che il proprietario ha messo a disposizione.
+async fn me_chat(
+    State(state): State<Shared>,
+    axum::Extension(ctx): axum::Extension<UserCtx>,
+    Json(body): Json<Value>,
+) -> Response {
+    let message = text_field(&body, "message", 4001);
+    let (user, text) = (ctx.user.clone(), message.clone());
+    let turn = match with_core(&state, move |j| j.user_turn(&user, &text)).await {
+        Ok(turn) => turn,
+        Err(e) => return e.into_response(),
+    };
+    match turn {
+        crate::orchestrator::UserTurn::Done(value) => Json(value).into_response(),
+        crate::orchestrator::UserTurn::Ask(request, provider) => {
+            let Ok(permit) = state.user_slots.clone().try_acquire_owned() else {
+                return error(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "cloud.busy",
+                    "JARVIS sta elaborando altre richieste: riprova fra poco.",
+                );
+            };
+            let answer = tokio::task::spawn_blocking(move || request.execute())
+                .await
+                .unwrap_or(Err(crate::cloud::Failure::Unavailable));
+            drop(permit);
+            let user = ctx.user.clone();
+            reply(
+                with_core(&state, move |j| {
+                    j.user_turn_finish(&user, &message, answer, provider)
+                })
+                .await,
+            )
+        }
+    }
+}
+
+async fn users_list(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.users_overview()).await)
+}
+
+async fn users_settings(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply(with_core(&state, move |j| j.users_settings_set(&body)).await)
+}
+
+async fn users_invite(State(state): State<Shared>) -> Response {
+    reply(
+        with_core(&state, |j| j.user_invite_create())
+            .await
+            .map(|v| plain(v, "Invito creato: vale una volta e scade fra 72 ore.")),
+    )
+}
+
+async fn user_disable(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    reply(with_core(&state, move |j| j.user_set_disabled(&id, true)).await)
+}
+
+async fn user_enable(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    reply(with_core(&state, move |j| j.user_set_disabled(&id, false)).await)
+}
+
+async fn user_delete(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    reply(with_core(&state, move |j| j.user_delete(&id)).await)
+}
+
 /// Pacchetti di estensione (ADR-0165): solo dal computer del proprietario.
 async fn plugins_list(State(state): State<Shared>) -> Response {
     reply(with_core(&state, |j| Ok(j.plugins())).await)
@@ -3659,6 +4094,8 @@ pub fn state_with_remote(
         port,
         last_health: Mutex::new(json!({})),
         cloud_slots: Arc::new(tokio::sync::Semaphore::new(2)),
+        hash_slots: Arc::new(tokio::sync::Semaphore::new(2)),
+        user_slots: Arc::new(tokio::sync::Semaphore::new(2)),
         remote_hosts: std::sync::RwLock::new(remote_hosts),
         nodes,
         device_db,
@@ -3669,5 +4106,6 @@ pub fn state_with_remote(
         live_streams: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         jobs: Mutex::new(Vec::new()),
         job_handles: Mutex::new(std::collections::HashMap::new()),
+        auth_failures: Mutex::new(std::collections::HashMap::new()),
     })
 }

@@ -814,9 +814,17 @@ pub struct AgentRequest {
     pub steps: Vec<AgentStep>,
     pub tools: Vec<Function>,
     limiter: Arc<Mutex<Limiter>>,
+    /// Turni precedenti (ruolo `user` o `assistant`, testo), inseriti prima della richiesta corrente.
+    pub history: Vec<(String, String)>,
 }
 
 impl AgentRequest {
+    /// Aggiunge la conversazione precedente (le chat degli utenti, ADR-0169).
+    pub fn with_history(mut self, history: Vec<(String, String)>) -> Self {
+        self.history = history;
+        self
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         provider: Provider,
@@ -837,14 +845,18 @@ impl AgentRequest {
             steps,
             tools,
             limiter,
+            history: Vec::new(),
         }
     }
 
     pub fn payload(&self) -> Value {
-        let mut messages = vec![
-            json!({"role": "system", "content": self.system}),
-            json!({"role": "user", "content": self.goal}),
-        ];
+        let mut messages = vec![json!({"role": "system", "content": self.system})];
+        for (role, content) in &self.history {
+            if matches!(role.as_str(), "user" | "assistant") {
+                messages.push(json!({"role": role, "content": content}));
+            }
+        }
+        messages.push(json!({"role": "user", "content": self.goal}));
         for (index, step) in self.steps.iter().enumerate() {
             let name = step.tool.replace('.', "__");
             match self.provider {
@@ -1472,6 +1484,36 @@ fn stream_at(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agent_requests_carry_previous_turns_between_system_and_goal() {
+        let request = AgentRequest::new(
+            Provider::Nim,
+            "modello".into(),
+            "chiave".into(),
+            "sistema".into(),
+            "domanda attuale".into(),
+            Vec::new(),
+            Vec::new(),
+            Default::default(),
+        )
+        .with_history(vec![
+            ("user".into(), "prima domanda".into()),
+            ("assistant".into(), "prima risposta".into()),
+            ("system".into(), "ruolo non ammesso nella cronologia".into()),
+            ("tool".into(), "nemmeno questo".into()),
+        ]);
+        let payload = request.payload();
+        let messages = payload["messages"].as_array().unwrap();
+        let roles: Vec<&str> = messages.iter().filter_map(|m| m["role"].as_str()).collect();
+        assert_eq!(roles, ["system", "user", "assistant", "user"], "{payload}");
+        assert_eq!(messages[1]["content"], "prima domanda");
+        assert_eq!(messages[3]["content"], "domanda attuale");
+        assert!(
+            payload.get("tools").is_none(),
+            "gli utenti non hanno strumenti"
+        );
+    }
 
     #[test]
     fn provider_model_rejection_retries_a_catalog_model_with_the_same_key() {

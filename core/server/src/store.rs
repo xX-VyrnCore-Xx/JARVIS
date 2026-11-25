@@ -117,6 +117,8 @@ impl Store {
                  updated_at TEXT NOT NULL, doc TEXT NOT NULL);
              CREATE UNIQUE INDEX IF NOT EXISTS plans_idem ON plans (idem) WHERE idem IS NOT NULL;",
         )?;
+        // Account degli utenti (ADR-0169).
+        conn.execute_batch(crate::accounts::SCHEMA)?;
         // Migrazione additiva: database creati prima delle fonti Web (RF-06).
         let has_sources = conn.prepare("SELECT sources FROM messages LIMIT 0").is_ok();
         if !has_sources {
@@ -323,14 +325,14 @@ impl Store {
         self.chat_cipher.is_some()
     }
 
-    fn seal_chat(&self, purpose: &str, value: &str) -> StoreResult<String> {
+    pub(crate) fn seal_chat(&self, purpose: &str, value: &str) -> StoreResult<String> {
         self.chat_cipher.as_ref().map_or_else(
             || Ok(value.to_string()),
             |cipher| cipher.seal(purpose, value).map_err(crypto_error),
         )
     }
 
-    fn open_chat(&self, purpose: &str, value: String) -> StoreResult<String> {
+    pub(crate) fn open_chat(&self, purpose: &str, value: String) -> StoreResult<String> {
         match &self.chat_cipher {
             Some(cipher) => cipher.open(purpose, &value).map_err(crypto_error),
             None => Ok(value),
