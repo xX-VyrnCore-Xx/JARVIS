@@ -1670,6 +1670,125 @@ async fn agents_are_evaluated_and_the_environment_twin_is_consistent() {
 }
 
 #[tokio::test]
+async fn plan_templates_run_and_the_owner_can_save_a_procedure() {
+    let e = env();
+    let (_, list) = e.api("GET", "/api/plans/templates", None).await;
+    let names: Vec<&str> = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|t| t["name"].as_str())
+        .collect();
+    for expected in [
+        "diagnosi-sistema",
+        "stato-repository",
+        "analisi-log",
+        "riepilogo-tabella",
+        "controllo-sicurezza",
+    ] {
+        assert!(names.contains(&expected), "{expected} in {names:?}");
+    }
+    // Un modello in sola lettura parte da solo; i passi indipendenti girano insieme.
+    let (status, created) = e
+        .api(
+            "POST",
+            "/api/plans/from-template",
+            Some(json!({"template": "diagnosi-sistema", "run": true})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let done = wait_plan(
+        &e,
+        created["id"].as_str().unwrap(),
+        &["succeeded", "failed"],
+    )
+    .await;
+    assert_eq!(done["status"], "succeeded", "{done}");
+    assert!(done["steps"][0]["output"].is_object());
+    assert!(done["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|ev| ev["kind"] == "parallel"));
+    // Parametri obbligatori e modelli sconosciuti.
+    let (status, missing) = e
+        .api(
+            "POST",
+            "/api/plans/from-template",
+            Some(json!({"template": "analisi-log"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(missing["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("file"));
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/plans/from-template",
+            Some(json!({"template": "inesistente"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // Il proprietario salva un piano come procedura; i nomi incorporati sono riservati.
+    let (_, custom) = e
+        .api(
+            "POST",
+            "/api/plans",
+            Some(json!({"goal": "Controllo rapido", "steps": [
+                {"id": "calc", "tool": "math.calc", "arguments": {"expression": "2*21"},
+                 "expect": [{"field": "result", "op": "eq", "value": 42}]}]})),
+        )
+        .await;
+    let (status, saved) = e
+        .api(
+            "POST",
+            "/api/plans/templates",
+            Some(json!({"plan_id": custom["id"], "name": "controllo-rapido", "description": "Procedura approvata"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert!(saved["message"]
+        .as_str()
+        .unwrap()
+        .contains("Procedura salvata"));
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/plans/templates",
+            Some(json!({"plan_id": custom["id"], "name": "diagnosi-sistema"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (_, again) = e
+        .api(
+            "POST",
+            "/api/plans/from-template",
+            Some(json!({"template": "controllo-rapido", "run": true})),
+        )
+        .await;
+    let done = wait_plan(&e, again["id"].as_str().unwrap(), &["succeeded", "failed"]).await;
+    assert_eq!(done["status"], "succeeded", "{done}");
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/plans/templates/delete",
+            Some(json!({"name": "controllo-rapido"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/plans/templates/delete",
+            Some(json!({"name": "controllo-rapido"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn tailscale_status_is_reported_without_authorising_anything() {
     let e = env();
     let (status, view) = e.api("GET", "/api/tailscale", None).await;

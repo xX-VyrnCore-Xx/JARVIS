@@ -80,6 +80,101 @@ impl Jarvis {
         Ok(json!({"items": items}))
     }
 
+    fn user_templates(&self) -> Vec<Value> {
+        std::fs::read(self.cfg.data_dir.join("plan-templates.json"))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .and_then(|v| v["templates"].as_array().cloned())
+            .unwrap_or_default()
+    }
+
+    /// Modelli di piano: incorporati e quelli salvati dal proprietario (procedure approvate).
+    pub fn plan_templates(&self) -> Value {
+        let mut items: Vec<Value> = serde_json::from_str::<Vec<Value>>(plans::BUILTIN_TEMPLATES)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|mut t| {
+                t["builtin"] = json!(true);
+                t
+            })
+            .collect();
+        items.extend(self.user_templates().into_iter().map(|mut t| {
+            t["builtin"] = json!(false);
+            t
+        }));
+        json!({"items": items})
+    }
+
+    /// Crea un piano da un modello e dai parametri.
+    pub fn plan_from_template(&mut self, body: &Value) -> Result<Value, CoreError> {
+        let name = body["template"].as_str().unwrap_or_default();
+        let templates = self.plan_templates();
+        let template = templates["items"]
+            .as_array()
+            .and_then(|l| l.iter().find(|t| t["name"] == name))
+            .ok_or_else(|| CoreError::NotFound(format!("Modello «{name}» non trovato")))?;
+        let mut plan =
+            plans::instantiate(template, &body["params"]).map_err(CoreError::BadRequest)?;
+        plan["idempotency_key"] = body["idempotency_key"].clone();
+        self.plan_create(&plan)
+    }
+
+    /// Salva un piano come procedura riutilizzabile. Solo il proprietario: nulla viene appreso da solo.
+    pub fn plan_template_save(&mut self, body: &Value) -> Result<Value, CoreError> {
+        let plan = self.plan_load(body["plan_id"].as_str().unwrap_or_default())?;
+        let template = plans::template_from_plan(
+            &plan,
+            body["name"].as_str().unwrap_or_default(),
+            body["description"].as_str().unwrap_or_default(),
+        )
+        .map_err(CoreError::BadRequest)?;
+        let name = template["name"].as_str().unwrap_or_default().to_string();
+        let builtin: Vec<Value> =
+            serde_json::from_str(plans::BUILTIN_TEMPLATES).unwrap_or_default();
+        if builtin.iter().any(|t| t["name"] == name.as_str()) {
+            return Err(CoreError::BadRequest(
+                "Il nome è di un modello incorporato".into(),
+            ));
+        }
+        let mut saved: Vec<Value> = self
+            .user_templates()
+            .into_iter()
+            .filter(|t| t["name"] != name.as_str())
+            .collect();
+        if saved.len() >= 30 {
+            return Err(CoreError::BadRequest(
+                "Al massimo 30 modelli personali".into(),
+            ));
+        }
+        saved.push(template.clone());
+        std::fs::write(
+            self.cfg.data_dir.join("plan-templates.json"),
+            json!({"templates": saved}).to_string(),
+        )
+        .map_err(|e| CoreError::Internal(e.to_string()))?;
+        self.record_owner_action("plan.template.save")?;
+        Ok(template)
+    }
+
+    pub fn plan_template_delete(&mut self, name: &str) -> Result<Value, CoreError> {
+        let before = self.user_templates();
+        let kept: Vec<Value> = before
+            .iter()
+            .filter(|t| t["name"] != name)
+            .cloned()
+            .collect();
+        if kept.len() == before.len() {
+            return Err(CoreError::NotFound("Modello personale non trovato".into()));
+        }
+        std::fs::write(
+            self.cfg.data_dir.join("plan-templates.json"),
+            json!({"templates": kept}).to_string(),
+        )
+        .map_err(|e| CoreError::Internal(e.to_string()))?;
+        self.record_owner_action("plan.template.delete")?;
+        Ok(self.plan_templates())
+    }
+
     pub fn plan_get(&self, id: &str) -> Result<Value, CoreError> {
         self.plan_load(id)
     }

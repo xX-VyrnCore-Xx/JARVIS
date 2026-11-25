@@ -506,6 +506,12 @@ pub fn router(state: Shared) -> Router {
         .route("/api/agents", get(agents_registry))
         .route("/api/agents/route", get(agents_route))
         .route("/api/models/route", get(models_route))
+        .route(
+            "/api/plans/templates",
+            get(plan_templates).post(plan_template_save),
+        )
+        .route("/api/plans/templates/delete", post(plan_template_delete))
+        .route("/api/plans/from-template", post(plan_from_template))
         .route("/api/plans", get(plans_list).post(plan_create))
         .route("/api/plans/{id}", get(plan_get))
         .route("/api/plans/{id}/run", post(plan_run))
@@ -2837,6 +2843,45 @@ fn spawn_plan_runner(state: &Shared, id: String) {
         }
     });
     handles.insert(key, handle.abort_handle());
+}
+
+async fn plan_templates(State(state): State<Shared>) -> Response {
+    reply(Ok(with_core(&state, |j| j.plan_templates()).await))
+}
+
+async fn plan_template_save(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply_said(
+        with_core(&state, move |j| j.plan_template_save(&body)).await,
+        "plan.template",
+    )
+}
+
+async fn plan_template_delete(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let name = body["name"].as_str().unwrap_or_default().to_string();
+    reply_said(
+        with_core(&state, move |j| j.plan_template_delete(&name)).await,
+        "plan.template.delete",
+    )
+}
+
+/// Crea (e con `run` avvia) un piano da un modello.
+async fn plan_from_template(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let run = body["run"].as_bool().unwrap_or(false);
+    let created = with_core(&state, move |j| {
+        let doc = j.plan_from_template(&body)?;
+        if run {
+            let id = doc["id"].as_str().unwrap_or_default().to_string();
+            return j.plan_start(&id);
+        }
+        Ok(doc)
+    })
+    .await;
+    if let Ok(doc) = &created {
+        if doc["status"] == "running" {
+            spawn_plan_runner(&state, doc["id"].as_str().unwrap_or_default().to_string());
+        }
+    }
+    reply(created.map(|doc| said(doc, if run { "plan.started" } else { "plan.created" }, None)))
 }
 
 async fn plan_create(State(state): State<Shared>, Json(body): Json<Value>) -> Response {

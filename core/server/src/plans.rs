@@ -401,6 +401,124 @@ pub fn clip_output(output: &Value) -> Value {
     }
 }
 
+/// Modelli di piano incorporati (ADR-0159): procedure ricorrenti pronte, tutte in sola lettura.
+pub const BUILTIN_TEMPLATES: &str = r#"[
+ {"name": "diagnosi-sistema", "description": "Stato di CPU, dischi e processi del computer",
+  "params": [], "goal": "Diagnosi del sistema",
+  "steps": [{"id": "info", "tool": "system.info"}, {"id": "dischi", "tool": "system.disks"}, {"id": "processi", "tool": "process.list"}]},
+ {"name": "stato-repository", "description": "Ramo, ultimi commit e dipendenze del repository nella workspace",
+  "params": [{"name": "cartella", "default": "."}], "goal": "Stato del repository in {{cartella}}",
+  "steps": [{"id": "stato", "tool": "git.status"}, {"id": "storia", "tool": "git.log", "arguments": {"limit": 5}},
+            {"id": "dipendenze", "tool": "deps.list", "arguments": {"path": "{{cartella}}"}}]},
+ {"name": "analisi-log", "description": "Riepilogo di un file di log della workspace",
+  "params": [{"name": "file", "required": true}], "goal": "Analisi del log {{file}}",
+  "steps": [{"id": "log", "tool": "log.analyze", "arguments": {"path": "{{file}}"},
+             "expect": [{"field": "lines", "op": "gt", "value": 0}]}]},
+ {"name": "riepilogo-tabella", "description": "Riepilogo di una tabella CSV della workspace",
+  "params": [{"name": "file", "required": true}], "goal": "Riepilogo della tabella {{file}}",
+  "steps": [{"id": "tabella", "tool": "table.summary", "arguments": {"path": "{{file}}"}}]},
+ {"name": "controllo-sicurezza", "description": "Postura di sicurezza e spazio sui dischi",
+  "params": [], "goal": "Controllo di sicurezza",
+  "steps": [{"id": "postura", "tool": "security.status"}, {"id": "dischi", "tool": "system.disks"}]}
+]"#;
+
+/// Sostituisce i segnaposto `{{nome}}` con i parametri; un parametro mancante senza valore predefinito è un errore.
+fn fill(value: &Value, params: &Map<String, Value>, missing: &mut Vec<String>) -> Value {
+    match value {
+        Value::String(s) => {
+            // Segnaposto unico: il parametro conserva il proprio tipo (numeri, booleani).
+            if let Some(name) = s.strip_prefix("{{").and_then(|r| r.strip_suffix("}}")) {
+                if !name.contains("{{") {
+                    return match params.get(name.trim()) {
+                        Some(v) => v.clone(),
+                        None => {
+                            missing.push(name.trim().to_string());
+                            Value::Null
+                        }
+                    };
+                }
+            }
+            let mut out = String::new();
+            let mut rest = s.as_str();
+            while let Some(start) = rest.find("{{") {
+                out.push_str(&rest[..start]);
+                let after = &rest[start + 2..];
+                let Some(end) = after.find("}}") else {
+                    out.push_str(&rest[start..]);
+                    rest = "";
+                    break;
+                };
+                let name = after[..end].trim();
+                match params.get(name) {
+                    Some(Value::String(text)) => out.push_str(text),
+                    Some(other) => out.push_str(&other.to_string()),
+                    None => missing.push(name.to_string()),
+                }
+                rest = &after[end + 2..];
+            }
+            out.push_str(rest);
+            Value::String(out)
+        }
+        Value::Array(list) => Value::Array(list.iter().map(|v| fill(v, params, missing)).collect()),
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(k, v)| (k.clone(), fill(v, params, missing)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// Piano ricavato da un modello e dai parametri indicati (i predefiniti riempiono i parametri mancanti).
+pub fn instantiate(template: &Value, given: &Value) -> Result<Value, String> {
+    let mut params = Map::new();
+    for spec in template["params"].as_array().into_iter().flatten() {
+        let name = spec["name"].as_str().unwrap_or_default();
+        match (
+            given.get(name).filter(|v| !v.is_null()),
+            spec.get("default"),
+        ) {
+            (Some(v), _) => params.insert(name.to_string(), v.clone()),
+            (None, Some(d)) => params.insert(name.to_string(), d.clone()),
+            (None, None) if spec["required"] == true => {
+                return Err(format!("Manca il parametro «{name}»"))
+            }
+            (None, None) => None,
+        };
+    }
+    let mut missing = Vec::new();
+    let plan = json!({"goal": fill(&template["goal"], &params, &mut missing), "steps": fill(&template["steps"], &params, &mut missing)});
+    if let Some(name) = missing.first() {
+        return Err(format!("Manca il parametro «{name}»"));
+    }
+    validate(&plan)
+}
+
+/// Modello da un piano esistente: passi, dipendenze, condizioni e annullamenti, senza esiti né stato.
+pub fn template_from_plan(plan: &Value, name: &str, description: &str) -> Result<Value, String> {
+    let ok = name.len() <= 40
+        && !name.is_empty()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    if !ok {
+        return Err("Nome del modello: a-z, 0-9 e trattino, massimo 40".into());
+    }
+    let steps: Vec<Value> = plan["steps"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|s| {
+            json!({"id": s["id"], "tool": s["tool"], "arguments": s["arguments"], "depends_on": s["depends_on"],
+                   "retries": s["retries"], "on_error": s["on_error"], "undo": s["undo"], "expect": s["expect"]})
+        })
+        .collect();
+    let template = json!({"name": name, "description": description.chars().take(200).collect::<String>(),
+        "params": [], "goal": plan["goal"], "steps": steps});
+    instantiate(&template, &json!({}))?;
+    Ok(template)
+}
+
 /// Copia del piano pronta per una nuova esecuzione (replay): stessi passi, nessun risultato.
 pub fn reset(doc: &Value) -> Value {
     let mut copy = doc.clone();
@@ -598,6 +716,37 @@ mod tests {
         assert!(bad(json!([{"op": "exists"}])).contains("field"));
         assert!(bad(json!([{"field": "a", "op": "eq"}])).contains("value"));
         assert!(bad(json!("x")).contains("lista"));
+    }
+
+    #[test]
+    fn templates_fill_parameters_keep_types_and_start_valid_plans() {
+        let builtin: Value = serde_json::from_str(BUILTIN_TEMPLATES).unwrap();
+        for template in builtin.as_array().unwrap() {
+            let given = json!({"file": "x.log"});
+            let plan = instantiate(template, &given).unwrap();
+            assert_eq!(plan["status"], "pending", "{}", template["name"]);
+        }
+        let repo = instantiate(&builtin[1], &json!({})).unwrap();
+        assert_eq!(repo["goal"], "Stato del repository in .");
+        assert_eq!(repo["steps"][2]["arguments"]["path"], ".");
+        assert_eq!(repo["steps"][1]["arguments"]["limit"], 5);
+        assert_eq!(
+            instantiate(&builtin[2], &json!({})).unwrap_err(),
+            "Manca il parametro «file»"
+        );
+        let typed = json!({"name": "t", "params": [{"name": "n", "required": true}], "goal": "g {{n}}",
+            "steps": [{"id": "a", "tool": "time.wait", "arguments": {"seconds": "{{n}}"}}]});
+        let plan = instantiate(&typed, &json!({"n": 2})).unwrap();
+        assert_eq!(plan["steps"][0]["arguments"]["seconds"], 2);
+        assert_eq!(plan["goal"], "g 2");
+        let loose = json!({"name": "t", "params": [], "goal": "g", "steps": [{"id": "a", "tool": "x", "arguments": {"p": "{{ignoto}}"}}]});
+        assert!(instantiate(&loose, &json!({}))
+            .unwrap_err()
+            .contains("ignoto"));
+        let learned = template_from_plan(&repo, "il-mio-controllo", "Procedura approvata").unwrap();
+        assert_eq!(learned["steps"].as_array().unwrap().len(), 3);
+        assert!(learned["steps"][0].get("status").is_none());
+        assert!(template_from_plan(&repo, "Nome Sbagliato", "").is_err());
     }
 
     #[test]
