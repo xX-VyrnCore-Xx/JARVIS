@@ -325,6 +325,7 @@ pub struct JarvisApp {
     plan_templates: Vec<Value>,
     plan_templates_loaded: bool,
     template_params: std::collections::HashMap<String, String>,
+    plan_goal: String,
     plan_detail: Option<Value>,
     plan_polled: Instant,
     emergency_active: bool,
@@ -487,6 +488,7 @@ impl JarvisApp {
             plan_templates: Vec::new(),
             plan_templates_loaded: false,
             template_params: std::collections::HashMap::new(),
+            plan_goal: String::new(),
             plan_detail: None,
             plan_polled: Instant::now(),
             emergency_active: false,
@@ -2151,6 +2153,7 @@ impl JarvisApp {
                 });
             }
         }
+        self.show_plan_proposal(ui, ctx);
         self.show_plan_templates(ui, ctx);
         let Some(data) = self.data.clone() else {
             return;
@@ -2210,6 +2213,37 @@ impl JarvisApp {
             ui.add_space(4.0);
         }
         self.show_plan_detail(ui, ctx);
+    }
+
+    /// Piano proposto dal modello (ADR-0160): crea una bozza da rivedere; non la avvia.
+    fn show_plan_proposal(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        egui::CollapsingHeader::new("Fai proporre un piano al modello")
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.plan_goal)
+                        .desired_width(420.0)
+                        .char_limit(300)
+                        .hint_text("Descrivi l'obiettivo (richiede un modello cloud)"),
+                );
+                let ready = !self.plan_goal.trim().is_empty();
+                if ui
+                    .add_enabled(ready, egui::Button::new("Proponi una bozza"))
+                    .clicked()
+                {
+                    let goal = self.plan_goal.trim().to_owned();
+                    self.plan_goal.clear();
+                    self.act(
+                        ctx,
+                        "/api/plans/propose".into(),
+                        Some(json!({"goal": goal, "create": true})),
+                    );
+                }
+                ui.label(
+                    egui::RichText::new("La bozza non parte da sola: la rivedi e poi la avvii.")
+                        .weak(),
+                );
+            });
     }
 
     /// Procedure pronte (ADR-0159): un gesto crea e avvia il piano, con i parametri richiesti.

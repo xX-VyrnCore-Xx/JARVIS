@@ -1897,6 +1897,14 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** `GET /api/agents` descrive i sette specialisti e il generalista (competenze dagli strumenti, rischio massimo, contesto isolato o condiviso, risorse); `GET /api/agents/route?q=` mostra quale agente riceverebbe una richiesta e per quali parole chiave; `GET /api/models/route?q=` mostra la rotta per compito, il modello per provider, il ripiego e la riservatezza (credenziali bloccate, dati personali rilevati, profilo condiviso) **senza inviare nulla**. Non si introducono nuovi agenti: si riusano quelli esistenti.
 - **Evidenza:** test API del registro e dell'instradamento.
 
+### ADR-0160 — Pianificatore guidato dal modello: il modello propone, il Core valida, il proprietario decide
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout (fase B della roadmap).
+- **Decisione:** `POST /api/plans/propose` (`goal`, `create` facoltativo) chiede al modello cloud configurato un piano a grafo in JSON. Il prompt elenca solo gli strumenti del catalogo con riepilogo, argomenti e rischio, esclude `mission.*` e `plan.*` e dichiara che obiettivo e risultati sono dati, non istruzioni. Il Core **non si fida della risposta**: estrae il JSON (anche da recinti di codice), rimuove i campi riservati (`id`, `status`, `idempotency_key`, `budget`…), applica le stesse regole di un piano scritto a mano (passi, dipendenze, cicli, riferimenti, condizioni), scarta gli strumenti sconosciuti o interni anche in `undo`, e aggiunge `max_risk` e il rischio di ogni passo. L'esito è una **bozza**: con `create` diventa un piano `pending` salvato, mai avviato; l'esecuzione resta una chiamata esplicita, passo per passo sotto policy, regole del proprietario, conferme, budget e audit. L'obiettivo con credenziali non lascia il Core (`contains_credentials`); senza chiave cloud la risposta è 503 «unavailable». Azione registrata nell'audit (`plan.propose`).
+- **Perché:** il modello decide cosa fare, ma i confini (strumenti, permessi, conferme) restano deterministici nel Core.
+- **Non incluso:** ripianificazione automatica dopo un fallimento, modello locale, verifica indipendente del piano con un secondo modello.
+- **Evidenza:** test unitari del parsing e della validazione, test d'integrazione con risposte simulate del modello (bozza non avviata, strumenti sconosciuti, risposte non valide, nessun piano creato su errore) e controlli e2e.
+
 ### ADR-0154 — Esecuzione parallela dei piani e condizioni di successo
 
 - **Data:** 2026-11-25 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario di completare le parti «Pianificate» (fasi A e C della roadmap).

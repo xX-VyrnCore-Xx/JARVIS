@@ -105,6 +105,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var publicHost = ""
     /// Profilo del proprietario (ADR-0133): bozza modificabile dei campi.
     @State private var profileDraft: [String: String] = [:]
+    @State private var planGoal = ""
     @State private var profileShare = true
     @State private var changingInvite = false
 
@@ -1502,7 +1503,9 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             memoryOverview
         case .missions: missionTools
         case .security: emergencyCard
-        case .plans: planTemplates
+        case .plans:
+            planProposal
+            planTemplates
         case .profile: profileEditor
         case .connectors: connectorSetup
         case .devices:
@@ -1880,6 +1883,22 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     }
                 }
             }
+        }
+    }
+
+    /// Piano proposto dal modello (ADR-0160): crea una bozza da rivedere, non la avvia.
+    private var planProposal: some View {
+        card("Fai proporre un piano al modello", icon: "wand.and.stars") {
+            Text("Descrivi l'obiettivo: il modello propone i passi, il Core li valida e ne mostra il rischio. La bozza non parte da sola.")
+                .font(.callout).foregroundStyle(.secondary)
+            TextField("Es. Riassumi lo stato del repository e controlla le dipendenze", text: $planGoal, axis: .vertical)
+                .textFieldStyle(.roundedBorder).lineLimit(1...3)
+            Button("Proponi una bozza", systemImage: "sparkles") {
+                let goal = planGoal.trimmingCharacters(in: .whitespacesAndNewlines)
+                planGoal = ""
+                mutate("/api/plans/propose", body: ["goal": String(goal.prefix(300)), "create": true])
+            }
+            .disabled(planGoal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
     }
 

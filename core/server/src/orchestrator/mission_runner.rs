@@ -68,7 +68,7 @@ impl Jarvis {
     }
 
     /// Provider cloud da usare: quello predefinito se ha una chiave, altrimenti il primo configurato.
-    fn mission_provider(
+    pub(super) fn mission_provider(
         &self,
         goal: &str,
     ) -> Result<Option<(Provider, String, String)>, CoreError> {

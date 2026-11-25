@@ -256,6 +256,10 @@ function check(condition, message) {
   check(mcpServers.status === 200, "elenco dei server MCP autorizzati");
   const watches = await request("/api/watches", { token: ownerToken });
   check(watches.status === 200, "elenco delle osservazioni di file");
+  const propose = await request("/api/plans/propose", { method: "POST", token: ownerToken, body: { goal: "Riassumi lo stato del repository" } });
+  check([503, 200].includes(propose.status) && (propose.status === 200 || propose.json?.error?.code === "unavailable"), "proposta di piano: senza modello cloud risposta chiara, mai un piano avviato");
+  const badGoal = await request("/api/plans/propose", { method: "POST", token: ownerToken, body: { goal: "" } });
+  check(badGoal.status === 400, "proposta di piano: obiettivo vuoto rifiutato");
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

@@ -39,6 +39,7 @@ pub mod orchestrator;
 pub mod passkeys;
 pub mod permissions;
 pub mod persona;
+pub mod planner;
 pub mod plans;
 pub mod policy;
 pub mod privacy;

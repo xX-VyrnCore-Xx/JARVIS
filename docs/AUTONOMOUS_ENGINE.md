@@ -47,7 +47,9 @@ Limiti: al massimo 20 passi, budget di tempo (predefinito 120 s, massimo 900 s) 
 - **Modelli** (ADR-0159): `GET /api/plans/templates`, `POST /api/plans/from-template` (parametri `{{nome}}`), salvataggio di un
   piano riuscito come procedura (`POST /api/plans/templates`). Nulla è appreso da solo: la procedura la approva il proprietario.
 
-Non implementati: scomposizione automatica di un obiettivo nuovo in un piano e ripianificazione guidata dal modello (vedi roadmap).
+- **Proposta dal modello** (ADR-0160): `POST /api/plans/propose` fa scomporre un obiettivo in un piano a grafo dal modello cloud; il Core lo valida e lo restituisce come bozza (con `create` salvata, mai avviata) con il rischio di ogni passo.
+
+Non implementata: ripianificazione guidata dal modello dopo un errore (vedi roadmap).
 
 ## Eventi e ambiente (ADR-0157, 0158)
 

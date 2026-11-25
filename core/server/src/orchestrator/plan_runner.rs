@@ -62,6 +62,114 @@ impl Jarvis {
         Ok(doc)
     }
 
+    /// Richiesta al modello per proporre un piano (ADR-0160). `None` se non c'è alcun modello cloud configurato.
+    pub fn plan_propose_request(
+        &self,
+        goal: &str,
+    ) -> Result<Option<crate::cloud::AgentRequest>, CoreError> {
+        let goal = goal.trim();
+        if goal.is_empty() || goal.chars().count() > 300 {
+            return Err(CoreError::BadRequest(
+                "«goal» è obbligatorio (massimo 300 caratteri)".into(),
+            ));
+        }
+        if crate::cloud::contains_credentials(goal) {
+            return Err(CoreError::BadRequest(
+                "L'obiettivo sembra contenere una credenziale: non lo invio al modello.".into(),
+            ));
+        }
+        let Some((provider, model, key)) = self.mission_provider(goal)? else {
+            return Ok(None);
+        };
+        let tools: Vec<crate::planner::ToolInfo> = self
+            .catalog
+            .iter()
+            .filter(|t| {
+                let n = t.name();
+                !n.starts_with("mission.") && !n.starts_with("plan.")
+            })
+            .map(|t| {
+                let schema = &t.descriptor["input_schema"];
+                let names = |v: &Value| -> Vec<String> {
+                    v.as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|x| x.as_str().map(str::to_string))
+                        .collect()
+                };
+                let mut properties: Vec<String> = schema["properties"]
+                    .as_object()
+                    .map(|o| o.keys().cloned().collect())
+                    .unwrap_or_default();
+                properties.sort();
+                crate::planner::ToolInfo {
+                    name: t.name().to_string(),
+                    summary: t.descriptor["summary"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                    required: names(&schema["required"]),
+                    properties,
+                    risk: t.risk().to_string(),
+                }
+            })
+            .collect();
+        Ok(Some(crate::cloud::AgentRequest::new(
+            provider,
+            model,
+            key,
+            crate::planner::system_prompt(&tools),
+            goal.to_string(),
+            Vec::new(),
+            Vec::new(),
+            self.cloud_limiter.clone(),
+        )))
+    }
+
+    /// Chiude la proposta: valida la risposta del modello. Con `create` salva la bozza (non la avvia).
+    pub fn plan_propose_finish(
+        &mut self,
+        goal: &str,
+        answer: Result<crate::cloud::Answer, crate::cloud::Failure>,
+        provider: crate::cloud::Provider,
+        create: bool,
+    ) -> Result<Value, CoreError> {
+        let text = match answer {
+            Ok(crate::cloud::Answer::Text(t)) => t,
+            Ok(crate::cloud::Answer::Call(_)) => {
+                return Err(CoreError::BadRequest(
+                    "Il modello ha risposto con una chiamata invece che con un piano.".into(),
+                ))
+            }
+            Err(failure) => return Err(CoreError::Unavailable(failure.user_message(provider).0)),
+        };
+        let catalog = &self.catalog;
+        let known = |t: &str| {
+            catalog.get(t).is_some() && !t.starts_with("mission.") && !t.starts_with("plan.")
+        };
+        let risk = |t: &str| {
+            catalog
+                .get(t)
+                .map(|x| x.risk().to_string())
+                .unwrap_or_default()
+        };
+        let proposal =
+            crate::planner::proposal(&text, goal, &known, &risk).map_err(CoreError::BadRequest)?;
+        self.record_owner_action("plan.propose")?;
+        if !create {
+            return Ok(json!({"created": false, "proposal": proposal}));
+        }
+        let mut input = proposal.clone();
+        for key in ["proposed_by", "max_risk", "risk_by_step"] {
+            input.as_object_mut().map(|o| o.remove(key));
+        }
+        let mut doc = self.plan_create(&input)?;
+        doc["proposed_by"] = proposal["proposed_by"].clone();
+        doc["max_risk"] = proposal["max_risk"].clone();
+        self.plan_save(&mut doc)?;
+        Ok(json!({"created": true, "proposal": proposal, "plan": doc}))
+    }
+
     pub fn plan_list(&self) -> Result<Value, CoreError> {
         let items: Vec<Value> = self
             .store

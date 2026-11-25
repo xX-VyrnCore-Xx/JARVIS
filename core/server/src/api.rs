@@ -512,6 +512,7 @@ pub fn router(state: Shared) -> Router {
         )
         .route("/api/plans/templates/delete", post(plan_template_delete))
         .route("/api/plans/from-template", post(plan_from_template))
+        .route("/api/plans/propose", post(plan_propose))
         .route("/api/plans", get(plans_list).post(plan_create))
         .route("/api/plans/{id}", get(plan_get))
         .route("/api/plans/{id}/run", post(plan_run))
@@ -2882,6 +2883,34 @@ async fn plan_from_template(State(state): State<Shared>, Json(body): Json<Value>
         }
     }
     reply(created.map(|doc| said(doc, if run { "plan.started" } else { "plan.created" }, None)))
+}
+
+/// Fa proporre un piano al modello cloud (ADR-0160): restituisce una bozza validata, mai un piano avviato.
+async fn plan_propose(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let goal = body["goal"].as_str().unwrap_or_default().to_string();
+    let create = body["create"].as_bool().unwrap_or(false);
+    let asked = {
+        let goal = goal.clone();
+        with_core(&state, move |j| j.plan_propose_request(&goal)).await
+    };
+    let request = match asked {
+        Ok(Some(request)) => request,
+        Ok(None) => {
+            return reply(Err(CoreError::Unavailable(
+                "Per proporre un piano serve un modello cloud con una chiave configurata.".into(),
+            )))
+        }
+        Err(e) => return reply(Err(e)),
+    };
+    let provider = request.provider;
+    let answer = tokio::task::spawn_blocking(move || request.execute())
+        .await
+        .unwrap_or(Err(crate::cloud::Failure::Unavailable));
+    let done = with_core(&state, move |j| {
+        j.plan_propose_finish(&goal, answer, provider, create)
+    })
+    .await;
+    reply(done.map(|doc| said(doc, "plan.proposed", None)))
 }
 
 async fn plan_create(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
