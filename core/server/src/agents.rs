@@ -139,6 +139,31 @@ fn stem_score(plain: &str, stem: &str) -> usize {
     }
 }
 
+/// Classifica gli ambiti di una richiesta: (agente, punti) in ordine decrescente. Le parole chiave valgono 3, le
+/// radici il loro punteggio. Serve al motore di intento (multi-intento, ambiguità), non cambia l'instradamento.
+pub fn rank(message: &str) -> Vec<(&'static str, usize)> {
+    let text = format!(" {} ", fold(message).replace("processor", "chip"));
+    let plain: String = text
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect();
+    let plain = format!(
+        " {} ",
+        plain.split_whitespace().collect::<Vec<_>>().join(" ")
+    );
+    let mut scored: Vec<(&'static str, usize)> = SPECIALISTS
+        .iter()
+        .map(|agent| {
+            let keywords = agent.keywords.iter().filter(|k| text.contains(*k)).count() * 3;
+            let stems: usize = agent.stems.iter().map(|s| stem_score(&plain, s)).sum();
+            (agent.name, keywords + stems)
+        })
+        .filter(|(_, score)| *score > 0)
+        .collect();
+    scored.sort_by_key(|(_, score)| std::cmp::Reverse(*score));
+    scored
+}
+
 /// Secondo stadio, solo se nessuna parola chiave ha colpito: conta le radici di parola per ambito; vince l'ambito
 /// in testa di almeno un punto, altrimenti il generalista. Le missioni restano sempre al generalista.
 fn route_by_stems(text: &str) -> Option<&'static Agent> {

@@ -88,6 +88,10 @@ impl Jarvis {
 
     /// Missione attiva con l'esecuzione scaduta, se ce n'è una.
     pub fn mission_due(&self, now_t: chrono::DateTime<chrono::Utc>) -> Option<String> {
+        // Livelli di autonomia (ADR-0174): sotto il 4 nulla parte da solo.
+        if !crate::permissions::background_allowed(&self.cfg.data_dir) {
+            return None;
+        }
         self.store
             .missions_due(&automation::ts(now_t), 1)
             .ok()

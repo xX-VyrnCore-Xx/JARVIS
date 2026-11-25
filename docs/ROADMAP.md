@@ -244,6 +244,10 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Database, memoria e animazioni macOS (2026-11-24, base `013b7b5`).** ADR-0124, ADR-0125. Pragma e manutenzione del database, indici di memoria verificati e ricostruiti, ricerca a candidati con recenza, statistiche e doppioni; animazioni SwiftUI. Verifiche: fmt, clippy, `cargo test --locked`, test Python e contratti. **Sospeso:** resa e fluidità delle animazioni (Swift solo CI).
 
+**Evoluzione cognitiva, incremento 2 (2026-11-25, ADR-0174).** Livelli di autonomia 0–5 per agente, strumento e rischio, solo restrittivi; le attività in background si fermano sotto il livello 4; `GET/PATCH /api/autonomy` solo dal computer del Core. Mancano livelli per dispositivo, interfaccia e il significato del livello 5.
+
+**Evoluzione cognitiva, incremento 1 (2026-11-25, ADR-0173, non committato).** Analisi dei divari su tutti i requisiti del documento «Cognitive Architecture» ([GAP_ANALYSIS.md](GAP_ANALYSIS.md), [VALIDATION_REPORT.md](VALIDATION_REPORT.md)); motore di intento e di contesto, annullamento dei piani con «fermati», dati di sviluppo e validazione separati (validazione 87%). Prossimi: livelli di autonomia 0–5 solo restrittivi, stato del mondo, collaborazione fra specialisti, pausa e dry run, memoria con importanza, apprendimento da dimostrazione (bloccato per l'osservazione dell'interfaccia).
+
 **Deleghe con piano (2026-11-25, ADR-0172).** «Sistema tutto», «fai tu», «metti online», «aggiorna tutto»: con un modello cloud il Core propone un piano come bozza da approvare; senza modello la chat resta invariata. Percorso con modello reale non provato.
 
 **Instradamento misurato e strumenti robusti (2026-11-25, ADR-0171).** Corpus di 65 richieste sintetiche (100%) e di 101 del proprietario (da 19 a 101 con un secondo stadio a radici di parola; resa su richieste nuove da verificare) e prova con argomenti ostili sui 21 strumenti puri. Grafica: nessuna modifica in questo passo (resa non verificabile qui). Prossimo passo: ampliare il corpus con richieste reali del proprietario.

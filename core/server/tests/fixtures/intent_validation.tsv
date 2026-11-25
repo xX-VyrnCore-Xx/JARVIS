@@ -1,0 +1,46 @@
+Ferma tutto subito|cancellation
+Stop, ho cambiato idea|cancellation
+Lascia perdere, faccio io|cancellation
+Basta così|cancellation
+Intendevo la cartella dei documenti, non il desktop|correction
+Sbagliato, volevo il file di ieri|correction
+No, quello vecchio|correction
+Procedi pure|authorization
+Va bene, autorizzo|authorization
+Ok|authorization
+Il sito si è bloccato di nuovo|observation
+Il router non va più|observation
+Il server è rotto|observation
+Che casino questa cartella|observation
+Non parte più niente|observation
+Quanti file ci sono nella cartella download?|question
+Dove ho salvato il contratto?|question
+Quale versione di Python ho installato?|question
+Chi ha modificato questo file per ultimo?|question
+Riesci a controllare le porte aperte?|question
+Quando scade il certificato?|question
+Puoi dirmi quanto spazio libero resta sul disco?|question
+Prepara il report mensile|instruction
+Installa Docker|instruction
+Crea una cartella chiamata progetti|instruction
+Scrivi una mail al cliente|instruction
+Calcola l'IVA su 450 euro|instruction
+Apri il browser|instruction
+Aggiorna il repository|instruction
+Spegni il server|instruction
+Buongiorno|chitchat
+Buonasera JARVIS|chitchat
+Grazie|chitchat
+Ciao|chitchat
+Come stai?|chitchat
+Il server non risponde più|observation
+Sembra che il disco sia pieno|observation
+Ho cancellato per sbaglio la cartella|observation
+Non è che potresti controllare i log?|question
+Se puoi, riavvia il servizio|instruction
+Mmm|chitchat
+Ma funziona o no?|question
+Ancora lento|observation
+Meglio di no|cancellation
+Va bene così, grazie|chitchat
+Rifai tutto da capo|instruction

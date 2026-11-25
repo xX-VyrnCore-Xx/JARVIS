@@ -511,3 +511,41 @@ async fn broad_delegations_fall_back_to_the_normal_chat_without_a_cloud_model() 
     let plans: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
     assert!(plans["items"].as_array().unwrap().is_empty(), "{plans}");
 }
+
+#[test]
+fn stopping_phrases_cancel_a_running_plan_and_are_otherwise_ordinary_chat() {
+    // ADR-0173: «aspetta, fermati» annulla i piani in corso; senza piani non cambia nulla e non c'è errore.
+    let mut j = jarvis();
+    let out = j.chat("Aspetta, fermati").unwrap();
+    let said = out.reply.clone().unwrap_or_default();
+    assert!(!said.contains("ho annullato"), "{said}");
+    let plan = j
+        .plan_create(&json!({"goal": "lungo", "steps": [
+            {"id": "a", "tool": "time.wait", "arguments": {"seconds": 1}},
+            {"id": "b", "tool": "time.wait", "depends_on": ["a"], "arguments": {"seconds": 1}}]}))
+        .unwrap();
+    let id = plan["id"].as_str().unwrap().to_string();
+    j.plan_start(&id).unwrap();
+    let out = j.chat("Lascia stare").unwrap();
+    let said = out.reply.clone().unwrap_or_default();
+    assert!(said.contains("ho annullato 1 piano"), "{said}");
+    assert_eq!(j.plan_get(&id).unwrap()["status"], "cancelled");
+}
+
+#[test]
+fn the_intent_reading_resolves_references_with_the_real_plans() {
+    let mut j = jarvis();
+    let plan = j
+        .plan_create(&json!({"goal": "Aggiorna il server", "steps": [
+            {"id": "a", "tool": "time.now", "arguments": {}}]}))
+        .unwrap();
+    assert_eq!(plan["status"], "pending");
+    let a = j.intent_analyze("Fallo partire").unwrap();
+    assert_eq!(
+        a["references"][0]["resolved"]["label"], "Aggiorna il server",
+        "{a}"
+    );
+    assert_eq!(a["grants_permission"], false);
+    let b = j.intent_analyze("Sistemalo").unwrap();
+    assert_eq!(b["ambiguous"], true, "{b}");
+}
