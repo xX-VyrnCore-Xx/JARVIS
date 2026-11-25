@@ -111,3 +111,27 @@ fn routing_accuracy_stays_above_threshold() {
         wrong.join("\n")
     );
 }
+
+/// Corpus del proprietario (richieste reali, etichettate a mano): vive in `fixtures/routing_corpus.tsv`.
+fn owner_corpus() -> Vec<(String, String)> {
+    include_str!("fixtures/routing_corpus.tsv")
+        .lines()
+        .filter_map(|line| line.split_once('|'))
+        .map(|(m, a)| (m.trim().to_string(), a.trim().to_string()))
+        .collect()
+}
+
+#[test]
+fn owner_corpus_report() {
+    let corpus = owner_corpus();
+    let mut wrong = 0;
+    for (message, expected) in &corpus {
+        let got = route(message).map_or(GENERAL, |a| a.name);
+        if got != expected {
+            wrong += 1;
+            eprintln!("ERRORE {message:?}: atteso {expected}, ottenuto {got}");
+        }
+    }
+    let total = corpus.len();
+    eprintln!("corpus proprietario: {}/{total}", total - wrong);
+}

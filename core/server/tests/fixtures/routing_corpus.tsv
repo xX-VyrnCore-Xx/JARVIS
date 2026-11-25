@@ -1,0 +1,101 @@
+Aprimi il terminale|system
+Chiudi tutte le app che non sto usando|system
+Come sta messo il computer?|system
+Quanta RAM sto usando?|system
+Perché il PC va così lento?|system
+Aprimi VS Code|system
+Controlla se ci sono aggiornamenti|system
+Trovami quel file che ho scaricato ieri|system
+Fammi un po' di pulizia sul computer|system
+Riavviami il PC tra dieci minuti|system
+Quanto spazio libero ho ancora?|system
+Controlla se il server è online|system
+Che cavolo sta consumando tutta questa CPU?|system
+Spostami questi file sul server|system
+Controlla che tutti i servizi siano attivi|system
+Aprimi l'ultimo progetto su cui stavo lavorando|system
+Organizzami la cartella download|system
+Guarda se il server si sta surriscaldando|system
+Controlla la connessione, mi sembra lenta|system
+Installa quello che serve per far partire il progetto|system
+Trovami qualche potenziale cliente|business
+Come posso guadagnare 800 euro?|business
+Preparami un preventivo per questo cliente|business
+Scrivimi una mail commerciale|business
+Analizza la concorrenza|business
+Quanto dovrei farmi pagare per questo sito?|business
+Trovami delle attività che hanno bisogno di un gestionale|business
+Fammi un riepilogo dei miei progetti commerciali|business
+Preparami una proposta da mandare al cliente|business
+Secondo te questo progetto è redditizio?|business
+Analizza questo repository|coding
+Controlla se ci sono bug|coding
+Sistema questo errore|coding
+Fammi partire il progetto|coding
+Crea una nuova branch|coding
+Controlla cosa manca da implementare|coding
+Fai una code review completa|coding
+Ottimizza questo codice che fa schifo|coding
+Generami la documentazione del progetto|coding
+Fai la build e prepara la release|coding
+Controlla se tutti i test passano|coding
+Implementa questa funzionalità|coding
+Guarda perché non funziona|coding
+Aggiorna le dipendenze senza rompere niente|coding
+Controlla se ci sono problemi di architettura|coding
+Fammi un commit con un messaggio sensato|coding
+Confronta questa branch con la main|coding
+Controlla il backend e dimmi cosa non va|coding
+Migliora le prestazioni dell'applicazione|coding
+Continua da dove eravamo rimasti col progetto|coding
+Ricordati questa cosa|memory
+Cosa stavamo facendo ieri?|memory
+Ti ricordi il progetto del server?|memory
+Come avevamo deciso di strutturare HyperCore VE?|memory
+Salvati queste informazioni per dopo|memory
+Qual era il modello di mini PC che avevo scelto?|memory
+Non ricordo cosa avevamo deciso l'altra volta|memory
+Dimentica quello che ti ho appena detto|memory
+Fammi un riepilogo delle ultime decisioni|memory
+Che progetti ho ancora in sospeso?|memory
+Cercami informazioni su questa tecnologia|research
+Qual è il miglior modello AI gratuito al momento?|research
+Cercami un'alternativa più economica|research
+Controlla quanto costa questo prodotto|research
+Cosa è successo oggi nel mondo della tecnologia?|research
+Trovami la documentazione ufficiale|research
+Cerca se qualcuno ha avuto il mio stesso problema|research
+Confrontami questi due processori|research
+Guarda se è uscita una nuova versione|research
+Fammi una ricerca approfondita su questo argomento|research
+Controlla se qualcuno ha già sviluppato una cosa simile|research
+Cerca qualche soluzione open source|research
+Questo file è sicuro?|monitoring
+Controlla se ci sono accessi sospetti al server|monitoring
+Verifica se questa mail è phishing|monitoring
+Controlla le porte aperte sul mio server|monitoring
+Ci sono vulnerabilità nel mio progetto?|monitoring
+Controlla che non abbia lasciato API key nel codice|monitoring
+Verifica i permessi di questi file|monitoring
+Questo link mi sembra strano, controllalo|monitoring
+Controlla che i backup siano protetti|monitoring
+Fammi un audit di sicurezza del server|monitoring
+Avvisami se il server va offline|automation
+Ogni sera fammi un backup|automation
+Ricordami domani di finire il progetto|automation
+Quando finisce la build avvisami|automation
+Ogni mattina fammi un riepilogo della giornata|automation
+Se la CPU supera l'80% avvisami|automation
+Controlla periodicamente se ci sono aggiornamenti|automation
+Automatizza questa procedura|automation
+Ogni lunedì controlla lo stato dei miei progetti|automation
+Quando esce una nuova versione avvisami|automation
+Spegni il server quando ha finito il backup|automation
+Sincronizza ogni notte questi file col NAS|automation
+JARVIS, ci sei?|general_assistant
+Che ne pensi?|general_assistant
+Spiegamelo in parole semplici|general_assistant
+Aiutami a organizzare la giornata|general_assistant
+Non so cosa fare, consigliami qualcosa|general_assistant
+Cosa sei in grado di fare?|general_assistant
+Occupatene tu, fammi sapere cosa serve|general_assistant
