@@ -3751,6 +3751,70 @@ impl Jarvis {
         Ok(self.watches())
     }
 
+    /// Centro privacy (ADR-0187): cosa è conservato e dove, cosa può uscire verso il cloud, quali strumenti e
+    /// attività sono attivi. Solo fatti letti dallo stato reale; nessun contenuto e nessun segreto.
+    pub fn privacy_overview(&self) -> Result<Value, CoreError> {
+        // Inventario dei dati locali: dimensione per voce di primo livello della cartella dati.
+        fn size(path: &std::path::Path, budget: &mut usize) -> u64 {
+            let Ok(meta) = std::fs::symlink_metadata(path) else {
+                return 0;
+            };
+            if meta.is_file() {
+                return meta.len();
+            }
+            if !meta.is_dir() || *budget == 0 {
+                return 0;
+            }
+            std::fs::read_dir(path)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| {
+                    *budget = budget.saturating_sub(1);
+                    size(&e.path(), budget)
+                })
+                .sum()
+        }
+        let mut stored: Vec<Value> = std::fs::read_dir(&self.cfg.data_dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| {
+                let mut budget = 5000;
+                json!({"name": e.file_name().to_string_lossy(), "bytes": size(&e.path(), &mut budget)})
+            })
+            .collect();
+        stored.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+        let cloud = self.cloud_status()?;
+        let configured: Vec<Value> = cloud["providers"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|p| p["configured"] == true)
+            .map(|p| json!({"id": p["id"], "preferred": p["preferred"]}))
+            .collect();
+        let permissions = self.permissions();
+        let mut by_effects: std::collections::BTreeMap<String, u32> = Default::default();
+        for tool in permissions["tools"].as_array().into_iter().flatten() {
+            *by_effects
+                .entry(tool["effects"].as_str().unwrap_or("?").to_string())
+                .or_default() += 1;
+        }
+        let autonomy = self.autonomy();
+        Ok(json!({
+            "stored_locally": {"data_dir_entries": stored, "memory": self.memory_stats()?,
+                "note": "Le schermate lette con screen.read non vengono salvate: l'immagine è cancellata subito."},
+            "cloud": {"providers_with_key": configured,
+                "note": "Il testo parte verso un provider solo se hai configurato la sua chiave e scegli un modello cloud; i dati sensibili riconosciuti sono mascherati e i modelli locali sono esclusi."},
+            "tools": {"count": permissions["tools"].as_array().map_or(0, Vec::len), "by_effects": by_effects},
+            "autonomy": {"default": autonomy["default"], "background_allowed": autonomy["background_allowed"]},
+            "connectors": self.connectors()?.len(),
+            "mcp_servers": self.mcp_servers()["items"].as_array().map_or(0, Vec::len),
+            "background": {"file_watches": self.watches()["items"].as_array().map_or(0, Vec::len),
+                "resource_profile": crate::perf::current(&self.cfg.data_dir).id()},
+        }))
+    }
+
     /// Limiti di lavoro del profilo di risorse attivo (ADR-0186).
     pub fn limits(&self) -> crate::perf::Limits {
         crate::perf::current(&self.cfg.data_dir).limits()

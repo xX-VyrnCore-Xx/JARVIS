@@ -264,6 +264,8 @@ function check(condition, message) {
   check(wsPlan.status === 200 && wsPlan.json?.executes === false && wsPlan.json?.steps?.some((x) => x.tool === "app.open" && x.needs_confirmation === true), "attivazione del profilo: solo piano, nessuna esecuzione");
   const wsDel = await request("/api/workspaces/profiles/remove", { method: "POST", token: ownerToken, body: { id: "Prova e2e" } });
   check(wsDel.status === 200, "profilo di workspace rimosso");
+  const priv = await request("/api/privacy/overview", { token: ownerToken });
+  check(priv.status === 200 && Array.isArray(priv.json?.stored_locally?.data_dir_entries) && priv.json?.cloud && !JSON.stringify(priv.json).includes(ownerToken), "centro privacy: inventario senza segreti");
   const perfGet = await request("/api/performance", { token: ownerToken });
   check(perfGet.status === 200 && perfGet.json?.active === "balanced" && perfGet.json?.profiles?.length === 4, "profili di risorse: predefinito bilanciato");
   const perfBad = await request("/api/performance", { method: "POST", token: ownerToken, body: { profile: "turbo" } });

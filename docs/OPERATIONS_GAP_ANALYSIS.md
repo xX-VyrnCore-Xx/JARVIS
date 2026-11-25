@@ -20,7 +20,7 @@ Data: 2026-11-25. Metodo: elenco di strumenti del catalogo (`contracts/catalog/t
 | 16 | Avatar | PARTIAL | Stati inattivo/ascolto/elaborazione/parla. Mancano ricerca, esecuzione, attesa di autorizzazione, errore, offline, completamento, movimento ridotto. |
 | 17 | Centro di comando | PARTIAL | Plancia e sezioni esistenti. Palette comandi e ricerca globale: da verificare (nessuna trovata in SwiftUI). |
 | 18 | Conoscenza personale | PARTIAL | Memoria cognitiva, note, export/import. Mancano collezioni, riferimenti collegati, freschezza. |
-| 19 | Privacy | PARTIAL | `privacy::redact`, audit, permessi, export della memoria. Manca un pannello unico (inventario dati, cronologia permessi). |
+| 19 | Privacy | PARTIAL → **nuovo** (inventario) | `privacy::redact`, audit, permessi, export della memoria. `/api/privacy/overview` (ADR-0187): inventario locale, provider cloud con chiave, strumenti per effetto, autonomia, connettori, MCP, osservazioni. Manca ancora la vista grafica, la cronologia dei permessi e i controlli di conservazione. |
 | 20 | Risorse | PARTIAL → **nuovo** | Profili Eco/Bilanciato/Prestazioni/Massimo (`/api/performance`, ADR-0186): regolano passi dell'agente, sotto-agenti e frequenza delle metriche. Mancano limiti CPU/RAM, scaricamento modelli, modalità batteria e banda: non applicabili senza misure dell'host. |
 | 21 | Integrazioni | IMPLEMENTED/PARTIAL | Registro connettori, OAuth, plugin, client MCP con salute e politica (ADR-0182). Webhook: `/api/hooks`. |
 | 22 | Emergenze | PARTIAL | `/api/emergency`, diagnosi dei piani. Il ciclo rilevamento→registrazione per gli incidenti elencati non è completo. |

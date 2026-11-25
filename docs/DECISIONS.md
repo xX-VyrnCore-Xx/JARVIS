@@ -2285,6 +2285,13 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Non incluso:** limiti di CPU/RAM, scaricamento dei modelli, batteria e banda: richiedono misure dell'host non verificabili qui.
 - **Evidenza:** test unitari (monotonia, persistenza, valori sconosciuti) e controlli e2e.
 
+### ADR-0187 — Centro privacy (inventario)
+
+- **Data:** 2026-11-25. **Stato:** parziale (API pronta, nessuna vista grafica).
+- **Decisione:** `GET /api/privacy/overview` riassume solo fatti letti dallo stato reale: dimensione delle voci della cartella dati, statistiche della memoria, provider cloud con chiave (mai il valore), numero di strumenti per effetto, livello di autonomia, connettori, server MCP, osservazioni e profilo di risorse. Nessun contenuto di utente.
+- **Limiti:** niente cronologia dei permessi né criteri di conservazione; la vista grafica resta da fare.
+- **Evidenza:** test d'integrazione `privacy_overview_and_resource_profiles_work_through_the_api` e controllo e2e.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

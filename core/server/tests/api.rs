@@ -2889,3 +2889,49 @@ async fn mcp_read_only_tools_run_without_confirmation_only_after_the_owner_appro
         .iter()
         .any(|t| t == "hub_repo_search"));
 }
+
+#[tokio::test]
+async fn privacy_overview_and_resource_profiles_work_through_the_api() {
+    let e = env();
+    let (status, privacy) = e.api("GET", "/api/privacy/overview", None).await;
+    assert_eq!(status, StatusCode::OK, "{privacy}");
+    assert!(privacy["stored_locally"]["data_dir_entries"].is_array());
+    assert_eq!(privacy["background"]["resource_profile"], "balanced");
+    assert!(privacy["cloud"]["providers_with_key"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    let (status, bad) = e
+        .api(
+            "POST",
+            "/api/performance",
+            Some(json!({"profile": "turbo"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{bad}");
+    let (status, eco) = e
+        .api("POST", "/api/performance", Some(json!({"profile": "eco"})))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{eco}");
+    assert_eq!(eco["active"], "eco");
+    let (_, privacy) = e.api("GET", "/api/privacy/overview", None).await;
+    assert_eq!(privacy["background"]["resource_profile"], "eco");
+    // Salvataggio di un profilo di workspace e piano di attivazione senza esecuzione.
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/workspaces/profiles",
+            Some(json!({"name": "Lavoro", "apps": ["Mail"]})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, plan) = e
+        .api(
+            "POST",
+            "/api/workspaces/profiles/plan",
+            Some(json!({"id": "lavoro"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{plan}");
+    assert_eq!(plan["executes"], false);
+}

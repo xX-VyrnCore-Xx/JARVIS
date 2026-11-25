@@ -646,6 +646,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/mcp/servers/health", post(mcp_server_health))
         .route("/api/mcp/servers/policy", post(mcp_server_policy))
         .route("/api/mcp/presets", get(mcp_presets))
+        .route("/api/privacy/overview", get(privacy_overview))
         .route(
             "/api/performance",
             get(performance_get).post(performance_set),
@@ -3262,6 +3263,10 @@ async fn mcp_server_test(State(state): State<Shared>, Json(body): Json<Value>) -
 }
 
 /// Regole di osservazione dei file (ADR-0158), solo proprietario.
+async fn privacy_overview(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.privacy_overview()).await)
+}
+
 async fn performance_get(State(state): State<Shared>) -> Response {
     reply(Ok(with_core(&state, |j| j.performance()).await))
 }
