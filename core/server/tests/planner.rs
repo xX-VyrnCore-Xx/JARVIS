@@ -114,3 +114,116 @@ fn bad_model_answers_are_rejected_with_a_clear_message() {
         .unwrap()
         .is_empty());
 }
+
+fn run_to_end(j: &mut Jarvis, id: &str) -> serde_json::Value {
+    j.plan_start(id).unwrap();
+    for _ in 0..50 {
+        let doc = j.plan_step(id).unwrap();
+        if doc["status"] != "running" {
+            return doc;
+        }
+    }
+    panic!("il piano non termina");
+}
+
+fn failed_plan(j: &mut Jarvis) -> String {
+    let plan = j
+        .plan_create(&json!({"goal": "Leggi e conta", "steps": [
+            {"id": "ok", "tool": "math.calc", "arguments": {"expression": "1+1"}},
+            {"id": "read", "tool": "fs.read", "arguments": {"path": "non-esiste-davvero.txt"}},
+            {"id": "after", "tool": "text.count", "depends_on": ["read"], "arguments": {"text": "x"}}]}))
+        .unwrap();
+    let id = plan["id"].as_str().unwrap().to_string();
+    let done = run_to_end(j, &id);
+    assert_eq!(done["status"], "failed");
+    id
+}
+
+#[test]
+fn only_a_stopped_plan_can_be_replanned_and_the_chain_is_bounded() {
+    let mut j = jarvis();
+    let ok = j
+        .plan_create(&json!({"goal": "Calcolo", "steps": [{"id": "a", "tool": "math.calc", "arguments": {"expression": "1+1"}}]}))
+        .unwrap();
+    let id = ok["id"].as_str().unwrap();
+    assert!(
+        matches!(j.plan_replan_request(id), Err(CoreError::BadRequest(_))),
+        "piano non avviato"
+    );
+    assert!(matches!(
+        j.plan_replan_request("inesistente"),
+        Err(CoreError::NotFound(_))
+    ));
+    let failed = failed_plan(&mut j);
+    // Senza chiave cloud non c'è un modello da interrogare, ma la richiesta è ammessa.
+    assert!(j.plan_replan_request(&failed).unwrap().is_none());
+}
+
+#[test]
+fn recovery_plan_is_a_linked_draft_and_the_original_is_untouched() {
+    let mut j = jarvis();
+    let failed = failed_plan(&mut j);
+    let before = j.plan_get(&failed).unwrap();
+    let text = r#"{"goal":"Leggi e conta","steps":[
+        {"id":"retry","tool":"text.count","arguments":{"text":"ciao mondo"}}]}"#;
+    let out = j
+        .plan_replan_finish(&failed, Ok(Answer::Text(text.into())), Provider::Nim, true)
+        .unwrap();
+    assert_eq!(out["created"], true);
+    assert_eq!(
+        out["plan"]["status"], "pending",
+        "il piano di recupero non parte da solo"
+    );
+    assert_eq!(out["plan"]["replan_of"], failed.as_str());
+    assert_eq!(out["plan"]["replan_depth"], 1);
+    let after = j.plan_get(&failed).unwrap();
+    assert_eq!(before["status"], after["status"]);
+    assert_eq!(before["steps"], after["steps"]);
+
+    // Una catena di recuperi si ferma: oltre il limite decide il proprietario.
+    // La prima ripianificazione ha successo; da qui in poi i recuperi falliscono ancora.
+    let mut current = failed.clone();
+    let broken =
+        r#"{"goal":"g","steps":[{"id":"r","tool":"fs.read","arguments":{"path":"manca.txt"}}]}"#;
+    let mut refused = false;
+    for _ in 0..5 {
+        if current != failed {
+            run_to_end(&mut j, &current);
+        }
+        match j.plan_replan_request(&current) {
+            Ok(_) => {
+                let next = j
+                    .plan_replan_finish(
+                        &current,
+                        Ok(Answer::Text(broken.into())),
+                        Provider::Nim,
+                        true,
+                    )
+                    .unwrap();
+                current = next["plan"]["id"].as_str().unwrap().to_string();
+            }
+            Err(CoreError::BadRequest(m)) => {
+                assert!(m.contains("più volte"));
+                refused = true;
+                break;
+            }
+            Err(e) => panic!("errore inatteso: {e:?}"),
+        }
+    }
+    assert!(refused, "la catena delle ripianificazioni deve fermarsi");
+}
+
+#[test]
+fn replanning_is_blocked_by_the_emergency_stop() {
+    let mut j = jarvis();
+    let failed = failed_plan(&mut j);
+    j.emergency_set(true).unwrap();
+    assert!(matches!(
+        j.plan_replan_request(&failed),
+        Err(CoreError::Unavailable(_))
+    ));
+    assert!(matches!(
+        j.plan_propose_request("calcola"),
+        Err(CoreError::Unavailable(_))
+    ));
+}

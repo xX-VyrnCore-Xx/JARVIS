@@ -1897,6 +1897,14 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** `GET /api/agents` descrive i sette specialisti e il generalista (competenze dagli strumenti, rischio massimo, contesto isolato o condiviso, risorse); `GET /api/agents/route?q=` mostra quale agente riceverebbe una richiesta e per quali parole chiave; `GET /api/models/route?q=` mostra la rotta per compito, il modello per provider, il ripiego e la riservatezza (credenziali bloccate, dati personali rilevati, profilo condiviso) **senza inviare nulla**. Non si introducono nuovi agenti: si riusano quelli esistenti.
 - **Evidenza:** test API del registro e dell'instradamento.
 
+### ADR-0161 — Ripianificazione: un piano di recupero proposto dal modello, sempre come bozza
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout (completa la fase B).
+- **Decisione:** `POST /api/plans/{id}/replan` (`create` facoltativo) chiede al modello un piano di recupero per un piano **fallito, annullato o interrotto** (o con passi falliti). Al modello va un rapporto con obiettivo e, per ogni passo, id, strumento, stato e codice/messaggio di errore ripuliti e accorciati; **non** vanno argomenti né risultati dei passi, che possono contenere contenuti privati, e un rapporto con credenziali non parte. Le istruzioni chiedono di non ripetere i passi riusciti, di cambiare approccio e di **non aggirare** permessi negati, conferme rifiutate o l'arresto di emergenza (in quel caso risponde senza passi e il Core mostra il motivo). La risposta passa dalla stessa validazione del pianificatore (strumenti del catalogo, cicli, riferimenti, campi riservati). Il recupero è una **nuova bozza** `pending` con `replan_of` e `replan_depth`; il piano originale non cambia. La catena è limitata a 3 ripianificazioni, poi decide il proprietario. Con l'arresto di emergenza attivo né proposta né ripianificazione partono. Audit `plan.replan`.
+- **Perché:** il recupero automatico che esegue da solo amplierebbe l'autonomia oltre ciò che il proprietario ha approvato; qui il modello suggerisce e il proprietario sceglie.
+- **Non incluso:** esecuzione automatica del recupero, riuso dei risultati dei passi riusciti nel nuovo piano.
+- **Evidenza:** test unitari del rapporto (nessun argomento o risultato), test d'integrazione con piani realmente falliti (bozza collegata, originale invariato, catena limitata, arresto di emergenza) e controlli e2e.
+
 ### ADR-0160 — Pianificatore guidato dal modello: il modello propone, il Core valida, il proprietario decide
 
 - **Data:** 2026-11-25 · **Stato:** implementata nel checkout (fase B della roadmap).

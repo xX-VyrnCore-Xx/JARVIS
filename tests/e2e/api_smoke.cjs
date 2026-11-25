@@ -260,6 +260,10 @@ function check(condition, message) {
   check([503, 200].includes(propose.status) && (propose.status === 200 || propose.json?.error?.code === "unavailable"), "proposta di piano: senza modello cloud risposta chiara, mai un piano avviato");
   const badGoal = await request("/api/plans/propose", { method: "POST", token: ownerToken, body: { goal: "" } });
   check(badGoal.status === 400, "proposta di piano: obiettivo vuoto rifiutato");
+  const replanMissing = await request("/api/plans/inesistente/replan", { method: "POST", token: ownerToken, body: {} });
+  check(replanMissing.status === 404, "ripianificazione di un piano inesistente rifiutata");
+  const replanDone = await request(`/api/plans/${plan.json.id}/replan`, { method: "POST", token: ownerToken, body: {} });
+  check(replanDone.status === 400, "un piano riuscito non si ripianifica");
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

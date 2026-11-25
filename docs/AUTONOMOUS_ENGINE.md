@@ -49,7 +49,9 @@ Limiti: al massimo 20 passi, budget di tempo (predefinito 120 s, massimo 900 s) 
 
 - **Proposta dal modello** (ADR-0160): `POST /api/plans/propose` fa scomporre un obiettivo in un piano a grafo dal modello cloud; il Core lo valida e lo restituisce come bozza (con `create` salvata, mai avviata) con il rischio di ogni passo.
 
-Non implementata: ripianificazione guidata dal modello dopo un errore (vedi roadmap).
+- **Ripianificazione** (ADR-0161): `POST /api/plans/{id}/replan` fa proporre al modello un piano di recupero per un piano fermo. Il modello vede solo stato ed errori dei passi (mai argomenti né risultati); il recupero è una bozza collegata (`replan_of`), la catena è limitata a 3 e l'arresto di emergenza la blocca.
+
+Non implementata: esecuzione automatica del recupero (la decide sempre il proprietario).
 
 ## Eventi e ambiente (ADR-0157, 0158)
 

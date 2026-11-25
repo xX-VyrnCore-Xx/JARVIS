@@ -244,6 +244,8 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Database, memoria e animazioni macOS (2026-11-24, base `013b7b5`).** ADR-0124, ADR-0125. Pragma e manutenzione del database, indici di memoria verificati e ricostruiti, ricerca a candidati con recenza, statistiche e doppioni; animazioni SwiftUI. Verifiche: fmt, clippy, `cargo test --locked`, test Python e contratti. **Sospeso:** resa e fluidità delle animazioni (Swift solo CI).
 
+**Ripianificazione (2026-11-25, ADR-0161).** `POST /api/plans/{id}/replan`: bozza di recupero collegata, catena limitata, nessun argomento né risultato al modello; pulsante nelle app. Restano pianificati: modelli locali, SDK, auto-miglioramento.
+
 **Pianificatore guidato dal modello (2026-11-25, ADR-0160).** `POST /api/plans/propose`: bozza validata dal Core, mai avviata; UI egui e SwiftUI. Restano pianificati: ripianificazione, modelli locali, SDK, auto-miglioramento.
 
 **Parti pianificate consegnate (2026-11-25, base `ae38e81`).** ADR-0154–0159. Esecuzione parallela dei passi e condizioni di successo, Git/log/dipendenze/CSV, client MCP, gemello dell'ambiente, valutazione degli agenti, osservazione di file e modelli di piano. Verifiche: fmt, Clippy, `cargo test --locked`, test Python e contratti, fmt/Clippy egui; **sospeso:** Swift solo in CI, prove con server MCP reali e con repository di grandi dimensioni. Restano pianificati: pianificatore guidato dal modello, modelli locali, SDK e plugin nativi, auto-miglioramento controllato.
