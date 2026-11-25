@@ -14,6 +14,23 @@ Esiti misurabili dell'evoluzione cognitiva (vedi [GAP_ANALYSIS.md](GAP_ANALYSIS.
 Gli errori noti **non sono stati corretti** guardando la validazione; se si correggono, le frasi passano nello sviluppo e se ne
 scrivono di nuove. Per una misura vera servono frasi nuove del proprietario.
 
+## Nuove capacità: prove eseguite (ADR-0173–0180)
+
+| Capacità | Prove |
+| --- | --- |
+| Intento e contesto | 8 test unitari, 2 d'integrazione (piani reali, annullamento), dataset di sviluppo e validazione |
+| Livelli di autonomia | 4 unitari (minimo fra livelli, nessun allentamento, validazione, livello per dispositivo), 2 d'integrazione (livelli 0 e 1 con la chat, missioni ferme sotto il 4, nessuna modifica da chat) |
+| Stato del mondo | 7 unitari, 1 d'integrazione con le fonti reali |
+| Pausa, vincoli, prova a secco | 1 unitario, 3 d'integrazione (pausa e ripresa in sola lettura, validazione, prova senza effetti anche da chat) |
+| Collaborazione fra specialisti | 1 d'integrazione (sistema e memoria in ordine, ricordo davvero salvato, nessuna collaborazione con un solo specialista) |
+| Memoria cognitiva | 4 unitari, 1 d'integrazione (progetto fuori contesto, affidabilità, consolidamento con audit) |
+| Autocorrezione | 4 unitari, 2 d'integrazione (nessun nuovo tentativo su risorsa assente, diagnosi, scrittura verificata, contraddizioni) |
+| Passaggio fra dispositivi | 3 unitari, 1 d'integrazione (ripresa unica, audit) |
+| Prova HTTP completa | `tests/e2e/api_smoke.cjs` con controlli sulle nuove rotte (eseguito in CI) |
+
+**Non provato:** passaggio con dispositivi reali e nodo vero; collaborazione con un modello cloud; sincronizzazione
+periodica dello stato del mondo (oggi su richiesta); interfacce grafiche per tutte le nuove funzioni (si usano API e chat).
+
 ## Controlli eseguiti sul codice
 
 Vedi il checkpoint in [ROADMAP.md](ROADMAP.md): `cargo fmt --check`, `cargo clippy --locked --all-targets -- -D warnings`,

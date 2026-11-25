@@ -133,3 +133,87 @@ fn autonomy_edits_are_validated_and_cannot_come_from_the_chat() {
     assert_eq!(j.autonomy()["default"], 4);
     assert_eq!(j.autonomy()["agents"]["coding"], 2);
 }
+
+#[test]
+fn project_memories_enter_the_context_only_when_the_request_names_the_project() {
+    // ADR-0178: affidabilità e progetto sulle voci della memoria, consolidamento con audit.
+    use jarvis_core::tools;
+    let mut j = jarvis();
+    j.chat("ricorda che il server di Alfa è a Milano").unwrap();
+    j.chat("ricorda che il mio gruppo di lavoro è il team verde")
+        .unwrap();
+    let all = j.memory_cognitive(None, None).unwrap();
+    let items = all["items"].as_array().unwrap();
+    let alfa = items
+        .iter()
+        .find(|i| i["text"].as_str().unwrap().contains("Alfa"))
+        .unwrap();
+    let id = alfa["id"].as_str().unwrap().to_string();
+    assert_eq!(alfa["reliability"], "stated");
+    assert!(alfa["importance"].as_f64().unwrap() > 0.0);
+    let out = j
+        .memory_set_meta(&id, &json!({"reliability": "verified", "project": "Alfa"}))
+        .unwrap();
+    let updated = out["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["id"] == id.as_str())
+        .unwrap();
+    assert_eq!(updated["project"], "alfa");
+    assert_eq!(updated["reliability"], "verified");
+    assert!(updated["importance"].as_f64().unwrap() > alfa["importance"].as_f64().unwrap());
+    assert!(j
+        .memory_set_meta(&id, &json!({"reliability": "certissimo"}))
+        .is_err());
+    assert!(j
+        .memory_set_meta("inesistente", &json!({"project": "x"}))
+        .is_err());
+    assert_eq!(
+        j.memory_cognitive(None, Some("alfa")).unwrap()["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    // Un ricordo di progetto non finisce nel contesto di una richiesta che non lo cita.
+    let other = j.chat("che ore sono").unwrap().to_json().to_string();
+    assert!(!other.contains("Milano"));
+    // Lo strumento della memoria accetta progetto e affidabilità e li applica.
+    let store = jarvis_core::store::Store::open(std::path::Path::new(":memory:")).unwrap();
+    let web = jarvis_core::web::WebConfig::default();
+    let ctx = tools::Context {
+        workspace: std::path::Path::new("."),
+        store: &store,
+        web: &web,
+    };
+    let saved = tools::execute(
+        "memory.remember",
+        &json!({"text": "la scadenza di Beta è il 3 dicembre", "project": "Beta", "reliability": "uncertain"}),
+        &ctx,
+    )
+    .unwrap();
+    assert_eq!(saved["project"], "Beta");
+    let view = jarvis_core::memcog::view(&store, None, Some("beta"), 5).unwrap();
+    assert_eq!(view[0]["reliability"], "uncertain");
+    assert!(tools::execute(
+        "memory.remember",
+        &json!({"text": "altro", "reliability": "verified"}),
+        &ctx
+    )
+    .is_err());
+    // Il consolidamento in anteprima non cambia nulla; applicato è nell'audit.
+    let before = j.memory_cognitive(None, None).unwrap()["items"]
+        .as_array()
+        .unwrap()
+        .len();
+    assert_eq!(j.memory_consolidate(false).unwrap()["applied"], false);
+    assert_eq!(j.memory_consolidate(true).unwrap()["applied"], true);
+    assert!(
+        j.memory_cognitive(None, None).unwrap()["items"]
+            .as_array()
+            .unwrap()
+            .len()
+            <= before
+    );
+}

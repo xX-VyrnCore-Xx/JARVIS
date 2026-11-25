@@ -549,3 +549,328 @@ fn the_intent_reading_resolves_references_with_the_real_plans() {
     let b = j.intent_analyze("Sistemalo").unwrap();
     assert_eq!(b["ambiguous"], true, "{b}");
 }
+
+#[test]
+fn the_world_state_is_synchronised_from_real_sources_and_keeps_observed_apart_from_inferred() {
+    // ADR-0175: sistema, dischi, processi, piani e regole vengono osservati; una deduzione non li sostituisce.
+    let mut j = jarvis();
+    let plan = j
+        .plan_create(&json!({"goal": "Controlla il sistema", "steps": [
+            {"id": "a", "tool": "time.now", "arguments": {}}]}))
+        .unwrap();
+    let id = plan["id"].as_str().unwrap().to_string();
+    let first = j.world_sync().unwrap();
+    assert!(first["observed"].as_u64().unwrap() >= 3, "{first}");
+    let world = j.world(None, false).unwrap();
+    let keys: Vec<&str> = world["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| e["key"].as_str().unwrap())
+        .collect();
+    assert!(keys.contains(&"system:local"), "{keys:?}");
+    assert!(keys.contains(&"policy:owner"), "{keys:?}");
+    assert!(keys.contains(&format!("plan:{id}").as_str()), "{keys:?}");
+    assert!(world["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|e| e["source"] == "observed" && e["stale"] == false));
+    // Il piano usa lo strumento: la dipendenza è navigabile.
+    let deps = j.world_dependencies(&format!("plan:{id}")).unwrap();
+    assert_eq!(deps["uses"][0]["key"], "tool:time.now", "{deps}");
+    // Una deduzione non sostituisce un'osservazione valida; su un elemento nuovo è accettata e marcata.
+    assert!(j
+        .world_infer(&json!({"kind": "policy", "name": "owner", "value": {"profile": "libero"}, "confidence": 0.9}))
+        .is_err());
+    j.world_infer(&json!({"kind": "fact", "name": "server-vm", "value": {"online": true}, "confidence": 0.4, "note": "visto ieri"}))
+        .unwrap();
+    let fact = j.world(Some("fact"), false).unwrap();
+    assert_eq!(fact["items"][0]["source"], "inferred");
+    assert_eq!(fact["summary"]["inferred"], 1);
+    // Un piano che sparisce dall'ambiente osservato viene tolto e resta nella cronologia.
+    j.plan_cancel(&id).ok();
+    let events = j.world_events(20, None).unwrap();
+    assert!(events["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["change"] == "appeared"));
+}
+
+fn two_step_plan(j: &mut Jarvis, goal: &str) -> String {
+    let plan = j
+        .plan_create(&json!({"goal": goal, "steps": [
+            {"id": "leggi", "tool": "time.now", "arguments": {}},
+            {"id": "scrivi", "tool": "notes.add", "depends_on": ["leggi"], "arguments": {"text": "nota di prova"}},
+            {"id": "dopo", "tool": "time.now", "depends_on": ["scrivi"], "arguments": {}}]}))
+        .unwrap();
+    plan["id"].as_str().unwrap().to_string()
+}
+
+#[test]
+fn a_plan_can_be_paused_constrained_and_resumed_and_the_constraint_skips_what_it_forbids() {
+    // ADR-0176: «aspetta» sospende, «continua senza modificare» riprende in sola lettura.
+    let mut j = jarvis();
+    let id = two_step_plan(&mut j, "Leggi e annota");
+    j.plan_start(&id).unwrap();
+    let out = j.chat("Aspetta, fermati").unwrap();
+    let said = out.reply.clone().unwrap_or_default();
+    assert!(said.contains("sospeso 1 piano"), "{said}");
+    assert_eq!(j.plan_get(&id).unwrap()["status"], "paused");
+    // Un piano sospeso non avanza.
+    assert_eq!(j.plan_step(&id).unwrap()["status"], "paused");
+    let out = j.chat("Continua, ma senza modificare il database").unwrap();
+    let said = out.reply.clone().unwrap_or_default();
+    assert!(said.contains("sola lettura"), "{said}");
+    assert_eq!(j.take_plan_runners(), vec![id.clone()]);
+    let mut doc = j.plan_get(&id).unwrap();
+    assert_eq!(doc["constraints"]["read_only"], true);
+    for _ in 0..8 {
+        doc = j.plan_step(&id).unwrap();
+        if doc["status"] != "running" {
+            break;
+        }
+    }
+    let status = |step: &str| {
+        doc["steps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["id"] == step)
+            .unwrap()["status"]
+            .clone()
+    };
+    assert_eq!(status("leggi"), "done", "{doc}");
+    assert_eq!(status("scrivi"), "skipped", "{doc}");
+    assert_eq!(status("dopo"), "skipped", "i dipendenti seguono: {doc}");
+    assert_eq!(doc["steps"][1]["error"]["code"], "plan.constraint");
+    assert_ne!(doc["status"], "succeeded");
+}
+
+#[test]
+fn constraints_are_validated_resume_needs_a_paused_plan_and_cancel_is_distinct_from_pause() {
+    let mut j = jarvis();
+    let id = two_step_plan(&mut j, "Prova");
+    assert!(j
+        .plan_constrain(&id, &json!({"max_risk": "enorme"}))
+        .is_err());
+    assert!(j
+        .plan_constrain(
+            &id,
+            &json!({"read_only": true, "forbid_tools": ["notes.*"]})
+        )
+        .is_ok());
+    // Un vincolo si può togliere con null (solo dall'API del proprietario).
+    let doc = j.plan_constrain(&id, &json!({"read_only": null})).unwrap();
+    assert!(doc["constraints"]["read_only"].is_null());
+    // «riprendi» senza piani sospesi non cambia nulla e non dà errore.
+    let out = j.chat("Riprendi quello che stavi facendo").unwrap();
+    assert!(!out.reply.unwrap_or_default().contains("Riprendo"));
+    assert!(j.take_plan_runners().is_empty());
+    // «Lascia stare» annulla un piano sospeso, «aspetta» no.
+    j.plan_start(&id).unwrap();
+    j.plan_pause(&id).unwrap();
+    j.chat("Lascia stare").unwrap();
+    assert_eq!(j.plan_get(&id).unwrap()["status"], "cancelled");
+}
+
+#[test]
+fn the_dry_run_describes_each_step_without_executing_or_auditing_decisions() {
+    let mut j = jarvis();
+    let id = two_step_plan(&mut j, "Prova a secco");
+    j.plan_constrain(&id, &json!({"read_only": true})).unwrap();
+    let dry = j.plan_dry_run(&id).unwrap();
+    assert_eq!(dry["executed"], false);
+    let steps = dry["steps"].as_array().unwrap();
+    assert_eq!(steps[0]["outcome"], "would_run", "{dry}");
+    assert_eq!(steps[1]["outcome"], "skipped_by_constraint", "{dry}");
+    assert_eq!(dry["summary"]["would_run"], 2, "{dry}");
+    // Nulla è stato eseguito: il piano è ancora in attesa e nessun passo ha un esito.
+    let doc = j.plan_get(&id).unwrap();
+    assert_eq!(doc["status"], "pending");
+    assert!(doc["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|s| s["status"] == "pending"));
+    // Da chat: «prima fammi vedere cosa vuoi fare» dà la stessa prova.
+    let said = j
+        .chat("Prima fammi vedere cosa vuoi fare")
+        .unwrap()
+        .reply
+        .unwrap_or_default();
+    assert!(said.contains("Prova a secco"), "{said}");
+    assert_eq!(j.plan_get(&id).unwrap()["status"], "pending");
+}
+
+#[test]
+fn a_request_across_two_specialists_is_split_run_in_order_and_aggregated() {
+    // ADR-0177: sistema e azienda in una sola frase.
+    let mut j = jarvis();
+    let out = j
+        .chat("quali processi usano la CPU e poi ricorda che il cane si chiama Fido")
+        .unwrap()
+        .to_json();
+    let steps: Vec<&serde_json::Value> = out["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|s| s["kind"] == "collaboration")
+        .collect();
+    assert_eq!(steps.len(), 2, "{out}");
+    assert_eq!(steps[0]["requested_agent"], "system", "{out}");
+    assert_eq!(steps[1]["requested_agent"], "memory", "{out}");
+    assert_eq!(steps[0]["part"], 1);
+    let reply = out["reply"].as_str().unwrap();
+    assert!(reply.contains("Richiesta con 2 parti"), "{reply}");
+    assert!(
+        reply.contains("**1. system**") && reply.contains("**2. memory**"),
+        "{reply}"
+    );
+    assert!(
+        reply.contains("Fido") && reply.contains("Ricordato"),
+        "la seconda parte è stata eseguita: {reply}"
+    );
+    assert!(
+        j.memory()
+            .unwrap()
+            .iter()
+            .any(|m| m.to_string().contains("Fido")),
+        "il ricordo è stato salvato dallo specialista di memoria"
+    );
+    assert_eq!(out["task"]["state"], "succeeded");
+    // Una frase che tocca un solo specialista, o nessuno, resta una richiesta normale.
+    let single = j.chat("che ore sono e poi che ore sono").unwrap().to_json();
+    assert!(single["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|s| s["kind"] != "collaboration"));
+}
+
+#[test]
+fn a_failed_step_is_diagnosed_not_retried_when_retrying_cannot_help_and_the_plan_says_what_to_do() {
+    // ADR-0179: classe, causa, strategie alternative e raccomandazione.
+    let mut j = jarvis();
+    let plan = j
+        .plan_create(
+            &json!({"goal": "Leggi un file fuori dalla workspace", "steps": [
+            {"id": "leggi", "tool": "fs.read", "retries": 2, "arguments": {"path": "../fuori.txt"}},
+            {"id": "poi", "tool": "time.now", "depends_on": ["leggi"], "arguments": {}}]}),
+        )
+        .unwrap();
+    let id = plan["id"].as_str().unwrap().to_string();
+    j.plan_start(&id).unwrap();
+    let mut doc = j.plan_get(&id).unwrap();
+    for _ in 0..6 {
+        doc = j.plan_step(&id).unwrap();
+        if doc["status"] != "running" {
+            break;
+        }
+    }
+    assert_eq!(doc["status"], "failed", "{doc}");
+    assert_eq!(
+        doc["steps"][0]["attempts"], 1,
+        "un percorso non ammesso non migliora riprovando: {doc}"
+    );
+    assert!(matches!(
+        doc["steps"][1]["status"].as_str(),
+        Some("skipped" | "cancelled")
+    ));
+    let diagnosis = j.plan_diagnosis(&id).unwrap();
+    let failure = &diagnosis["failures"][0];
+    assert_eq!(failure["class"], "scope", "{diagnosis}");
+    assert_eq!(failure["retryable"], false);
+    assert_eq!(failure["blocked_steps"][0], "poi");
+    assert!(!failure["strategies"].as_array().unwrap().is_empty());
+    assert_eq!(diagnosis["replan_available"], true);
+    assert!(diagnosis["recommendation"]
+        .as_str()
+        .unwrap()
+        .contains("ripianifica"));
+}
+
+#[test]
+fn a_write_is_verified_by_reading_the_system_back_and_memory_contradictions_are_reported() {
+    let mut j = jarvis();
+    let plan = j
+        .plan_create(&json!({"goal": "Scrivi un file", "steps": [
+            {"id": "scrivi", "tool": "fs.write", "arguments": {"path": "prova.txt", "content": "ciao"}}]}))
+        .unwrap();
+    let id = plan["id"].as_str().unwrap().to_string();
+    j.plan_start(&id).unwrap();
+    j.plan_approve(&id, &[]).ok();
+    let mut doc = j.plan_get(&id).unwrap();
+    for _ in 0..4 {
+        doc = j.plan_step(&id).unwrap();
+        if doc["status"] == "waiting" {
+            j.plan_approve(&id, &[]).unwrap();
+        } else if doc["status"] != "running" {
+            break;
+        }
+    }
+    assert_eq!(doc["status"], "succeeded", "{doc}");
+    j.chat("ricorda che il mio cane si chiama Fido").unwrap();
+    j.chat("ricorda che il mio cane si chiama Rex").unwrap();
+    let contradictions = j.memory_contradictions().unwrap();
+    assert_eq!(
+        contradictions["items"].as_array().unwrap().len(),
+        1,
+        "{contradictions}"
+    );
+}
+
+#[test]
+fn a_handoff_carries_the_goal_and_plan_state_to_one_device_without_any_permission() {
+    // ADR-0180: pacchetto di ripresa creato dal proprietario, ripreso una sola volta.
+    let mut j = jarvis();
+    let plan = j
+        .plan_create(&json!({"goal": "Migrare i backup", "steps": [
+            {"id": "a", "tool": "time.now", "arguments": {}},
+            {"id": "b", "tool": "time.now", "depends_on": ["a"], "arguments": {}}]}))
+        .unwrap();
+    let plan_id = plan["id"].as_str().unwrap().to_string();
+    assert!(j
+        .handoff_create(&json!({"to": "dispositivo-che-non-esiste"}))
+        .is_err());
+    assert!(j
+        .handoff_create(&json!({"goal": "usa la chiave sk-abcdefghijklmnopqrstuvwxyz0123456789"}))
+        .is_err());
+    let made = j
+        .handoff_create(
+            &json!({"to": "any", "plan_id": plan_id, "note": "riprendi dal secondo passo"}),
+        )
+        .unwrap();
+    assert_eq!(made["goal"], "Migrare i backup");
+    assert_eq!(made["plan"]["steps"], 2);
+    let id = made["id"].as_str().unwrap().to_string();
+    assert_eq!(
+        j.handoffs_for("tablet").unwrap()["items"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let taken = j.handoff_accept(&id, "tablet").unwrap();
+    assert_eq!(taken["plan"]["id"], plan_id.as_str());
+    assert!(taken["permissions"]
+        .as_str()
+        .unwrap()
+        .contains("nessun permesso"));
+    let again = j.handoff_accept(&id, "telefono").unwrap_err();
+    assert!(
+        format!("{again:?}").contains("già ripreso da tablet"),
+        "{again:?}"
+    );
+    assert!(j.handoffs_for("telefono").unwrap()["items"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    // La ripresa è nell'audit con il dispositivo come attore.
+    assert!(j
+        .audit_log(200)
+        .unwrap()
+        .to_string()
+        .contains("handoff.accept"));
+}

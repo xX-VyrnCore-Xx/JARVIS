@@ -17,7 +17,7 @@ fn event(doc: &mut Value, step: &str, kind: &str, detail: impl Into<String>) {
 }
 
 impl Jarvis {
-    fn plan_load(&self, id: &str) -> Result<Value, CoreError> {
+    pub(super) fn plan_load(&self, id: &str) -> Result<Value, CoreError> {
         self.store
             .plan_get(id)
             .map_err(internal)?
@@ -415,7 +415,7 @@ impl Jarvis {
             ));
         }
         match doc["status"].as_str() {
-            Some("pending" | "interrupted" | "waiting") => {
+            Some("pending" | "interrupted" | "waiting" | "paused") => {
                 // Il budget di tempo vale per ogni esecuzione: l'attesa di una conferma non lo consuma.
                 doc["started_at"] = json!(now());
                 doc["status"] = json!("running");
@@ -461,6 +461,212 @@ impl Jarvis {
         self.plan_save(&mut doc)?;
         self.record_owner_action("plan.approve")?;
         Ok(doc)
+    }
+
+    /// Sospende un piano in corso (ADR-0176): i passi già fatti restano, quello in corso finisce, nessun altro parte.
+    /// Si riprende con `plan_start`. Non è un annullamento.
+    pub fn plan_pause(&mut self, id: &str) -> Result<Value, CoreError> {
+        let mut doc = self.plan_load(id)?;
+        if !matches!(doc["status"].as_str(), Some("running" | "waiting")) {
+            return Err(CoreError::BadRequest(
+                "Si sospende solo un piano in corso o in attesa di conferma".into(),
+            ));
+        }
+        doc["status"] = json!("paused");
+        event(&mut doc, "", "paused", "Sospeso dal proprietario");
+        self.plan_save(&mut doc)?;
+        self.record_owner_action("plan.pause")?;
+        Ok(doc)
+    }
+
+    /// Aggiunge o modifica i vincoli di un piano non concluso (ADR-0176): valgono dal passo successivo, per ogni
+    /// strumento e agente del piano. `null` per un campo lo toglie (solo dall'API del proprietario).
+    pub fn plan_constrain(&mut self, id: &str, patch: &Value) -> Result<Value, CoreError> {
+        let mut doc = self.plan_load(id)?;
+        if matches!(
+            doc["status"].as_str(),
+            Some("succeeded" | "failed" | "cancelled" | "budget_exceeded")
+        ) {
+            return Err(CoreError::BadRequest("Il piano è già concluso".into()));
+        }
+        let mut merged = doc["constraints"].as_object().cloned().unwrap_or_default();
+        let mut set = serde_json::Map::new();
+        for (key, value) in patch
+            .as_object()
+            .ok_or_else(|| CoreError::BadRequest("i vincoli devono essere un oggetto".into()))?
+        {
+            if value.is_null() {
+                merged.remove(key);
+            } else {
+                set.insert(key.clone(), value.clone());
+            }
+        }
+        let valid =
+            plans::normalize_constraints(&Value::Object(set)).map_err(CoreError::BadRequest)?;
+        merged.extend(valid.as_object().cloned().unwrap_or_default());
+        doc["constraints"] = Value::Object(merged);
+        let text = format!("Vincoli: {}", doc["constraints"]);
+        event(&mut doc, "", "constrained", text);
+        self.plan_save(&mut doc)?;
+        self.record_owner_action("plan.constrain")?;
+        Ok(doc)
+    }
+
+    /// Salta i passi che violano i vincoli del piano; i dipendenti seguono. Restituisce quanti ne ha saltati.
+    fn apply_constraints(&self, doc: &mut Value) -> usize {
+        let constraints = doc["constraints"].clone();
+        if !constraints.is_object() || constraints.as_object().is_some_and(|o| o.is_empty()) {
+            return 0;
+        }
+        let mut hits: Vec<(usize, String, String)> = Vec::new();
+        for (i, step) in doc["steps"].as_array().into_iter().flatten().enumerate() {
+            if step["status"] != "pending" {
+                continue;
+            }
+            let tool = step["tool"].as_str().unwrap_or_default();
+            let Some(info) = self.catalog.get(tool) else {
+                continue;
+            };
+            let effects = info.descriptor["effects"].as_str().unwrap_or("write_local");
+            if let Some(reason) =
+                plans::constraint_violation(&constraints, tool, effects, info.risk())
+            {
+                hits.push((
+                    i,
+                    step["id"].as_str().unwrap_or_default().to_string(),
+                    reason,
+                ));
+            }
+        }
+        for (i, id, reason) in &hits {
+            doc["steps"][*i]["status"] = json!("skipped");
+            doc["steps"][*i]["error"] = json!({"code": "plan.constraint", "message": reason});
+            event(doc, id, "constraint", format!("Passo saltato: {reason}"));
+        }
+        hits.len()
+    }
+
+    /// Prova a secco (ADR-0176): per ogni passo dice cosa deciderebbe la policy, se servirebbe una conferma, se è
+    /// reversibile e se un vincolo lo salterebbe. **Non esegue nulla** e non scrive decisioni nell'audit.
+    pub fn plan_dry_run(&self, id: &str) -> Result<Value, CoreError> {
+        let doc = self.plan_load(id)?;
+        let constraints = doc["constraints"].clone();
+        let rules = crate::permissions::Rules::load(&self.cfg.data_dir);
+        let mut rows = Vec::new();
+        let (mut runnable, mut confirm, mut denied, mut constrained) = (0, 0, 0, 0);
+        let probe = uuid::Uuid::new_v4().to_string();
+        for step in doc["steps"].as_array().into_iter().flatten() {
+            let tool = step["tool"].as_str().unwrap_or_default();
+            let arguments = &step["arguments"];
+            let version = self
+                .catalog
+                .get(tool)
+                .map(|t| t.version().to_string())
+                .unwrap_or_default();
+            let digest = canonical_digest(
+                &json!({"tool": tool, "version": version, "arguments": arguments}),
+            );
+            let decision = policy::decide(
+                &self.catalog,
+                &self.cfg.web,
+                &policy::Request {
+                    subject: json!({"kind": "agent", "id": "planner"}),
+                    task_id: &probe,
+                    correlation_id: &probe,
+                    tool,
+                    version: &version,
+                    arguments,
+                    digest: &digest,
+                    perms: &rules,
+                },
+            );
+            let info = self.catalog.get(tool);
+            let effects = info
+                .map(|t| {
+                    t.descriptor["effects"]
+                        .as_str()
+                        .unwrap_or("write_local")
+                        .to_string()
+                })
+                .unwrap_or_default();
+            let risk = info.map(|t| t.risk().to_string()).unwrap_or_default();
+            let violation = plans::constraint_violation(&constraints, tool, &effects, &risk);
+            let verdict = decision["decision"].as_str().unwrap_or("deny");
+            let outcome = if violation.is_some() {
+                constrained += 1;
+                "skipped_by_constraint"
+            } else if verdict == "deny" {
+                denied += 1;
+                "denied"
+            } else if verdict == "require_confirmation" && step["approved"] != true {
+                confirm += 1;
+                "needs_confirmation"
+            } else {
+                runnable += 1;
+                "would_run"
+            };
+            rows.push(json!({
+                "id": step["id"], "tool": tool, "outcome": outcome, "risk": risk, "effects": effects,
+                "reversible": crate::toolsys::reversible(tool, &effects),
+                "reasons": decision["reasons"], "constraint": violation,
+                "uses_previous_results": arguments.to_string().contains("${"),
+                "depends_on": step["depends_on"],
+            }));
+        }
+        Ok(json!({
+            "executed": false, "plan": id, "steps": rows,
+            "summary": {"would_run": runnable, "needs_confirmation": confirm, "denied": denied,
+                        "skipped_by_constraint": constrained},
+        }))
+    }
+
+    /// Diagnosi di un piano (ADR-0179): per ogni passo fallito classe, causa probabile e strategie alternative,
+    /// quali passi ha bloccato e se conviene ripianificare.
+    pub fn plan_diagnosis(&self, id: &str) -> Result<Value, CoreError> {
+        let doc = self.plan_load(id)?;
+        let steps = doc["steps"].as_array().cloned().unwrap_or_default();
+        let mut failures = Vec::new();
+        for step in steps.iter().filter(|s| s["status"] == "failed") {
+            let mut error = step["error"].clone();
+            if error["class"].is_null() {
+                crate::reflect::annotate(&mut error);
+            }
+            let blocked: Vec<&str> = steps
+                .iter()
+                .filter(|s| {
+                    matches!(s["status"].as_str(), Some("skipped" | "cancelled"))
+                        && s["depends_on"]
+                            .as_array()
+                            .is_some_and(|d| d.iter().any(|x| x == &step["id"]))
+                })
+                .filter_map(|s| s["id"].as_str())
+                .collect();
+            failures.push(json!({
+                "step": step["id"], "tool": step["tool"], "attempts": step["attempts"],
+                "code": error["code"], "message": error["message"], "class": error["class"],
+                "cause": error["cause"], "retryable": error["retryable"],
+                "strategies": error["strategies"], "blocked_steps": blocked,
+            }));
+        }
+        let depth = doc["replan_depth"].as_u64().unwrap_or(0);
+        let all_futile = failures.iter().all(|f| f["retryable"] == false);
+        Ok(json!({
+            "plan": id, "status": doc["status"], "failures": failures,
+            "not_run": steps
+                .iter()
+                .filter(|s| matches!(s["status"].as_str(), Some("skipped" | "cancelled")))
+                .count(),
+            "replan_available": !failures.is_empty() && depth < crate::planner::MAX_REPLANS,
+            "recommendation": if failures.is_empty() {
+                "nessun guasto: niente da correggere"
+            } else if depth >= crate::planner::MAX_REPLANS {
+                "limite di ripianificazioni raggiunto: decide il proprietario"
+            } else if all_futile {
+                "riprovare non aiuta: ripianifica con una strategia diversa"
+            } else {
+                "guasto passeggero: riprova il piano o ripianifica"
+            },
+        }))
     }
 
     pub fn plan_cancel(&mut self, id: &str) -> Result<Value, CoreError> {
@@ -576,6 +782,7 @@ impl Jarvis {
             self.plan_save(&mut doc)?;
             return Ok(doc);
         }
+        self.apply_constraints(&mut doc);
         plans::skip_blocked(&mut doc);
         let Some(index) = plans::next_ready(&doc) else {
             let status = plans::final_status(&doc);
@@ -730,7 +937,20 @@ impl Jarvis {
             doc["steps"][index]["started_at"] = json!(now());
         }
         let goal = doc["goal"].as_str().unwrap_or_default().to_string();
-        let (status, output) = self.plan_exec(&goal, &tool, &arguments, approved)?;
+        let (mut status, mut output) = self.plan_exec(&goal, &tool, &arguments, approved)?;
+        // Prova osservabile (ADR-0179): un'operazione che modifica qualcosa si rilegge, non si crede sulla parola.
+        if status == "succeeded" {
+            if let Some(Err(message)) = crate::reflect::evidence(
+                &tool,
+                &arguments,
+                &output,
+                &self.cfg.workspace(),
+                &self.store,
+            ) {
+                status = "failed";
+                output = json!({"code": "plan.unverified", "message": message});
+            }
+        }
         apply_result(doc, index, status, output);
         Ok(false)
     }
@@ -947,7 +1167,14 @@ fn apply_result(doc: &mut Value, index: usize, status: &str, output: Value) {
     if status == "succeeded" {
         finish_step(doc, index, "done", plans::clip_output(&output));
         event(doc, &step_id, "done", format!("{tool} eseguito"));
-    } else if status != "denied" && attempts <= retries {
+    } else if status != "denied"
+        && attempts <= retries
+        && !crate::reflect::classify(
+            output["code"].as_str().unwrap_or_default(),
+            output["message"].as_str().unwrap_or_default(),
+        )
+        .futile_to_retry()
+    {
         doc["steps"][index]["status"] = json!("pending");
         doc["steps"][index]["error"] = output;
         event(
@@ -958,6 +1185,8 @@ fn apply_result(doc: &mut Value, index: usize, status: &str, output: Value) {
         );
     } else {
         let code = output["code"].as_str().unwrap_or("errore").to_string();
+        let mut output = output;
+        crate::reflect::annotate(&mut output);
         finish_step(doc, index, "failed", output);
         event(doc, &step_id, "failed", code);
         after_failure(doc, index);

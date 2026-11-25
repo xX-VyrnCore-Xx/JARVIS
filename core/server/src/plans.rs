@@ -301,6 +301,108 @@ pub fn skip_blocked(doc: &mut Value) -> usize {
     }
 }
 
+/// Vincoli modificabili durante l'esecuzione (ADR-0176). Possono solo **restringere** il piano: nessun passo viene
+/// reso più permissivo, e un passo che li viola è saltato (con i suoi dipendenti) invece di essere eseguito.
+/// Campi: `read_only` (niente passi che modificano o eseguono), `forbid_tools` (nomi o prefissi `fs.*`),
+/// `forbid_effects` (effetti del catalogo) e `max_risk` (`low`, `medium` o `high`).
+pub fn normalize_constraints(patch: &Value) -> Result<Value, String> {
+    let obj = patch
+        .as_object()
+        .ok_or("i vincoli devono essere un oggetto")?;
+    let mut out = serde_json::Map::new();
+    for (key, value) in obj {
+        match key.as_str() {
+            "read_only" => {
+                out.insert(
+                    key.clone(),
+                    json!(value.as_bool().ok_or("read_only: vero o falso")?),
+                );
+            }
+            "forbid_tools" => {
+                let list = value.as_array().ok_or("forbid_tools: elenco")?;
+                if list.len() > 32 {
+                    return Err("forbid_tools: al massimo 32 voci".into());
+                }
+                let mut names = Vec::new();
+                for item in list {
+                    let name = item.as_str().ok_or("forbid_tools: testi")?;
+                    if !crate::permissions::valid_pattern(name) {
+                        return Err(format!("forbid_tools: nome non valido ({name})"));
+                    }
+                    names.push(json!(name));
+                }
+                out.insert(key.clone(), Value::Array(names));
+            }
+            "forbid_effects" => {
+                let list = value.as_array().ok_or("forbid_effects: elenco")?;
+                let mut effects = Vec::new();
+                for item in list {
+                    let e = item.as_str().ok_or("forbid_effects: testi")?;
+                    if !["read", "write_local", "write_external"].contains(&e) {
+                        return Err(format!("forbid_effects: effetto sconosciuto ({e})"));
+                    }
+                    effects.push(json!(e));
+                }
+                out.insert(key.clone(), Value::Array(effects));
+            }
+            "max_risk" => {
+                let r = value.as_str().unwrap_or_default();
+                if !["low", "medium", "high"].contains(&r) {
+                    return Err("max_risk: low, medium o high".into());
+                }
+                out.insert(key.clone(), json!(r));
+            }
+            other => return Err(format!("vincolo sconosciuto: {other}")),
+        }
+    }
+    Ok(Value::Object(out))
+}
+
+fn risk_rank(risk: &str) -> u8 {
+    match risk {
+        "low" => 0,
+        "medium" => 1,
+        "high" => 2,
+        _ => 3,
+    }
+}
+
+/// Motivo per cui un passo viola i vincoli, se li viola.
+pub fn constraint_violation(
+    constraints: &Value,
+    tool: &str,
+    effects: &str,
+    risk: &str,
+) -> Option<String> {
+    if constraints["read_only"] == true && !matches!(effects, "read" | "none") {
+        return Some("vincolo «solo lettura»".into());
+    }
+    for pattern in constraints["forbid_tools"].as_array().into_iter().flatten() {
+        let pattern = pattern.as_str().unwrap_or_default();
+        let hit = match pattern.strip_suffix(".*") {
+            Some(prefix) => tool.starts_with(&format!("{prefix}.")),
+            None => pattern == tool,
+        };
+        if hit {
+            return Some(format!("strumento vietato dal vincolo ({pattern})"));
+        }
+    }
+    if constraints["forbid_effects"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|e| e == effects)
+    {
+        return Some(format!("effetto vietato dal vincolo ({effects})"));
+    }
+    if let Some(max) = constraints["max_risk"].as_str() {
+        if risk_rank(risk) > risk_rank(max) {
+            return Some(format!("rischio oltre il massimo consentito ({max})"));
+        }
+    }
+    None
+}
+
 /// Stato complessivo quando non c'è più nulla da eseguire.
 pub fn final_status(doc: &Value) -> &'static str {
     let steps = doc["steps"].as_array().cloned().unwrap_or_default();
@@ -765,5 +867,27 @@ mod tests {
         assert_eq!(copy["steps_executed"], 0);
         assert_eq!(clip_output(&json!({"a": "b"})), json!({"a": "b"}));
         assert_eq!(clip_output(&json!("x".repeat(5000)))["truncated"], true);
+    }
+
+    #[test]
+    fn constraints_are_validated_and_only_restrict() {
+        assert!(normalize_constraints(&json!({"read_only": true, "max_risk": "medium"})).is_ok());
+        for bad in [
+            json!({"read_only": "si"}),
+            json!({"max_risk": "enorme"}),
+            json!({"forbid_tools": ["../x"]}),
+            json!({"forbid_effects": ["tutto"]}),
+            json!({"altro": 1}),
+            json!([]),
+        ] {
+            assert!(normalize_constraints(&bad).is_err(), "{bad}");
+        }
+        let c = json!({"read_only": true});
+        assert!(constraint_violation(&c, "fs.write", "write_local", "high").is_some());
+        assert!(constraint_violation(&c, "fs.read", "read", "low").is_none());
+        let c = json!({"forbid_tools": ["web.*"], "max_risk": "medium"});
+        assert!(constraint_violation(&c, "web.fetch", "read", "medium").is_some());
+        assert!(constraint_violation(&c, "shell.run", "execute", "critical").is_some());
+        assert!(constraint_violation(&c, "time.now", "none", "low").is_none());
     }
 }

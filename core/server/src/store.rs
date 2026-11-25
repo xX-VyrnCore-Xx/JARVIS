@@ -119,6 +119,10 @@ impl Store {
         )?;
         // Account degli utenti (ADR-0169).
         conn.execute_batch(crate::accounts::SCHEMA)?;
+        // Stato del mondo (ADR-0175).
+        conn.execute_batch(crate::world::SCHEMA)?;
+        // Passaggi di attività fra dispositivi (ADR-0180).
+        conn.execute_batch(crate::handoff::SCHEMA)?;
         // Migrazione additiva: database creati prima delle fonti Web (RF-06).
         let has_sources = conn.prepare("SELECT sources FROM messages LIMIT 0").is_ok();
         if !has_sources {

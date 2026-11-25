@@ -288,6 +288,23 @@ function check(condition, message) {
   check(noSession.status === 401 && ownerNotUser.status === 401, "il token del proprietario non apre l'area utente");
   const noInvite = await request("/api/auth/register", { method: "POST", body: { username: "prova-e2e", password: "una frase lunga e strana" } });
   check(noInvite.status === 401, "registrazione senza invito rifiutata");
+  const intent = await request("/api/intent/analyze", { method: "POST", token: ownerToken, body: { message: "Non funziona un cazzo" } });
+  check(intent.status === 200 && intent.json?.kind === "observation" && intent.json?.grants_permission === false, "intento: uno sfogo non è un'autorizzazione");
+  const autonomy = await request("/api/autonomy", { token: ownerToken });
+  check(autonomy.status === 200 && autonomy.json?.default === 4 && autonomy.json?.background_allowed === true, "livelli di autonomia predefiniti");
+  const badLevel = await request("/api/autonomy", { method: "PATCH", token: ownerToken, body: { default: 9 } });
+  check(badLevel.status === 400, "livello di autonomia fuori scala rifiutato");
+  const sync = await request("/api/world/sync", { method: "POST", token: ownerToken });
+  const world = await request("/api/world", { token: ownerToken });
+  check(sync.status === 200 && world.status === 200 && world.json?.items?.some((e) => e.key === "system:local" && e.source === "observed"), "stato del mondo: sistema osservato");
+  const inferred = await request("/api/world/infer", { method: "POST", token: ownerToken, body: { kind: "policy", name: "owner", value: { profile: "libero" }, confidence: 0.9 } });
+  check(inferred.status === 400, "una deduzione non sostituisce un'osservazione valida");
+  const cognitive = await request("/api/memory/cognitive", { token: ownerToken });
+  check(cognitive.status === 200 && Array.isArray(cognitive.json?.items) && cognitive.json?.reliability_levels?.includes("verified"), "memoria con importanza e affidabilità");
+  const contradictions = await request("/api/memory/contradictions", { token: ownerToken });
+  check(contradictions.status === 200 && Array.isArray(contradictions.json?.items), "contraddizioni della memoria");
+  const handoffNoDevice = await request("/api/handoffs", { method: "POST", token: ownerToken, body: { to: "inesistente", goal: "prova" } });
+  check(handoffNoDevice.status === 400, "passaggio verso un dispositivo sconosciuto rifiutato");
   const badLogin = await request("/api/auth/login", { method: "POST", body: { username: "nessuno", password: "una frase sbagliata" } });
   check(badLogin.status === 401, "accesso con credenziali sbagliate rifiutato");
 })().catch((error) => {

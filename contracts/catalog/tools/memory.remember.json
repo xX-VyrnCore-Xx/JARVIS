@@ -22,6 +22,20 @@
           "procedural"
         ],
         "description": "semantic per fatti, procedural per preferenze e regole; se assente lo deduce il Core"
+      },
+      "project": {
+        "type": "string",
+        "maxLength": 40,
+        "description": "Progetto a cui appartiene il ricordo: entra nel contesto solo se la richiesta lo cita"
+      },
+      "reliability": {
+        "type": "string",
+        "enum": [
+          "stated",
+          "inferred",
+          "uncertain"
+        ],
+        "description": "Affidabilità: detto dal proprietario, dedotto o da ricontrollare (verified solo per decisione del proprietario)"
       }
     }
   },

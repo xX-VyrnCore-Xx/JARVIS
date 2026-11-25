@@ -231,6 +231,67 @@ pub fn classify(message: &str) -> (Kind, f32) {
     (Kind::Chitchat, 0.4)
 }
 
+/// «Aspetta», «fermati», «stop»: sospendere (si può riprendere). «Annulla», «lascia stare»: annullare.
+pub fn is_soft_stop(message: &str) -> bool {
+    starts_with_any(
+        &fold(message),
+        &[
+            "aspetta",
+            "fermati",
+            "fermo",
+            "stop",
+            "basta",
+            "ferma tutto",
+            "interrompi",
+        ],
+    )
+}
+
+/// «Riprendi», «continua», «vai avanti»: riprendere un'attività sospesa (solo se ce n'è una).
+pub fn is_resume(message: &str) -> bool {
+    starts_with_any(
+        &fold(message),
+        &[
+            "riprendi",
+            "continua",
+            "vai avanti",
+            "ok riprendi",
+            "ricomincia da dove eri",
+        ],
+    )
+}
+
+/// «Senza modificare…», «solo in lettura»: vincolo di sola lettura da applicare all'attività che riprende.
+pub fn wants_read_only(message: &str) -> bool {
+    let text = fold(message);
+    [
+        "senza modificare",
+        "senza scrivere",
+        "senza cancellare",
+        "solo lettura",
+        "solo in lettura",
+        "senza toccare",
+    ]
+    .iter()
+    .any(|p| text.contains(p))
+}
+
+/// «Prima fammi vedere cosa vuoi fare», «simula»: mostrare cosa farebbe un piano senza eseguirlo.
+pub fn wants_preview(message: &str) -> bool {
+    let text = fold(message);
+    [
+        "prima fammi vedere",
+        "prima mostrami",
+        "fammi vedere cosa vuoi fare",
+        "cosa faresti",
+        "simula",
+        "prova a secco",
+        "dry run",
+    ]
+    .iter()
+    .any(|p| text.contains(p))
+}
+
 /// Divide una frase in richieste distinte («fai il backup e poi riavvia il server»).
 pub fn split_intents(message: &str) -> Vec<String> {
     let mut parts = vec![message.to_string()];
@@ -671,5 +732,17 @@ mod tests {
     fn ties_between_domains_ask_which_one() {
         let a = analyze("controlla il server e i bug", &Recent::default());
         assert!(a["domains"].as_array().unwrap().len() >= 2);
+    }
+
+    #[test]
+    fn stop_resume_read_only_and_preview_phrases_are_recognised() {
+        assert!(is_soft_stop("Aspetta, fermati."));
+        assert!(!is_soft_stop("lascia stare"));
+        assert!(is_resume("Riprendi quello che stavi facendo"));
+        assert!(is_resume("Continua, ma senza modificare il database"));
+        assert!(wants_read_only("Continua, ma senza modificare il database"));
+        assert!(!wants_read_only("Continua"));
+        assert!(wants_preview("Prima fammi vedere cosa vuoi fare."));
+        assert!(!is_resume("cerca la ricevuta"));
     }
 }

@@ -233,6 +233,7 @@ impl Store {
                  relation TEXT NOT NULL, object TEXT NOT NULL);
              CREATE INDEX IF NOT EXISTS memory_edges_by_memory ON memory_edges (memory_id);",
         )?;
+        crate::memcog::migrate(self)?;
         // Database precedenti o indici interrotti da un arresto brusco: si ricostruiscono dalla sola tabella `memory`.
         if !self.memory_consistent()? {
             self.memory_reindex()?;
@@ -638,13 +639,17 @@ impl Store {
         let mut recency: HashMap<String, f32> = HashMap::new();
         {
             let mut stmt = self.conn.prepare(
-                "SELECT text, COALESCE(updated_at, created_at) FROM memory WHERE id = ?1",
+                "SELECT text, COALESCE(updated_at, created_at), importance FROM memory WHERE id = ?1",
             )?;
             let today = chrono::Utc::now();
             for id in candidates {
-                let Some((text, stamp)) = stmt
+                let Some((text, stamp, importance)) = stmt
                     .query_row([&id], |r| {
-                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, f64>(2)?,
+                        ))
                     })
                     .optional()?
                 else {
@@ -667,7 +672,11 @@ impl Store {
                 let age_days = chrono::DateTime::parse_from_rfc3339(&stamp)
                     .map(|t| (today - t.with_timezone(&chrono::Utc)).num_days().max(0) as f32)
                     .unwrap_or(0.0);
-                recency.insert(id.clone(), 0.04 * 0.5f32.powf(age_days / 365.0));
+                // Più importante, più avanti a parità di pertinenza (ADR-0178): ordinamento, mai soglia.
+                recency.insert(
+                    id.clone(),
+                    0.04 * 0.5f32.powf(age_days / 365.0) + 0.06 * (importance as f32 - 0.5),
+                );
                 scores.insert(
                     id.clone(),
                     0.5 * cosines.get(&id).copied().unwrap_or(0.0)

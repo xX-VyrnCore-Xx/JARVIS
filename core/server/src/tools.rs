@@ -316,6 +316,12 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
             Ok(json!({"path": s("path"), "bytes_written": content.len()}))
         }
         "memory.remember" => {
+            if args["reliability"].as_str() == Some("verified") {
+                return Err(ToolError::new(
+                    "memory.invalid",
+                    "«verified» lo assegna solo il proprietario.",
+                ));
+            }
             if crate::cloud::contains_credentials(s("text")) {
                 return Err(ToolError::new(
                     "memory.sensitive",
@@ -348,7 +354,13 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
                     &crate::now(),
                 )
                 .map_err(|e| ToolError::new("memory.unavailable", e.to_string()))?;
-            Ok(json!({"id": id, "text": s("text"), "kind": kind}))
+            let project = args["project"].as_str().filter(|p| !p.trim().is_empty());
+            let reliability = args["reliability"].as_str();
+            if project.is_some() || reliability.is_some() {
+                crate::memcog::set_meta(ctx.store, &id, reliability, project)
+                    .map_err(|e| ToolError::new("memory.invalid", e))?;
+            }
+            Ok(json!({"id": id, "text": s("text"), "kind": kind, "project": project}))
         }
         "memory.list" => {
             let items = ctx

@@ -22,22 +22,23 @@ Aggiornato dopo l'incremento 1 (ADR-0173, motore di intento e di contesto).
 | 3.1 Non dipendere da sole parole chiave | **PARTIAL** | Instradamento a due stadi (parole chiave + radici con punteggio, ADR-0171) e prompt che risolve dal contesto; nessun classificatore con embedding | `agents.rs` |
 | 3.2 Context Engine | **PARTIAL** (era MISSING) | Riferimenti risolti con conversazione, piani, file citati, errori recenti, con età e `stale`. **Non c'è** applicazione/finestra attiva, repository, file selezionati né schermo nel contesto automatico (esistono come strumenti con conferma) | `intent.rs`, `orchestrator.rs` |
 | 3.3 Memoria: semantica, episodica, procedurale, grafo, scadenza, provenienza, duplicati, recupero | **IMPLEMENTED** (parti) | ADR-0022/0037/0125; `memory.rs`, `memory_edges` | `memory.rs` |
-| 3.3 Importanza, consolidamento, memoria di progetto/preferenze/attività, affidabilità | **PARTIAL / MISSING** | Nessun punteggio di importanza né livello di affidabilità; nessuna memoria di progetto dedicata | `memory.rs` |
+| 3.3 Importanza, consolidamento, memoria di progetto, affidabilità | **IMPLEMENTED** (ADR-0178) | Punteggio spiegabile, 4 livelli di affidabilità, progetto, consolidamento con anteprima. Mancano scadenza adattiva e riassunto di episodi | `memcog.rs` |
 | 3.4 Pianificazione: grafo, dipendenze, parallelismo, ripianificazione, checkpoint, verifica (`expect`) | **IMPLEMENTED** | ADR-0152, 0154, 0160, 0161; test in `plans.rs`, `tests/planner.rs` | `plans.rs`, `orchestrator/plan_runner.rs`, `planner.rs` |
 | 3.4 Priorità fra attività, pianificazione sensibile alle risorse | **MISSING** | Solo budget di passi e tempo | — |
-| 3.5 Multi-agente: instradamento, delega, registro, salute, supervisione | **PARTIAL** | Un solo ambito per richiesta; la richiesta con più ambiti va al generalista. Mancano collaborazione parallela fra specialisti, comunicazione fra agenti, risoluzione dei conflitti e aggregazione dei risultati | `agents.rs`, `supervisor.rs` |
+| 3.5 Multi-agente: instradamento, delega, registro, salute, supervisione, collaborazione, contesto condiviso, ripiego, aggregazione | **IMPLEMENTED** (ADR-0177) con limiti | Parti con specialisti diversi in sequenza, contesto condiviso, ripiego sul generalista, risposta aggregata. **Non** parallela; conflitti risolti per sequenza; nessuna ripresa automatica dopo una conferma | `agents.rs`, `supervisor.rs` |
 
 ## 4. Esecuzione
 
 | Requisito | Classe | Evidenza e divario |
 | --- | --- | --- |
 | Registro, scoperta, metadati, validazione input, timeout, ripetizioni, audit, cronologia | **IMPLEMENTED** | `toolsys.rs`, `tools.rs`, catalogo |
-| Validazione dell'output contro schema | **PARTIAL** | Solo `expect` nei piani |
+| Validazione dell'output | **PARTIAL** | `expect` nei piani e prove osservabili per le scritture (ADR-0179); non contro `output_schema` |
 | Sandbox | **IMPLEMENTED** | Docker senza rete |
 | Annullamento, interruzione, ripresa, persistenza, replay, checkpoint | **IMPLEMENTED** | Piani (ADR-0152); ora anche «aspetta, fermati» annulla i piani in corso (ADR-0173) |
-| Pausa vera di un piano in corso | **MISSING** | Esiste annulla e riprendi dopo interruzione, non «sospendi» |
-| Modifica dei vincoli durante l'esecuzione e propagazione agli agenti | **MISSING** | — |
-| Dry run, Shadow mode | **MISSING** | I piani si rivedono prima di avviare, ma non c'è una simulazione degli effetti |
+| Pausa vera di un piano in corso | **IMPLEMENTED** | ADR-0176: sospendi/riprendi, anche da chat |
+| Modifica dei vincoli durante l'esecuzione e propagazione agli agenti | **IMPLEMENTED** | ADR-0176: vincoli solo restrittivi, applicati prima di ogni passo |
+| Dry run | **IMPLEMENTED** | ADR-0176: prova a secco senza effetti né decisioni nell'audit |
+| Shadow mode | **MISSING** | Esecuzione parallela non vincolante per confronto: non realizzata |
 | Circuit breaker, idempotenza | **PARTIAL** | Salute degli strumenti e blocco missioni dopo errori; nessun circuit breaker generale |
 | Undo globale, rollback | **PARTIAL** | `plan_rollback` per i passi reversibili; rollback di release; nessun undo globale |
 
@@ -65,13 +66,11 @@ notifiche oltre a `dedupe_key`: **PARTIAL**.
 
 ## 9. Autocorrezione
 
-Ripianificazione con catena limitata, condizioni di successo, ripetizioni controllate: **PARTIAL**. Mancano analisi della
-causa, classificazione dei guasti, strategia alternativa scelta dal sistema e rilevamento di contraddizioni.
+**IMPLEMENTED** con limiti (ADR-0179): classificazione dei guasti, causa e strategie, nuovi tentativi solo dove servono, verifica con prove osservabili, diagnosi dei piani, contraddizioni nella memoria. Resta: strategia alternativa scelta e avviata da sola (oggi è una proposta da approvare) e prove per gli strumenti senza controllo semplice.
 
 ## 10. Stato del mondo
 
-**MISSING.** Esistono pezzi sparsi (stato di sistema, salute degli strumenti, nodi, repository via `git.*`) ma non una
-rappresentazione unica con versioni, riconciliazione e distinzione fra osservato e dedotto.
+**IMPLEMENTED** (ADR-0175): rappresentazione unica con versioni, riconciliazione, dato vecchio, dipendenze e cronologia; osservato distinto da dedotto. Mancano la sincronizzazione periodica automatica, servizi del sistema operativo e dispositivi non nodi, e l'uso nella chat.
 
 ## 11. Instradamento dei modelli
 
@@ -96,9 +95,7 @@ prossimo incremento: va progettato come ulteriore *restrizione* (mai estensione)
 
 ## 14. Più dispositivi
 
-Nodi esecutori, dispositivi associati, notifiche, sessione condivisa del proprietario: **PARTIAL**. Passaggio di un'attività
-fra dispositivi, sincronizzazione offline con risoluzione dei conflitti, permessi per dispositivo oltre ai permessi di
-route: **MISSING**.
+Nodi esecutori, dispositivi associati, notifiche, sessione condivisa del proprietario: **IMPLEMENTED**. Passaggio di un'attività fra dispositivi con ripresa unica e conflitto esplicito, livelli di autonomia per nodo: **IMPLEMENTED** (ADR-0180). Sincronizzazione offline con coda e fusione dei conflitti, livelli per i dispositivi che non sono nodi, esecuzione remota di piani: **MISSING**.
 
 ## 15. Osservabilità
 
@@ -113,11 +110,15 @@ Dataset per instradamento (sviluppo e validazione del proprietario nel solo corp
 annullamento e ripresa, offline: esistenti. Mancano: sincronizzazione fra dispositivi, contesto con applicazione attiva,
 ripristino dopo crash come test dedicato.
 
-## Prossimi incrementi (ordine proposto)
+## Seconda analisi (dopo gli incrementi 1–8)
 
-1. ~~Livelli di autonomia 0–5~~ — fatto (ADR-0174).
-2. **Stato del mondo** osservato vs dedotto, con versioni e rilevamento del dato vecchio, alimentato da strumenti già esistenti.
-3. **Collaborazione fra specialisti**: richieste con più ambiti come piano con passi assegnati ad agenti diversi.
-4. **Pausa e vincoli durante l'esecuzione**, dry run dei piani.
-5. **Memoria**: importanza, affidabilità, memoria di progetto.
-6. **Apprendimento da dimostrazione** (blocca: osservazione dell'interfaccia sui sistemi reali).
+Requisiti ancora **MISSING** o **BLOCKED**, in ordine di valore:
+
+1. **Apprendimento da dimostrazione** — BLOCKED: serve un registratore delle azioni sull'interfaccia (Accessibilità su macOS, UI Automation su Windows), con consenso, redazione dei segreti, validazione in sandbox e approvazione; non è verificabile in questo ambiente.
+2. **Sincronizzazione offline** con coda di modifiche e fusione dei conflitti; esecuzione remota di un piano su un altro dispositivo.
+3. **Shadow mode** (esecuzione non vincolante per confronto) e circuit breaker generale degli strumenti.
+4. **Collaborazione parallela** fra agenti e comunicazione diretta fra agenti (oggi in sequenza con contesto condiviso).
+5. **Intento appreso** (embedding o modello per i casi dubbi), contesto con applicazione/finestra attiva e schermo, apprendimento delle correzioni dell'utente sull'instradamento.
+6. **Modelli locali / instradamento locale-first** — escluso su istruzione del proprietario; cache semantica, budget di token per richiesta.
+7. **Interfacce grafiche** per autonomia, stato del mondo, memoria cognitiva, diagnosi e passaggi (oggi API e chat); la grafica è stata rimandata dal proprietario.
+8. Sincronizzazione periodica automatica dello stato del mondo; scadenza adattiva della memoria; tracciamento distribuito completo.

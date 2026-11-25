@@ -26,10 +26,12 @@ pub mod docs;
 pub mod executive;
 pub mod expert;
 pub mod guard;
+pub mod handoff;
 pub mod improvements;
 pub mod intent;
 pub mod mcp;
 pub mod mcp_client;
+pub mod memcog;
 pub mod memory;
 pub mod missions;
 pub mod n8n;
@@ -53,6 +55,7 @@ pub mod profile;
 pub mod promptfix;
 pub mod prompts;
 pub mod push;
+pub mod reflect;
 pub mod rollback;
 pub mod screen;
 pub mod secrets;
@@ -84,6 +87,7 @@ pub mod toolsys;
 pub mod updates;
 pub mod watch;
 pub mod web;
+pub mod world;
 
 /// Istante corrente in RFC 3339 UTC con millisecondi (`common.schema.json#/$defs/timestamp`).
 pub fn now() -> String {
