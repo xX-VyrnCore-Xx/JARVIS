@@ -268,6 +268,14 @@ function check(condition, message) {
   const docTools = ["pdf.extract", "sheet.read", "clipboard.read", "clipboard.write"];
   const names = (docRegistry.json?.items ?? []).map((t) => t.name);
   check(docRegistry.status === 200 && docTools.every((n) => names.includes(n)), "strumenti per documenti nel registro");
+  const improvements = await request("/api/improvements", { token: ownerToken });
+  check(improvements.status === 200 && Array.isArray(improvements.json?.items) && improvements.json?.policy?.includes("tu decidi"), "suggerimenti di miglioramento senza modifiche automatiche");
+  const noAction = await request("/api/improvements/apply", { method: "POST", token: ownerToken, body: { id: "sconosciuto" } });
+  check(noAction.status === 404, "suggerimento sconosciuto rifiutato");
+  const supervisor = await request("/api/agents/supervisor", { token: ownerToken });
+  check(supervisor.status === 200 && supervisor.json?.items?.every((a) => a.state === "attivo"), "supervisione degli agenti: tutti attivi di default");
+  const badLimit = await request("/api/agents/limits", { method: "POST", token: ownerToken, body: { agent: "inventato", enabled: false } });
+  check(badLimit.status === 400, "limiti per un agente sconosciuto rifiutati");
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

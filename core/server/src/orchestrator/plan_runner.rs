@@ -298,7 +298,7 @@ impl Jarvis {
         Ok(json!({"items": items}))
     }
 
-    fn user_templates(&self) -> Vec<Value> {
+    pub(super) fn user_templates(&self) -> Vec<Value> {
         std::fs::read(self.cfg.data_dir.join("plan-templates.json"))
             .ok()
             .and_then(|b| serde_json::from_slice::<Value>(&b).ok())

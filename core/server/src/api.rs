@@ -505,6 +505,8 @@ pub fn router(state: Shared) -> Router {
         .route("/api/twin", get(twin_get))
         .route("/api/agents", get(agents_registry))
         .route("/api/agents/route", get(agents_route))
+        .route("/api/agents/supervisor", get(agent_supervisor))
+        .route("/api/agents/limits", post(agent_limits))
         .route("/api/models/route", get(models_route))
         .route(
             "/api/plans/templates",
@@ -513,6 +515,9 @@ pub fn router(state: Shared) -> Router {
         .route("/api/plans/templates/delete", post(plan_template_delete))
         .route("/api/plans/from-template", post(plan_from_template))
         .route("/api/plans/propose", post(plan_propose))
+        .route("/api/improvements", get(improvements_list))
+        .route("/api/improvements/apply", post(improvement_apply))
+        .route("/api/improvements/dismiss", post(improvement_dismiss))
         .route("/api/plans", get(plans_list).post(plan_create))
         .route("/api/plans/{id}", get(plan_get))
         .route("/api/plans/{id}/run", post(plan_run))
@@ -2773,13 +2778,12 @@ async fn agents_registry(State(state): State<Shared>) -> Response {
 }
 
 /// Spiega a quale agente andrebbe una richiesta e perché (parametro `q`).
-async fn agents_route(Query(q): Query<std::collections::HashMap<String, String>>) -> Response {
+async fn agents_route(
+    State(state): State<Shared>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
     let message = q.get("q").cloned().unwrap_or_default();
-    Json(json!({
-        "agent": crate::agents::explain(&message),
-        "role": crate::prompts::role_label(crate::prompts::role_for(&message)),
-    }))
-    .into_response()
+    reply(with_core(&state, move |j| Ok(j.agent_route_explained(&message))).await)
 }
 
 /// Spiega come una richiesta verrebbe instradata ai modelli cloud (parametro `q`): rotta per compito, modello per
@@ -2884,6 +2888,34 @@ async fn plan_from_template(State(state): State<Shared>, Json(body): Json<Value>
         }
     }
     reply(created.map(|doc| said(doc, if run { "plan.started" } else { "plan.created" }, None)))
+}
+
+/// Supervisione degli agenti (ADR-0164): regole, uso dell'ultima ora e stato.
+async fn agent_supervisor(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| Ok(j.agent_supervisor())).await)
+}
+
+async fn agent_limits(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply(with_core(&state, move |j| j.agent_limits_set(&body)).await)
+}
+
+/// Suggerimenti di miglioramento (ADR-0163): solo lettura.
+async fn improvements_list(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.improvements()).await)
+}
+
+async fn improvement_apply(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let id = body["id"].as_str().unwrap_or_default().to_string();
+    reply(
+        with_core(&state, move |j| j.improvement_apply(&id))
+            .await
+            .map(|v| said(v, "improvement.applied", None)),
+    )
+}
+
+async fn improvement_dismiss(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let id = body["id"].as_str().unwrap_or_default().to_string();
+    reply(with_core(&state, move |j| j.improvement_dismiss(&id)).await)
 }
 
 /// Fa proporre un piano al modello cloud (ADR-0160): restituisce una bozza validata, mai un piano avviato.

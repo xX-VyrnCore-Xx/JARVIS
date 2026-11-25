@@ -25,6 +25,7 @@ pub mod docs;
 pub mod executive;
 pub mod expert;
 pub mod guard;
+pub mod improvements;
 pub mod mcp;
 pub mod mcp_client;
 pub mod memory;
@@ -72,6 +73,7 @@ pub fn hide_console(cmd: &mut std::process::Command) {
     let _ = cmd;
 }
 pub mod store;
+pub mod supervisor;
 pub mod tls;
 pub mod toolbox;
 pub mod tools;

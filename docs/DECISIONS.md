@@ -1897,6 +1897,20 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** `GET /api/agents` descrive i sette specialisti e il generalista (competenze dagli strumenti, rischio massimo, contesto isolato o condiviso, risorse); `GET /api/agents/route?q=` mostra quale agente riceverebbe una richiesta e per quali parole chiave; `GET /api/models/route?q=` mostra la rotta per compito, il modello per provider, il ripiego e la riservatezza (credenziali bloccate, dati personali rilevati, profilo condiviso) **senza inviare nulla**. Non si introducono nuovi agenti: si riusano quelli esistenti.
 - **Evidenza:** test API del registro e dell'instradamento.
 
+### ADR-0163 — Auto-miglioramento controllato: JARVIS propone, il proprietario approva
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout (fase K della roadmap, nella forma sicura).
+- **Decisione:** `GET /api/improvements` analizza **solo evidenze locali** (piani riusciti, esiti degli strumenti, prestazioni degli agenti) con regole deterministiche, senza inviare nulla a un modello: (1) **procedura ricorrente**, cioè la stessa sequenza di almeno 2 strumenti riuscita 3 o più volte e non ancora salvata; (2) strumento con almeno 5 esecuzioni e metà o più errori; (3) agente con almeno 5 lavori e meno del 50% di successi. L'unica azione applicabile è `POST /api/improvements/apply` per la procedura: salva il piano più recente come modello personale (stesse regole di nome e limiti di ADR-0159). Gli altri sono suggerimenti da valutare a mano (`apply` risponde 400). `POST /api/improvements/dismiss` nasconde un suggerimento (ultimi 200 ricordati). Entrambe le azioni sono del solo proprietario e finiscono nell'audit (`improvement.apply`, `improvement.dismiss`).
+- **Cosa non fa, per scelta:** non modifica codice, regole di sicurezza, permessi, chiavi, prompt o catalogo degli strumenti; non scrive memorie né competenze da sola; non esegue le procedure salvate. Un sistema che si riscrive da solo renderebbe impossibile verificare i confini di sicurezza.
+- **Evidenza:** test unitari delle regole (soglie, modelli già salvati, nomi in conflitto, piani con un solo passo) e test d'integrazione con piani reali: tre piani uguali → suggerimento → applica → modello salvato e suggerimento sparito; scartato non ritorna; strumento inaffidabile segnalato senza azione.
+
+### ADR-0164 — Supervisione degli agenti: pausa e quota oraria decise dal proprietario
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout (fase I della roadmap).
+- **Decisione:** `GET /api/agents/supervisor` mostra per ogni specializzazione regole, lavori dell'ultima ora e stato (attivo, in pausa, quota esaurita); `POST /api/agents/limits` (`agent`, `enabled`, `max_runs_per_hour` da 1 a 500 o `null`) le modifica, solo dal proprietario e con audit `agent.limits`. L'instradamento (`route_agent`) applica la supervisione: un agente in pausa o oltre quota **non lavora** e la richiesta va al generalista, che resta sotto le stesse policy, conferme, budget e audit. La supervisione **restringe e non allarga**: non dà strumenti, permessi né autonomia in più. `/api/agents` mostra la supervisione accanto alle prestazioni e `/api/agents/route` spiega l'effetto sulla richiesta. **Conflitti:** se una richiesta tocca più specializzazioni decide il generalista; la sicurezza difensiva (agente `monitoring`) ha la precedenza e non è soggetta alle pause per non togliere le restrizioni difensive.
+- **Non incluso:** priorità fra agenti in parallelo, quote di tempo o di memoria per agente, interfaccia grafica dedicata (oggi via API).
+- **Evidenza:** test unitari delle decisioni e della validazione delle regole; test d'integrazione: agente messo in pausa → il generalista lavora; riattivato con limite → torna attivo; agente sconosciuto rifiutato.
+
 ### ADR-0162 — Strumenti per documenti: PDF, fogli XLSX e appunti
 
 - **Data:** 2026-11-25 · **Stato:** implementata nel checkout (fase E della roadmap).

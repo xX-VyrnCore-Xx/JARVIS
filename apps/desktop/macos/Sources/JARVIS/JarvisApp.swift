@@ -1504,6 +1504,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         case .missions: missionTools
         case .security: emergencyCard
         case .plans:
+            improvementSuggestions
             planProposal
             planTemplates
         case .profile: profileEditor
@@ -1886,6 +1887,31 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                         }
                         .disabled(needsInput)
                         .help(needsInput ? "Richiede parametri: crealo da API con POST /api/plans/from-template" : "Avvia la procedura")
+                    }
+                }
+            }
+        }
+    }
+
+    /// Miglioramenti suggeriti (ADR-0163): JARVIS propone, il proprietario decide. Nulla cambia da solo.
+    @ViewBuilder private var improvementSuggestions: some View {
+        let items = (payload["improvements"] as? [[String: Any]]) ?? []
+        if !items.isEmpty {
+            card("Miglioramenti suggeriti", icon: "lightbulb") {
+                ForEach(items.indices, id: \.self) { index in
+                    let item = items[index]
+                    let id = item["id"] as? String ?? ""
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item["title"] as? String ?? "").font(.headline)
+                        Text(item["detail"] as? String ?? "").font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            if item["action"] is [String: Any] {
+                                Button("Salva la procedura", systemImage: "square.and.arrow.down") {
+                                    mutate("/api/improvements/apply", body: ["id": id])
+                                }.buttonStyle(.borderedProminent)
+                            }
+                            Button("Nascondi") { mutate("/api/improvements/dismiss", body: ["id": id]) }
+                        }
                     }
                 }
             }
@@ -2343,6 +2369,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             if page == .plans {
                 let templates = try? await core.request("/api/plans/templates", timeout: 5)
                 result["templates"] = templates?["items"]
+                let suggestions = try? await core.request("/api/improvements", timeout: 5)
+                result["improvements"] = suggestions?["items"]
             }
             if page == .chat {
                 let chats = try? await core.request("/api/conversations", timeout: 5)

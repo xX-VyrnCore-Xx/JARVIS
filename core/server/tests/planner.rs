@@ -227,3 +227,151 @@ fn replanning_is_blocked_by_the_emergency_stop() {
         Err(CoreError::Unavailable(_))
     ));
 }
+
+#[test]
+fn recurring_plans_become_a_suggestion_the_owner_applies_or_dismisses() {
+    let mut j = jarvis();
+    assert!(j.improvements().unwrap()["items"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    for i in 0..3 {
+        let plan = j
+            .plan_create(&json!({"goal": "Calcola e conta", "steps": [
+                {"id": "a", "tool": "math.calc", "arguments": {"expression": format!("{i}+1")}},
+                {"id": "b", "tool": "text.count", "depends_on": ["a"], "arguments": {"text": "ciao mondo"}}]}))
+            .unwrap();
+        assert_eq!(
+            run_to_end(&mut j, plan["id"].as_str().unwrap())["status"],
+            "succeeded"
+        );
+    }
+    let listed = j.improvements().unwrap();
+    let items = listed["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "{listed}");
+    assert_eq!(items[0]["kind"], "save_procedure");
+    assert!(listed["policy"]
+        .as_str()
+        .unwrap()
+        .contains("propone e tu decidi"));
+    let id = items[0]["id"].as_str().unwrap().to_string();
+
+    // Nulla cambia finché il proprietario non approva: nessun modello salvato.
+    assert!(j.plan_templates()["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|t| t["builtin"] == true));
+    let applied = j.improvement_apply(&id).unwrap();
+    assert_eq!(applied["template"]["name"], "calcola-e-conta");
+    assert!(j.plan_templates()["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|t| t["name"] == "calcola-e-conta"));
+    assert!(
+        j.improvements().unwrap()["items"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "già salvata"
+    );
+    assert!(matches!(
+        j.improvement_apply(&id),
+        Err(CoreError::NotFound(_))
+    ));
+    assert!(matches!(
+        j.improvement_apply("sconosciuto"),
+        Err(CoreError::NotFound(_))
+    ));
+}
+
+#[test]
+fn dismissed_suggestions_are_not_proposed_again_and_review_ones_have_no_action() {
+    let mut j = jarvis();
+    for i in 0..3 {
+        let plan = j
+            .plan_create(&json!({"goal": format!("Giro {i}"), "steps": [
+                {"id": "a", "tool": "math.calc", "arguments": {"expression": "1+1"}},
+                {"id": "b", "tool": "text.count", "arguments": {"text": "x"}}]}))
+            .unwrap();
+        run_to_end(&mut j, plan["id"].as_str().unwrap());
+    }
+    let id = j.improvements().unwrap()["items"][0]["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    j.improvement_dismiss(&id).unwrap();
+    assert!(j.improvements().unwrap()["items"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    // Uno strumento che fallisce spesso produce solo un suggerimento da valutare.
+    for _ in 0..5 {
+        let plan = j
+            .plan_create(&json!({"goal": "Lettura", "steps": [
+                {"id": "r", "tool": "fs.read", "arguments": {"path": "manca-davvero.txt"}}]}))
+            .unwrap();
+        run_to_end(&mut j, plan["id"].as_str().unwrap());
+    }
+    let items = j.improvements().unwrap();
+    let review = items["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["kind"] == "review_tool")
+        .expect("strumento inaffidabile segnalato");
+    assert_eq!(review["id"], "tool-fs.read");
+    assert!(matches!(
+        j.improvement_apply("tool-fs.read"),
+        Err(CoreError::BadRequest(_))
+    ));
+}
+
+#[test]
+fn supervision_pauses_an_agent_and_hands_its_work_to_the_generalist() {
+    let mut j = jarvis();
+    let ask = "Scrivi una funzione Python e correggi il bug nel codice";
+    let before = j.agent_route_explained(ask);
+    let chosen = before["agent"]["agent"].as_str().unwrap().to_string();
+    assert_ne!(
+        chosen, "generale",
+        "la richiesta tocca una specializzazione: {before}"
+    );
+    assert!(before["agent"]["supervision"].is_null());
+
+    let state = j
+        .agent_limits_set(&json!({"agent": chosen, "enabled": false}))
+        .unwrap();
+    let entry = state["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["agent"] == chosen.as_str())
+        .unwrap();
+    assert_eq!(entry["state"], "in pausa");
+    let after = j.agent_route_explained(ask);
+    assert_eq!(
+        after["agent"]["supervision"]["effective"],
+        jarvis_core::agents::GENERAL
+    );
+
+    // Il registro mostra la supervisione accanto alle prestazioni.
+    let registry = j.agent_registry();
+    let item = registry["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["name"] == chosen.as_str())
+        .unwrap();
+    assert_eq!(item["supervision"]["state"], "in pausa");
+
+    // Riattivato con un limite: lavora finché ha quota.
+    j.agent_limits_set(&json!({"agent": chosen, "enabled": true, "max_runs_per_hour": 1}))
+        .unwrap();
+    assert!(j.agent_route_explained(ask)["agent"]["supervision"].is_null());
+    assert!(matches!(
+        j.agent_limits_set(&json!({"agent": "inventato", "enabled": false})),
+        Err(CoreError::BadRequest(_))
+    ));
+}

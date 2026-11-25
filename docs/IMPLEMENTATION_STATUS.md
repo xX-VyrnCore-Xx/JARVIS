@@ -1,7 +1,7 @@
 # Stato di implementazione
 
 Fonte autorevole dello stato di ogni requisito dell'evoluzione «piattaforma di intelligenza artificiale personale».
-Aggiornata il 2026-11-25 sul codice di `main` più la PR in corso (ADR fino alla 0162). Legenda: **Implementato** (funziona end-to-end ed è
+Aggiornata il 2026-11-25 sul codice di `main` più la PR in corso (ADR fino alla 0164). Legenda: **Implementato** (funziona end-to-end ed è
 verificato da test), **Parziale** (funziona in parte: il limite è indicato), **Sperimentale** (c'è, non maturo),
 **Pianificato** (assente). Nessuna voce è un segnaposto: ciò che non esiste è dichiarato «Pianificato».
 Verifiche ed esiti per revisione: [ROADMAP.md](ROADMAP.md). Piano dei passi successivi: [IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md).
@@ -78,14 +78,13 @@ dinamico di strumenti: **Pianificato**.
 | Automazione in linguaggio naturale | Parziale | «ogni giorno alle 08:00 …» offline e `workflow.create`; grammatica limitata |
 | Automazione guidata da eventi | Implementato | calendario, webhook dei connettori e **modifiche di file e cartelle** della workspace (ADR-0158); non variazioni di risorse di sistema |
 | Digital Environment Twin | Implementato | `GET /api/twin`: dispositivi, nodi, servizi, connettori, progetti e capacità, senza segreti (ADR-0157); aggiornato a ogni richiesta, non in modo continuo |
-| Auto-miglioramento controllato | Pianificato | JARVIS non modifica il proprio codice, le policy né i privilegi |
+| Auto-miglioramento controllato | Implementato (limitato per scelta) | suggerimenti da evidenze locali; l'unica azione è salvare una procedura approvata dal proprietario; nessuna modifica di codice, sicurezza o permessi (ADR-0163) |
 
 ## 5. Multi-agente ([AUTONOMOUS_ENGINE.md](AUTONOMOUS_ENGINE.md))
 
 Registro, scoperta e mappatura delle competenze (`GET /api/agents`), spiegazione dell'instradamento, delega con contesto
 isolato e ambito di strumenti concesso, protocollo di delega a contratto: **Implementato**. Valutazione delle prestazioni per agente (lavori, successo, durata): **Implementato** (ADR-0157). Contesto condiviso e collaborazione
-fra agenti: **Parziale** (delega a un agente alla volta). Supervisione attiva, risoluzione dei conflitti e quote di risorse per agente:
-**Pianificato** (esistono limiti di passi per agente).
+fra agenti: **Parziale** (delega a un agente alla volta). Supervisione (pausa e quota oraria per agente, decise dal proprietario, ADR-0164) e conflitti (decide il generalista): **Implementato**. Priorità fra agenti in parallelo e quote di tempo o memoria: **Pianificato** (esistono limiti di passi per agente).
 
 ## 6. IA ibrida e instradamento ([AI_SYSTEM.md](AI_SYSTEM.md))
 
