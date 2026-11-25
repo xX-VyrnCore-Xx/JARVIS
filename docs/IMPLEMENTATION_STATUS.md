@@ -1,7 +1,7 @@
 # Stato di implementazione
 
 Fonte autorevole dello stato di ogni requisito dell'evoluzione «piattaforma di intelligenza artificiale personale».
-Aggiornata il 2026-11-25 sul codice di `main` più la PR in corso (ADR fino alla 0166). Legenda: **Implementato** (funziona end-to-end ed è
+Aggiornata il 2026-11-25 sul codice di `main` più la PR in corso (ADR fino alla 0167). Legenda: **Implementato** (funziona end-to-end ed è
 verificato da test), **Parziale** (funziona in parte: il limite è indicato), **Sperimentale** (c'è, non maturo),
 **Pianificato** (assente). Nessuna voce è un segnaposto: ciò che non esiste è dichiarato «Pianificato».
 Verifiche ed esiti per revisione: [ROADMAP.md](ROADMAP.md). Piano dei passi successivi: [IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md).
@@ -112,10 +112,11 @@ sono dichiarate nel registro (`platforms`), non simulate.
 
 ## 9. Interfaccia
 
-Plancia, chat (multiple, in background), attività, **Piani** e **Strumenti** (nuovi), modelli, missioni, automazioni, memoria,
-competenze, connettori, dispositivi, sicurezza (con arresto di emergenza), permessi, audit, sistema, aggiornamenti, notifiche,
-profilo: **Implementato** su macOS e Windows (Android: chat, conferme, attività, notifiche). Gestione degli agenti (solo API),
-editor visivo di workflow, grafo temporale unificato, monitor di infrastruttura dedicato: **Parziale** o **Pianificato**.
+Plancia, chat (multiple, in background), attività, piani (con proposta del modello, ripianificazione, procedure pronte e
+miglioramenti suggeriti), **Agenti** (supervisione: pausa e limite orario) e **Pacchetti** (installa, aggiorna, rimuovi), strumenti,
+modelli, missioni, automazioni, memoria, competenze, connettori, dispositivi, sicurezza (con arresto di emergenza), permessi, audit,
+sistema, aggiornamenti, notifiche, profilo: **Implementato** su macOS e Windows (ADR-0167; Android: chat, conferme, attività,
+notifiche). Editor visivo di workflow, grafo temporale unificato, monitor di infrastruttura dedicato: **Pianificato**.
 
 ## 10. Qualità
 

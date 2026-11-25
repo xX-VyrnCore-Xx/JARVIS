@@ -22,7 +22,7 @@ const POSITIVE: egui::Color32 = egui::Color32::from_rgb(105, 220, 174);
 const CAUTION: egui::Color32 = egui::Color32::from_rgb(245, 190, 96);
 const NEGATIVE: egui::Color32 = egui::Color32::from_rgb(255, 125, 135);
 
-const NAV: [(&str, &str, bool); 18] = [
+const NAV: [(&str, &str, bool); 20] = [
     ("dashboard", "Plancia", true),
     ("chat", "Chat", false),
     ("tasks", "Attività", false),
@@ -33,7 +33,9 @@ const NAV: [(&str, &str, bool); 18] = [
     ("workspace", "Workspace", true),
     ("memory", "Memoria", true),
     ("skills", "Competenze", true),
+    ("agents", "Agenti", true),
     ("tools", "Strumenti", true),
+    ("plugins", "Pacchetti", true),
     ("connectors", "Connettori", true),
     ("devices", "Dispositivi", true),
     ("security", "Sicurezza", true),
@@ -47,10 +49,10 @@ const NAV: [(&str, &str, bool); 18] = [
 fn nav_group(id: &str) -> &'static str {
     match id {
         "dashboard" | "chat" | "tasks" | "models" => "Assistente",
-        "missions" | "plans" | "automations" | "workspace" | "memory" | "skills" => {
+        "missions" | "plans" | "automations" | "workspace" | "memory" | "skills" | "agents" => {
             "Organizzazione"
         }
-        "connectors" | "tools" | "devices" => "Connessioni",
+        "connectors" | "tools" | "plugins" | "devices" => "Connessioni",
         "security" | "permissions" | "audit" => "Protezione",
         _ => "Sistema",
     }
@@ -169,6 +171,21 @@ fn draw_nav_icon(painter: &egui::Painter, center: egui::Pos2, id: &str, color: e
                 ],
                 stroke,
             ));
+        }
+        "agents" => {
+            painter.circle_stroke(p(0.0, -4.5), 2.8, stroke);
+            painter.circle_stroke(p(-5.5, 3.5), 2.4, stroke);
+            painter.circle_stroke(p(5.5, 3.5), 2.4, stroke);
+        }
+        "plugins" => {
+            painter.rect_stroke(
+                egui::Rect::from_center_size(p(0.0, 1.0), egui::vec2(12.0, 10.0)),
+                1.5,
+                stroke,
+                egui::StrokeKind::Middle,
+            );
+            painter.line_segment([p(-3.0, -4.0), p(-3.0, -7.5)], stroke);
+            painter.line_segment([p(3.0, -4.0), p(3.0, -7.5)], stroke);
         }
         "connectors" => {
             painter.circle_stroke(p(-4.5, 0.0), 4.0, stroke);
@@ -328,6 +345,8 @@ pub struct JarvisApp {
     improvements: Vec<Value>,
     template_params: std::collections::HashMap<String, String>,
     plan_goal: String,
+    agent_limits: std::collections::HashMap<String, String>,
+    plugin_json: String,
     plan_detail: Option<Value>,
     plan_polled: Instant,
     emergency_active: bool,
@@ -492,6 +511,8 @@ impl JarvisApp {
             improvements: Vec::new(),
             template_params: std::collections::HashMap::new(),
             plan_goal: String::new(),
+            agent_limits: std::collections::HashMap::new(),
+            plugin_json: String::new(),
             plan_detail: None,
             plan_polled: Instant::now(),
             emergency_active: false,
@@ -1946,6 +1967,8 @@ impl JarvisApp {
             "missions" => self.show_missions(ui, ctx),
             "plans" => self.show_plans(ui, ctx),
             "tools" => self.show_tools(ui, ctx),
+            "agents" => self.show_agents(ui, ctx),
+            "plugins" => self.show_plugins(ui, ctx),
             "permissions" => self.show_permissions(ui, ctx),
             "tasks" | "automations" | "skills" | "workspace" | "devices" | "security" | "audit" => {
                 ui.horizontal(|ui| {
@@ -1993,6 +2016,222 @@ impl JarvisApp {
     }
 
     /// Gestione degli strumenti (ADR-0151): registro con categoria, rischio, salute e regola del proprietario.
+    /// Supervisione degli agenti (ADR-0164): pausa e limite orario per ogni specializzazione.
+    fn show_agents(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.horizontal(|ui| {
+            ui.heading("Agenti");
+            if ui.button("Aggiorna").clicked() {
+                self.data = None;
+                self.refresh(ctx);
+            }
+            if self.loading {
+                ui.add(egui::Spinner::new());
+            }
+        });
+        if let Some(error) = &self.error {
+            ui.colored_label(NEGATIVE, error);
+        }
+        let Some(data) = self.data.clone() else {
+            return;
+        };
+        ui.label(
+            "Ogni specializzazione lavora solo sul proprio ambito. Puoi metterla in pausa o darle un limite di \
+             lavori all'ora: quando è ferma, la richiesta passa al generalista, sempre sotto le stesse policy e \
+             conferme. La supervisione restringe e non allarga.",
+        );
+        if let Some(conflicts) = data["conflicts"].as_str() {
+            ui.label(egui::RichText::new(conflicts).small().weak());
+        }
+        for agent in data["items"].as_array().into_iter().flatten() {
+            let name = agent["agent"].as_str().unwrap_or("").to_owned();
+            let enabled = agent["enabled"].as_bool().unwrap_or(true);
+            let (state, color) = match agent["state"].as_str() {
+                Some("attivo") => ("attivo", POSITIVE),
+                Some("in pausa") => ("in pausa", CAUTION),
+                _ => ("quota esaurita", NEGATIVE),
+            };
+            egui::Frame::new()
+                .fill(SURFACE)
+                .corner_radius(10)
+                .inner_margin(10)
+                .show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(egui::RichText::new(&name).strong());
+                        ui.colored_label(color, state);
+                        ui.small(format!(
+                            "{} lavori nell'ultima ora{}",
+                            agent["runs_last_hour"].as_u64().unwrap_or(0),
+                            agent["max_runs_per_hour"]
+                                .as_u64()
+                                .map(|m| format!(" su {m}"))
+                                .unwrap_or_default()
+                        ));
+                    });
+                    ui.label(
+                        egui::RichText::new(agent["role"].as_str().unwrap_or(""))
+                            .small()
+                            .weak(),
+                    );
+                    let runs = agent["performance"]["runs"].as_u64().unwrap_or(0);
+                    if runs > 0 {
+                        ui.small(format!(
+                            "{runs} lavori in totale · {}% di successi · {} ms in media",
+                            agent["performance"]["success_rate"], agent["performance"]["avg_ms"]
+                        ));
+                    }
+                    ui.horizontal_wrapped(|ui| {
+                        if ui
+                            .button(if enabled {
+                                "Metti in pausa"
+                            } else {
+                                "Riattiva"
+                            })
+                            .clicked()
+                        {
+                            self.act(
+                                ctx,
+                                "/api/agents/limits".into(),
+                                Some(json!({"agent": name, "enabled": !enabled})),
+                            );
+                        }
+                        let text = self.agent_limits.entry(name.clone()).or_default();
+                        ui.add(
+                            egui::TextEdit::singleline(text)
+                                .desired_width(70.0)
+                                .hint_text("senza limite"),
+                        );
+                        if ui.button("Imposta il limite orario").clicked() {
+                            let value = text.trim().to_owned();
+                            let limit = if value.is_empty() {
+                                Some(Value::Null)
+                            } else {
+                                value
+                                    .parse::<u64>()
+                                    .ok()
+                                    .filter(|n| (1..=500).contains(n))
+                                    .map(|n| json!(n))
+                            };
+                            match limit {
+                                Some(limit) => {
+                                    text.clear();
+                                    self.act(
+                                        ctx,
+                                        "/api/agents/limits".into(),
+                                        Some(json!({"agent": name, "max_runs_per_hour": limit})),
+                                    );
+                                }
+                                None => {
+                                    self.error = Some(
+                                        "Il limite orario va da 1 a 500 (vuoto per toglierlo)"
+                                            .into(),
+                                    );
+                                }
+                            }
+                        }
+                    });
+                });
+            ui.add_space(6.0);
+        }
+    }
+
+    /// Pacchetti di estensione (ADR-0165): competenze e procedure in JSON, senza codice.
+    fn show_plugins(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.horizontal(|ui| {
+            ui.heading("Pacchetti");
+            if ui.button("Aggiorna").clicked() {
+                self.data = None;
+                self.refresh(ctx);
+            }
+            if self.loading {
+                ui.add(egui::Spinner::new());
+            }
+        });
+        if let Some(error) = &self.error {
+            ui.colored_label(NEGATIVE, error);
+        }
+        ui.label(
+            "Un pacchetto aggiunge competenze e procedure, scritte in JSON. Non contiene codice, non usa la rete e \
+             non porta chiavi: ciò che porta resta sotto le tue regole, conferme e audit. Si installa tutto o niente.",
+        );
+        egui::CollapsingHeader::new("Installa o aggiorna un pacchetto")
+            .default_open(false)
+            .show(ui, |ui| {
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.plugin_json)
+                        .code_editor()
+                        .desired_rows(8)
+                        .desired_width(f32::INFINITY)
+                        .hint_text("{\"contract\": \"jarvis.plugin/1\", \"name\": \"…\", \"version\": \"1.0.0\", …}"),
+                );
+                let ready = !self.plugin_json.trim().is_empty();
+                if ui
+                    .add_enabled(ready, egui::Button::new("Installa"))
+                    .clicked()
+                {
+                    match serde_json::from_str::<Value>(&self.plugin_json) {
+                        Ok(package) if package.is_object() => {
+                            self.plugin_json.clear();
+                            self.error = None;
+                            self.act(ctx, "/api/plugins".into(), Some(package));
+                        }
+                        Ok(_) => self.error = Some("Il pacchetto deve essere un oggetto JSON".into()),
+                        Err(e) => self.error = Some(format!("JSON non valido: {e}")),
+                    }
+                }
+            });
+        let Some(data) = self.data.clone() else {
+            return;
+        };
+        let items = data["items"].as_array().cloned().unwrap_or_default();
+        if items.is_empty() {
+            ui.label("Nessun pacchetto installato.");
+        }
+        for item in items {
+            let name = item["name"].as_str().unwrap_or("").to_owned();
+            egui::Frame::new()
+                .fill(SURFACE)
+                .corner_radius(10)
+                .inner_margin(10)
+                .show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(egui::RichText::new(&name).strong());
+                        ui.label(
+                            egui::RichText::new(format!(
+                                "v{}",
+                                item["version"].as_str().unwrap_or("?")
+                            ))
+                            .weak(),
+                        );
+                        let author = item["author"].as_str().unwrap_or("");
+                        if !author.is_empty() {
+                            ui.label(egui::RichText::new(author).small().weak());
+                        }
+                    });
+                    ui.label(item["description"].as_str().unwrap_or(""));
+                    ui.small(format!(
+                        "{} competenze · {} procedure · impronta {}",
+                        item["skills"].as_array().map_or(0, Vec::len),
+                        item["templates"].as_array().map_or(0, Vec::len),
+                        item["digest"]
+                            .as_str()
+                            .unwrap_or("")
+                            .get(..12)
+                            .unwrap_or("")
+                    ));
+                    if ui.small_button("Rimuovi").clicked() {
+                        self.act(
+                            ctx,
+                            "/api/plugins/remove".into(),
+                            Some(json!({"name": name})),
+                        );
+                    }
+                });
+            ui.add_space(6.0);
+        }
+    }
+
     fn show_tools(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.horizontal(|ui| {
             ui.heading("Strumenti");
@@ -5617,6 +5856,8 @@ fn endpoint(page: &str) -> &'static str {
         "permissions" => "/api/permissions",
         "plans" => "/api/plans",
         "tools" => "/api/tools/registry",
+        "agents" => "/api/agents/supervisor",
+        "plugins" => "/api/plugins",
         "workspace" => "/api/workspace",
         "connectors" => "/api/connectors",
         "devices" => "/api/devices",
@@ -5828,6 +6069,22 @@ fn show_notification(item: &Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn agents_and_packages_pages_are_owner_only_and_use_the_supervision_and_plugin_apis() {
+        for (page, api, group) in [
+            ("agents", "/api/agents/supervisor", "Organizzazione"),
+            ("plugins", "/api/plugins", "Connessioni"),
+        ] {
+            assert_eq!(endpoint(page), api);
+            assert_eq!(nav_group(page), group);
+            assert!(NAV
+                .iter()
+                .any(|(id, _, owner_only)| *id == page && *owner_only));
+        }
+        assert_eq!(title("agents"), "Agenti");
+        assert_eq!(title("plugins"), "Pacchetti");
+    }
 
     #[test]
     fn every_navigation_item_has_an_api_source() {

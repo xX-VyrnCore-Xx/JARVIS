@@ -1897,6 +1897,12 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** `GET /api/agents` descrive i sette specialisti e il generalista (competenze dagli strumenti, rischio massimo, contesto isolato o condiviso, risorse); `GET /api/agents/route?q=` mostra quale agente riceverebbe una richiesta e per quali parole chiave; `GET /api/models/route?q=` mostra la rotta per compito, il modello per provider, il ripiego e la riservatezza (credenziali bloccate, dati personali rilevati, profilo condiviso) **senza inviare nulla**. Non si introducono nuovi agenti: si riusano quelli esistenti.
 - **Evidenza:** test API del registro e dell'instradamento.
 
+### ADR-0167 — Pagine «Agenti» e «Pacchetti» nelle app macOS e Windows
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout (fase L, parte).
+- **Decisione:** due pagine del solo proprietario, senza logica nel client: **Agenti** (da `/api/agents/supervisor`: stato, lavori dell'ultima ora, prestazioni, ruolo; azioni «Metti in pausa»/«Riattiva» e «Imposta il limite orario» da 1 a 500, vuoto per toglierlo, tramite `POST /api/agents/limits`) e **Pacchetti** (da `/api/plugins`: versione, autore, competenze e procedure portate, impronta; «Rimuovi» con `POST /api/plugins/remove`; area di testo per incollare un pacchetto JSON e «Installa» con `POST /api/plugins`). Il client controlla solo che il testo sia un oggetto JSON e che il limite sia nell'intervallo; ogni altra validazione, tutto-o-niente compreso, resta nel Core. La risposta del supervisore ora include `name`, `role` e `performance`. I dispositivi associati non vedono queste pagine (i loro percorsi non sono tra quelli consentiti). Android non cambia.
+- **Evidenza:** test del Core sui nuovi campi; Clippy e test del client egui (anche per il bersaglio Windows) con i test della navigazione; la parte SwiftUI è compilata solo dalla CI.
+
 ### ADR-0166 — Hugging Face come server MCP e client MCP con sessioni
 
 - **Data:** 2026-11-25 · **Stato:** implementata nel checkout.

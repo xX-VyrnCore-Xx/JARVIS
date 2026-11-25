@@ -33,11 +33,12 @@ private enum Section: String, Identifiable {
     case devices = "Dispositivi", skills = "Competenze", security = "Sicurezza", audit = "Audit"
     case system = "Sistema", models = "Modelli AI", updates = "Aggiornamenti", notifications = "Notifiche"
     case missions = "Missioni", profile = "Profilo", plans = "Piani", tools = "Strumenti"
+    case agents = "Agenti", plugins = "Pacchetti"
 
     static let navigation: [(title: String, entries: [Section])] = [
         ("Assistente", [.dashboard, .chat, .tasks, .models, .notifications, .profile]),
-        ("Organizzazione", [.missions, .plans, .workflows, .workspace, .memory, .skills]),
-        ("Collegamenti", [.devices, .tools, .connectors]),
+        ("Organizzazione", [.missions, .plans, .workflows, .workspace, .memory, .skills, .agents]),
+        ("Collegamenti", [.devices, .tools, .plugins, .connectors]),
         ("Amministrazione", [.confirmations, .security, .audit, .system, .updates])
     ]
 
@@ -64,6 +65,8 @@ private enum Section: String, Identifiable {
         case .profile: "person.crop.circle"
         case .plans: "point.3.connected.trianglepath.dotted"
         case .tools: "wrench.and.screwdriver"
+        case .agents: "person.3"
+        case .plugins: "shippingbox"
         }
     }
     var endpoint: String {
@@ -87,6 +90,8 @@ private enum Section: String, Identifiable {
         case .profile: "/api/profile"
         case .plans: "/api/plans"
         case .tools: "/api/tools/registry"
+        case .agents: "/api/agents/supervisor"
+        case .plugins: "/api/plugins"
         }
     }
 }
@@ -106,6 +111,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     /// Profilo del proprietario (ADR-0133): bozza modificabile dei campi.
     @State private var profileDraft: [String: String] = [:]
     @State private var planGoal = ""
+    @State private var agentLimits: [String: String] = [:]
+    @State private var pluginJSON = ""
     @State private var profileShare = true
     @State private var changingInvite = false
 
@@ -1507,6 +1514,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             improvementSuggestions
             planProposal
             planTemplates
+        case .agents: agentsIntro
+        case .plugins: pluginInstaller
         case .profile: profileEditor
         case .connectors: connectorSetup
         case .devices:
@@ -1815,6 +1824,53 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     mutate("/api/permissions", method: "PATCH", body: ["rules": [name: value]])
                 }
             }
+        case .agents:
+            let name = item.id
+            let enabled = item.data["enabled"] as? Bool ?? true
+            let state = item["state"] ?? "attivo"
+            let used = item.data["runs_last_hour"] as? Int ?? 0
+            let limit = item.data["max_runs_per_hour"] as? Int
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(state).font(.caption.weight(.medium))
+                        .foregroundStyle(state == "attivo" ? Color.green : (state == "in pausa" ? .orange : .red))
+                    Text("\(used) lavori nell'ultima ora" + (limit.map { " su \($0)" } ?? ""))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if let performance = item.data["performance"] as? [String: Any], (performance["runs"] as? Int ?? 0) > 0 {
+                    Text("\(performance["runs"] as? Int ?? 0) lavori in totale · \(performance["success_rate"] as? Double ?? 0)% di successi")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button(enabled ? "Metti in pausa" : "Riattiva", systemImage: enabled ? "pause.fill" : "play.fill") {
+                        mutate("/api/agents/limits", body: ["agent": name, "enabled": !enabled])
+                    }
+                    TextField("senza limite", text: Binding(get: { agentLimits[name] ?? "" }, set: { agentLimits[name] = $0 }))
+                        .textFieldStyle(.roundedBorder).frame(width: 110)
+                    Button("Imposta il limite orario") {
+                        let value = (agentLimits[name] ?? "").trimmingCharacters(in: .whitespaces)
+                        if value.isEmpty {
+                            mutate("/api/agents/limits", body: ["agent": name, "max_runs_per_hour": NSNull()])
+                        } else if let n = Int(value), (1...500).contains(n) {
+                            mutate("/api/agents/limits", body: ["agent": name, "max_runs_per_hour": n])
+                        } else {
+                            error = "Il limite orario va da 1 a 500 (vuoto per toglierlo)"
+                            return
+                        }
+                        agentLimits[name] = ""
+                    }
+                }
+            }
+        case .plugins:
+            let skills = (item.data["skills"] as? [Any])?.count ?? 0
+            let templates = (item.data["templates"] as? [Any])?.count ?? 0
+            let digest = String((item["digest"] ?? "").prefix(12))
+            HStack {
+                Text("v\(item["version"] ?? "?") · \(skills) competenze · \(templates) procedure · impronta \(digest)")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Rimuovi", role: .destructive) { mutate("/api/plugins/remove", body: ["name": item.id]) }
+            }
         case .plans:
             let id = urlSegment(item.id)
             let status = item["status"] ?? ""
@@ -1890,6 +1946,39 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     }
                 }
             }
+        }
+    }
+
+    /// Supervisione degli agenti (ADR-0164).
+    private var agentsIntro: some View {
+        card("Supervisione degli agenti", icon: "person.3") {
+            Text("Ogni specializzazione lavora solo sul proprio ambito. Puoi metterla in pausa o darle un limite di lavori all'ora: quando è ferma, la richiesta passa al generalista, sempre sotto le stesse policy e conferme. La supervisione restringe e non allarga.")
+                .font(.callout).foregroundStyle(.secondary)
+            if let conflicts = payload["conflicts"] as? String {
+                Text(conflicts).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// Pacchetti di estensione (ADR-0165): competenze e procedure in JSON, senza codice.
+    private var pluginInstaller: some View {
+        card("Installa o aggiorna un pacchetto", icon: "shippingbox") {
+            Text("Un pacchetto aggiunge competenze e procedure scritte in JSON. Non contiene codice, non usa la rete e non porta chiavi: ciò che porta resta sotto le tue regole, conferme e audit. Si installa tutto o niente.")
+                .font(.callout).foregroundStyle(.secondary)
+            TextEditor(text: $pluginJSON)
+                .font(.system(.caption, design: .monospaced))
+                .frame(minHeight: 130)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.secondary.opacity(0.3)))
+            Button("Installa", systemImage: "square.and.arrow.down") {
+                guard let object = try? JSONSerialization.jsonObject(with: Data(pluginJSON.utf8)) as? [String: Any] else {
+                    error = "JSON non valido: il pacchetto deve essere un oggetto"
+                    return
+                }
+                pluginJSON = ""
+                mutate("/api/plugins", body: object)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(pluginJSON.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
     }
 
@@ -2447,7 +2536,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             ("/api/skills", "Competenza salvata."), ("/api/memory", "Memoria aggiornata."),
             ("/api/cloud", "Impostazioni dei modelli salvate."), ("/api/updates", "Aggiornamenti controllati."),
             ("/api/permissions", "Permessi aggiornati."), ("/api/backup", "Copia di sicurezza creata."),
-            ("/api/missions", "Missione aggiornata."),
+            ("/api/missions", "Missione aggiornata."), ("/api/agents/limits", "Regole dell’agente aggiornate."),
+            ("/api/plugins", "Pacchetti aggiornati."),
         ]
         if let hit = table.first(where: { path.hasPrefix($0.0) }) { return hit.1 }
         return method == "DELETE" ? "Elemento rimosso." : "Modifica salvata."

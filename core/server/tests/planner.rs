@@ -350,6 +350,12 @@ fn supervision_pauses_an_agent_and_hands_its_work_to_the_generalist() {
         .find(|i| i["agent"] == chosen.as_str())
         .unwrap();
     assert_eq!(entry["state"], "in pausa");
+    assert!(
+        entry["role"].as_str().is_some_and(|r| !r.is_empty()),
+        "ruolo per le interfacce"
+    );
+    assert_eq!(entry["performance"]["runs"], 0);
+    assert_eq!(entry["name"], chosen.as_str());
     let after = j.agent_route_explained(ask);
     assert_eq!(
         after["agent"]["supervision"]["effective"],
