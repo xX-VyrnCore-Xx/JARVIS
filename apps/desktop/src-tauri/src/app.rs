@@ -246,6 +246,8 @@ enum Event {
     BackgroundStarted(Result<Value, String>),
     /// Lavori in background ancora in corso.
     BackgroundRunning(usize),
+    /// Chat esportata in Markdown, pronta da copiare (ADR-0150).
+    ChatExported(Result<Value, String>),
     /// Comando pronunciato dopo «Hey Jarvis» (ADR-0140).
     #[cfg_attr(not(windows), allow(dead_code))]
     WakeCommand(String),
@@ -594,6 +596,22 @@ impl JarvisApp {
                     }
                     ctx.request_repaint();
                 }
+                Event::ChatExported(result) => {
+                    match result {
+                        Ok(doc) => {
+                            ctx.copy_text(doc["markdown"].as_str().unwrap_or_default().to_owned());
+                            self.action_notice = Some((
+                                format!(
+                                    "Chat copiata negli appunti in Markdown ({} messaggi).",
+                                    doc["messages"].as_u64().unwrap_or(0)
+                                ),
+                                Instant::now(),
+                            ));
+                        }
+                        Err(error) => self.error = Some(error),
+                    }
+                    ctx.request_repaint();
+                }
                 Event::BackgroundRunning(count) => {
                     if self.background_running > 0 && count == 0 {
                         // Finito: la risposta è nella chat, si ricarica la cronologia.
@@ -930,6 +948,44 @@ impl JarvisApp {
                 let wait = if live.load(Ordering::Relaxed) { 30 } else { 5 };
                 std::thread::sleep(Duration::from_secs(wait));
             }
+        });
+    }
+
+    /// Annulla i lavori in background in corso (ADR-0150).
+    fn cancel_background(&mut self) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let jobs = client.get("/api/cloud/jobs").unwrap_or(Value::Null);
+            for job in jobs["items"].as_array().into_iter().flatten() {
+                if job["status"] == "running" {
+                    if let Some(id) = job["id"].as_str() {
+                        let _ = client.post(&format!("/api/cloud/jobs/{id}/cancel"), None);
+                    }
+                }
+            }
+            let _ = tx.send(Event::BackgroundRunning(0));
+        });
+    }
+
+    fn export_chat(&self) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        let id = self
+            .conversations
+            .iter()
+            .find(|c| c["active"] == true)
+            .and_then(|c| c["id"].as_str())
+            .unwrap_or("main")
+            .to_owned();
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let _ = tx.send(Event::ChatExported(
+                client.get(&format!("/api/conversations/export?id={id}")),
+            ));
         });
     }
 
@@ -1552,6 +1608,17 @@ impl JarvisApp {
                             }
                         }
                     });
+                if ui.button("Copia chat").on_hover_text("Copia la chat in Markdown").clicked() {
+                    self.export_chat();
+                }
+                if self.background_running > 0
+                    && ui
+                        .button("Annulla lavoro")
+                        .on_hover_text("Ferma il lavoro in background in corso")
+                        .clicked()
+                {
+                    self.cancel_background();
+                }
                 ui.checkbox(&mut self.chat_background, "In background")
                     .on_hover_text(
                         "JARVIS lavora nel cloud anche se l'app è in secondo piano o chiusa e ti avvisa alla fine.",

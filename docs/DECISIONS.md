@@ -1867,6 +1867,15 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Non incluso:** cifratura della memoria a lungo termine (serve il testo in chiaro per l'indice FTS, ADR-0022) e del file di audit (firmato, non cifrato).
 - **Evidenza:** test di migrazione e lettura delle notifiche cifrate, test della guardia, test API del punteggio.
 
+### ADR-0150 — Nuovi strumenti di analisi, ricerca ed esportazione delle chat, stop dei lavori
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («aggiungi altre funzioni», «migliora ancora tutto») e proposte in sospeso (pulsante di stop).
+- **Strumenti (solo calcolo, nessun dato salvato):** `data.stats` (conteggio, media, mediana, minimo, massimo, quartili, deviazione standard, valori anomali con la regola dell'intervallo interquartile; da una lista o dai numeri di un testo, anche con la virgola decimale), `text.extract` (email, indirizzi web, date, hashtag, telefoni, senza duplicati) e `text.diff` (confronto riga per riga con sottosequenza comune, somiglianza in percentuale; fino a 400 righe). Disponibili ai modelli cloud come strumenti di calcolo, via MCP (ADR-0138) e offline («statistiche: 2, 4, 4, 5», «estrai email da: …»).
+- **Chat:** `GET /api/conversations/search?q=` cerca nei messaggi di tutte le chat (ultimi 3000, maiuscole e accenti ignorati, estratto del contesto); `GET /api/conversations/export?id=` produce la chat in Markdown (le app la copiano negli appunti). I messaggi restano cifrati sul disco: la ricerca li decifra in memoria.
+- **Stop:** `POST /api/cloud/jobs/{id}/cancel` ferma un lavoro in background in corso (404 se sconosciuto, 409 se già concluso, audit `cloud.job.cancel`); il risultato non viene scritto nella chat. La chiamata già in volo verso il provider non si interrompe, ma la sua risposta è scartata.
+- **Evidenza:** test unitari dei tre strumenti, test API (ricerca, esportazione, 404/409 dello stop, strumenti via MCP), test Python delle regole offline e smoke E2E.
+- **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ROADMAP.md, `contracts/catalog/tools/`.
+
 ### ADR-0135 — Correttore dei messaggi scritti
 
 - **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora il correttore grammaticale di prompt»).

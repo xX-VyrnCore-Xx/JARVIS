@@ -89,6 +89,9 @@ class OfflineBackend(unittest.TestCase):
             "unit economics: arpu 100 margine 70% churn 3% cac 500": ("biz.unit_economics", {"arpu_monthly": 100.0, "gross_margin_percent": 70.0, "monthly_churn_percent": 3.0, "cac": 500.0}),
             "van tasso 10% flussi -1000; 500; 500; 500": ("biz.npv", {"discount_rate_percent": 10.0, "cashflows": [-1000.0, 500.0, 500.0, 500.0]}),
             "correggi: perche e' gia tardi": ("text.correct", {"text": "perche e' gia tardi"}),
+            "statistiche: 2, 4, 4, 4, 5, 5, 7, 9": ("data.stats", {"text": "2, 4, 4, 4, 5, 5, 7, 9"}),
+            "estrai email da: scrivi a mario@esempio.it": ("text.extract", {"text": "scrivi a mario@esempio.it", "kind": "email"}),
+            "estrai: vedi https://esempio.org": ("text.extract", {"text": "vedi https://esempio.org"}),
             "prepara la sandbox": ("sandbox.prepare", {}),
             "importa nella sandbox: dati.csv": ("sandbox.import", {"from": "dati.csv"}),
             "importa nella sandbox: dati.csv come in/x.csv": ("sandbox.import", {"from": "dati.csv", "to": "in/x.csv"}),
@@ -249,6 +252,12 @@ class ExecutiveToolsTextTest(unittest.TestCase):
         self.assertIn("Perché è già tardi", text)
         self.assertIn("«perche» → «perché»", text)
         self.assertEqual(self.describe("text.correct", {"text": "x", "changed": False, "changes": []}), "Il testo è già corretto.")
+        stats = self.describe("data.stats", {"count": 6, "mean": 8.0, "median": 7.0, "min": 1, "max": 20,
+                                             "std_dev_sample": 3.5, "outliers": [20]})
+        self.assertIn("6 valori: media 8.0", stats)
+        self.assertIn("Valori anomali: 20", stats)
+        self.assertIn("email: a@b.it", self.describe("text.extract", {"emails": ["a@b.it"]}))
+        self.assertIn("Non ho trovato", self.describe("text.extract", {}))
 
     def test_missing_optional_values_do_not_break_the_text(self):
         self.assertIn("non definito", self.describe("biz.npv", {"npv": -5.0, "irr_percent": None, "payback_periods": None, "verdict": "x"}))

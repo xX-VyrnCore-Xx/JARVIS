@@ -213,6 +213,21 @@ def _describe_tool_result(result: dict) -> str:
     if tool == "biz.loan":
         return (f"Rata mensile {output.get('monthly_payment'):.2f} € per {output.get('months')} mesi: "
                 f"totale {output.get('total_paid'):.2f} €, di cui interessi {output.get('total_interest'):.2f} €.")
+    if tool == "data.stats":
+        spread = output.get("std_dev_sample")
+        extra = f", deviazione standard {spread}" if spread is not None else ""
+        outliers = output.get("outliers") or []
+        flagged = f". Valori anomali: {', '.join(str(v) for v in outliers)}" if outliers else ""
+        return (f"{output.get('count')} valori: media {output.get('mean')}, mediana {output.get('median')}, "
+                f"minimo {output.get('min')}, massimo {output.get('max')}{extra}{flagged}.")
+    if tool == "text.extract":
+        parts = []
+        for key, label in (("emails", "email"), ("urls", "indirizzi web"), ("dates", "date"),
+                           ("hashtags", "hashtag"), ("phones", "telefoni")):
+            items = output.get(key) or []
+            if items:
+                parts.append(f"{label}: " + ", ".join(items[:10]))
+        return "\n".join(parts) if parts else "Non ho trovato elementi da estrarre."
     if tool == "text.correct":
         changes = output.get("changes") or []
         notes = "; ".join(f"«{c['from']}» → «{c['to']}»" for c in changes[:8])
@@ -542,6 +557,12 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
     # Correttore dei testi (ADR-0135).
     (re.compile(r"^\s*(?:correggi(?: il testo| l'ortografia)?|controlla l'ortografia)\s*:\s*(\S.*)$", re.I | re.S), "text.correct",
      lambda m: {"text": m[1].strip()[:8000]}),
+    # Analisi di testi e numeri (ADR-0150).
+    (re.compile(r"^\s*(?:statistiche|statistica|media e mediana)(?: di| dei numeri)?\s*:\s*(\S.*)$", re.I | re.S), "data.stats",
+     lambda m: {"text": m[1].strip()[:8000]}),
+    (re.compile(r"^\s*estrai(?:\s+(email|url|date|hashtag|telefoni?))?\s*(?:da)?\s*:\s*(\S.*)$", re.I | re.S), "text.extract",
+     lambda m: {"text": m[2].strip()[:8000],
+                **({"kind": {"telefono": "phone", "telefoni": "phone"}.get(m[1].lower(), m[1].lower())} if m[1] else {})}),
     # Direzione aziendale (ADR-0132): calcoli di CEO e CFO, sempre da strumento.
     (re.compile(r"^\s*(?:margine|markup|ricarico)\s+(?:con\s+)?costo\s+(\d[\d.,]*)\s*(?:€|euro)?\s+(?:e\s+)?prezzo\s+(\d[\d.,]*)\s*(?:€|euro)?\s*$", re.I), "biz.margin",
      lambda m: {"cost": _it_number(m[1]), "price": _it_number(m[2])}),

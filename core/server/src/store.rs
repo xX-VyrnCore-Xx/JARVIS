@@ -29,6 +29,16 @@ pub(crate) struct ConversationTurn {
     pub cloud_provider: Option<String>,
 }
 
+/// Testo in minuscolo e senza accenti, per le ricerche.
+fn fold_search(text: &str) -> String {
+    text.to_lowercase()
+        .replace('à', "a")
+        .replace(['è', 'é'], "e")
+        .replace('ì', "i")
+        .replace('ò', "o")
+        .replace('ù', "u")
+}
+
 fn crypto_error(message: String) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(message)))
 }
@@ -676,6 +686,67 @@ impl Store {
             self.set_active(MAIN_CONVERSATION);
         }
         Ok(existed)
+    }
+
+    fn message_row(
+        &self,
+        r: &rusqlite::Row<'_>,
+    ) -> rusqlite::Result<(i64, String, String, String, String)> {
+        let role: String = r.get(0)?;
+        let task: Option<String> = r.get(2)?;
+        let at: String = r.get(3)?;
+        let purpose = message_purpose(&role, task.as_deref(), &at);
+        let content = self.open_chat(&format!("{purpose}:content"), r.get(1)?)?;
+        Ok((r.get(4)?, role, content, at, r.get::<_, String>(5)?))
+    }
+
+    /// Messaggi di una chat in ordine cronologico (senza fonti né valutazioni): per l'esportazione.
+    pub fn conversation_messages(&self, id: &str, limit: u32) -> StoreResult<Vec<Value>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT role, content, task_id, at, seq, conversation FROM messages
+             WHERE conversation = ?1 ORDER BY seq DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![id, limit], |r| self.message_row(r))?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (seq, role, content, at, _) = row?;
+            out.push(json!({"seq": seq, "role": role, "content": content, "at": at}));
+        }
+        out.reverse();
+        Ok(out)
+    }
+
+    /// Cerca un testo nei messaggi di tutte le chat (ultimi 3000, dal più recente): maiuscole e accenti ignorati.
+    pub fn messages_search(&self, query: &str, limit: usize) -> StoreResult<Vec<Value>> {
+        let needle = fold_search(query);
+        if needle.chars().count() < 2 {
+            return Ok(Vec::new());
+        }
+        let mut stmt = self.conn.prepare(
+            "SELECT role, content, task_id, at, seq, conversation FROM messages ORDER BY seq DESC LIMIT 3000",
+        )?;
+        let rows = stmt.query_map([], |r| self.message_row(r))?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (seq, role, content, at, conversation) = row?;
+            let folded = fold_search(&content);
+            if let Some(position) = folded.find(&needle) {
+                let start = content
+                    .char_indices()
+                    .map(|(i, _)| i)
+                    .rfind(|i| *i <= position.saturating_sub(40))
+                    .unwrap_or(0);
+                let snippet: String = content[start..].chars().take(140).collect();
+                out.push(json!({
+                    "conversation_id": conversation, "seq": seq, "role": role, "at": at,
+                    "snippet": snippet.replace('\n', " "),
+                }));
+                if out.len() >= limit {
+                    break;
+                }
+            }
+        }
+        Ok(out)
     }
 
     /// Chat recenti: titolo ricavato dal primo messaggio (mai salvato in chiaro), numero di messaggi, attiva.

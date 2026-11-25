@@ -1056,11 +1056,28 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             Button("Nuova chat", systemImage: "square.and.pencil") {
                 changeChat("/api/conversations", body: [:])
             }
+            Button("Copia chat", systemImage: "doc.on.doc") { copyChat() }
+                .help("Copia la chat in Markdown negli appunti")
             Toggle(isOn: $chatInBackground) {
                 Label("In background", systemImage: "moon.zzz")
             }
             .toggleStyle(.button)
             .help("JARVIS lavora nel cloud anche se l'app è in secondo piano o chiusa e ti avvisa alla fine.")
+        }
+    }
+
+    /// Esporta la chat attiva in Markdown e la copia negli appunti (ADR-0150).
+    private func copyChat() {
+        let chats = (payload["chats"] as? [[String: Any]]) ?? []
+        let active = chats.first { $0["active"] as? Bool == true }?["id"] as? String ?? "main"
+        Task {
+            do {
+                let result = try await core.request("/api/conversations/export?id=\(urlSegment(active))")
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(result["markdown"] as? String ?? "", forType: .string)
+                info = "Chat copiata negli appunti in Markdown (\(result["messages"] as? Int ?? 0) messaggi)."
+                error = nil
+            } catch { self.error = error.localizedDescription }
         }
     }
 

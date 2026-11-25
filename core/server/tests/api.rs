@@ -877,6 +877,117 @@ async fn protection_reports_encryption_posture_and_docker_profiles() {
 }
 
 #[tokio::test]
+async fn chats_can_be_searched_and_exported_and_finished_jobs_cannot_be_cancelled() {
+    let e = env();
+    e.api(
+        "POST",
+        "/api/chat",
+        Some(json!({"message": "ricorda che il progetto Aurora costa 50000 euro"})),
+    )
+    .await;
+    e.api("POST", "/api/conversations", Some(json!({}))).await;
+    e.api(
+        "POST",
+        "/api/chat",
+        Some(json!({"message": "che ore sono"})),
+    )
+    .await;
+    // La ricerca attraversa tutte le chat, ignora maiuscole e accenti.
+    let (status, found) = e
+        .api("GET", "/api/conversations/search?q=AURORA", None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let items = found["items"].as_array().unwrap();
+    assert!(!items.is_empty());
+    assert_eq!(items[0]["conversation_id"], "main");
+    assert!(items[0]["snippet"].as_str().unwrap().contains("Aurora"));
+    let (_, none) = e.api("GET", "/api/conversations/search?q=x", None).await;
+    assert_eq!(none["items"], json!([]));
+    let (status, export) = e
+        .api("GET", "/api/conversations/export?id=main", None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let markdown = export["markdown"].as_str().unwrap();
+    assert!(
+        markdown.starts_with("# Chat principale")
+            && markdown.contains("**Tu**")
+            && markdown.contains("Aurora")
+    );
+    let (status, _) = e
+        .api("GET", "/api/conversations/export?id=inesistente", None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // Annullamento: lavoro sconosciuto 404, lavoro già concluso 409.
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/cloud/jobs/inesistente/cancel",
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (_, job) = e
+        .api(
+            "POST",
+            "/api/cloud/background",
+            Some(json!({"message": "che ore sono"})),
+        )
+        .await;
+    let id = job["id"].as_str().unwrap().to_string();
+    for _ in 0..100 {
+        let (_, jobs) = e.api("GET", "/api/cloud/jobs", None).await;
+        if jobs["items"][0]["status"] != "running" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    let (status, _) = e
+        .api(
+            "POST",
+            &format!("/api/cloud/jobs/{id}/cancel"),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn data_tools_run_through_the_policy_and_the_mcp_server() {
+    let e = env();
+    let (_, stats) = e
+        .api(
+            "POST",
+            "/api/mcp",
+            Some(json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": {"name": "data__stats", "arguments": {"values": [2, 4, 4, 4, 5, 5, 7, 9]}}})),
+        )
+        .await;
+    let text = stats["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default();
+    assert!(
+        text.contains("\"mean\": 5.0") && text.contains("\"median\": 4.5"),
+        "{stats}"
+    );
+    let (_, tools) = e
+        .api(
+            "POST",
+            "/api/mcp",
+            Some(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})),
+        )
+        .await;
+    let names: Vec<&str> = tools["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|t| t["name"].as_str())
+        .collect();
+    for expected in ["data__stats", "text__extract", "text__diff"] {
+        assert!(names.contains(&expected), "{expected} in {names:?}");
+    }
+}
+
+#[tokio::test]
 async fn tailscale_status_is_reported_without_authorising_anything() {
     let e = env();
     let (status, view) = e.api("GET", "/api/tailscale", None).await;

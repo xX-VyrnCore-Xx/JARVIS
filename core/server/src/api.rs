@@ -39,6 +39,8 @@ pub struct AppState {
     live_streams: Arc<std::sync::atomic::AtomicUsize>,
     /// Lavori cloud in background (ADR-0144): gli ultimi, solo in memoria; la risposta è comunque nella chat.
     jobs: Mutex<Vec<Value>>,
+    /// Per annullare un lavoro in background (ADR-0150).
+    job_handles: Mutex<std::collections::HashMap<String, tokio::task::AbortHandle>>,
 }
 
 /// Dopo `REMOTE_FAILURE_LIMIT` autenticazioni remote fallite in `REMOTE_FAILURE_WINDOW` le richieste remote con
@@ -437,6 +439,9 @@ pub fn router(state: Shared) -> Router {
         )
         .route("/api/cloud/background", post(cloud_background))
         .route("/api/cloud/jobs", get(cloud_jobs))
+        .route("/api/cloud/jobs/{id}/cancel", post(cloud_job_cancel))
+        .route("/api/conversations/search", get(conversation_search))
+        .route("/api/conversations/export", get(conversation_export))
         .route("/api/conversations/select", post(conversation_select))
         .route("/api/conversations/delete", post(conversation_delete))
         .route("/api/memory", get(memory))
@@ -894,8 +899,15 @@ async fn cloud_background(
     }
     let id = job["id"].as_str().unwrap_or_default().to_string();
     let worker = state.clone();
-    tokio::spawn(async move {
+    let job_id = id.clone();
+    let handle = tokio::spawn(async move {
         let result = run_cloud_chat(&worker, is_device, body, None).await;
+        let finished_id = id.clone();
+        worker
+            .job_handles
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&finished_id);
         let (status, summary, detail, outcome) = match result {
             Ok(out) => {
                 let reply = out["reply"].as_str().unwrap_or("Fatto.").to_string();
@@ -938,7 +950,44 @@ async fn cloud_background(
         });
         let _ = with_core(&worker, move |j| j.notify(note)).await;
     });
+    state
+        .job_handles
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(job_id, handle.abort_handle());
     (StatusCode::ACCEPTED, Json(said(job, "background", None))).into_response()
+}
+
+/// Annulla un lavoro in background ancora in corso: il risultato non viene scritto nella chat.
+async fn cloud_job_cancel(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    let cancelled = {
+        let mut jobs = state.jobs.lock().unwrap_or_else(|e| e.into_inner());
+        match jobs.iter_mut().find(|j| j["id"] == id.as_str()) {
+            None => return CoreError::NotFound("lavoro non trovato".into()).into_response(),
+            Some(job) if job["status"] != "running" => {
+                return error(
+                    StatusCode::CONFLICT,
+                    "not_running",
+                    "Il lavoro è già terminato.",
+                )
+            }
+            Some(job) => {
+                job["status"] = json!("cancelled");
+                job["finished_at"] = json!(crate::automation::ts(chrono::Utc::now()));
+                job.clone()
+            }
+        }
+    };
+    if let Some(handle) = state
+        .job_handles
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&id)
+    {
+        handle.abort();
+    }
+    let _ = with_core(&state, |j| j.record_owner_action("cloud.job.cancel")).await;
+    Json(said(cancelled, "job.cancel", None)).into_response()
 }
 
 async fn cloud_jobs(State(state): State<Shared>) -> Response {
@@ -1952,6 +2001,22 @@ async fn conversation_new(State(state): State<Shared>) -> Response {
         with_core(&state, |j| j.conversation_new()).await,
         "chat.new",
     )
+}
+
+async fn conversation_search(
+    State(state): State<Shared>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let query = q.get("q").cloned().unwrap_or_default();
+    reply(with_core(&state, move |j| j.conversation_search(&query)).await)
+}
+
+async fn conversation_export(
+    State(state): State<Shared>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let id = q.get("id").cloned().unwrap_or_else(|| "main".into());
+    reply(with_core(&state, move |j| j.conversation_export(&id)).await)
 }
 
 async fn conversation_select(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
@@ -3131,5 +3196,6 @@ pub fn state_with_remote(
         remote_failures: Mutex::new((std::time::Instant::now(), 0)),
         live_streams: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         jobs: Mutex::new(Vec::new()),
+        job_handles: Mutex::new(std::collections::HashMap::new()),
     })
 }

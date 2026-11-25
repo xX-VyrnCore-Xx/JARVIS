@@ -227,6 +227,7 @@ fn sentence(key: &str, detail: Option<&str>) -> String {
         "voice" => "Impostazioni vocali aggiornate.".into(),
         "sandbox" => "Impostazione del sandbox salvata.".into(),
         "briefing" => "Briefing pronto: lo trovi tra le notifiche.".into(),
+        "job.cancel" => "Lavoro annullato: non scriverò il risultato nella chat.".into(),
         "background" => "Lavoro avviato in background: ti avviso quando ha finito.".into(),
         _ => "Modifica salvata.".into(),
     }

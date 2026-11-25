@@ -219,6 +219,14 @@ function check(condition, message) {
   check(persona.status === 200 && /Personalità aggiornata/.test(persona.json?.message || ""), "conferma specifica e non generica");
   const badFrequency = await request("/api/persona", { method: "PATCH", token: ownerToken, body: { address_frequency: "sempre" } });
   check(badFrequency.status === 400, "frequenza del titolo non valida rifiutata");
+  const found = await request("/api/conversations/search?q=ore", { token: ownerToken });
+  check(found.status === 200 && Array.isArray(found.json?.items), "ricerca nelle chat");
+  const exported = await request("/api/conversations/export?id=main", { token: ownerToken });
+  check(exported.status === 200 && /^# Chat principale/.test(exported.json?.markdown || ""), "esportazione della chat in Markdown");
+  const missingJob = await request("/api/cloud/jobs/inesistente/cancel", { method: "POST", token: ownerToken, body: {} });
+  check(missingJob.status === 404, "annullamento di un lavoro sconosciuto");
+  const mcpStats = await request("/api/mcp", { method: "POST", token: ownerToken, body: { jsonrpc: "2.0", id: 9, method: "tools/call", params: { name: "data__stats", arguments: { values: [1, 2, 3, 4] } } } });
+  check(mcpStats.status === 200 && /"mean": 2.5/.test(mcpStats.json?.result?.content?.[0]?.text || ""), "strumento data.stats via MCP");
   const tailscale = await request("/api/tailscale", { token: ownerToken });
   check(tailscale.status === 200 && typeof tailscale.json?.installed === "boolean" && tailscale.json?.allowed === false, "stato di Tailscale senza autorizzare indirizzi");
 })().catch((error) => {
