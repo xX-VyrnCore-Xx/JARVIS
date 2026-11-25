@@ -227,6 +227,8 @@ fn sentence(key: &str, detail: Option<&str>) -> String {
         "voice" => "Impostazioni vocali aggiornate.".into(),
         "sandbox" => "Impostazione del sandbox salvata.".into(),
         "briefing" => "Briefing pronto: lo trovi tra le notifiche.".into(),
+        "mcp.server" => "Server MCP autorizzato: i suoi strumenti si usano con la tua conferma e i risultati sono trattati come dati.".into(),
+        "mcp.server.remove" => "Server MCP rimosso, con il suo token.".into(),
         "plan.created" => "Piano creato: puoi eseguirlo quando vuoi e annullarlo in ogni momento.".into(),
         "plan.started" => "Piano in esecuzione: procedo un passo alla volta e mi fermo se serve la tua conferma.".into(),
         "plan.approved" => "Passi approvati: riprendo il piano.".into(),

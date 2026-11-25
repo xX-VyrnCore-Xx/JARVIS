@@ -110,6 +110,9 @@ impl Store {
              CREATE TABLE IF NOT EXISTS tool_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, tool TEXT NOT NULL,
                  at TEXT NOT NULL, ms REAL NOT NULL, ok INTEGER NOT NULL, code TEXT);
              CREATE INDEX IF NOT EXISTS tool_runs_by_tool ON tool_runs (tool, id);
+             CREATE TABLE IF NOT EXISTS agent_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, agent TEXT NOT NULL,
+                 at TEXT NOT NULL, ok INTEGER NOT NULL, tools INTEGER NOT NULL, ms REAL NOT NULL);
+             CREATE INDEX IF NOT EXISTS agent_runs_by_agent ON agent_runs (agent, id);
              CREATE TABLE IF NOT EXISTS plans (id TEXT PRIMARY KEY, idem TEXT, status TEXT NOT NULL,
                  updated_at TEXT NOT NULL, doc TEXT NOT NULL);
              CREATE UNIQUE INDEX IF NOT EXISTS plans_idem ON plans (idem) WHERE idem IS NOT NULL;",
@@ -732,6 +735,45 @@ impl Store {
             }
         }
         Ok(ids.len())
+    }
+
+    /// Registra l'esito di un lavoro di un agente (ADR-0153); restano gli ultimi 2000.
+    pub fn agent_run_add(
+        &self,
+        agent: &str,
+        at: &str,
+        ok: bool,
+        tools: usize,
+        ms: f64,
+    ) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT INTO agent_runs (agent, at, ok, tools, ms) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![agent, at, ok, tools as i64, ms],
+        )?;
+        self.conn.execute(
+            "DELETE FROM agent_runs WHERE id <= (SELECT MAX(id) FROM agent_runs) - 2000",
+            [],
+        )?;
+        Ok(())
+    }
+
+    /// Prestazioni per agente: lavori, tasso di successo, durata e strumenti medi.
+    pub fn agent_stats(&self) -> StoreResult<Vec<Value>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT agent, COUNT(*), SUM(ok), AVG(ms), AVG(tools), MAX(at) FROM agent_runs GROUP BY agent ORDER BY agent",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            let runs: i64 = r.get(1)?;
+            let ok: i64 = r.get(2)?;
+            Ok(json!({
+                "agent": r.get::<_, String>(0)?, "runs": runs, "succeeded": ok,
+                "success_rate": ((ok as f64 / runs.max(1) as f64) * 1000.0).round() / 10.0,
+                "avg_ms": (r.get::<_, f64>(3)? * 10.0).round() / 10.0,
+                "avg_tools": (r.get::<_, f64>(4)? * 10.0).round() / 10.0,
+                "last_at": r.get::<_, String>(5)?,
+            }))
+        })?;
+        rows.collect()
     }
 
     /// Registra un'esecuzione di uno strumento (ADR-0151); restano le ultime 5000.

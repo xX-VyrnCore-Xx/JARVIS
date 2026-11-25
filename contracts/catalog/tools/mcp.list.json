@@ -1,0 +1,38 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "mcp.list",
+  "version": "1.0.0",
+  "summary": "Elenca gli strumenti di un server MCP autorizzato dal proprietario",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "server"
+    ],
+    "properties": {
+      "server": {
+        "type": "string",
+        "pattern": "^[a-z0-9_-]{1,32}$"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "integration",
+  "effects": "read",
+  "risk": "medium",
+  "permissions": [
+    "integration.mcp:execute"
+  ],
+  "errors": [
+    "mcp.unknown_server",
+    "mcp.failed"
+  ],
+  "timeout_ms": 45000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "none"
+}

@@ -50,6 +50,8 @@ const SOURCES: &[&str] = &[
     tool_file!("it.subnet"),
     tool_file!("log.analyze"),
     tool_file!("math.calc"),
+    tool_file!("mcp.call"),
+    tool_file!("mcp.list"),
     tool_file!("memory.update"),
     tool_file!("mission.cancel"),
     tool_file!("mission.list"),
