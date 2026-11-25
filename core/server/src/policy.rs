@@ -379,9 +379,11 @@ pub fn decide(catalog: &Catalog, web: &WebConfig, req: &Request) -> Value {
             )
         }
         Some(t)
-            if req.perms.verdict(
+            if req.perms.verdict_for(
                 t.name(),
                 t.descriptor["effects"].as_str().unwrap_or("write_local"),
+                t.risk(),
+                req.subject["id"].as_str().unwrap_or_default(),
             ) == Some(crate::permissions::Mode::Deny) =>
         {
             (
@@ -396,9 +398,11 @@ pub fn decide(catalog: &Catalog, web: &WebConfig, req: &Request) -> Value {
         }
         Some(t)
             if !(t.needs_confirmation() || matches!(t.risk(), "high" | "critical"))
-                && req.perms.verdict(
+                && req.perms.verdict_for(
                     t.name(),
                     t.descriptor["effects"].as_str().unwrap_or("write_local"),
+                    t.risk(),
+                    req.subject["id"].as_str().unwrap_or_default(),
                 ) == Some(crate::permissions::Mode::Ask) =>
         {
             (

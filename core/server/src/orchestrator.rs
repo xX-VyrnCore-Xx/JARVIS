@@ -3277,7 +3277,11 @@ impl Jarvis {
         }
         self.proactive_poll(now_t);
         // Eventi (ADR-0158): un file o una cartella osservati sono cambiati.
-        for rule in crate::watch::changed(&self.cfg.data_dir, &self.cfg.workspace()) {
+        let watching = crate::permissions::background_allowed(&self.cfg.data_dir);
+        for rule in crate::watch::changed(&self.cfg.data_dir, &self.cfg.workspace())
+            .into_iter()
+            .filter(|_| watching)
+        {
             let key = rule["workflow"].as_str().unwrap_or_default();
             match self.find_workflow(key) {
                 Ok((doc, _)) if doc["enabled"] == true => {
@@ -4103,6 +4107,40 @@ impl Jarvis {
         crate::profile::set_current(&crate::profile::load(&self.cfg.data_dir));
         self.record_owner_action("profile.update")?;
         Ok(doc)
+    }
+
+    /// Livelli di autonomia in vigore (ADR-0174).
+    pub fn autonomy(&self) -> Value {
+        crate::permissions::Autonomy::load(&self.cfg.data_dir).to_json()
+    }
+
+    /// Modifica i livelli di autonomia: solo dal computer del Core, mai da chat. Ogni modifica è nell'audit.
+    pub fn autonomy_update(&mut self, patch: &Value) -> Result<Value, CoreError> {
+        let mut names: Vec<&str> = crate::agents::SPECIALISTS.iter().map(|a| a.name).collect();
+        names.push(crate::agents::GENERAL);
+        for pattern in patch["tools"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .map(|(p, _)| p)
+        {
+            let known = self
+                .catalog
+                .iter()
+                .any(|t| match pattern.strip_suffix(".*") {
+                    Some(prefix) => t.name().starts_with(&format!("{prefix}.")),
+                    None => t.name() == pattern,
+                });
+            if !known && crate::permissions::valid_pattern(pattern) {
+                return Err(CoreError::BadRequest(format!(
+                    "nessuno strumento del catalogo corrisponde a {pattern}"
+                )));
+            }
+        }
+        let out = crate::permissions::update_autonomy(&self.cfg.data_dir, patch, &names)
+            .map_err(CoreError::BadRequest)?;
+        self.record_owner_action("autonomy.update")?;
+        Ok(out)
     }
 
     pub fn permissions_update(&mut self, patch: &Value) -> Result<Value, CoreError> {

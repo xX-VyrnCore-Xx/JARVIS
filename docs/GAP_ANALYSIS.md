@@ -115,7 +115,7 @@ ripristino dopo crash come test dedicato.
 
 ## Prossimi incrementi (ordine proposto)
 
-1. **Livelli di autonomia 0–5** per agente/strumento/categoria, solo restrittivi (sicurezza prima di tutto il resto).
+1. ~~Livelli di autonomia 0–5~~ — fatto (ADR-0174).
 2. **Stato del mondo** osservato vs dedotto, con versioni e rilevamento del dato vecchio, alimentato da strumenti già esistenti.
 3. **Collaborazione fra specialisti**: richieste con più ambiti come piano con passi assegnati ad agenti diversi.
 4. **Pausa e vincoli durante l'esecuzione**, dry run dei piani.

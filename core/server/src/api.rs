@@ -688,6 +688,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/sandbox", get(sandbox_get).patch(sandbox_put))
         .route("/api/docker", get(docker_status))
         .route("/api/docker/cleanup", post(docker_cleanup))
+        .route("/api/autonomy", get(autonomy_get).patch(autonomy_patch))
         .route(
             "/api/permissions",
             get(permissions_get).patch(permissions_patch),
@@ -2005,6 +2006,36 @@ async fn permissions_get(
         );
     }
     reply(Ok(with_core(&state, |j| j.permissions()).await))
+}
+
+/// Livelli di autonomia (ADR-0174): lettura e modifica solo dal computer del Core.
+async fn autonomy_get(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+) -> Response {
+    if device.is_some() {
+        return error(
+            StatusCode::FORBIDDEN,
+            "owner_only",
+            "operazione disponibile solo dal computer del proprietario",
+        );
+    }
+    reply(Ok(with_core(&state, |j| j.autonomy()).await))
+}
+
+async fn autonomy_patch(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Json(body): Json<Value>,
+) -> Response {
+    if device.is_some() {
+        return error(
+            StatusCode::FORBIDDEN,
+            "owner_only",
+            "operazione disponibile solo dal computer del proprietario",
+        );
+    }
+    reply(with_core(&state, move |j| j.autonomy_update(&body)).await)
 }
 
 async fn permissions_patch(

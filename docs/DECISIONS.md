@@ -1897,6 +1897,13 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** `GET /api/agents` descrive i sette specialisti e il generalista (competenze dagli strumenti, rischio massimo, contesto isolato o condiviso, risorse); `GET /api/agents/route?q=` mostra quale agente riceverebbe una richiesta e per quali parole chiave; `GET /api/models/route?q=` mostra la rotta per compito, il modello per provider, il ripiego e la riservatezza (credenziali bloccate, dati personali rilevati, profilo condiviso) **senza inviare nulla**. Non si introducono nuovi agenti: si riusano quelli esistenti.
 - **Evidenza:** test API del registro e dell'instradamento.
 
+### ADR-0174 — Livelli di autonomia
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout.
+- **Decisione:** `Rules::verdict_for(strumento, effetti, rischio, agente)` aggiunge ai profili e alle regole di ADR-0116 i **livelli 0–5** (`<dati>/autonomy.json`): 0 nessuno strumento; 1 solo letture; 2 ogni modifica con conferma; 3 comportamento del catalogo senza attività in background; 4 (predefinito) come 3 con missioni, iniziative proattive e osservazioni di file; 5 riservato, oggi come 4. Configurabili per agente, strumento (con prefisso) e categoria di rischio; vale il **livello minimo** fra quelli applicabili, e il verdetto finale è il più severo fra profilo, regole e livello: **un livello non allarga mai nulla**, in continuità con l'invariante di ADR-0116. La policy lo applica in modo deterministico per ogni chiamata (soggetto = agente che propone); le attività che partono da sole (`mission_due`, `proactive_tick`, osservazioni in `run_due`) si fermano sotto il livello 4. `GET/PATCH /api/autonomy` solo dal computer del Core (i dispositivi ricevono 403), non da chat: due frasi ostili in chat non cambiano nulla (test). File illeggibile: livello 2 (fallire chiuso). Ogni modifica è nell'audit (`autonomy.update`).
+- **Non incluso:** livelli per dispositivo e per singola operazione (i dispositivi hanno già i permessi per rotta; manca il livello per dispositivo), il significato proprio del livello 5, interfaccia nelle app (si usa l'API), motivo di rifiuto distinto nel registro (oggi `policy.owner_rule_deny`/`owner_rule_ask`).
+- **Evidenza:** 3 test unitari (minimo fra livelli, nessun allentamento di profili e regole, validazione e file corrotto) e 2 d'integrazione (livello 0 e 1 con la chat, missioni ferme sotto il 4, nessuna modifica da chat). **Sospeso:** interfaccia grafica.
+
 ### ADR-0173 — Motore di intento e di contesto
 
 - **Data:** 2026-11-25 · **Stato:** implementata nel checkout (non committata, su richiesta del proprietario).

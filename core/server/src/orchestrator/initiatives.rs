@@ -36,7 +36,7 @@ impl Jarvis {
     ) -> Result<Vec<&'static str>, CoreError> {
         let s = proactive::settings(&self.cfg.data_dir);
         let mut fired = Vec::new();
-        if s["enabled"] != true {
+        if s["enabled"] != true || !crate::permissions::background_allowed(&self.cfg.data_dir) {
             return Ok(fired);
         }
         let time = |k: &str, d: &str| {
