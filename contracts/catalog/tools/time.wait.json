@@ -1,0 +1,38 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "time.wait",
+  "version": "1.0.0",
+  "summary": "Attende da 0 a 10 secondi (utile fra due passi di un piano)",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "seconds"
+    ],
+    "properties": {
+      "seconds": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 10
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "none",
+  "risk": "low",
+  "permissions": [
+    "core.compute:execute"
+  ],
+  "errors": [
+    "time.invalid"
+  ],
+  "timeout_ms": 12000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 1
+  },
+  "confirmation": "none"
+}

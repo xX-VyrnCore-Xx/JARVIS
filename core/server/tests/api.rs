@@ -1399,6 +1399,89 @@ async fn agents_and_model_routing_are_explained_without_sending_anything() {
 }
 
 #[tokio::test]
+async fn independent_plan_steps_run_in_parallel_and_results_are_verified() {
+    let e = env();
+    let started = std::time::Instant::now();
+    let (status, created) = e
+        .api(
+            "POST",
+            "/api/plans",
+            Some(json!({
+                "goal": "Attese in parallelo",
+                "run": true,
+                "steps": [
+                    {"id": "a", "tool": "time.wait", "arguments": {"seconds": 1.0}},
+                    {"id": "b", "tool": "time.wait", "arguments": {"seconds": 1.0}},
+                    {"id": "c", "tool": "time.wait", "arguments": {"seconds": 1.0}},
+                    {"id": "sum", "tool": "math.calc", "depends_on": ["a", "b", "c"],
+                     "arguments": {"expression": "1+2"},
+                     "expect": [{"field": "result", "op": "eq", "value": 3}]}
+                ]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let done = wait_plan(
+        &e,
+        created["id"].as_str().unwrap(),
+        &["succeeded", "failed"],
+    )
+    .await;
+    let elapsed = started.elapsed();
+    assert_eq!(done["status"], "succeeded", "{done}");
+    // Tre attese da un secondo in parallelo: molto meno dei tre secondi di un'esecuzione in fila.
+    assert!(
+        elapsed < std::time::Duration::from_millis(2400),
+        "{elapsed:?}"
+    );
+    assert!(done["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|ev| ev["kind"] == "parallel"));
+    assert_eq!(done["steps_executed"], 4);
+    // Le condizioni di successo fanno fallire un passo il cui risultato non è quello atteso.
+    let (_, wrong) = e
+        .api(
+            "POST",
+            "/api/plans",
+            Some(json!({
+                "goal": "Risultato errato",
+                "run": true,
+                "steps": [
+                    {"id": "calc", "tool": "math.calc", "arguments": {"expression": "2+2"},
+                     "expect": [{"field": "result", "op": "eq", "value": 5}]},
+                    {"id": "next", "tool": "time.now", "depends_on": ["calc"]}
+                ]
+            })),
+        )
+        .await;
+    let failed = wait_plan(&e, wrong["id"].as_str().unwrap(), &["failed", "succeeded"]).await;
+    assert_eq!(failed["status"], "failed", "{failed}");
+    assert_eq!(
+        failed["steps"][0]["error"]["code"],
+        "plan.expectation_failed"
+    );
+    assert!(failed["steps"][0]["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("result"));
+    assert!(matches!(
+        failed["steps"][1]["status"].as_str(),
+        Some("skipped" | "cancelled")
+    ));
+    // Strumenti con stato non entrano nei gruppi paralleli e le condizioni non valide sono rifiutate.
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/plans",
+            Some(json!({"goal": "x", "steps": [{"id": "a", "tool": "time.now", "expect": [{"field": "x", "op": "boh"}]}]})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
 async fn tailscale_status_is_reported_without_authorising_anything() {
     let e = env();
     let (status, view) = e.api("GET", "/api/tailscale", None).await;

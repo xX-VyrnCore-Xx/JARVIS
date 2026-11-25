@@ -113,6 +113,36 @@ pub fn entry(descriptor: &Value) -> Value {
     })
 }
 
+/// Strumenti che non toccano il database né lo stato del Core: calcoli, lettura di file nella workspace e rete.
+/// Solo questi possono girare in parallelo dentro un piano (ogni esecuzione usa un archivio privato e vuoto).
+pub fn parallel_safe(name: &str) -> bool {
+    name.starts_with("biz.")
+        || matches!(
+            name,
+            "time.now"
+                | "time.wait"
+                | "math.calc"
+                | "units.convert"
+                | "date.calc"
+                | "text.count"
+                | "text.correct"
+                | "text.diff"
+                | "text.extract"
+                | "data.stats"
+                | "code.validate_json"
+                | "security.cvss"
+                | "it.subnet"
+                | "system.disks"
+                | "process.list"
+                | "fs.read"
+                | "fs.list"
+                | "fs.search"
+                | "web.search"
+                | "web.fetch"
+                | "weather.forecast"
+        )
+}
+
 /// Stato di salute da conteggi: poche esecuzioni non bastano per giudicare.
 pub fn health_state(runs: u64, failures: u64) -> &'static str {
     if runs < 3 {
@@ -156,6 +186,23 @@ mod tests {
         assert_eq!(out["category"], "storage");
         assert_eq!(out["offline"], false);
         assert_eq!(out["reversible"], "yes");
+    }
+
+    #[test]
+    fn only_stateless_tools_run_in_parallel() {
+        assert!(
+            parallel_safe("math.calc") && parallel_safe("biz.npv") && parallel_safe("web.fetch")
+        );
+        for sequential in [
+            "fs.write",
+            "notes.add",
+            "memory.search",
+            "sandbox.run",
+            "workflow.run",
+            "shell.run",
+        ] {
+            assert!(!parallel_safe(sequential), "{sequential}");
+        }
     }
 
     #[test]

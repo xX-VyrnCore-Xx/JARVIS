@@ -153,6 +153,14 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
                 "utf8_bytes": text.len(),
             }))
         }
+        "time.wait" => {
+            let seconds = args["seconds"].as_f64().unwrap_or(0.0);
+            if !(0.0..=10.0).contains(&seconds) {
+                return Err(ToolError::new("time.invalid", "Da 0 a 10 secondi"));
+            }
+            std::thread::sleep(std::time::Duration::from_millis((seconds * 1000.0) as u64));
+            Ok(json!({"waited_seconds": seconds}))
+        }
         "data.stats" => crate::datatools::stats(args),
         "text.extract" => crate::datatools::extract(args),
         "text.diff" => crate::datatools::diff(args),

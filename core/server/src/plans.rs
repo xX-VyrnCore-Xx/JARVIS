@@ -9,6 +9,8 @@ use serde_json::{json, Map, Value};
 
 pub const MAX_STEPS: usize = 20;
 pub const MAX_RETRIES: u64 = 2;
+/// Passi indipendenti eseguiti insieme al massimo.
+pub const MAX_PARALLEL: usize = 4;
 pub const DEFAULT_SECONDS: u64 = 120;
 pub const MAX_SECONDS: u64 = 900;
 /// Dimensione massima del risultato di un passo conservato nel piano.
@@ -87,9 +89,13 @@ pub fn validate(input: &Value) -> Result<Value, String> {
                 json!({"tool": undo_tool, "arguments": u.get("arguments").cloned().unwrap_or_else(|| json!({}))})
             }
         };
+        let expect = match step.get("expect").filter(|e| !e.is_null()) {
+            None => json!([]),
+            Some(list) => validate_expect(list).map_err(|e| format!("Passo «{id}»: {e}"))?,
+        };
         out.push(json!({
             "id": id, "tool": tool, "arguments": arguments, "depends_on": depends,
-            "retries": retries, "on_error": on_error, "undo": undo,
+            "retries": retries, "on_error": on_error, "undo": undo, "expect": expect,
             "status": "pending", "attempts": 0, "output": Value::Null, "error": Value::Null,
         }));
     }
@@ -159,6 +165,84 @@ fn has_cycle(steps: &[Value]) -> bool {
             return true;
         }
     }
+}
+
+const EXPECT_OPS: [&str; 9] = [
+    "exists",
+    "not_empty",
+    "eq",
+    "ne",
+    "gt",
+    "ge",
+    "lt",
+    "le",
+    "contains",
+];
+
+/// Condizioni di successo di un passo (validazione indipendente del risultato): `[{field, op, value}]`.
+fn validate_expect(list: &Value) -> Result<Value, String> {
+    let items = list.as_array().ok_or("«expect» deve essere una lista")?;
+    if items.len() > 8 {
+        return Err("al massimo 8 condizioni".into());
+    }
+    for item in items {
+        let op = item["op"].as_str().unwrap_or_default();
+        if !EXPECT_OPS.contains(&op) {
+            return Err(format!(
+                "operatore sconosciuto «{op}» ({})",
+                EXPECT_OPS.join(", ")
+            ));
+        }
+        if item["field"].as_str().is_none_or(str::is_empty) {
+            return Err("ogni condizione indica «field»".into());
+        }
+        if !matches!(op, "exists" | "not_empty") && item.get("value").is_none() {
+            return Err(format!("la condizione «{op}» richiede «value»"));
+        }
+    }
+    Ok(list.clone())
+}
+
+/// Verifica le condizioni sul risultato di un passo; l'errore dice quale non è soddisfatta.
+pub fn check_expect(output: &Value, expect: &Value) -> Result<(), String> {
+    for item in expect.as_array().into_iter().flatten() {
+        let field = item["field"].as_str().unwrap_or_default();
+        let op = item["op"].as_str().unwrap_or_default();
+        let actual = lookup(output, field);
+        let wanted = &item["value"];
+        let number = |v: &Value| v.as_f64();
+        let ok = match (op, actual) {
+            ("exists", found) => found.is_some(),
+            (_, None) => false,
+            ("not_empty", Some(v)) => match v {
+                Value::Null => false,
+                Value::String(s) => !s.is_empty(),
+                Value::Array(a) => !a.is_empty(),
+                Value::Object(o) => !o.is_empty(),
+                _ => true,
+            },
+            ("eq", Some(v)) => v == wanted,
+            ("ne", Some(v)) => v != wanted,
+            ("gt", Some(v)) => number(v).zip(number(wanted)).is_some_and(|(a, b)| a > b),
+            ("ge", Some(v)) => number(v).zip(number(wanted)).is_some_and(|(a, b)| a >= b),
+            ("lt", Some(v)) => number(v).zip(number(wanted)).is_some_and(|(a, b)| a < b),
+            ("le", Some(v)) => number(v).zip(number(wanted)).is_some_and(|(a, b)| a <= b),
+            ("contains", Some(Value::String(s))) => wanted.as_str().is_some_and(|w| s.contains(w)),
+            ("contains", Some(Value::Array(a))) => a.contains(wanted),
+            _ => false,
+        };
+        if !ok {
+            return Err(format!(
+                "condizione non soddisfatta: «{field}» {op} {}",
+                if wanted.is_null() {
+                    String::new()
+                } else {
+                    wanted.to_string()
+                }
+            ));
+        }
+    }
+    Ok(())
 }
 
 fn status_of<'a>(doc: &'a Value, id: &str) -> &'a str {
@@ -479,6 +563,41 @@ mod tests {
         assert!(resolve(&json!({"n": "${next.x}"}), &doc)
             .unwrap_err()
             .contains("non è concluso"));
+    }
+
+    #[test]
+    fn expectations_validate_the_result_of_a_step() {
+        let ok = json!({"result": 42, "name": "alfa", "items": [1, 2], "empty": ""});
+        for expect in [
+            json!([{"field": "result", "op": "eq", "value": 42}]),
+            json!([{"field": "result", "op": "gt", "value": 40}, {"field": "result", "op": "le", "value": 42}]),
+            json!([{"field": "name", "op": "contains", "value": "lf"}, {"field": "items", "op": "contains", "value": 2}]),
+            json!([{"field": "items", "op": "not_empty"}, {"field": "name", "op": "exists"}]),
+            json!([]),
+        ] {
+            assert!(check_expect(&ok, &expect).is_ok(), "{expect}");
+        }
+        for expect in [
+            json!([{"field": "result", "op": "eq", "value": 41}]),
+            json!([{"field": "result", "op": "lt", "value": 10}]),
+            json!([{"field": "assente", "op": "exists"}]),
+            json!([{"field": "empty", "op": "not_empty"}]),
+            json!([{"field": "name", "op": "ne", "value": "alfa"}]),
+        ] {
+            assert!(
+                check_expect(&ok, &expect)
+                    .unwrap_err()
+                    .contains("non soddisfatta"),
+                "{expect}"
+            );
+        }
+        let bad = |expect: Value| {
+            validate(&plan(json!([{"id": "a", "tool": "x", "expect": expect}]))).unwrap_err()
+        };
+        assert!(bad(json!([{"field": "a", "op": "boh"}])).contains("operatore"));
+        assert!(bad(json!([{"op": "exists"}])).contains("field"));
+        assert!(bad(json!([{"field": "a", "op": "eq"}])).contains("value"));
+        assert!(bad(json!("x")).contains("lista"));
     }
 
     #[test]

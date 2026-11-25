@@ -87,6 +87,7 @@ const SOURCES: &[&str] = &[
     tool_file!("shell.run"),
     tool_file!("system.info"),
     tool_file!("time.now"),
+    tool_file!("time.wait"),
     tool_file!("web.browse"),
     tool_file!("web.fetch"),
     tool_file!("web.form"),
