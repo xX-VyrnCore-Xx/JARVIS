@@ -75,6 +75,7 @@ pub mod toolbox;
 pub mod tools;
 pub mod toolsys;
 pub mod updates;
+pub mod watch;
 pub mod web;
 
 /// Istante corrente in RFC 3339 UTC con millisecondi (`common.schema.json#/$defs/timestamp`).

@@ -500,6 +500,8 @@ pub fn router(state: Shared) -> Router {
         )
         .route("/api/mcp/servers/remove", post(mcp_server_remove))
         .route("/api/mcp/servers/test", post(mcp_server_test))
+        .route("/api/watches", get(watches_list).post(watch_add))
+        .route("/api/watches/remove", post(watch_remove))
         .route("/api/twin", get(twin_get))
         .route("/api/agents", get(agents_registry))
         .route("/api/agents/route", get(agents_route))
@@ -2729,6 +2731,26 @@ async fn mcp_server_test(State(state): State<Shared>, Json(body): Json<Value>) -
         Ok(Err(message)) => CoreError::Unavailable(message).into_response(),
         Err(_) => CoreError::Internal("prova interrotta".into()).into_response(),
     }
+}
+
+/// Regole di osservazione dei file (ADR-0158), solo proprietario.
+async fn watches_list(State(state): State<Shared>) -> Response {
+    reply(Ok(with_core(&state, |j| j.watches()).await))
+}
+
+async fn watch_add(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply_said(
+        with_core(&state, move |j| j.watch_add(&body)).await,
+        "watch.add",
+    )
+}
+
+async fn watch_remove(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let id = body["id"].as_str().unwrap_or_default().to_string();
+    reply_said(
+        with_core(&state, move |j| j.watch_remove(&id)).await,
+        "watch.remove",
+    )
 }
 
 /// Digital Environment Twin (ADR-0157): inventario dell'ambiente a cui JARVIS ha accesso.

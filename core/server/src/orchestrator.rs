@@ -3171,6 +3171,25 @@ impl Jarvis {
             return Ok(runs);
         }
         self.proactive_poll(now_t);
+        // Eventi (ADR-0158): un file o una cartella osservati sono cambiati.
+        for rule in crate::watch::changed(&self.cfg.data_dir, &self.cfg.workspace()) {
+            let key = rule["workflow"].as_str().unwrap_or_default();
+            match self.find_workflow(key) {
+                Ok((doc, _)) if doc["enabled"] == true => {
+                    if let Ok(run) = self.run_workflow(&doc, "event", None) {
+                        runs.push(run);
+                    }
+                }
+                _ => {
+                    let _ = self.notify(json!({
+                        "severity": "warning", "category": "automation",
+                        "title": "Una regola di osservazione non ha trovato il suo workflow",
+                        "body": format!("«{}»: workflow assente o sospeso.", rule["workflow"].as_str().unwrap_or("?")),
+                        "source": {"kind": "module", "id": "watch"}, "dedupe_key": format!("watch:{}", rule["id"].as_str().unwrap_or_default()),
+                    }));
+                }
+            }
+        }
         // Cose da fare scadute (ADR-0046): una notifica per ciascuna, una sola volta.
         let now_s = now_t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         for t in crate::toolbox::todos_due(&self.store, &now_s) {
@@ -3372,6 +3391,60 @@ impl Jarvis {
             },
             "tools_available_here": by_category,
         }))
+    }
+
+    pub fn watches(&self) -> Value {
+        crate::watch::list(&self.cfg.data_dir)
+    }
+
+    pub fn watch_add(&mut self, body: &Value) -> Result<Value, CoreError> {
+        // Il workflow si indica per id (anche il prefisso) o per nome esatto; la regola conserva l'id.
+        let key = body["workflow"]
+            .as_str()
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let doc = match self.find_workflow(&key) {
+            Ok((doc, _)) => doc,
+            Err(_) => {
+                let named: Vec<Value> = self
+                    .workflows()?
+                    .into_iter()
+                    .filter(|w| {
+                        w["name"]
+                            .as_str()
+                            .is_some_and(|n| n.eq_ignore_ascii_case(&key))
+                    })
+                    .collect();
+                match named.as_slice() {
+                    [one] => one.clone(),
+                    [] => return Err(CoreError::NotFound(format!("Nessuna automazione «{key}»"))),
+                    _ => {
+                        return Err(CoreError::BadRequest(
+                            "Più automazioni hanno quel nome: usa l'id".into(),
+                        ))
+                    }
+                }
+            }
+        };
+        let id = doc["workflow_id"].as_str().unwrap_or_default().to_string();
+        let rule = crate::watch::add(
+            &self.cfg.data_dir,
+            &self.cfg.workspace(),
+            body["path"].as_str().unwrap_or_default(),
+            &id,
+        )
+        .map_err(CoreError::BadRequest)?;
+        self.record_owner_action("watch.add")?;
+        Ok(rule)
+    }
+
+    pub fn watch_remove(&mut self, id: &str) -> Result<Value, CoreError> {
+        if !crate::watch::remove(&self.cfg.data_dir, id).map_err(CoreError::Internal)? {
+            return Err(CoreError::NotFound("regola non trovata".into()));
+        }
+        self.record_owner_action("watch.remove")?;
+        Ok(self.watches())
     }
 
     /// Server MCP autorizzati e strumenti remoti (ADR-0156). Solo dal computer del proprietario.

@@ -513,3 +513,54 @@ fn tampering_after_an_edit_is_still_detected() {
     let runs = j.run_due(Utc::now() + Duration::seconds(61)).unwrap();
     assert_eq!(runs[0]["error"]["code"], "security.approval_mismatch");
 }
+
+#[test]
+fn a_changed_file_starts_its_workflow_once_and_the_emergency_stop_pauses_watching() {
+    let (mut j, data) = fresh();
+    let out = j.chat("ogni minuto scrivi battito.txt: vivo").unwrap();
+    let id = out.confirmation.as_ref().unwrap()["confirmation_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    j.confirm(&id, true).unwrap();
+    let name = j.workflows().unwrap()[0]["name"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    std::fs::write(data.join("workspace/ingresso.txt"), "versione 1").unwrap();
+    j.watch_add(&json!({"path": "ingresso.txt", "workflow": name}))
+        .unwrap();
+    assert!(j
+        .watch_add(&json!({"path": "../fuori", "workflow": name}))
+        .is_err());
+    // Nessun cambiamento: nessuna esecuzione.
+    assert!(j.run_due(Utc::now()).unwrap().is_empty());
+    std::fs::write(data.join("workspace/ingresso.txt"), "versione 2, più lunga").unwrap();
+    let runs = j.run_due(Utc::now()).unwrap();
+    assert_eq!(runs.len(), 1, "{runs:?}");
+    assert_eq!(runs[0]["trigger"]["kind"], "event");
+    assert_eq!(runs[0]["status"], "succeeded");
+    assert!(validate(Contract::WorkflowRun, &runs[0]).is_valid());
+    assert_eq!(
+        std::fs::read_to_string(data.join("workspace/battito.txt")).unwrap(),
+        "vivo"
+    );
+    // Una sola esecuzione per cambiamento.
+    assert!(j.run_due(Utc::now()).unwrap().is_empty());
+    // Con l'arresto di emergenza il controllo non avviene: il cambiamento resta in attesa.
+    j.emergency_set(true).unwrap();
+    std::fs::write(
+        data.join("workspace/ingresso.txt"),
+        "versione 3 ancora più lunga",
+    )
+    .unwrap();
+    std::fs::remove_file(data.join("workspace/battito.txt")).unwrap();
+    assert!(j.run_due(Utc::now()).unwrap().is_empty());
+    assert!(!data.join("workspace/battito.txt").exists());
+    j.emergency_set(false).unwrap();
+    assert_eq!(j.run_due(Utc::now()).unwrap().len(), 1);
+    assert!(data.join("workspace/battito.txt").exists());
+    let id = j.watches()["items"][0]["id"].as_str().unwrap().to_string();
+    j.watch_remove(&id).unwrap();
+    assert!(j.watches()["items"].as_array().unwrap().is_empty());
+}
