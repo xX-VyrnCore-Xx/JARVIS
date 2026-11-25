@@ -38,7 +38,7 @@ const MEMORY_CHARS: usize = 3000;
 /// Lunghezza massima dei turni più vecchi: la richiesta corrente resta intera.
 const OLD_TURN_CHARS: usize = 1200;
 /// Strumenti proposti al massimo in una delega (il contratto ne ammette 96): 64 non bastavano più dopo ADR-0132.
-const MAX_DELEGATED_TOOLS: usize = 80;
+const MAX_DELEGATED_TOOLS: usize = 128;
 const MAX_MESSAGE: usize = 8000;
 
 /// Strumenti ammessi via MCP: calcolo, conversioni, data e ora e informazioni di sistema. Niente file, memoria,
