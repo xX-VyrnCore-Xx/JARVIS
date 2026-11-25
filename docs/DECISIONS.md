@@ -2298,6 +2298,13 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** l'avatar macOS aggiunge due stati legati a condizioni reali: *attesa di autorizzazione* (conferme in sospeso nel Core → colore ambra) e *offline* (Core non raggiungibile → senza saturazione e attenuato). Ogni stato ha un'etichetta di accessibilità con priorità offline > errore > parla > ascolto > elabora > attesa > inattivo. «Riduci movimento» resta rispettato. `docs/ARCHITECTURE.md` ottiene una mappa del repository e un diagramma di sequenza basati sui moduli presenti.
 - **Non incluso:** stati «ricerca», «esecuzione» e «collaborazione tra agenti»: il client non riceve ancora un segnale affidabile per distinguerli dall'elaborazione generica; non si simulano.
 
+### ADR-0189 — Mappa del codice (`code.map`)
+
+- **Data:** 2026-11-25. **Stato:** implementata (parziale rispetto a §8).
+- **Decisione:** strumento di sola lettura (rischio basso, nessuna conferma) che analizza la workspace in modo lessicale: linguaggi e righe, file più grandi, simboli (`fn`, `struct`, `def`, `class`…), dipendenze fra moduli (`use crate::`, `mod`, `import`), moduli più usati, chi dipende da un modulo (diretti e transitivi) e dove è definito un simbolo. Esclude `target`, `.git`, `node_modules` e simili; ignora collegamenti simbolici; limiti di 4000 file e 512 KiB per file.
+- **Limiti dichiarati:** non è un compilatore (macro e importazioni dinamiche sfuggono); i moduli si identificano dal nome del file, quindi nomi uguali in cartelle diverse si fondono; **nessun indice persistente né incrementale**, ogni richiesta rilegge i file.
+- **Evidenza:** test su una workspace sintetica e sui sorgenti del Core.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

@@ -43,6 +43,7 @@ const SOURCES: &[&str] = &[
     tool_file!("fs.move"),
     tool_file!("fs.search"),
     tool_file!("fs.usage"),
+    tool_file!("code.map"),
     tool_file!("git.branch"),
     tool_file!("git.commit"),
     tool_file!("git.diff"),

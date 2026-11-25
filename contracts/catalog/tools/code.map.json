@@ -1,0 +1,51 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "code.map",
+  "version": "1.0.0",
+  "summary": "Mappa il codice della workspace: linguaggi, simboli, dipendenze fra moduli e impatto di una modifica (sola lettura)",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {
+      "path": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300
+      },
+      "top": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 50
+      },
+      "dependents_of": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "symbol": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "node",
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "node.filesystem:read"
+  ],
+  "errors": [
+    "fs.unavailable"
+  ],
+  "timeout_ms": 20000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

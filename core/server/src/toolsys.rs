@@ -140,6 +140,7 @@ pub fn parallel_safe(name: &str) -> bool {
                 | "fs.list"
                 | "fs.search"
                 | "fs.usage"
+                | "code.map"
                 | "git.status"
                 | "git.log"
                 | "git.diff"

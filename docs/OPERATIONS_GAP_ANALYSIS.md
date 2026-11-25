@@ -9,7 +9,7 @@ Data: 2026-11-25. Metodo: elenco di strumenti del catalogo (`contracts/catalog/t
 | 5 | Voce | PARTIAL | Wake word, trascrizione, sintesi, motore di sistema macOS (ADR-0183). Da verificare: barge-in, eco, VAD, dizionario di pronuncia. |
 | 6 | Workspace intelligente | PARTIAL → **nuovo** | Profili con app e cartelle e piano di attivazione (questa sessione). Mancano snapshot, ripristino sessioni, modalità focus. |
 | 7 | Centro operativo personale | PARTIAL | `todo.*`, `notes.*`, briefing giornaliero/settimanale (`/api/proactive/*`), connettori Calendar/Gmail. Mancano obiettivi, blocchi di tempo, tracciamento sessioni. |
-| 8 | Intelligenza per sviluppatori | PARTIAL | `git.*`, `deps.list`, `log.analyze`, `code.check_python`. Mancano indice del codice, grafo delle dipendenze, copertura, diagnosi build. |
+| 8 | Intelligenza per sviluppatori | PARTIAL → **migliorato** | `git.*`, `deps.list`, `log.analyze`, `code.check_python`, `code.map` (simboli, grafo delle dipendenze, impatto; ADR-0189). Mancano indice persistente/incrementale, copertura, diagnosi build. |
 | 9 | Infrastruttura | PARTIAL | `system.*`, `process.list`, `it.subnet`, `/api/docker`, nodi e dispositivi, Tailscale. Mancano inventario server, SSH, certificati, uptime, backup remoti. |
 | 10 | Documenti | PARTIAL | `pdf.extract`, `sheet.read`, `table.summary`, `text.diff`. Mancano DOCX/PPTX, confronto fra documenti, versioni, ricerca semantica. |
 | 11 | Comunicazioni | PARTIAL | Connettori Gmail/Calendar, canali di notifica. Bozze separate dall'invio: da verificare. |
