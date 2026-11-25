@@ -1,0 +1,42 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "data.stats",
+  "version": "1.0.0",
+  "summary": "Statistiche descrittive (media, mediana, deviazione, quartili, valori anomali) di una lista di numeri o dei numeri in un testo",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {
+      "values": {
+        "type": "array",
+        "maxItems": 5000,
+        "items": {
+          "type": "number"
+        }
+      },
+      "text": {
+        "type": "string",
+        "maxLength": 12000
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "none",
+  "risk": "low",
+  "permissions": [
+    "core.compute:execute"
+  ],
+  "errors": [
+    "data.invalid"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

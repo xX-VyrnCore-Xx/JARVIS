@@ -1,0 +1,48 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "text.extract",
+  "version": "1.0.0",
+  "summary": "Estrae email, indirizzi web, date, hashtag o telefoni da un testo, senza duplicati",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "text"
+    ],
+    "properties": {
+      "text": {
+        "type": "string",
+        "maxLength": 12000
+      },
+      "kind": {
+        "type": "string",
+        "enum": [
+          "all",
+          "email",
+          "url",
+          "date",
+          "hashtag",
+          "phone"
+        ]
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "none",
+  "risk": "low",
+  "permissions": [
+    "core.compute:execute"
+  ],
+  "errors": [
+    "text.invalid"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}
