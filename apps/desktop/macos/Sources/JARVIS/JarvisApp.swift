@@ -133,6 +133,10 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var speakReplies = false
     @State private var systemStats: [String: Any] = [:]
     @State private var missionsPreview: [Record] = []
+    /// Dati e controlli delle schede della Plancia (ADR-0181).
+    @StateObject private var dash = DashboardModel()
+    @StateObject private var media = NowPlaying()
+    @State private var portrait: NSImage? = UserPortrait.load()
     @State private var commandText = ""
     @State private var avatarSpeaking = false
     /// Ascolto «Hey Jarvis» (ADR-0134): microfono analizzato solo per la parola di attivazione.
@@ -607,39 +611,75 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     }
 
     private var dashboard: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             dashboardHero.staggeredAppear(0)
-            commandBar.staggeredAppear(1)
-            quickCategories
-            attentionCard.staggeredAppear(3)
+            attentionCard.staggeredAppear(1)
+            dashboardRow.staggeredAppear(2)
             protectionCard.staggeredAppear(3)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 12, alignment: .top)], spacing: 12) {
-                dashboardTile("Core", value: coreStatus, icon: "cpu", color: coreIsUp ? .green : .orange,
-                              destination: .system, order: 0)
-                dashboardTile("Intelligenza artificiale", value: aiStatus.0, icon: "sparkles", color: aiStatus.1,
-                              destination: .models, order: 1)
-                dashboardTile("Conferme in attesa", value: count("pending_confirmations"), icon: "checkmark.shield",
-                              color: (core.health["pending_confirmations"] as? Int ?? 0) > 0 ? .orange : .green,
-                              destination: .confirmations, order: 2)
-                dashboardTile("Notifiche da leggere", value: count("notifications_unread"), icon: "bell",
-                              color: (core.health["notifications_unread"] as? Int ?? 0) > 0 ? .cyan : .green,
-                              destination: .notifications, order: 3)
-                dashboardTile("Automazioni attive", value: count("automations"), icon: "bolt",
-                              color: .cyan, destination: .workflows, order: 4)
-                dashboardTile("Verifica audit", value: auditStatus.0, icon: "lock.shield",
-                              color: auditStatus.1, destination: .security, order: 5)
-            }
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 12) {
-                    recentActivity.frame(minWidth: 340)
-                    missionsCard.frame(minWidth: 300)
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 18) {
+                    quickCategories
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: 12, alignment: .top)], spacing: 12) {
+                        dashboardTile("Core", value: coreStatus, icon: "cpu", color: coreIsUp ? .green : .orange,
+                                      destination: .system, order: 0)
+                        dashboardTile("Intelligenza artificiale", value: aiStatus.0, icon: "sparkles", color: aiStatus.1,
+                                      destination: .models, order: 1)
+                        dashboardTile("Conferme in attesa", value: count("pending_confirmations"), icon: "checkmark.shield",
+                                      color: (core.health["pending_confirmations"] as? Int ?? 0) > 0 ? .orange : .green,
+                                      destination: .confirmations, order: 2)
+                        dashboardTile("Notifiche da leggere", value: count("notifications_unread"), icon: "bell",
+                                      color: (core.health["notifications_unread"] as? Int ?? 0) > 0 ? .cyan : .green,
+                                      destination: .notifications, order: 3)
+                        dashboardTile("Automazioni attive", value: count("automations"), icon: "bolt",
+                                      color: .cyan, destination: .workflows, order: 4)
+                        dashboardTile("Verifica audit", value: auditStatus.0, icon: "lock.shield",
+                                      color: auditStatus.1, destination: .security, order: 5)
+                    }
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: 12) {
+                            recentActivity.frame(minWidth: 340)
+                            missionsCard.frame(minWidth: 300)
+                        }
+                        VStack(alignment: .leading, spacing: 12) {
+                            recentActivity
+                            missionsCard
+                        }
+                    }
                 }
-                VStack(alignment: .leading, spacing: 12) {
-                    recentActivity
-                    missionsCard
-                }
+                .padding(.top, 10)
+            } label: {
+                Text("Altre sezioni e dettagli").font(.callout.weight(.medium)).foregroundStyle(.secondary)
             }
-            .staggeredAppear(8)
+        }
+        .task(id: refresh) {
+            while !Task.isCancelled {
+                await dash.refresh(core)
+                try? await Task.sleep(for: .seconds(20))
+            }
+        }
+        .task {
+            while !Task.isCancelled {
+                await dash.sampleSystem(core)
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
+    }
+
+    /// Seconda fila della Plancia: sistema, attività, notifiche, media e monitoraggio.
+    private var dashboardRow: some View {
+        let notifications = dash.summary["notifications"] as? [String: Any] ?? [:]
+        let unread = notifications["unread"] as? Int ?? 0
+        let noteItems = notifications["items"] as? [[String: Any]] ?? []
+        let cards = Group {
+            SystemStatusCard(stats: dash.stats, coreUp: coreIsUp, detail: "Modello: \(activeModel)")
+            TodayCard(items: dash.summary["today"] as? [[String: Any]] ?? []) { startChat("Ricordami di ") }
+            NotificationsCard(unread: unread, items: Array(noteItems.prefix(3)))
+            MediaCard(media: media)
+            MonitoringCard(history: dash.cpuHistory, monitoring: dash.summary["monitoring"] as? [String: Any] ?? [:])
+        }
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 12) { cards }.frame(minWidth: 1000)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 12, alignment: .top)], spacing: 12) { cards }
         }
     }
 
@@ -661,25 +701,35 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         }
     }
 
-    /// Intestazione della Plancia: saluto, modello attivo, avatar con anelli e carichi del sistema.
+    /// Intestazione della Plancia (ADR-0181): saluto e barra dei comandi a sinistra, avatar al centro, specialisti
+    /// attivi, meteo facoltativo e progetti a destra.
     private var dashboardHero: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 18) {
-                VStack(alignment: .leading, spacing: 18) { greetingBlock; aiCard }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                heroAvatar(size: 230).frame(width: 290)
-                VStack(alignment: .leading, spacing: 14) { systemCard; agentsCard }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        let rightColumn = VStack(spacing: 12) {
+            ActiveAgentsCard(items: dash.summary["agents"] as? [[String: Any]] ?? [])
+            WeatherCard(weather: dash.weather, configured: dash.weather["configured"] as? Bool ?? false) { place in
+                Task { await dash.setWeatherPlace(core, place) }
             }
-            .frame(minWidth: 900)
+            ProjectsCard(projects: dash.summary["projects"] as? [[String: Any]] ?? [])
+        }
+        return ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 18) {
+                VStack(alignment: .leading, spacing: 18) {
+                    greetingBlock
+                    WaveformView(active: sending || avatarSpeaking, barCount: 34).frame(height: 38)
+                    commandBar
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                heroAvatar(size: 330).frame(width: 350)
+                rightColumn.frame(width: 280)
+            }
+            .frame(minWidth: 980)
             VStack(alignment: .leading, spacing: 16) {
                 HStack(alignment: .center, spacing: 14) {
                     greetingBlock.frame(maxWidth: .infinity, alignment: .leading)
-                    heroAvatar(size: 150).frame(width: 190)
+                    heroAvatar(size: 170).frame(width: 200)
                 }
-                aiCard
-                systemCard
-                agentsCard
+                commandBar
+                rightColumn
             }
         }
         .padding(22)
@@ -696,29 +746,36 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     private var greetingBlock: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(timeGreeting).font(.title3).foregroundStyle(.secondary)
+            Text("Ciao,").font(.system(size: 40, weight: .bold, design: .rounded)).foregroundStyle(.white)
             HStack(spacing: 10) {
-                Text("Sono").font(.system(size: 38, weight: .bold, design: .rounded)).foregroundStyle(.white)
-                Text("JARVIS").font(.system(size: 38, weight: .bold, design: .rounded))
+                Text("sono").font(.system(size: 40, weight: .bold, design: .rounded)).foregroundStyle(.white)
+                Text("JARVIS").font(.system(size: 40, weight: .bold, design: .rounded))
                     .foregroundStyle(LinearGradient(colors: [Color.cyan, Color(red: 0.4, green: 0.55, blue: 1)],
                                                     startPoint: .leading, endPoint: .trailing))
+                    .shadow(color: Color.cyan.opacity(0.45), radius: 8)
             }
             .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
-            Text(statusHeadline).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text("\(timeGreeting). Il tuo assistente intelligente: cosa vuoi fare oggi?")
+                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            Text(statusHeadline).font(.caption).foregroundStyle(.secondary.opacity(0.8))
         }
     }
 
     private func heroAvatar(size: CGFloat) -> some View {
-        VStack(spacing: 10) {
-            ZStack {
-                OrbitRings().frame(width: size, height: size)
-                Avatar(thinking: sending && streamingReply.isEmpty, speaking: avatarSpeaking || !streamingReply.isEmpty,
+        let talking = avatarSpeaking || !streamingReply.isEmpty
+        return ZStack {
+            OrbitRings().frame(width: size, height: size)
+            if let portrait {
+                PortraitAvatar(image: portrait, speaking: talking, thinking: sending && streamingReply.isEmpty,
+                               listening: wake.phase == .capturing, level: wake.level, alert: avatarAlert)
+                    .frame(width: size * 0.82, height: size * 0.82)
+            } else {
+                Avatar(thinking: sending && streamingReply.isEmpty, speaking: talking,
                        listening: wake.phase == .capturing, level: wake.level, alert: avatarAlert,
                        celebrate: celebrateTick).frame(width: size * 0.78, height: size * 0.78)
             }
-            .frame(width: size, height: size)
-            WaveformView(active: sending || avatarSpeaking, barCount: 26).frame(maxWidth: size)
         }
+        .frame(width: size, height: size)
         .frame(maxWidth: .infinity)
     }
 
@@ -835,8 +892,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     /// Barra dei comandi: scrivi e vai direttamente in chat.
     private var commandBar: some View {
         HStack(spacing: 12) {
-            Image(systemName: "sparkles").foregroundStyle(.cyan)
-            TextField("Parla con JARVIS…", text: $commandText)
+            Image(systemName: "mic.fill").foregroundStyle(.cyan)
+            TextField("Parlami o scrivi un comando…", text: $commandText)
                 .textFieldStyle(.plain).font(.body).onSubmit(sendCommand)
             Button { sendCommand() } label: { Image(systemName: "paperplane.fill").font(.body.weight(.semibold)) }
                 .buttonStyle(PressableStyle()).foregroundStyle(.cyan)

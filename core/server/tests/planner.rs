@@ -874,3 +874,38 @@ fn a_handoff_carries_the_goal_and_plan_state_to_one_device_without_any_permissio
         .to_string()
         .contains("handoff.accept"));
 }
+
+#[test]
+fn the_dashboard_summary_collects_agents_projects_tasks_and_counters_without_any_default_place() {
+    // ADR-0181: una chiamata per le schede; il meteo è facoltativo e non ha località predefinita.
+    let mut j = jarvis();
+    let plan = j
+        .plan_create(&json!({"goal": "Migrare i backup", "steps": [
+            {"id": "a", "tool": "time.now", "arguments": {}},
+            {"id": "b", "tool": "time.now", "depends_on": ["a"], "arguments": {}}]}))
+        .unwrap();
+    j.plan_start(plan["id"].as_str().unwrap()).unwrap();
+    j.plan_step(plan["id"].as_str().unwrap()).unwrap();
+    j.chat("ricordami di pagare la bolletta domani").unwrap();
+    let s = j.dashboard_summary().unwrap();
+    assert!(s["agents"].as_array().unwrap().len() >= 7, "{s}");
+    assert!(s["agents"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|a| a["state"] == "attivo"));
+    let project = &s["projects"][0];
+    assert_eq!(project["name"], "Migrare i backup", "{s}");
+    assert_eq!(project["steps"], 2);
+    assert_eq!(project["percent"], 50, "{s}");
+    assert!(s["monitoring"]["uptime_s"].is_number());
+    assert!(s["monitoring"]["operations"].as_i64().unwrap() >= 1);
+    assert_eq!(s["weather_configured"], false);
+    let (place, _) = j.dashboard_weather_target();
+    assert!(place.is_none(), "nessuna località predefinita");
+    assert!(j.dashboard_update(&json!({"weather_place": 3})).is_err());
+    j.dashboard_update(&json!({"weather_place": "Torino"}))
+        .unwrap();
+    assert_eq!(j.dashboard_weather_target().0.as_deref(), Some("Torino"));
+    assert_eq!(j.dashboard_summary().unwrap()["weather_configured"], true);
+}

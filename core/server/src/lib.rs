@@ -20,6 +20,7 @@ pub mod config;
 pub mod connector_catalog;
 pub mod connectors;
 mod container_runtime;
+pub mod dashboard;
 pub mod datatools;
 pub mod devtools;
 pub mod docs;

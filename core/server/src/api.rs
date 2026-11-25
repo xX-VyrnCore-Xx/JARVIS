@@ -701,6 +701,9 @@ pub fn router(state: Shared) -> Router {
         .route("/api/memory/{id}/meta", post(memory_meta))
         .route("/api/handoffs", get(handoffs_get).post(handoff_post))
         .route("/api/handoffs/{id}/accept", post(handoff_accept))
+        .route("/api/dashboard", axum::routing::patch(dashboard_patch))
+        .route("/api/dashboard/summary", get(dashboard_summary))
+        .route("/api/dashboard/weather", get(dashboard_weather))
         .route("/api/world", get(world_get))
         .route("/api/world/sync", post(world_sync))
         .route("/api/world/infer", post(world_infer))
@@ -2149,6 +2152,50 @@ async fn handoff_accept(
         .and_then(|d| d.0 .0["device_id"].as_str().map(str::to_string))
         .unwrap_or_else(|| "owner".into());
     reply(with_core(&state, move |j| j.handoff_accept(&id, &who)).await)
+}
+
+/// Dati della Plancia in una chiamata (ADR-0181).
+async fn dashboard_summary(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.dashboard_summary()).await)
+}
+
+async fn dashboard_patch(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply(with_core(&state, move |j| j.dashboard_update(&body)).await)
+}
+
+/// Meteo della località scelta dal proprietario: nessuna richiesta esterna senza una località; risultato in
+/// cache per mezz'ora; la rete si usa fuori dal blocco del Core.
+async fn dashboard_weather(State(state): State<Shared>) -> Response {
+    static CACHE: std::sync::Mutex<Option<(std::time::Instant, String, Value)>> =
+        std::sync::Mutex::new(None);
+    let (place, web) = with_core(&state, |j| j.dashboard_weather_target()).await;
+    let Some(place) = place else {
+        return Json(json!({"configured": false})).into_response();
+    };
+    if let Some((at, cached_place, view)) = CACHE.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    {
+        if cached_place == place && at.elapsed().as_secs() < crate::dashboard::WEATHER_TTL_S {
+            return Json(view).into_response();
+        }
+    }
+    let fetch = {
+        let place = place.clone();
+        tokio::task::spawn_blocking(move || crate::toolbox::weather(&web, &place, 1)).await
+    };
+    match fetch {
+        Ok(Ok(raw)) => {
+            let view = crate::dashboard::weather_view(&raw);
+            *CACHE.lock().unwrap_or_else(|e| e.into_inner()) =
+                Some((std::time::Instant::now(), place, view.clone()));
+            Json(view).into_response()
+        }
+        Ok(Err(e)) => Json(json!({"configured": true, "available": false, "reason": e.message}))
+            .into_response(),
+        Err(_) => {
+            Json(json!({"configured": true, "available": false, "reason": "lettura interrotta"}))
+                .into_response()
+        }
+    }
 }
 
 /// Stato del mondo (ADR-0175): osservato e dedotto, con versioni e dato vecchio. Lettura per il proprietario.

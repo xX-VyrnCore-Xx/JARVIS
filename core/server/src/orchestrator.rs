@@ -4567,6 +4567,87 @@ impl Jarvis {
         Ok(out)
     }
 
+    /// Tutto ciò che mostrano le schede della Plancia, in una chiamata (ADR-0181).
+    pub fn dashboard_summary(&self) -> Result<Value, CoreError> {
+        let agents = self.agent_supervisor()["items"].clone();
+        let mut projects: Vec<Value> = Vec::new();
+        for doc in self.store.plans_recent(12).map_err(internal)? {
+            let status = doc["status"].as_str().unwrap_or_default();
+            if status == "cancelled" {
+                continue;
+            }
+            let steps = doc["steps"].as_array().cloned().unwrap_or_default();
+            let done = steps.iter().filter(|s| s["status"] == "done").count();
+            projects.push(json!({
+                "id": doc["id"],
+                "name": doc["goal"].as_str().unwrap_or_default().chars().take(60).collect::<String>(),
+                "status": status, "steps": steps.len(), "done": done,
+                "percent": crate::dashboard::percent(done, steps.len()),
+            }));
+        }
+        projects.sort_by_key(|p| match p["status"].as_str() {
+            Some("running") => 0,
+            Some("paused" | "waiting") => 1,
+            Some("pending") => 2,
+            _ => 3,
+        });
+        projects.truncate(4);
+        let todos = crate::toolbox::todo_list(&self.store, &json!({"status": "tutte"}))
+            .map(|v| v["items"].as_array().cloned().unwrap_or_default())
+            .unwrap_or_default();
+        let mut today: Vec<Value> = todos
+            .iter()
+            .filter(|t| t["done_at"].is_null())
+            .take(4)
+            .cloned()
+            .collect();
+        today.extend(
+            todos
+                .iter()
+                .filter(|t| !t["done_at"].is_null())
+                .take(2)
+                .cloned(),
+        );
+        let notes = self.notifications(4, false, None)?;
+        let tools = self.store.tool_stats().map_err(internal)?;
+        let runs: i64 = tools.iter().filter_map(|t| t["runs"].as_i64()).sum();
+        let failures: i64 = tools.iter().filter_map(|t| t["failures"].as_i64()).sum();
+        let agent_runs: i64 = self
+            .store
+            .agent_stats()
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|s| s["runs"].as_i64())
+            .sum();
+        Ok(json!({
+            "agents": agents,
+            "projects": projects,
+            "today": today,
+            "notifications": {"unread": notes["unread"], "items": notes["items"]},
+            "monitoring": {
+                "uptime_s": self.obs.snapshot()["uptime_s"],
+                "operations": runs + agent_runs,
+                "tool_success_percent": if runs == 0 { Value::Null } else { json!(((runs - failures) as f64 / runs as f64 * 1000.0).round() / 10.0) },
+            },
+            "weather_configured": crate::dashboard::weather_place(&self.cfg.data_dir).is_some(),
+        }))
+    }
+
+    /// Località del meteo (se scelta) e configurazione Web per leggerlo fuori dal blocco del Core.
+    pub fn dashboard_weather_target(&self) -> (Option<String>, crate::web::WebConfig) {
+        (
+            crate::dashboard::weather_place(&self.cfg.data_dir),
+            self.cfg.web.clone(),
+        )
+    }
+
+    pub fn dashboard_update(&mut self, patch: &Value) -> Result<Value, CoreError> {
+        let out = crate::dashboard::set_weather_place(&self.cfg.data_dir, patch)
+            .map_err(CoreError::BadRequest)?;
+        self.record_owner_action("dashboard.update")?;
+        Ok(out)
+    }
+
     pub fn permissions_update(&mut self, patch: &Value) -> Result<Value, CoreError> {
         // Le regole devono riferirsi a strumenti del catalogo (o a un loro prefisso).
         for pattern in patch["rules"]
