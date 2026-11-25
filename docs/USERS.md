@@ -60,6 +60,13 @@ Può creare inviti, **disattivare** (chiude le sessioni) o riattivare un account
 accesso al computer e ai file del Core tecnicamente controlla anche la chiave di cifratura: la separazione è fra i **profili**, non una
 protezione dall'amministratore del sistema.
 
+## Come si usa dalle app
+
+- **Utente:** nel client egui (Windows e macOS) apri «Collega JARVIS», scegli *Registrati* (con l'invito) o *Accedi*, indica l'indirizzo
+  del Core. Vedi solo **Chat** e **Profilo**; la sessione si ricorda finché non esci.
+- **Proprietario:** pagina **Utenti** (client egui e console SwiftUI) per registrazioni, uso del modello cloud, inviti e account.
+  La console SwiftUI si collega solo al Core locale: l'accesso utente è nel client egui.
+
 ## Limiti
 
 Gli utenti non possono usare strumenti, file, connettori, automazioni o piani; la chat dell'utente non ha streaming; non esistono

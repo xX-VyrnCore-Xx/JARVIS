@@ -1,7 +1,7 @@
 # Stato di implementazione
 
 Fonte autorevole dello stato di ogni requisito dell'evoluzione «piattaforma di intelligenza artificiale personale».
-Aggiornata il 2026-11-25 sul codice di `main` più la PR in corso (ADR fino alla 0169). Legenda: **Implementato** (funziona end-to-end ed è
+Aggiornata il 2026-11-25 sul codice di `main` più la PR in corso (ADR fino alla 0170). Legenda: **Implementato** (funziona end-to-end ed è
 verificato da test), **Parziale** (funziona in parte: il limite è indicato), **Sperimentale** (c'è, non maturo),
 **Pianificato** (assente). Nessuna voce è un segnaposto: ciò che non esiste è dichiarato «Pianificato».
 Verifiche ed esiti per revisione: [ROADMAP.md](ROADMAP.md). Piano dei passi successivi: [IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md).
@@ -113,8 +113,7 @@ sono dichiarate nel registro (`platforms`), non simulate.
 ## 8b. Utenti
 
 Account con registrazione su invito, accesso con Argon2id e sessioni revocabili, chat isolata senza strumenti, memoria e **personalità per
-utente**, gestione da parte del proprietario: **Implementato** nel Core e nell'API (ADR-0169, [USERS.md](USERS.md)); interfacce in
-ADR-0170. Strumenti per gli utenti, streaming, recupero password via email, provider esterni: **Pianificato** o escluso per scelta.
+utente**, gestione da parte del proprietario: **Implementato** nel Core e nell'API (ADR-0169, [USERS.md](USERS.md)); interfacce di accesso, chat, profilo e pagina Utenti in ADR-0170. Strumenti per gli utenti, streaming, recupero password via email, provider esterni: **Pianificato** o escluso per scelta.
 
 ## 9. Interfaccia
 

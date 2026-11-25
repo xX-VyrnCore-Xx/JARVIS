@@ -22,9 +22,13 @@ const POSITIVE: egui::Color32 = egui::Color32::from_rgb(105, 220, 174);
 const CAUTION: egui::Color32 = egui::Color32::from_rgb(245, 190, 96);
 const NEGATIVE: egui::Color32 = egui::Color32::from_rgb(255, 125, 135);
 
-const NAV: [(&str, &str, bool); 20] = [
+mod users_ui;
+use users_ui::UserState;
+
+const NAV: [(&str, &str, bool); 22] = [
     ("dashboard", "Plancia", true),
     ("chat", "Chat", false),
+    ("profile", "Profilo", true),
     ("tasks", "Attività", false),
     ("models", "Modelli AI", true),
     ("missions", "Missioni", true),
@@ -40,6 +44,7 @@ const NAV: [(&str, &str, bool); 20] = [
     ("devices", "Dispositivi", true),
     ("security", "Sicurezza", true),
     ("permissions", "Permessi", true),
+    ("users", "Utenti", true),
     ("audit", "Audit", true),
     ("system", "Sistema", true),
     ("updates", "Aggiornamenti", true),
@@ -77,12 +82,12 @@ fn scroll_fade(ui: &egui::Ui, view: egui::Rect, fill: egui::Color32, top: bool) 
 /// Gruppo della barra laterale di ogni pagina (stessi titoli dell'app macOS).
 fn nav_group(id: &str) -> &'static str {
     match id {
-        "dashboard" | "chat" | "tasks" | "models" => "Assistente",
+        "dashboard" | "chat" | "profile" | "tasks" | "models" => "Assistente",
         "missions" | "plans" | "automations" | "workspace" | "memory" | "skills" | "agents" => {
             "Organizzazione"
         }
         "connectors" | "tools" | "plugins" | "devices" => "Connessioni",
-        "security" | "permissions" | "audit" => "Protezione",
+        "security" | "permissions" | "users" | "audit" => "Protezione",
         _ => "Sistema",
     }
 }
@@ -201,6 +206,27 @@ fn draw_nav_icon(painter: &egui::Painter, center: egui::Pos2, id: &str, color: e
                 stroke,
             ));
         }
+        "profile" => {
+            painter.circle_stroke(p(0.0, -3.5), 3.4, stroke);
+            painter.add(egui::Shape::line(
+                vec![
+                    p(-6.5, 8.0),
+                    p(-5.5, 3.0),
+                    p(0.0, 1.5),
+                    p(5.5, 3.0),
+                    p(6.5, 8.0),
+                ],
+                stroke,
+            ));
+        }
+        "users" => {
+            painter.circle_stroke(p(-3.0, -3.5), 2.8, stroke);
+            painter.circle_stroke(p(4.5, -2.5), 2.2, stroke);
+            painter.line_segment([p(-8.0, 7.0), p(-7.0, 2.5)], stroke);
+            painter.line_segment([p(-7.0, 2.5), p(1.0, 2.5)], stroke);
+            painter.line_segment([p(1.0, 2.5), p(2.0, 7.0)], stroke);
+            painter.line_segment([p(5.0, 2.0), p(8.0, 3.5)], stroke);
+        }
         "agents" => {
             painter.circle_stroke(p(0.0, -4.5), 2.8, stroke);
             painter.circle_stroke(p(-5.5, 3.5), 2.4, stroke);
@@ -316,6 +342,8 @@ enum Event {
     /// Modelli di piano (ADR-0159).
     PlanTemplates(Result<Value, String>),
     Improvements(Result<Value, String>),
+    UserReply(Result<Value, String>),
+    UserArea(Result<(Value, Value, Value), String>),
     /// Comando pronunciato dopo «Hey Jarvis» (ADR-0140).
     #[cfg_attr(not(windows), allow(dead_code))]
     WakeCommand(String),
@@ -331,6 +359,8 @@ struct Connection {
     client: ApiClient,
     core: Option<RunningCore>,
     remote: bool,
+    /// Sessione di un utente (ADR-0169): solo chat e profilo.
+    user: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -342,6 +372,7 @@ struct CoreBackend {
 #[derive(Clone, Copy)]
 enum Mutation {
     Post,
+    Put,
     Patch,
     Delete,
 }
@@ -375,6 +406,8 @@ pub struct JarvisApp {
     template_params: std::collections::HashMap<String, String>,
     plan_goal: String,
     nav_scroll_pending: bool,
+    /// Accesso e area degli utenti (ADR-0170).
+    users: UserState,
     /// Istante dell'ultima operazione riuscita: l'avatar risponde con un'onda verde.
     celebrate_at: f64,
     /// Colore d'accento della personalità dell'utente connesso (RGB).
@@ -547,6 +580,7 @@ impl JarvisApp {
             template_params: std::collections::HashMap::new(),
             plan_goal: String::new(),
             nav_scroll_pending: true,
+            users: UserState::default(),
             celebrate_at: 0.0,
             accent: None,
             nav_last_page: String::new(),
@@ -633,18 +667,41 @@ impl JarvisApp {
                         self.client = Some(Arc::new(connection.client));
                         self.pairing = false;
                         self.error = None;
+                        self.users.busy = false;
+                        self.users.mode = connection.user;
                         if self.remote {
                             self.current = "chat".into();
                         }
-                        self.start_notification_poll(ctx);
-                        self.history_loading = true;
-                        self.refresh(ctx);
+                        if self.users.mode {
+                            // Area dell'utente: nessun flusso di notifiche né cronologia del proprietario.
+                            self.users.area_loaded = false;
+                            self.users.synced = false;
+                            self.chat.clear();
+                        } else {
+                            self.start_notification_poll(ctx);
+                            self.history_loading = true;
+                            self.refresh(ctx);
+                        }
                     }
                     Err(error) => {
                         self.pairing = false;
-                        self.error = Some(error);
+                        if self.users.busy {
+                            // Accesso o registrazione non riusciti: si resta nella schermata di accesso.
+                            self.users.busy = false;
+                            self.pair_error = Some(error);
+                        } else {
+                            self.error = Some(error);
+                        }
                     }
                 },
+                Event::UserReply(result) => {
+                    self.apply_user_reply(result);
+                    ctx.request_repaint();
+                }
+                Event::UserArea(result) => {
+                    self.apply_user_area(result);
+                    ctx.request_repaint();
+                }
                 Event::Loaded(page, result) if page == self.current => {
                     self.loading = false;
                     match result {
@@ -796,6 +853,12 @@ impl JarvisApp {
                     match result {
                         Ok(doc) => {
                             self.error = None;
+                            if let (Some(code), Some(expires)) =
+                                (doc["code"].as_str(), doc["expires_at"].as_str())
+                            {
+                                self.users.invite_shown =
+                                    Some((code.to_owned(), expires.to_owned()));
+                            }
                             self.celebrate_at = ctx.input(|input| input.time);
                             if let Some(message) = doc["message"].as_str() {
                                 self.action_notice = Some((message.to_owned(), Instant::now()));
@@ -1014,6 +1077,9 @@ impl JarvisApp {
     /// Notifiche in tempo reale (ADR-0098): il flusso del Core avvisa subito quando ne arriva una e il
     /// client rilegge l'elenco; il polling resta come rete di sicurezza, rallentato mentre il flusso è attivo.
     fn start_notification_poll(&self, ctx: &egui::Context) {
+        if self.users.mode {
+            return;
+        }
         let Some(client) = self.client.clone() else {
             return;
         };
@@ -1148,6 +1214,10 @@ impl JarvisApp {
         let Some(client) = self.client.clone() else {
             return;
         };
+        // La chat dell'utente non ha una pagina da caricare: legge la sua cronologia a parte.
+        if self.users.mode && self.current == "chat" {
+            return;
+        }
         if self.loading {
             return;
         }
@@ -1487,6 +1557,10 @@ impl JarvisApp {
         std::thread::spawn(move || {
             let result = match mutation {
                 Mutation::Post => client.post(&path, body.as_ref()),
+                Mutation::Put => body
+                    .as_ref()
+                    .ok_or_else(|| "Corpo della richiesta mancante".to_string())
+                    .and_then(|body| client.put(&path, body)),
                 Mutation::Patch => body
                     .as_ref()
                     .ok_or_else(|| "Corpo della richiesta mancante".to_string())
@@ -1502,7 +1576,7 @@ impl JarvisApp {
     fn navigation(&mut self, ui: &mut egui::Ui, compact: bool, ctx: &egui::Context) {
         let mut last_group = "";
         for (id, label, owner_only) in NAV {
-            if self.remote && owner_only {
+            if !self.nav_visible(id, owner_only) {
                 continue;
             }
             if !compact {
@@ -1690,7 +1764,9 @@ impl JarvisApp {
                     );
                     ui.painter().circle_filled(dot.center(), 3.0, POSITIVE);
                     ui.label(
-                        egui::RichText::new(if self.remote {
+                        egui::RichText::new(if self.users.mode {
+                            "JARVIS · il tuo account"
+                        } else if self.remote {
                             "JARVIS remoto"
                         } else {
                             "JARVIS Online"
@@ -1720,6 +1796,10 @@ impl JarvisApp {
     }
 
     fn show_chat(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if self.users.mode {
+            self.show_user_chat(ui, ctx);
+            return;
+        }
         if !self.remote {
             if !self.conversations_loaded {
                 self.conversations_loaded = true;
@@ -2014,6 +2094,8 @@ impl JarvisApp {
             "plans" => self.show_plans(ui, ctx),
             "tools" => self.show_tools(ui, ctx),
             "agents" => self.show_agents(ui, ctx),
+            "profile" => self.show_user_profile(ui, ctx),
+            "users" => self.show_users(ui, ctx),
             "plugins" => self.show_plugins(ui, ctx),
             "permissions" => self.show_permissions(ui, ctx),
             "tasks" | "automations" | "skills" | "workspace" | "devices" | "security" | "audit" => {
@@ -5202,29 +5284,8 @@ impl JarvisApp {
     fn show_pairing(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.vertical_centered(|ui| {
             ui.add_space(60.0);
-            ui.heading("Collega il Core JARVIS");
-            ui.label(
-                "Inserisci l’origine HTTPS del Core e il codice temporaneo creato in Dispositivi.",
-            );
-            ui.add_space(16.0);
-            ui.add_sized(
-                [ui.available_width().min(460.0), 40.0],
-                egui::TextEdit::singleline(&mut self.remote_url)
-                    .hint_text("https://jarvis.example.com"),
-            );
-            ui.add_sized(
-                [ui.available_width().min(460.0), 40.0],
-                egui::TextEdit::singleline(&mut self.pair_code).hint_text("Codice monouso"),
-            );
-            if let Some(error) = &self.pair_error {
-                ui.colored_label(egui::Color32::LIGHT_RED, error);
-            }
-            if ui
-                .add_enabled(!self.pairing, egui::Button::new("Associa dispositivo"))
-                .clicked()
-            {
-                self.pair_remote(ctx);
-            }
+            ui.heading("Collega JARVIS");
+            self.show_user_auth(ui, ctx);
         });
     }
 
@@ -5262,10 +5323,12 @@ impl JarvisApp {
                     std::fs::set_permissions(&token_path, std::fs::Permissions::from_mode(0o600))
                         .map_err(|e| e.to_string())?;
                 }
+                let _ = std::fs::remove_file(data_dir.join("remote-user-token"));
                 ApiClient::device(&base, token.to_string()).map(|client| Connection {
                     client,
                     core: None,
                     remote: true,
+                    user: false,
                 })
             });
             let _ = tx.send(Event::Connected(Box::new(result)));
@@ -5929,6 +5992,8 @@ fn endpoint(page: &str) -> &'static str {
         "permissions" => "/api/permissions",
         "plans" => "/api/plans",
         "tools" => "/api/tools/registry",
+        "profile" => "/api/me",
+        "users" => "/api/users",
         "agents" => "/api/agents/supervisor",
         "plugins" => "/api/plugins",
         "workspace" => "/api/workspace",
@@ -6012,6 +6077,20 @@ fn connect_core() -> Result<Connection, String> {
                         client,
                         core: None,
                         remote: true,
+                        user: false,
+                    }
+                });
+            }
+        }
+        // Sessione di un utente (ADR-0169): si riprende dal file privato scritto all'accesso.
+        if let Ok(token) = std::fs::read_to_string(data_dir.join("remote-user-token")) {
+            if !token.trim().is_empty() {
+                return ApiClient::user(url.as_str(), token.trim().to_string()).map(|client| {
+                    Connection {
+                        client,
+                        core: None,
+                        remote: true,
+                        user: true,
                     }
                 });
             }
@@ -6060,6 +6139,7 @@ fn connect_core() -> Result<Connection, String> {
         client,
         core: Some(core),
         remote: false,
+        user: false,
     })
 }
 
