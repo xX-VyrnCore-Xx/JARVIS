@@ -473,3 +473,41 @@ fn plugin_packages_install_run_update_and_remove_atomically() {
         Err(CoreError::NotFound(_))
     ));
 }
+
+#[tokio::test]
+async fn broad_delegations_fall_back_to_the_normal_chat_without_a_cloud_model() {
+    // ADR-0172: senza modello cloud «sistema tutto» non crea piani e la chat risponde come sempre.
+    use axum::body::Body;
+    use axum::http::Request;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+    let j = jarvis();
+    let app = jarvis_core::api::router(jarvis_core::api::state(j, "t".into(), 18785));
+    let call = |method: &str, uri: &str, body: serde_json::Value| {
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("host", "127.0.0.1:18785")
+            .header("content-type", "application/json")
+            .header("x-jarvis-token", "t")
+            .body(Body::from(body.to_string()))
+            .unwrap()
+    };
+    for uri in ["/api/chat", "/api/chat/stream"] {
+        let res = app
+            .clone()
+            .oneshot(call("POST", uri, json!({"message": "Sistema tutto"})))
+            .await
+            .unwrap();
+        assert_eq!(res.status(), 200, "{uri}");
+        let bytes = res.into_body().collect().await.unwrap().to_bytes();
+        assert!(!String::from_utf8_lossy(&bytes).contains("Ho preparato un piano"));
+    }
+    let res = app
+        .oneshot(call("GET", "/api/plans", json!({})))
+        .await
+        .unwrap();
+    let bytes = res.into_body().collect().await.unwrap().to_bytes();
+    let plans: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(plans["items"].as_array().unwrap().is_empty(), "{plans}");
+}
