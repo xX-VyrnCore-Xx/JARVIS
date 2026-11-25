@@ -8,6 +8,7 @@ pub mod accounts;
 pub mod agents;
 pub mod api;
 pub mod appcontrol;
+pub mod assets;
 pub mod audit;
 pub mod automation;
 pub mod backup;
@@ -44,6 +45,7 @@ pub mod observability;
 pub mod openapi;
 pub mod orchestrator;
 pub mod passkeys;
+pub mod perf;
 pub mod permissions;
 pub mod persona;
 pub mod planner;
@@ -88,6 +90,7 @@ pub mod toolsys;
 pub mod updates;
 pub mod watch;
 pub mod web;
+pub mod workspaces;
 pub mod world;
 
 /// Istante corrente in RFC 3339 UTC con millisecondi (`common.schema.json#/$defs/timestamp`).

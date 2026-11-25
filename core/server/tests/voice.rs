@@ -15,6 +15,10 @@ const TOKEN: &str = "t";
 const PORT: u16 = 18769;
 
 fn app(voice: &str) -> axum::Router {
+    app_with(Some(voice.into()))
+}
+
+fn app_with(voice: Option<String>) -> axum::Router {
     let data = std::env::temp_dir().join(format!("jarvis-voice-{}", uuid::Uuid::new_v4().simple()));
     let cfg = Config {
         host: "127.0.0.1".parse().unwrap(),
@@ -23,7 +27,7 @@ fn app(voice: &str) -> axum::Router {
         python: std::env::var("JARVIS_PYTHON").unwrap_or_else(|_| "python3".into()),
         ai_dir: PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../ai"),
         delegation_timeout_ms: 30_000,
-        voice_engine: Some(voice.into()),
+        voice_engine: voice,
         worker_env: vec![],
         scheduler_tick_s: 20,
         token: TOKEN.into(),
@@ -334,4 +338,33 @@ async fn voice_endpoints_require_the_session_token() {
     )
     .await;
     assert_eq!(s, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn without_a_chosen_engine_the_voice_is_never_forced_off() {
+    // ADR-0183: il Core non deve spegnere la voce da solo; senza motori installati dice cosa manca.
+    let res = app_with(None)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/voice/wake")
+                .header("host", format!("127.0.0.1:{PORT}"))
+                .header("x-jarvis-token", TOKEN)
+                .header("content-type", "audio/wav")
+                .body(Body::from(wav(1.0, 8000.0, None)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    let body: Value =
+        serde_json::from_slice(&res.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    let message = body["error"]["message"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        !message.contains("JARVIS_VOICE_ENGINE=off") && !message.contains("disattivata"),
+        "{status} {body}"
+    );
 }

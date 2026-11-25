@@ -256,6 +256,23 @@ function check(condition, message) {
   check(mcpServers.status === 200, "elenco dei server MCP autorizzati");
   const watches = await request("/api/watches", { token: ownerToken });
   check(watches.status === 200, "elenco delle osservazioni di file");
+  const wsSave = await request("/api/workspaces/profiles", { method: "POST", token: ownerToken, body: { name: "Prova e2e", apps: ["Terminal"], dirs: ["."] } });
+  check(wsSave.status === 200 && wsSave.json?.name === "Prova e2e", "profilo di workspace salvato");
+  const wsBad = await request("/api/workspaces/profiles", { method: "POST", token: ownerToken, body: { name: "x", apps: ["rm -rf /"] } });
+  check(wsBad.status === 400, "profilo di workspace con comando rifiutato");
+  const wsPlan = await request("/api/workspaces/profiles/plan", { method: "POST", token: ownerToken, body: { id: "Prova e2e" } });
+  check(wsPlan.status === 200 && wsPlan.json?.executes === false && wsPlan.json?.steps?.some((x) => x.tool === "app.open" && x.needs_confirmation === true), "attivazione del profilo: solo piano, nessuna esecuzione");
+  const wsDel = await request("/api/workspaces/profiles/remove", { method: "POST", token: ownerToken, body: { id: "Prova e2e" } });
+  check(wsDel.status === 200, "profilo di workspace rimosso");
+  const priv = await request("/api/privacy/overview", { token: ownerToken });
+  check(priv.status === 200 && Array.isArray(priv.json?.stored_locally?.data_dir_entries) && priv.json?.cloud && !JSON.stringify(priv.json).includes(ownerToken), "centro privacy: inventario senza segreti");
+  const perfGet = await request("/api/performance", { token: ownerToken });
+  check(perfGet.status === 200 && perfGet.json?.active === "balanced" && perfGet.json?.profiles?.length === 4, "profili di risorse: predefinito bilanciato");
+  const perfBad = await request("/api/performance", { method: "POST", token: ownerToken, body: { profile: "turbo" } });
+  check(perfBad.status === 400, "profilo di risorse sconosciuto rifiutato");
+  const perfEco = await request("/api/performance", { method: "POST", token: ownerToken, body: { profile: "eco" } });
+  check(perfEco.status === 200 && perfEco.json?.active === "eco", "profilo Eco attivato");
+  await request("/api/performance", { method: "POST", token: ownerToken, body: { profile: "balanced" } });
   const propose = await request("/api/plans/propose", { method: "POST", token: ownerToken, body: { goal: "Riassumi lo stato del repository" } });
   check([503, 200].includes(propose.status) && (propose.status === 200 || propose.json?.error?.code === "unavailable"), "proposta di piano: senza modello cloud risposta chiara, mai un piano avviato");
   const badGoal = await request("/api/plans/propose", { method: "POST", token: ownerToken, body: { goal: "" } });
@@ -305,6 +322,14 @@ function check(condition, message) {
   check(contradictions.status === 200 && Array.isArray(contradictions.json?.items), "contraddizioni della memoria");
   const handoffNoDevice = await request("/api/handoffs", { method: "POST", token: ownerToken, body: { to: "inesistente", goal: "prova" } });
   check(handoffNoDevice.status === 400, "passaggio verso un dispositivo sconosciuto rifiutato");
+  const mcpPresets = await request("/api/mcp/presets", { token: ownerToken });
+  check(mcpPresets.status === 200 && mcpPresets.json?.items?.some((p) => p.id === "huggingface" && p.url === "https://huggingface.co/mcp"), "server MCP noti: Hugging Face");
+  const mcpHealthMissing = await request("/api/mcp/servers/health", { method: "POST", token: ownerToken, body: { name: "inesistente" } });
+  check(mcpHealthMissing.status === 404, "salute di un server MCP sconosciuto rifiutata");
+  const memExport = await request("/api/memory/export", { token: ownerToken });
+  check(memExport.status === 200 && memExport.json?.contract === "jarvis.memory-export/1" && Array.isArray(memExport.json?.items), "esportazione della memoria");
+  const memBad = await request("/api/memory/import", { method: "POST", token: ownerToken, body: { data: { contract: "altro" } } });
+  check(memBad.status === 400, "importazione con formato sconosciuto rifiutata");
   const badLogin = await request("/api/auth/login", { method: "POST", body: { username: "nessuno", password: "una frase sbagliata" } });
   check(badLogin.status === 401, "accesso con credenziali sbagliate rifiutato");
 })().catch((error) => {

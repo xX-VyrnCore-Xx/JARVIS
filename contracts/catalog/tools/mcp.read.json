@@ -1,0 +1,49 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "mcp.read",
+  "version": "1.0.0",
+  "summary": "Chiama uno strumento di sola lettura di un server MCP che il proprietario ha approvato per l'uso senza conferma",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "server",
+      "tool"
+    ],
+    "properties": {
+      "server": {
+        "type": "string",
+        "pattern": "^[a-z0-9_-]{1,32}$"
+      },
+      "tool": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "arguments": {
+        "type": "object"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "integration",
+  "effects": "read",
+  "risk": "medium",
+  "permissions": [
+    "integration.mcp:execute"
+  ],
+  "errors": [
+    "mcp.failed",
+    "mcp.not_allowed",
+    "mcp.not_auto",
+    "mcp.unknown_server"
+  ],
+  "timeout_ms": 45000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "none"
+}

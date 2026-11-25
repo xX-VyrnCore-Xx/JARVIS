@@ -1897,6 +1897,26 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** `GET /api/agents` descrive i sette specialisti e il generalista (competenze dagli strumenti, rischio massimo, contesto isolato o condiviso, risorse); `GET /api/agents/route?q=` mostra quale agente riceverebbe una richiesta e per quali parole chiave; `GET /api/models/route?q=` mostra la rotta per compito, il modello per provider, il ripiego e la riservatezza (credenziali bloccate, dati personali rilevati, profilo condiviso) **senza inviare nulla**. Non si introducono nuovi agenti: si riusano quelli esistenti.
 - **Evidenza:** test API del registro e dell'instradamento.
 
+### ADR-0183 — «Voce non disponibile»: causa e riconoscimento del Mac
+
+- **Data:** 2026-11-25 · **Stato:** corretto nel Core (verificato); **Swift verificato solo dalla CI** (nessun compilatore qui, mai provato con un microfono).
+- **Causa (riprodotta):** dal commit «Usa solo inferenza cloud…» il Core avviava il worker con `JARVIS_VOICE_ENGINE=off` **sempre**, quindi `POST /api/voice/wake` e `/transcribe` rispondevano `voce disattivata (JARVIS_VOICE_ENGINE=off)` e l'app macOS mostrava «Voce non disponibile» a ogni avvio, anche con i pacchetti vocali installati. Questo contraddiceva ADR-0010 e ADR-0054 («il setup installa la voce»). In più `POST /api/setup/start` rifiuta l'installazione con «La voce richiede un provider audio cloud», che non esiste.
+- **Correzione nel Core:** il worker riceve `JARVIS_VOICE_ENGINE` solo se lo sceglie il proprietario o le verifiche (`auto`, `local`, `fake`, `off`); senza scelta usa `auto`: i motori installati, altrimenti un messaggio che dice cosa manca («STT faster-whisper non installato (./jarvis.sh voice-setup); TTS Piper non installato…»).
+- **App macOS:** l'ascolto «Hey Jarvis» usa ora, come primo motore, il **riconoscimento vocale del Mac sul dispositivo** (`SFSpeechRecognizer` italiano, `requiresOnDeviceRecognition`): nessun modello da installare, nessun audio fuori dal computer, nessun file. Se mancano il permesso, la lingua o la dettatura sul dispositivo, l'app dice cosa fare e ripiega sul motore del Core. L'etichetta generica «Voce non disponibile» diventa «Ascolto non disponibile» con il motivo accanto. Nuova voce `NSSpeechRecognitionUsageDescription` nell'`Info.plist`.
+- **Compromesso di riservatezza da confermare:** ADR-0134 chiede che l'app ascolti «solo Hey Jarvis, nient'altro»: il motore del Core risponde solo sì/no e non produce testo. Il riconoscimento del Mac invece **trascrive in memoria** ciò che si dice mentre è in ascolto (sul dispositivo, per una sessione di circa un minuto, senza salvare né inviare) e agisce solo dopo la parola di attivazione. L'app lo dichiara nella scheda «Voce di JARVIS». Chi vuole la garanzia più stretta usa il motore del Core (`./jarvis.sh voice-setup`).
+- **Non incluso:** installazione dei modelli vocali dall'app (resta `voice-setup`; il rifiuto «provider audio cloud» di `/api/setup/start` non è stato toccato), la stessa correzione per Windows (ADR-0140) e Android.
+- **Evidenza:** riprodotto e verificato con un Core avviato: prima `voce disattivata (JARVIS_VOICE_ENGINE=off)`, dopo il messaggio vero sui motori mancanti. **Sospeso:** compilazione dello Swift (CI) e prova con microfono e dettatura italiana sul Mac.
+
+### ADR-0182 — Client MCP più robusto, Hugging Face con un gesto e memoria portabile
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout.
+- **Client MCP (`mcp_client.rs`):** (1) **sessione riusata** per 10 minuti (una `initialize` ogni dieci richieste, non una per richiesta) e **riaperta da sola** se il server la dimentica (HTTP 404 o messaggio di sessione), con una sola ripetizione; (2) **elenco strumenti a pagine** (`nextCursor`, fino a 5 pagine e 200 strumenti), in cache 5 minuti, con **impronta** e segnalazione `changed` quando uno strumento compare, sparisce o cambia schema; (3) **nuovi tentativi limitati**: HTTP 429/502/503/504 sempre (con `Retry-After` fino a 5 s), guasto di rete solo per le letture, **mai per `tools/call`** (potrebbe aver avuto effetto), al più 3 tentativi e 40 s in tutto; (4) **argomenti verificati sullo schema del server** (obbligatori, tipo, valori ammessi) prima di partire e strumento sconosciuto rifiutato; (5) risposte con testo, risorse testuali, collegamenti e contenuto strutturato, **immagini e audio ridotti a un segnaposto** con tipo e dimensione; (6) **statistiche per server** (chiamate, errori, ultimo esito, latenza) in `GET /api/mcp/servers` e `POST /api/mcp/servers/health` (raggiungibilità, latenza, strumenti, strumenti di sola lettura, cambiamenti).
+- **Politica per strumento, decisa dal proprietario** (`POST /api/mcp/servers/policy`): `allow` (strumenti chiamabili; vuoto = tutti; vale per `mcp.list`/`mcp.call`/`mcp.read`, errore `mcp.not_allowed`) e `auto` (strumenti che JARVIS può eseguire **senza conferma**). `auto` è accettato solo per strumenti che il server dichiara di sola lettura nell'elenco già letto o, per un server noto, nel catalogo; senza l'elenco non si può approvare nulla. Si usa con il nuovo strumento **`mcp.read`** (rischio medio, effetto «lettura», nessuna conferma): rifiuta (`mcp.not_auto`) tutto ciò che non è in `auto`. **`mcp.call` resta sempre con conferma** (rischio alto): niente scorciatoie nella policy né nel contratto.
+- **Hugging Face:** `GET /api/mcp/presets` elenca i server noti; `POST /api/mcp/servers` con `{"preset": "huggingface"}` (e, facoltativo, `"auto_suggested": true`) autorizza `https://huggingface.co/mcp` con gli strumenti di sola lettura consigliati dal catalogo (`hub_repo_search`, `hub_repo_details`, `hf_fs`, osservati il 2026-11-25 insieme a `hf_whoami`, tutti con `readOnlyHint`). Nessuno strumento automatico di fabbrica. Nuova competenza **«Modelli e dataset su Hugging Face»** (25 competenze) e l'agente di ricerca riceve `mcp.list`, `mcp.read`, `mcp.call` e le parole «Hugging Face» / «modelli open source». Resta valido ADR-0166: nessun provider Hugging Face dentro il Core; gli argomenti partono verso Hugging Face e il risultato è un dato non attendibile.
+- **Memoria:** `GET /api/memory/export` (documento `jarvis.memory-export/1` senza identificativi e senza credenziali), `POST /api/memory/import` (anteprima o scrittura: valida, salta i doppioni, rifiuta credenziali e voci malformate con il motivo; «verified» arriva come «stated», origine ignota come «uncertain», provenienza `import`), `POST /api/memory/contradictions/resolve` (tiene la voce scelta, la marca «verified», elimina le altre della coppia; rifiuta se una è fissata), `POST /api/memory/compact` (riassume per settimana gli episodi più vecchi di N giorni in un solo riassunto «dedotto» che dura 180 giorni, mai i fissati; anteprima di default) e **scadenza adattiva**: un episodio davvero usato (importanza almeno 0,3) vive almeno 90 giorni. Tutto con audit.
+- **Non incluso:** OAuth e flussi SSE a lunga durata per MCP, risorse e prompt MCP, provider Hugging Face nel Core, il comando in chat «ricorda per il progetto X» (si usa l'API o l'argomento `project` dello strumento), esecuzione dei modelli trovati.
+- **Evidenza:** 14 test unitari del client (sessione riusata e riaperta, pagine e impronta, tentativi, validazione, contenuti, politica, salute, server noti) con un server HTTP locale, 1 d'integrazione con il Core (mcp.read prima e dopo l'approvazione, elenco ammesso, preset, salute), 4 unitari e 1 d'integrazione della memoria, e il controllo del routing verso la ricerca. Lo schema reale degli strumenti di Hugging Face è stato letto con `curl` (il client Rust non raggiunge host esterni da questo ambiente). **Sospeso:** prova del client Rust contro il server reale di Hugging Face.
+
 ### ADR-0181 — Plancia dal mock-up: schede, ritratto e avatar che parla e cambia colore
 
 - **Data:** 2026-11-25 · **Stato:** implementata nel checkout; **Swift verificato solo dalla CI** (nessun compilatore Swift qui, resa a schermo non vista).
@@ -2240,6 +2260,37 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** ricavare lunghezza e precisione separatamente da una finestra di dodici valutazioni per coppia provider e modello. Mostrare il risultato aggregato in Modelli AI. La valutazione resta locale e la richiesta prevale sulle preferenze.
 - **Contesto:** il proprietario può includere i turni recenti compatibili per un singolo invio. Restano valide le verifiche del Core su provenienza, credenziali e budget.
 - **Impostazioni:** la scelta del provider è esplicita. I modelli del catalogo possono compilare il campo prima del salvataggio e la rimozione della chiave richiede conferma.
+
+### ADR-0184 — Risposte incomplete dei provider cloud
+
+- **Data:** 2026-11-25. **Stato:** implementata (non ancora pubblicata).
+- **Contesto:** «NVIDIA NIM ha restituito una risposta incompleta». Cause: testo scartato quando `finish_reason` era `length`; contenuto vuoto dei modelli che ragionano (token esauriti nel ragionamento); `max_tokens` fisso a 2000 per l'agente; nessun nuovo tentativo sugli errori 5xx.
+- **Decisione:** il testo troncato viene conservato (`Failure::Partial`) e proseguito fino a due volte con una richiesta di continuazione, in modalità normale, in streaming e per l'agente; se resta troncato è consegnato con una nota esplicita, mai perso. Su risposta vuota o troncata senza testo si ritenta sullo stesso modello con più spazio prima del modello alternativo. L'agente parte da 4096 token (raddoppiati al secondo tentativo). `send` ritenta 500/502/503/504 con attesa crescente. Una proposta di strumento non valida è ritentata una volta; più chiamate insieme restano rifiutate (invariante a proposta singola).
+- **Conseguenze:** due test esistenti aggiornati intenzionalmente (troncamento con testo → `Partial`; flusso troncato → testo più nota). Il messaggio all'utente indica cosa è già stato provato. Budget base di `Route::output_tokens` invariati.
+- **Evidenza:** test del modulo `cloud` con server simulato (continuazione, nota finale, vuoto ritentato, 5xx, agente, streaming, strumento non valido). Nessuna prova contro NIM reale.
+
+### ADR-0185 — Operazioni digitali: audit e prima fetta (risorse digitali e profili di workspace)
+
+- **Data:** 2026-11-25. **Stato:** parziale (audit completo, due capacità implementate).
+- **Contesto:** richiesta «Advanced Digital Operations & Human-Machine Interaction Upgrade» (27 aree). Audit in `docs/OPERATIONS_GAP_ANALYSIS.md`.
+- **Decisione:** implementare per prime due capacità assenti, a basso rischio e senza dipendenze nuove: (1) `fs.usage` (modulo `assets`): spazio per cartella e tipo, file grandi, duplicati per SHA-256 e file temporanei, solo lettura, senza collegamenti simbolici, con limiti dichiarati; (2) profili di workspace (modulo `workspaces`, `/api/workspaces/profiles*`): applicazioni e cartelle per progetto; l'attivazione **restituisce un piano** (`app.open` con conferma) e non esegue nulla. Le altre aree restano classificate nell'audit.
+- **Conseguenze:** nessuna eliminazione automatica: la pulizia resta a `fs.delete` con conferma. I profili rifiutano comandi, URL e percorsi fuori dalla workspace.
+- **Evidenza:** test unitari dei due moduli, controlli e2e delle nuove rotte.
+
+### ADR-0186 — Profili di risorse
+
+- **Data:** 2026-11-25. **Stato:** implementata.
+- **Decisione:** quattro profili (Eco, Bilanciato, Prestazioni, Massimo) scelti dal proprietario (`/api/performance`). Regolano solo limiti applicati davvero dal Core: passi dell'agente per richiesta (3/4/6/8), agenti temporanei (1/2/3/4) e intervallo delle istantanee delle metriche (15/5/2/1 min). Il predefinito «Bilanciato» coincide con i limiti precedenti (4 passi, 2 agenti, 5 min).
+- **Sicurezza:** nessun profilo tocca permessi, conferme, audit o redazione. La scelta è registrata come azione del proprietario.
+- **Non incluso:** limiti di CPU/RAM, scaricamento dei modelli, batteria e banda: richiedono misure dell'host non verificabili qui.
+- **Evidenza:** test unitari (monotonia, persistenza, valori sconosciuti) e controlli e2e.
+
+### ADR-0187 — Centro privacy (inventario)
+
+- **Data:** 2026-11-25. **Stato:** parziale (API pronta, nessuna vista grafica).
+- **Decisione:** `GET /api/privacy/overview` riassume solo fatti letti dallo stato reale: dimensione delle voci della cartella dati, statistiche della memoria, provider cloud con chiave (mai il valore), numero di strumenti per effetto, livello di autonomia, connettori, server MCP, osservazioni e profilo di risorse. Nessun contenuto di utente.
+- **Limiti:** niente cronologia dei permessi né criteri di conservazione; la vista grafica resta da fare.
+- **Evidenza:** test d'integrazione `privacy_overview_and_resource_profiles_work_through_the_api` e controllo e2e.
 
 ## Aggiornamento del registro
 

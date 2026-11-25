@@ -209,6 +209,7 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
         }
         "date.calc" => crate::toolbox::date_calc(args),
         "fs.search" => crate::toolbox::fs_search(ctx.workspace, args),
+        "fs.usage" => crate::assets::usage(ctx.workspace, args),
         "fs.mkdir" => crate::toolbox::fs_mkdir(ctx.workspace, s("path")),
         "fs.move" => crate::toolbox::fs_move(ctx.workspace, s("from"), s("to")),
         "fs.delete" => crate::toolbox::fs_delete(ctx.workspace, s("path")),

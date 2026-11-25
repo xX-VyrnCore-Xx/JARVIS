@@ -643,6 +643,26 @@ pub fn router(state: Shared) -> Router {
         )
         .route("/api/mcp/servers/remove", post(mcp_server_remove))
         .route("/api/mcp/servers/test", post(mcp_server_test))
+        .route("/api/mcp/servers/health", post(mcp_server_health))
+        .route("/api/mcp/servers/policy", post(mcp_server_policy))
+        .route("/api/mcp/presets", get(mcp_presets))
+        .route("/api/privacy/overview", get(privacy_overview))
+        .route(
+            "/api/performance",
+            get(performance_get).post(performance_set),
+        )
+        .route(
+            "/api/workspaces/profiles",
+            get(workspace_profiles_list).post(workspace_profile_save),
+        )
+        .route(
+            "/api/workspaces/profiles/remove",
+            post(workspace_profile_remove),
+        )
+        .route(
+            "/api/workspaces/profiles/plan",
+            post(workspace_profile_plan),
+        )
         .route("/api/watches", get(watches_list).post(watch_add))
         .route("/api/watches/remove", post(watch_remove))
         .route("/api/twin", get(twin_get))
@@ -697,6 +717,10 @@ pub fn router(state: Shared) -> Router {
         .route("/api/memory/cognitive", get(memory_cognitive))
         .route("/api/memory/consolidate", post(memory_consolidate))
         .route("/api/memory/contradictions", get(memory_contradictions))
+        .route("/api/memory/contradictions/resolve", post(memory_resolve))
+        .route("/api/memory/export", get(memory_export))
+        .route("/api/memory/import", post(memory_import))
+        .route("/api/memory/compact", post(memory_compact))
         .route("/api/plans/{id}/diagnosis", get(plan_diagnosis))
         .route("/api/memory/{id}/meta", post(memory_meta))
         .route("/api/handoffs", get(handoffs_get).post(handoff_post))
@@ -2092,6 +2116,22 @@ async fn memory_cognitive(
     )
 }
 
+async fn memory_export(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.memory_export()).await)
+}
+
+async fn memory_import(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply(with_core(&state, move |j| j.memory_import(&body)).await)
+}
+
+async fn memory_resolve(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply(with_core(&state, move |j| j.memory_resolve(&body)).await)
+}
+
+async fn memory_compact(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply(with_core(&state, move |j| j.memory_compact(&body)).await)
+}
+
 async fn memory_contradictions(State(state): State<Shared>) -> Response {
     reply(with_core(&state, |j| j.memory_contradictions()).await)
 }
@@ -3166,6 +3206,40 @@ async fn mcp_server_remove(State(state): State<Shared>, Json(body): Json<Value>)
     )
 }
 
+/// Server noti con un clic (Hugging Face), con indirizzo, privacy e strumenti di sola lettura consigliati.
+async fn mcp_presets() -> Response {
+    Json(crate::mcp_client::presets()).into_response()
+}
+
+/// Politica per strumento di un server: elenco ammesso e strumenti senza conferma (solo il proprietario).
+async fn mcp_server_policy(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply_said(
+        with_core(&state, move |j| j.mcp_server_policy(&body)).await,
+        "mcp.server.policy",
+    )
+}
+
+/// Salute di un server: raggiungibilità, latenza, strumenti e cambiamenti (fuori dal blocco del Core).
+async fn mcp_server_health(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let name = body["name"].as_str().unwrap_or_default().to_string();
+    let target = name.clone();
+    let info = with_core(&state, move |j| {
+        let url = crate::mcp_client::url_of(&j.data_dir(), &target);
+        let token = j.mcp_token(&target);
+        Ok::<_, CoreError>((url, token))
+    })
+    .await;
+    let Ok((Some(url), token)) = info else {
+        return CoreError::NotFound("server MCP non trovato".into()).into_response();
+    };
+    match tokio::task::spawn_blocking(move || crate::mcp_client::health(&url, token.as_deref()))
+        .await
+    {
+        Ok(report) => Json(report).into_response(),
+        Err(_) => CoreError::Internal("controllo interrotto".into()).into_response(),
+    }
+}
+
 /// Prova un server: elenca i suoi strumenti (fuori dal blocco del Core).
 async fn mcp_server_test(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
     let name = body["name"].as_str().unwrap_or_default().to_string();
@@ -3189,6 +3263,49 @@ async fn mcp_server_test(State(state): State<Shared>, Json(body): Json<Value>) -
 }
 
 /// Regole di osservazione dei file (ADR-0158), solo proprietario.
+async fn privacy_overview(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.privacy_overview()).await)
+}
+
+async fn performance_get(State(state): State<Shared>) -> Response {
+    reply(Ok(with_core(&state, |j| j.performance()).await))
+}
+
+async fn performance_set(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let profile = body["profile"].as_str().unwrap_or_default().to_string();
+    reply_said(
+        with_core(&state, move |j| j.performance_set(&profile)).await,
+        "performance.profile",
+    )
+}
+
+async fn workspace_profiles_list(State(state): State<Shared>) -> Response {
+    reply(Ok(with_core(&state, |j| j.workspace_profiles()).await))
+}
+
+async fn workspace_profile_save(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply_said(
+        with_core(&state, move |j| j.workspace_profile_save(&body)).await,
+        "workspace.profile.save",
+    )
+}
+
+async fn workspace_profile_remove(
+    State(state): State<Shared>,
+    Json(body): Json<Value>,
+) -> Response {
+    let key = body["id"].as_str().unwrap_or_default().to_string();
+    reply_said(
+        with_core(&state, move |j| j.workspace_profile_remove(&key)).await,
+        "workspace.profile.remove",
+    )
+}
+
+async fn workspace_profile_plan(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let key = body["id"].as_str().unwrap_or_default().to_string();
+    reply(with_core(&state, move |j| j.workspace_profile_plan(&key)).await)
+}
+
 async fn watches_list(State(state): State<Shared>) -> Response {
     reply(Ok(with_core(&state, |j| j.watches()).await))
 }

@@ -271,7 +271,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         case .off: return wakeListening ? "Avvio dell'ascolto…" : "Ascolto spento"
         case .denied: return "Microfono non consentito"
         case .unavailable: return "Microfono non disponibile"
-        case .waiting: return wake.detail.isEmpty ? "In ascolto: «Hey Jarvis»" : "Voce non disponibile"
+        case .waiting: return wake.detail.isEmpty ? "In ascolto: «Hey Jarvis»" : "Ascolto non disponibile"
         case .capturing: return "Ti ascolto…"
         case .working: return "Elaboro il comando…"
         }
@@ -1593,6 +1593,10 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                  : "Ascolto spento: il microfono non è in uso.")
                 .font(.caption).foregroundStyle(.secondary)
             if wakeListening, wake.phase != .off { Text(wakeStatusText + (wake.detail.isEmpty ? "" : " — " + wake.detail)).font(.caption).foregroundStyle(.cyan) }
+            if wakeListening, wake.engineKind == "system", wake.phase != .off {
+                Text("Motore: riconoscimento vocale del Mac, sul dispositivo. Mentre ascolta, il Mac trascrive in memoria ciò che dici e JARVIS agisce solo dopo «Hey Jarvis»: nulla viene salvato né inviato. Per far ascoltare soltanto la parola di attivazione serve il motore locale del Core (voice-setup).")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Text("JARVIS parla solo con una voce maschile (Luca).").font(.caption).foregroundStyle(.secondary)
             if !voiceHint.isEmpty { Text(voiceHint).font(.caption).foregroundStyle(.secondary) }
             Button("Fai tacere") {

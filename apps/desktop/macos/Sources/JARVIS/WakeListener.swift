@@ -1,6 +1,7 @@
 import AVFoundation
 import AppKit
 import Foundation
+import Speech
 
 /// Campioni a 16 kHz mono (16 bit) in un buffer circolare in memoria; scritto dal thread audio, letto dall'interfaccia.
 final class SampleBuffer: @unchecked Sendable {
@@ -70,6 +71,66 @@ enum WakeAudio {
     }
 }
 
+/// Riceve i buffer audio del microfono e li passa alla richiesta di riconoscimento in corso (ADR-0183).
+final class RecognitionBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var request: SFSpeechAudioBufferRecognitionRequest?
+
+    func set(_ new: SFSpeechAudioBufferRecognitionRequest?) {
+        lock.lock(); defer { lock.unlock() }
+        request = new
+    }
+
+    func append(_ buffer: AVAudioPCMBuffer) {
+        lock.lock(); defer { lock.unlock() }
+        request?.append(buffer)
+    }
+}
+
+/// Ultima trascrizione parziale di una sessione di riconoscimento, scritta dal sistema e letta dal ciclo di ascolto.
+final class RecognitionState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var text = ""
+    private var changedAt = Date()
+    private var finished = false
+    private var failed = false
+
+    func update(_ new: String, final: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        if new != text {
+            text = new
+            changedAt = Date()
+        }
+        if final { finished = true }
+    }
+
+    func fail() {
+        lock.lock(); defer { lock.unlock() }
+        failed = true
+    }
+
+    func snapshot() -> (text: String, changedAt: Date, finished: Bool, failed: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        return (text, changedAt, finished, failed)
+    }
+}
+
+/// Riconoscimento della parola di attivazione nel testo trascritto dal sistema.
+enum WakeText {
+    private static let expression = try? NSRegularExpression(
+        pattern: "(?:(?:ehi|ehy|hey|ok|ciao)\\s*,?\\s*)?(?:jarvis|giarvis|garvis|jervis|yarvis|charvis|giarvi|jarvi)\\b[\\s,.:!?-]*",
+        options: [.caseInsensitive])
+
+    /// `found` se compare «Hey Jarvis» (o una sua variante) e il testo che lo segue, già ripulito.
+    static func split(_ text: String) -> (found: Bool, command: String) {
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = expression?.firstMatch(in: text, options: [], range: range),
+              let swiftRange = Range(match.range, in: text) else { return (false, "") }
+        let rest = String(text[swiftRange.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+        return (true, rest)
+    }
+}
+
 /// Ascolto «Hey Jarvis» sempre attivo (ADR-0134).
 ///
 /// In attesa il microfono alimenta solo un buffer in memoria: i blocchi con voce vanno al Core per un unico verdetto
@@ -82,6 +143,8 @@ final class WakeListener: ObservableObject {
     @Published private(set) var phase: Phase = .off
     @Published private(set) var level: Double = 0
     @Published private(set) var detail = ""
+    /// Motore in uso: `system` (riconoscimento del Mac, sul dispositivo) o `core` (modello del Core).
+    @Published private(set) var engineKind = "core"
 
     /// Chiamato con il testo del comando dopo una parola di attivazione.
     var onCommand: ((String) -> Void)?
@@ -90,6 +153,7 @@ final class WakeListener: ObservableObject {
 
     private let engine = AVAudioEngine()
     private let buffer = SampleBuffer()
+    private let recognition = RecognitionBox()
     private var loop: Task<Void, Never>?
     private weak var core: CoreSession?
     private var running = false
@@ -137,6 +201,8 @@ final class WakeListener: ObservableObject {
         }
         phase = .waiting
         detail = ""
+        // Riconoscimento del Mac, sul dispositivo (ADR-0183): niente modelli da installare né audio fuori dal computer.
+        if await runSystemRecognizer() { return }
         var lastChecked = buffer.total
         var retryAt = Date.distantPast
         while running, !Task.isCancelled {
@@ -164,6 +230,100 @@ final class WakeListener: ObservableObject {
                 retryAt = Date().addingTimeInterval(20)
             }
         }
+    }
+
+    // MARK: Riconoscimento del sistema (ADR-0183)
+
+    private func ensureSpeechPermission() async -> Bool {
+        switch SFSpeechRecognizer.authorizationStatus() {
+        case .authorized: return true
+        case .notDetermined:
+            return await withCheckedContinuation { continuation in
+                SFSpeechRecognizer.requestAuthorization { status in continuation.resume(returning: status == .authorized) }
+            }
+        default: return false
+        }
+    }
+
+    /// Ascolta con il riconoscimento vocale del Mac, **solo sul dispositivo**: il testo vive in memoria per la durata
+    /// della sessione (circa un minuto) e solo ciò che segue «Hey Jarvis» diventa un comando. Restituisce `false`
+    /// (con il motivo in `detail`) se non è utilizzabile, e l'ascolto ripiega sul Core.
+    private func runSystemRecognizer() async -> Bool {
+        guard await ensureSpeechPermission() else {
+            detail = "Consenti il riconoscimento vocale a JARVIS in Impostazioni di Sistema → Privacy e sicurezza → Riconoscimento vocale."
+            return false
+        }
+        guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "it-IT")), recognizer.isAvailable else {
+            detail = "Il riconoscimento vocale italiano del Mac non è disponibile ora."
+            return false
+        }
+        guard recognizer.supportsOnDeviceRecognition else {
+            detail = "Per ascoltare senza inviare nulla ad Apple serve la dettatura in italiano sul Mac: attivala e scaricala in Impostazioni di Sistema → Tastiera → Dettatura."
+            return false
+        }
+        detail = ""
+        engineKind = "system"
+        phase = .waiting
+        while running, !Task.isCancelled {
+            if suspended {
+                recognition.set(nil)
+                buffer.clear()
+                try? await Task.sleep(for: .milliseconds(400))
+                continue
+            }
+            await recognizeOnce(recognizer)
+        }
+        return true
+    }
+
+    /// Una sessione di riconoscimento: finisce con un comando, un errore, il limite di tempo o la sospensione.
+    private func recognizeOnce(_ recognizer: SFSpeechRecognizer) async {
+        let request = SFSpeechAudioBufferRecognitionRequest()
+        request.shouldReportPartialResults = true
+        request.requiresOnDeviceRecognition = true
+        request.taskHint = .dictation
+        let state = RecognitionState()
+        let task = recognizer.recognitionTask(with: request) { result, error in
+            if let result { state.update(result.bestTranscription.formattedString, final: result.isFinal) }
+            if error != nil { state.fail() }
+        }
+        recognition.set(request)
+        let began = Date()
+        var wakeAt: Date?
+        var command = ""
+        while running, !Task.isCancelled, !suspended {
+            try? await Task.sleep(for: .milliseconds(250))
+            level = min(WakeAudio.rms(buffer.last(seconds: 0.3)) / 6000, 1)
+            let snapshot = state.snapshot()
+            if snapshot.failed || snapshot.finished || Date().timeIntervalSince(began) > 55 { break }
+            let heard = WakeText.split(snapshot.text)
+            guard heard.found else { continue }
+            if wakeAt == nil {
+                wakeAt = Date()
+                phase = .capturing
+                chime("Tink")
+            }
+            command = heard.command
+            let quiet = Date().timeIntervalSince(snapshot.changedAt)
+            let waited = Date().timeIntervalSince(wakeAt ?? Date())
+            if (!command.isEmpty && quiet > 1.3) || (command.isEmpty && waited > 6) || waited > 15 { break }
+        }
+        recognition.set(nil)
+        request.endAudio()
+        task.cancel()
+        buffer.clear()
+        if wakeAt != nil, !command.isEmpty, running {
+            phase = .working
+            let lowered = command.lowercased().trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+            if ["stop", "fermati", "zitto", "basta"].contains(lowered) {
+                _ = try? await core?.request("/api/voice/stop", method: "POST", body: [:])
+            } else {
+                onCommand?(command)
+            }
+        }
+        if running { phase = .waiting }
+        // Una breve pausa evita di riavviare di continuo una sessione che fallisce subito.
+        try? await Task.sleep(for: .milliseconds(300))
     }
 
     private func handleWake(core: CoreSession) async {
@@ -237,7 +397,9 @@ final class WakeListener: ObservableObject {
             throw CoreFailure(message: "formato audio non supportato")
         }
         let sink = buffer
+        let speech = recognition
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { pcm, _ in
+            speech.append(pcm)
             let capacity = AVAudioFrameCount(Double(pcm.frameLength) * 16_000 / format.sampleRate) + 64
             guard let out = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return }
             var supplied = false

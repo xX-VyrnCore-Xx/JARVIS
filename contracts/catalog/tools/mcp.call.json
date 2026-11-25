@@ -35,8 +35,9 @@
     "integration.mcp:execute"
   ],
   "errors": [
-    "mcp.unknown_server",
-    "mcp.failed"
+    "mcp.failed",
+    "mcp.not_allowed",
+    "mcp.unknown_server"
   ],
   "timeout_ms": 45000,
   "retry": {

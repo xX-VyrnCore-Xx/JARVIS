@@ -149,9 +149,7 @@ struct Pending {
 }
 
 /// Passi massimi del ciclo dell'agente per una richiesta (limite `max_steps` della delega).
-const MAX_STEPS: usize = 4;
 /// Agenti temporanei per richiesta e passi di ciascuno (ADR-0040).
-const MAX_SUBAGENTS: usize = 2;
 const SUBAGENT_STEPS: usize = 3;
 /// Strumenti per ciascuna esecuzione di una missione (ADR-0096).
 const MISSION_STEPS: usize = 5;
@@ -410,15 +408,15 @@ impl Jarvis {
             for (k, v) in &self.cfg.worker_env {
                 cmd.env(k, v);
             }
-            // L'unico motore vocale del Core ammesso è quello sintetico delle verifiche.
-            cmd.env(
-                "JARVIS_VOICE_ENGINE",
-                if self.cfg.voice_engine.as_deref() == Some("fake") {
-                    "fake"
-                } else {
-                    "off"
-                },
-            );
+            // Motore vocale (ADR-0010, ADR-0054): per scelta del proprietario o delle verifiche
+            // (`JARVIS_VOICE_ENGINE`: auto, local, fake, off). Senza scelta il worker usa «auto»: i motori
+            // installati dal setup, e un messaggio chiaro su cosa manca se non ce ne sono. Forzare «off» qui
+            // spegneva riconoscimento, parola di attivazione e sintesi a ogni avvio (ADR-0183).
+            if let Some(engine) = &self.cfg.voice_engine {
+                cmd.env("JARVIS_VOICE_ENGINE", engine);
+            } else {
+                cmd.env_remove("JARVIS_VOICE_ENGINE");
+            }
             cmd.env_remove("JARVIS_TOKEN");
             let spawned = Worker::spawn(cmd).map_err(|e| e.to_contract());
             self.obs.count(if spawned.is_ok() {
@@ -513,7 +511,7 @@ impl Jarvis {
             "limits": if let Some(agent) = self.temporary.get(&task.id()) {
                 json!({"max_steps": agent.steps, "max_subdelegations": 0, "allow_cloud": false})
             } else {
-                json!({"max_steps": MAX_STEPS, "max_subdelegations": MAX_SUBAGENTS, "allow_cloud": false})
+                json!({"max_steps": self.limits().max_steps, "max_subdelegations": self.limits().max_subagents, "allow_cloud": false})
             },
             "timeout_ms": self.cfg.delegation_timeout_ms,
             "completion_conditions": ["Esito jarvis.agent-result/1 valido"],
@@ -1640,7 +1638,8 @@ impl Jarvis {
             }
             let retryable = output["code"] == "policy.invalid_arguments";
             history.push(step_record(&tool, &arguments, &digest, status, output));
-            let last = history.len() >= MAX_STEPS || (status == "denied" && !retryable);
+            let last =
+                history.len() >= self.limits().max_steps || (status == "denied" && !retryable);
             result = self.next_step(&task, &inputs, &history, last, &mut out);
         }
     }
@@ -1719,10 +1718,15 @@ impl Jarvis {
                 "un agente temporaneo non può crearne altri".into(),
             ));
         }
-        if out.steps.iter().filter(|s| s["kind"] == "subagent").count() >= MAX_SUBAGENTS {
+        if out.steps.iter().filter(|s| s["kind"] == "subagent").count()
+            >= self.limits().max_subagents
+        {
             return Ok(fail(
                 "agent.limit",
-                format!("al massimo {MAX_SUBAGENTS} agenti temporanei per richiesta"),
+                format!(
+                    "al massimo {} agenti temporanei per richiesta",
+                    self.limits().max_subagents
+                ),
             ));
         }
         let role = args["role"].as_str().unwrap_or_default().to_string();
@@ -2002,7 +2006,7 @@ impl Jarvis {
         inputs["steps_left"] = json!(if last {
             0
         } else {
-            MAX_STEPS.saturating_sub(history.len())
+            self.limits().max_steps.saturating_sub(history.len())
         });
         match self.call_agent(task, &inputs) {
             Ok(r) if r["kind"] == "reply" || (!last && r["kind"] == "tool_call") => {
@@ -2128,7 +2132,7 @@ impl Jarvis {
             task.transition("running", "Confermato dal proprietario");
             let (status, output) = self.run_tool(&task, &tool, &arguments, true, &mut out)?;
             history.push(step_record(&tool, &arguments, &digest, status, output));
-            let last = history.len() >= MAX_STEPS;
+            let last = history.len() >= self.limits().max_steps;
             let result = self.next_step(&task, &inputs, &history, last, &mut out);
             self.drive(task, inputs, result, out, history)
         } else {
@@ -2443,6 +2447,48 @@ impl Jarvis {
             "projects": crate::memcog::projects(&self.store).map_err(internal)?,
             "reliability_levels": crate::memcog::RELIABILITY,
         }))
+    }
+
+    /// Esporta la memoria in un documento portabile (ADR-0182). Solo dal computer del proprietario.
+    pub fn memory_export(&mut self) -> Result<Value, CoreError> {
+        let out = crate::memcog::export(&self.store).map_err(internal)?;
+        self.record_owner_action("memory.export")?;
+        Ok(out)
+    }
+
+    /// Importa un'esportazione: anteprima (`apply` falso) o scrittura con audit.
+    pub fn memory_import(&mut self, body: &Value) -> Result<Value, CoreError> {
+        let apply = body["apply"].as_bool().unwrap_or(false);
+        let out = crate::memcog::import(&self.store, &body["data"], apply)
+            .map_err(CoreError::BadRequest)?;
+        if apply {
+            self.record_owner_action("memory.import")?;
+        }
+        Ok(out)
+    }
+
+    /// Risolve una contraddizione tenendo la voce scelta dal proprietario.
+    pub fn memory_resolve(&mut self, body: &Value) -> Result<Value, CoreError> {
+        let out = crate::memcog::resolve_contradiction(
+            &self.store,
+            body["subject"].as_str().unwrap_or_default(),
+            body["relation"].as_str().unwrap_or_default(),
+            body["keep"].as_str().unwrap_or_default(),
+        )
+        .map_err(CoreError::BadRequest)?;
+        self.record_owner_action("memory.resolve")?;
+        Ok(out)
+    }
+
+    /// Riassume gli episodi vecchi per settimana: anteprima o applicazione con audit.
+    pub fn memory_compact(&mut self, body: &Value) -> Result<Value, CoreError> {
+        let apply = body["apply"].as_bool().unwrap_or(false);
+        let days = body["days"].as_i64().unwrap_or(30);
+        let out = crate::memcog::compact_episodes(&self.store, days, apply).map_err(internal)?;
+        if apply {
+            self.record_owner_action("memory.compact")?;
+        }
+        Ok(out)
     }
 
     /// Contraddizioni nella memoria (ADR-0179): stessa coppia soggetto-relazione con oggetti diversi.
@@ -2966,7 +3012,7 @@ impl Jarvis {
                 "n8n.unavailable",
                 "la routine richiede conferma",
             )),
-            "mcp.list" | "mcp.call" => self.mcp_client_call(tool, arguments),
+            "mcp.list" | "mcp.call" | "mcp.read" => self.mcp_client_call(tool, arguments),
             "security.status" => self.security_status().map_err(|_| {
                 tool_error(
                     "security.unavailable",
@@ -3705,6 +3751,110 @@ impl Jarvis {
         Ok(self.watches())
     }
 
+    /// Centro privacy (ADR-0187): cosa è conservato e dove, cosa può uscire verso il cloud, quali strumenti e
+    /// attività sono attivi. Solo fatti letti dallo stato reale; nessun contenuto e nessun segreto.
+    pub fn privacy_overview(&self) -> Result<Value, CoreError> {
+        // Inventario dei dati locali: dimensione per voce di primo livello della cartella dati.
+        fn size(path: &std::path::Path, budget: &mut usize) -> u64 {
+            let Ok(meta) = std::fs::symlink_metadata(path) else {
+                return 0;
+            };
+            if meta.is_file() {
+                return meta.len();
+            }
+            if !meta.is_dir() || *budget == 0 {
+                return 0;
+            }
+            std::fs::read_dir(path)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| {
+                    *budget = budget.saturating_sub(1);
+                    size(&e.path(), budget)
+                })
+                .sum()
+        }
+        let mut stored: Vec<Value> = std::fs::read_dir(&self.cfg.data_dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| {
+                let mut budget = 5000;
+                json!({"name": e.file_name().to_string_lossy(), "bytes": size(&e.path(), &mut budget)})
+            })
+            .collect();
+        stored.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+        let cloud = self.cloud_status()?;
+        let configured: Vec<Value> = cloud["providers"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|p| p["configured"] == true)
+            .map(|p| json!({"id": p["id"], "preferred": p["preferred"]}))
+            .collect();
+        let permissions = self.permissions();
+        let mut by_effects: std::collections::BTreeMap<String, u32> = Default::default();
+        for tool in permissions["tools"].as_array().into_iter().flatten() {
+            *by_effects
+                .entry(tool["effects"].as_str().unwrap_or("?").to_string())
+                .or_default() += 1;
+        }
+        let autonomy = self.autonomy();
+        Ok(json!({
+            "stored_locally": {"data_dir_entries": stored, "memory": self.memory_stats()?,
+                "note": "Le schermate lette con screen.read non vengono salvate: l'immagine è cancellata subito."},
+            "cloud": {"providers_with_key": configured,
+                "note": "Il testo parte verso un provider solo se hai configurato la sua chiave e scegli un modello cloud; i dati sensibili riconosciuti sono mascherati e i modelli locali sono esclusi."},
+            "tools": {"count": permissions["tools"].as_array().map_or(0, Vec::len), "by_effects": by_effects},
+            "autonomy": {"default": autonomy["default"], "background_allowed": autonomy["background_allowed"]},
+            "connectors": self.connectors()?.len(),
+            "mcp_servers": self.mcp_servers()["items"].as_array().map_or(0, Vec::len),
+            "background": {"file_watches": self.watches()["items"].as_array().map_or(0, Vec::len),
+                "resource_profile": crate::perf::current(&self.cfg.data_dir).id()},
+        }))
+    }
+
+    /// Limiti di lavoro del profilo di risorse attivo (ADR-0186).
+    pub fn limits(&self) -> crate::perf::Limits {
+        crate::perf::current(&self.cfg.data_dir).limits()
+    }
+
+    pub fn performance(&self) -> Value {
+        crate::perf::describe(&self.cfg.data_dir)
+    }
+
+    pub fn performance_set(&mut self, profile: &str) -> Result<Value, CoreError> {
+        crate::perf::set(&self.cfg.data_dir, profile).map_err(CoreError::BadRequest)?;
+        self.record_owner_action("performance.profile")?;
+        Ok(self.performance())
+    }
+
+    /// Profili di workspace (ADR-0185).
+    pub fn workspace_profiles(&self) -> Value {
+        crate::workspaces::list(&self.cfg.data_dir)
+    }
+
+    pub fn workspace_profile_save(&mut self, body: &Value) -> Result<Value, CoreError> {
+        let profile = crate::workspaces::save_profile(&self.cfg.data_dir, body)
+            .map_err(CoreError::BadRequest)?;
+        self.record_owner_action("workspace.profile.save")?;
+        Ok(profile)
+    }
+
+    pub fn workspace_profile_remove(&mut self, key: &str) -> Result<Value, CoreError> {
+        if !crate::workspaces::remove(&self.cfg.data_dir, key).map_err(CoreError::Internal)? {
+            return Err(CoreError::NotFound("profilo non trovato".into()));
+        }
+        self.record_owner_action("workspace.profile.remove")?;
+        Ok(self.workspace_profiles())
+    }
+
+    pub fn workspace_profile_plan(&self, key: &str) -> Result<Value, CoreError> {
+        crate::workspaces::activation_plan(&self.cfg.data_dir, key)
+            .ok_or_else(|| CoreError::NotFound("profilo non trovato".into()))
+    }
+
     /// Server MCP autorizzati e strumenti remoti (ADR-0156). Solo dal computer del proprietario.
     pub fn mcp_servers(&self) -> Value {
         crate::mcp_client::list(&self.cfg.data_dir, &|name| {
@@ -3720,20 +3870,56 @@ impl Jarvis {
         self.secrets.get(&format!("mcp:{name}")).ok().flatten()
     }
 
+    /// Autorizza un server MCP, a mano (`name`, `url`) o da un server noto (`preset`). Con `auto_suggested` il
+    /// proprietario sceglie anche gli strumenti di sola lettura consigliati dal catalogo per l'uso senza conferma.
     pub fn mcp_server_save(&mut self, body: &Value) -> Result<Value, CoreError> {
-        let name = body["name"].as_str().unwrap_or_default();
-        crate::mcp_client::add(
-            &self.cfg.data_dir,
-            name,
-            body["url"].as_str().unwrap_or_default(),
-        )
-        .map_err(CoreError::BadRequest)?;
+        let name = match body["preset"].as_str() {
+            Some(id) => {
+                crate::mcp_client::add_preset(&self.cfg.data_dir, id, body["name"].as_str())
+                    .map_err(CoreError::BadRequest)?
+            }
+            None => {
+                let name = body["name"].as_str().unwrap_or_default().to_string();
+                crate::mcp_client::add(
+                    &self.cfg.data_dir,
+                    &name,
+                    body["url"].as_str().unwrap_or_default(),
+                )
+                .map_err(CoreError::BadRequest)?;
+                name
+            }
+        };
+        let name = name.as_str();
+        if body["auto_suggested"] == true {
+            let suggested = body["preset"]
+                .as_str()
+                .and_then(crate::mcp_client::preset)
+                .map(|p| p["suggested_auto"].clone())
+                .unwrap_or(Value::Null);
+            if suggested.is_array() {
+                crate::mcp_client::set_policy(
+                    &self.cfg.data_dir,
+                    name,
+                    &json!({"auto": suggested}),
+                )
+                .map_err(CoreError::BadRequest)?;
+            }
+        }
         if let Some(token) = body["token"].as_str().filter(|t| !t.is_empty()) {
             self.secrets
                 .put(&format!("mcp:{name}"), token)
                 .map_err(CoreError::Internal)?;
         }
         self.record_owner_action("mcp.server.add")?;
+        Ok(self.mcp_servers())
+    }
+
+    /// Politica per strumento di un server (`allow`, `auto`): decisione del proprietario, nell'audit.
+    pub fn mcp_server_policy(&mut self, body: &Value) -> Result<Value, CoreError> {
+        let name = body["name"].as_str().unwrap_or_default();
+        crate::mcp_client::set_policy(&self.cfg.data_dir, name, body)
+            .map_err(CoreError::BadRequest)?;
+        self.record_owner_action("mcp.server.policy")?;
         Ok(self.mcp_servers())
     }
 
@@ -3761,6 +3947,22 @@ impl Jarvis {
             crate::mcp_client::list_tools(&url, token.as_deref())
         } else {
             let remote = arguments["tool"].as_str().unwrap_or_default();
+            // Politica del proprietario per server (ADR-0182): elenco ammesso e strumenti senza conferma.
+            if !crate::mcp_client::is_allowed(&self.cfg.data_dir, name, remote) {
+                return Err(tool_error(
+                    "mcp.not_allowed",
+                    format!("Lo strumento «{remote}» non è fra quelli ammessi dal proprietario per «{name}»"),
+                ));
+            }
+            if tool == "mcp.read"
+                && !crate::mcp_client::auto_allowed(&self.cfg.data_dir)
+                    .contains(&format!("{name}/{remote}"))
+            {
+                return Err(tool_error(
+                    "mcp.not_auto",
+                    format!("«{remote}» non è approvato per l'uso senza conferma: usa mcp.call, che chiede il tuo consenso"),
+                ));
+            }
             let remote_args = arguments
                 .get("arguments")
                 .cloned()
@@ -5256,7 +5458,6 @@ impl Jarvis {
 // ---------------------------------------------------------------------- Metriche persistenti (RNF-07)
 
 /// Intervallo fra due istantanee salvate e periodo di conservazione.
-const METRICS_EVERY: std::time::Duration = std::time::Duration::from_secs(300);
 const METRICS_KEEP_DAYS: i64 = 7;
 /// Giorni di conservazione delle tracce dei task (ADR-0039).
 const TRACE_KEEP_DAYS: i64 = 30;
@@ -5269,7 +5470,7 @@ impl Jarvis {
         if !force
             && self
                 .metrics_saved
-                .is_some_and(|t| t.elapsed() < METRICS_EVERY)
+                .is_some_and(|t| t.elapsed() < self.limits().metrics_every)
         {
             return Ok(None);
         }
