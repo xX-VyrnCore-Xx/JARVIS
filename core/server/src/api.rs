@@ -455,6 +455,9 @@ pub fn router(state: Shared) -> Router {
         .route("/api/audit", get(audit))
         .route("/api/workspace", get(workspace))
         .route("/api/tools", get(tool_catalog))
+        .route("/api/tools/registry", get(tool_registry))
+        .route("/api/tools/health", get(tool_health))
+        .route("/api/tools/history", get(tool_history))
         .route("/api/metrics", get(metrics))
         .route("/api/database", get(database))
         .route("/api/metrics/history", get(metrics_history))
@@ -490,6 +493,17 @@ pub fn router(state: Shared) -> Router {
                 .post(devices_access_put),
         )
         .route("/api/openapi.json", get(openapi_document))
+        .route("/api/emergency", get(emergency_get).post(emergency_post))
+        .route("/api/agents", get(agents_registry))
+        .route("/api/agents/route", get(agents_route))
+        .route("/api/models/route", get(models_route))
+        .route("/api/plans", get(plans_list).post(plan_create))
+        .route("/api/plans/{id}", get(plan_get))
+        .route("/api/plans/{id}/run", post(plan_run))
+        .route("/api/plans/{id}/approve", post(plan_approve))
+        .route("/api/plans/{id}/cancel", post(plan_cancel))
+        .route("/api/plans/{id}/rollback", post(plan_rollback))
+        .route("/api/plans/{id}/replay", post(plan_replay))
         .route("/api/tailscale", get(tailscale_status))
         .route("/api/tailscale/connect", post(tailscale_connect))
         .route("/api/devices/pairing/cancel", post(cancel_pairing))
@@ -2223,6 +2237,26 @@ async fn metrics_export(
     }
 }
 
+async fn tool_registry(
+    State(state): State<Shared>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    reply(with_core(&state, move |j| j.tool_registry(&q)).await)
+}
+
+async fn tool_health(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.tool_health()).await)
+}
+
+async fn tool_history(
+    State(state): State<Shared>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let tool = q.get("tool").cloned().filter(|t| !t.is_empty());
+    let n = limit(&json!(q), 50);
+    reply(with_core(&state, move |j| j.tool_history(tool.as_deref(), n)).await)
+}
+
 async fn tool_catalog(State(state): State<Shared>) -> Json<Value> {
     Json(json!({"items": with_core(&state, |j| j.tool_catalog()).await}))
 }
@@ -2646,6 +2680,206 @@ fn tailscale_view(state: &Shared, mut status: Value) -> Value {
     status["allowed"] = json!(allowed);
     status["pairing_urls"] = json!(pairing_urls(state));
     status
+}
+
+/// Registro degli agenti (ADR-0153).
+async fn agents_registry(State(state): State<Shared>) -> Response {
+    reply(Ok(with_core(&state, |j| j.agent_registry()).await))
+}
+
+/// Spiega a quale agente andrebbe una richiesta e perché (parametro `q`).
+async fn agents_route(Query(q): Query<std::collections::HashMap<String, String>>) -> Response {
+    let message = q.get("q").cloned().unwrap_or_default();
+    Json(json!({
+        "agent": crate::agents::explain(&message),
+        "role": crate::prompts::role_label(crate::prompts::role_for(&message)),
+    }))
+    .into_response()
+}
+
+/// Spiega come una richiesta verrebbe instradata ai modelli cloud (parametro `q`): rotta per compito, modello per
+/// provider e regole di riservatezza. Non invia nulla ai provider.
+async fn models_route(
+    State(state): State<Shared>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let message = q.get("q").cloned().unwrap_or_default();
+    reply(Ok(with_core(&state, move |j| j.model_route(&message)).await))
+}
+
+/// Piani di esecuzione (ADR-0152): creazione, esecuzione per passi, conferme, annullamento, rollback e replay.
+async fn plans_list(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.plan_list()).await)
+}
+
+async fn plan_get(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    reply(with_core(&state, move |j| j.plan_get(&id)).await)
+}
+
+/// Avvia (se non c'è già) il ciclo che esegue un passo alla volta fuori dal blocco del Core.
+fn spawn_plan_runner(state: &Shared, id: String) {
+    let key = format!("plan:{id}");
+    let mut handles = state.job_handles.lock().unwrap_or_else(|e| e.into_inner());
+    if handles.contains_key(&key) {
+        return;
+    }
+    let worker = state.clone();
+    let (runner_id, runner_key) = (id.clone(), key.clone());
+    let handle = tokio::spawn(async move {
+        let final_doc = loop {
+            let step_id = runner_id.clone();
+            match with_core(&worker, move |j| j.plan_step(&step_id)).await {
+                Ok(doc) if doc["status"] == "running" => tokio::task::yield_now().await,
+                Ok(doc) => break Some(doc),
+                Err(_) => break None,
+            }
+        };
+        worker
+            .job_handles
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&runner_key);
+        if let Some(doc) = final_doc {
+            let status = doc["status"].as_str().unwrap_or("").to_string();
+            if matches!(
+                status.as_str(),
+                "succeeded" | "failed" | "budget_exceeded" | "waiting"
+            ) {
+                let waiting = status == "waiting";
+                let note = json!({
+                    "severity": if status == "succeeded" { "success" } else { "warning" },
+                    "category": "automation",
+                    "title": if waiting { "Un piano attende la tua conferma".to_string() }
+                             else { format!("Piano concluso: {status}") },
+                    "body": doc["goal"].as_str().unwrap_or_default().chars().take(300).collect::<String>(),
+                    "source": {"kind": "module", "id": "plans"},
+                    "dedupe_key": format!("plan:{runner_id}:{status}"), "link": {"view": "plans"},
+                });
+                let _ = with_core(&worker, move |j| j.notify(note)).await;
+            }
+        }
+    });
+    handles.insert(key, handle.abort_handle());
+}
+
+async fn plan_create(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let run = body["run"].as_bool().unwrap_or(false);
+    let created = with_core(&state, move |j| {
+        let doc = j.plan_create(&body)?;
+        if run {
+            let id = doc["id"].as_str().unwrap_or_default().to_string();
+            return j.plan_start(&id);
+        }
+        Ok(doc)
+    })
+    .await;
+    if let Ok(doc) = &created {
+        if doc["status"] == "running" {
+            spawn_plan_runner(&state, doc["id"].as_str().unwrap_or_default().to_string());
+        }
+    }
+    reply(created.map(|doc| said(doc, if run { "plan.started" } else { "plan.created" }, None)))
+}
+
+async fn plan_run(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    let target = id.clone();
+    let started = with_core(&state, move |j| j.plan_start(&target)).await;
+    if started.is_ok() {
+        spawn_plan_runner(&state, id);
+    }
+    reply_said(started, "plan.started")
+}
+
+async fn plan_approve(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    let steps: Vec<String> = body["steps"]
+        .as_array()
+        .map(|l| {
+            l.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let target = id.clone();
+    let approved = with_core(&state, move |j| j.plan_approve(&target, &steps)).await;
+    if approved.is_ok() {
+        spawn_plan_runner(&state, id);
+    }
+    reply_said(approved, "plan.approved")
+}
+
+async fn plan_cancel(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    if let Some(handle) = state
+        .job_handles
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(&format!("plan:{id}"))
+    {
+        handle.abort();
+    }
+    reply_said(
+        with_core(&state, move |j| j.plan_cancel(&id)).await,
+        "plan.cancelled",
+    )
+}
+
+async fn plan_rollback(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    let confirm = body["confirm"].as_bool().unwrap_or(false);
+    reply_said(
+        with_core(&state, move |j| j.plan_rollback(&id, confirm)).await,
+        "plan.rollback",
+    )
+}
+
+async fn plan_replay(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    reply_said(
+        with_core(&state, move |j| j.plan_replay(&id)).await,
+        "plan.replayed",
+    )
+}
+
+/// Arresto di emergenza (ADR-0151): stato e attivazione, solo dal computer del proprietario.
+async fn emergency_get(State(state): State<Shared>) -> Response {
+    reply(Ok(with_core(&state, |j| j.emergency_status()).await))
+}
+
+async fn emergency_post(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let active = body["active"].as_bool().unwrap_or(true);
+    if active {
+        // Ferma subito i lavori in background in corso.
+        let handles: Vec<_> = state
+            .job_handles
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .drain()
+            .collect();
+        for (id, handle) in handles {
+            handle.abort();
+            let mut jobs = state.jobs.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(job) = jobs.iter_mut().find(|j| j["id"] == id.as_str()) {
+                job["status"] = json!("cancelled");
+            }
+        }
+    }
+    let result = with_core(&state, move |j| j.emergency_set(active)).await;
+    reply(result.map(|doc| {
+        said(
+            doc,
+            if active {
+                "emergency.stop"
+            } else {
+                "emergency.resume"
+            },
+            None,
+        )
+    }))
 }
 
 /// Descrizione OpenAPI dell'API locale (ADR-0146).

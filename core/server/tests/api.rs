@@ -987,6 +987,417 @@ async fn data_tools_run_through_the_policy_and_the_mcp_server() {
     }
 }
 
+async fn wait_plan(e: &Env, id: &str, until: &[&str]) -> Value {
+    for _ in 0..200 {
+        let (_, doc) = e.api("GET", &format!("/api/plans/{id}"), None).await;
+        if until.contains(&doc["status"].as_str().unwrap_or_default()) {
+            return doc;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    panic!("il piano {id} non ha raggiunto {until:?}");
+}
+
+#[tokio::test]
+async fn a_plan_runs_its_graph_passing_values_between_steps() {
+    let e = env();
+    let (status, created) = e
+        .api(
+            "POST",
+            "/api/plans",
+            Some(json!({
+                "goal": "Calcola e conta",
+                "idempotency_key": "calc-1",
+                "steps": [
+                    {"id": "calc", "tool": "math.calc", "arguments": {"expression": "6*7"}},
+                    {"id": "words", "tool": "text.count", "depends_on": ["calc"],
+                     "arguments": {"text": "${calc.expression} fa ${calc.result}"}},
+                    {"id": "stats", "tool": "data.stats", "arguments": {"values": [1, 2, 3]}}
+                ]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    assert_eq!(created["status"], "pending");
+    let id = created["id"].as_str().unwrap().to_string();
+    // Stessa chiave di idempotenza: nessun duplicato.
+    let (_, again) = e
+        .api(
+            "POST",
+            "/api/plans",
+            Some(json!({"goal": "altro", "idempotency_key": "calc-1", "steps": [{"id": "a", "tool": "time.now"}]})),
+        )
+        .await;
+    assert_eq!(again["id"], id.as_str());
+    let (status, started) = e
+        .api("POST", &format!("/api/plans/{id}/run"), Some(json!({})))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(started["message"]
+        .as_str()
+        .unwrap()
+        .contains("Piano in esecuzione"));
+    let done = wait_plan(&e, &id, &["succeeded", "failed"]).await;
+    assert_eq!(done["status"], "succeeded", "{done}");
+    assert_eq!(done["steps"][0]["output"]["result"], 42);
+    // Il riferimento tra passi ha portato espressione e risultato nel secondo passo.
+    assert_eq!(done["steps"][1]["output"]["words"], 3);
+    assert_eq!(done["steps_executed"], 3);
+    assert!(done["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|ev| ev["kind"] == "finished"));
+    // Salute e cronologia degli strumenti registrano le esecuzioni, senza argomenti né risultati.
+    let (_, health) = e.api("GET", "/api/tools/health", None).await;
+    let calc = health["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["tool"] == "math.calc")
+        .unwrap();
+    assert!(calc["runs"].as_u64().unwrap() >= 1 && calc["failures"] == 0);
+    let (_, history) = e
+        .api("GET", "/api/tools/history?tool=math.calc", None)
+        .await;
+    assert_eq!(history["items"][0]["tool"], "math.calc");
+    assert!(history["items"][0].get("arguments").is_none());
+    // Replay: nuovo piano con gli stessi passi, azzerati.
+    let (_, replay) = e
+        .api("POST", &format!("/api/plans/{id}/replay"), Some(json!({})))
+        .await;
+    assert_ne!(replay["id"], id.as_str());
+    assert_eq!(replay["replay_of"], id.as_str());
+    assert_eq!(replay["steps"][0]["status"], "pending");
+    // Un piano concluso non si riavvia.
+    let (status, _) = e
+        .api("POST", &format!("/api/plans/{id}/run"), Some(json!({})))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn plan_failures_retries_and_bad_definitions_are_handled() {
+    let e = env();
+    for (body, expected) in [
+        (
+            json!({"goal": "x", "steps": [{"id": "a", "tool": "strumento.inesistente"}]}),
+            "sconosciuto",
+        ),
+        (
+            json!({"goal": "x", "steps": [{"id": "a", "tool": "time.now", "depends_on": ["a"]}]}),
+            "se stesso",
+        ),
+        (json!({"goal": "x", "steps": []}), "da 1 a"),
+    ] {
+        let (status, error) = e.api("POST", "/api/plans", Some(body)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            error["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains(expected),
+            "{error}"
+        );
+    }
+    let (_, created) = e
+        .api(
+            "POST",
+            "/api/plans",
+            Some(json!({
+                "goal": "Lettura che fallisce",
+                "run": true,
+                "steps": [
+                    {"id": "read", "tool": "fs.read", "arguments": {"path": "non-esiste.txt"}, "retries": 1},
+                    {"id": "after", "tool": "time.now", "depends_on": ["read"]},
+                    {"id": "free", "tool": "time.now"}
+                ]
+            })),
+        )
+        .await;
+    let id = created["id"].as_str().unwrap().to_string();
+    let done = wait_plan(&e, &id, &["failed", "succeeded"]).await;
+    assert_eq!(done["status"], "failed", "{done}");
+    assert_eq!(done["steps"][0]["status"], "failed");
+    assert_eq!(done["steps"][0]["attempts"], 2);
+    assert!(done["steps"][0]["error"]["code"].is_string());
+    // Il passo dipendente non parte; con on_error=stop anche gli altri passi in attesa vengono annullati.
+    assert!(matches!(
+        done["steps"][1]["status"].as_str(),
+        Some("skipped" | "cancelled")
+    ));
+    assert!(done["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|ev| ev["kind"] == "retry"));
+    // Un riferimento non risolvibile fa fallire il passo con un codice chiaro.
+    let (_, bad) = e
+        .api(
+            "POST",
+            "/api/plans",
+            Some(json!({"goal": "riferimento", "run": true, "steps": [
+                {"id": "a", "tool": "time.now"},
+                {"id": "b", "tool": "text.count", "depends_on": ["a"], "arguments": {"text": "${a.assente}"}}
+            ]})),
+        )
+        .await;
+    let broken = wait_plan(&e, bad["id"].as_str().unwrap(), &["failed", "succeeded"]).await;
+    assert_eq!(broken["steps"][1]["error"]["code"], "plan.bad_reference");
+}
+
+#[tokio::test]
+async fn risky_plan_steps_wait_for_the_owner_and_can_be_rolled_back() {
+    let e = env();
+    let (_, created) = e
+        .api(
+            "POST",
+            "/api/plans",
+            Some(json!({
+                "goal": "Scrivi una nota di prova",
+                "run": true,
+                "steps": [
+                    {"id": "write", "tool": "fs.write", "arguments": {"path": "piano-prova.txt", "content": "ciao"},
+                     "undo": {"tool": "fs.delete", "arguments": {"path": "piano-prova.txt"}}},
+                    {"id": "after", "tool": "time.now", "depends_on": ["write"]}
+                ]
+            })),
+        )
+        .await;
+    let id = created["id"].as_str().unwrap().to_string();
+    // La scrittura richiede conferma: il piano si ferma senza eseguire nulla.
+    let waiting = wait_plan(&e, &id, &["waiting", "failed"]).await;
+    assert_eq!(waiting["status"], "waiting", "{waiting}");
+    assert_eq!(waiting["steps"][0]["status"], "waiting_confirmation");
+    assert_eq!(waiting["steps_executed"], 0);
+    let (status, _) = e
+        .api(
+            "POST",
+            &format!("/api/plans/{id}/approve"),
+            Some(json!({"steps": ["nessuno"]})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = e
+        .api(
+            "POST",
+            &format!("/api/plans/{id}/approve"),
+            Some(json!({"steps": ["write"]})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let done = wait_plan(&e, &id, &["succeeded", "failed"]).await;
+    assert_eq!(done["status"], "succeeded", "{done}");
+    // Senza conferma l'annullamento della scrittura (eliminazione) non parte.
+    let (_, pending) = e
+        .api(
+            "POST",
+            &format!("/api/plans/{id}/rollback"),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(pending["rollback"][0]["status"], "needs_confirmation");
+    let (_, rolled) = e
+        .api(
+            "POST",
+            &format!("/api/plans/{id}/rollback"),
+            Some(json!({"confirm": true})),
+        )
+        .await;
+    assert_eq!(rolled["rollback"][0]["status"], "succeeded", "{rolled}");
+    assert_eq!(rolled["plan"]["steps"][0]["status"], "rolled_back");
+    // Annullare un piano in attesa ferma i passi non eseguiti.
+    let (_, second) = e
+        .api(
+            "POST",
+            "/api/plans",
+            Some(json!({"goal": "da annullare", "run": true, "steps": [
+                {"id": "w", "tool": "fs.write", "arguments": {"path": "x.txt", "content": "x"}}]})),
+        )
+        .await;
+    let sid = second["id"].as_str().unwrap().to_string();
+    wait_plan(&e, &sid, &["waiting"]).await;
+    let (status, cancelled) = e
+        .api("POST", &format!("/api/plans/{sid}/cancel"), Some(json!({})))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cancelled["status"], "cancelled");
+    assert_eq!(cancelled["steps"][0]["status"], "cancelled");
+}
+
+#[tokio::test]
+async fn the_emergency_stop_blocks_changes_and_autonomous_work_until_released() {
+    let e = env();
+    let (_, before) = e.api("GET", "/api/emergency", None).await;
+    assert_eq!(before["active"], false);
+    let (_, created) = e
+        .api(
+            "POST",
+            "/api/plans",
+            Some(json!({"goal": "lettura", "steps": [{"id": "a", "tool": "time.now"}]})),
+        )
+        .await;
+    let id = created["id"].as_str().unwrap().to_string();
+    let (status, on) = e
+        .api("POST", "/api/emergency", Some(json!({"active": true})))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(on["active"], true);
+    assert!(on["message"]
+        .as_str()
+        .unwrap()
+        .contains("Arresto di emergenza"));
+    let (_, registry) = e.api("GET", "/api/tools/registry", None).await;
+    assert_eq!(registry["emergency"], true);
+    // Con l'arresto attivo un piano non parte e gli strumenti che modificano sono negati dalla policy.
+    let (status, _) = e
+        .api("POST", &format!("/api/plans/{id}/run"), Some(json!({})))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (_, write) = e
+        .api(
+            "POST",
+            "/api/plans",
+            Some(json!({"goal": "scrittura", "steps": [{"id": "w", "tool": "notes.add", "arguments": {"text": "x"}}]})),
+        )
+        .await;
+    let (_, off) = e
+        .api("POST", "/api/emergency", Some(json!({"active": false})))
+        .await;
+    assert_eq!(off["active"], false);
+    let (status, _) = e
+        .api(
+            "POST",
+            &format!("/api/plans/{}/run", write["id"].as_str().unwrap()),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn the_registry_describes_every_tool_and_filters() {
+    let e = env();
+    let (status, all) = e.api("GET", "/api/tools/registry", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = all["items"].as_array().unwrap();
+    let (_, catalog) = e.api("GET", "/api/tools", None).await;
+    assert_eq!(items.len(), catalog["items"].as_array().unwrap().len());
+    assert!(items.len() >= 70);
+    for item in items {
+        for field in [
+            "name",
+            "version",
+            "category",
+            "risk",
+            "platforms",
+            "offline",
+            "reversible",
+            "dependencies",
+            "timeout_ms",
+            "retry",
+            "health",
+        ] {
+            assert!(!item[field].is_null(), "{} senza {field}", item["name"]);
+        }
+    }
+    let (_, web) = e
+        .api(
+            "GET",
+            "/api/tools/registry?category=web&offline=false",
+            None,
+        )
+        .await;
+    assert!(web["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|i| i["category"] == "web" && i["offline"] == false));
+    let (_, docker) = e.api("GET", "/api/tools/registry?q=sandbox", None).await;
+    assert!(docker["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|i| i["dependencies"] == json!(["docker"])));
+    let (_, mac) = e
+        .api("GET", "/api/tools/registry?platform=linux", None)
+        .await;
+    assert!(mac["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|i| i["name"] != "app.open"));
+    // Le regole del proprietario compaiono nel registro (Centro permessi).
+    e.api(
+        "PATCH",
+        "/api/permissions",
+        Some(json!({"rules": {"web.*": "deny"}})),
+    )
+    .await;
+    let (_, ruled) = e.api("GET", "/api/tools/registry?q=web.search", None).await;
+    assert_eq!(ruled["items"][0]["owner_rule"], "deny");
+}
+
+#[tokio::test]
+async fn agents_and_model_routing_are_explained_without_sending_anything() {
+    let e = env();
+    let (status, registry) = e.api("GET", "/api/agents", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = registry["items"].as_array().unwrap();
+    assert_eq!(items.len(), 8);
+    let coding = items.iter().find(|a| a["name"] == "coding").unwrap();
+    assert_eq!(coding["context"], "isolated");
+    assert!(coding["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|t| t == "sandbox.run"));
+    assert_eq!(coding["max_risk"], "critical");
+    let business = items.iter().find(|a| a["name"] == "business").unwrap();
+    assert!(business["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|c| c == "analysis"));
+    assert!(items.iter().any(|a| a["kind"] == "generalist"));
+    let (_, route) = e
+        .api(
+            "GET",
+            "/api/agents/route?q=calcola%20il%20runway%20e%20il%20burn%20rate",
+            None,
+        )
+        .await;
+    assert_eq!(route["agent"]["agent"], "business");
+    assert!(
+        route["agent"]["candidates"][0]["matched"]
+            .as_array()
+            .unwrap()
+            .len()
+            >= 2
+    );
+    let (_, vague) = e.api("GET", "/api/agents/route?q=ciao", None).await;
+    assert_eq!(vague["agent"]["agent"], "general_assistant");
+    let (_, model) = e
+        .api(
+            "GET",
+            "/api/models/route?q=Traduci%20in%20inglese%3A%20buongiorno",
+            None,
+        )
+        .await;
+    assert_eq!(model["task"], "traduzione");
+    assert_eq!(model["providers"][0]["route"], "translation");
+    assert_eq!(model["decision"], "local_only");
+    let (_, secret) = e
+        .api(
+            "GET",
+            "/api/models/route?q=usa%20la%20chiave%20nvapi-abcdefghijklmnop",
+            None,
+        )
+        .await;
+    assert_eq!(secret["decision"], "blocked_credentials");
+    assert_eq!(secret["privacy"]["credentials"], true);
+}
+
 #[tokio::test]
 async fn tailscale_status_is_reported_without_authorising_anything() {
     let e = env();

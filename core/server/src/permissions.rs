@@ -10,6 +10,7 @@ use std::path::Path;
 use serde_json::{json, Value};
 
 const FILE: &str = "permissions.json";
+const EMERGENCY_FILE: &str = "emergency.json";
 const MAX_RULES: usize = 64;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -53,6 +54,23 @@ pub enum Mode {
 pub struct Rules {
     profile: Profile,
     rules: Vec<(String, Mode)>,
+    /// Arresto di emergenza attivo (ADR-0151): tutto ciò che modifica o esegue è negato.
+    emergency: bool,
+}
+
+/// Vero se l'arresto di emergenza è attivo.
+pub fn emergency_active(dir: &Path) -> bool {
+    std::fs::read(dir.join(EMERGENCY_FILE))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+        .is_some_and(|doc| doc["active"] == true)
+}
+
+/// Attiva o disattiva l'arresto di emergenza e ne restituisce lo stato.
+pub fn set_emergency(dir: &Path, active: bool) -> Result<Value, String> {
+    let doc = json!({"active": active, "at": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)});
+    std::fs::write(dir.join(EMERGENCY_FILE), doc.to_string()).map_err(|e| e.to_string())?;
+    Ok(doc)
 }
 
 /// Nome di uno strumento o prefisso con asterisco finale (`connector.*`).
@@ -77,12 +95,26 @@ impl Rules {
     pub fn standard() -> Self {
         Self {
             profile: Profile::Standard,
+            emergency: false,
             rules: Vec::new(),
         }
     }
 
     /// Legge le regole. File assente: standard. File presente ma illeggibile: profilo prudente (fallire chiuso).
     pub fn load(dir: &Path) -> Self {
+        let mut rules = Self::load_saved(dir);
+        if emergency_active(dir) {
+            rules.emergency = true;
+            rules.profile = Profile::ReadOnly;
+        }
+        rules
+    }
+
+    pub fn emergency(&self) -> bool {
+        self.emergency
+    }
+
+    fn load_saved(dir: &Path) -> Self {
         let Ok(bytes) = std::fs::read(dir.join(FILE)) else {
             return Self::standard();
         };
@@ -92,6 +124,7 @@ impl Rules {
         else {
             return Self {
                 profile: Profile::Prudent,
+                emergency: false,
                 rules: Vec::new(),
             };
         };
@@ -112,7 +145,11 @@ impl Rules {
             .take(MAX_RULES)
             .collect();
         rules.sort_by(|a, b| a.0.cmp(&b.0));
-        Self { profile, rules }
+        Self {
+            profile,
+            rules,
+            emergency: false,
+        }
     }
 
     pub fn profile(&self) -> Profile {

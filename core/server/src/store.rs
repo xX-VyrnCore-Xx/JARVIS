@@ -106,7 +106,13 @@ impl Store {
              CREATE TABLE IF NOT EXISTS missions (id TEXT PRIMARY KEY, doc TEXT NOT NULL, status TEXT NOT NULL,
                  next_run_at TEXT, updated_at TEXT NOT NULL);
              CREATE INDEX IF NOT EXISTS missions_due ON missions (status, next_run_at);
-             CREATE TABLE IF NOT EXISTS proactive_sent (key TEXT PRIMARY KEY, at TEXT NOT NULL);",
+             CREATE TABLE IF NOT EXISTS proactive_sent (key TEXT PRIMARY KEY, at TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS tool_runs (id INTEGER PRIMARY KEY AUTOINCREMENT, tool TEXT NOT NULL,
+                 at TEXT NOT NULL, ms REAL NOT NULL, ok INTEGER NOT NULL, code TEXT);
+             CREATE INDEX IF NOT EXISTS tool_runs_by_tool ON tool_runs (tool, id);
+             CREATE TABLE IF NOT EXISTS plans (id TEXT PRIMARY KEY, idem TEXT, status TEXT NOT NULL,
+                 updated_at TEXT NOT NULL, doc TEXT NOT NULL);
+             CREATE UNIQUE INDEX IF NOT EXISTS plans_idem ON plans (idem) WHERE idem IS NOT NULL;",
         )?;
         // Migrazione additiva: database creati prima delle fonti Web (RF-06).
         let has_sources = conn.prepare("SELECT sources FROM messages LIMIT 0").is_ok();
@@ -283,6 +289,26 @@ impl Store {
                     )?;
                 }
                 tx.commit()?;
+            }
+        }
+        {
+            let rows: Vec<(String, String)> = {
+                let mut select = self
+                    .conn
+                    .prepare("SELECT id, doc FROM plans WHERE doc NOT LIKE 'enc:v1:%'")?;
+                let collected = select
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                    .collect::<Result<Vec<_>, _>>()?;
+                collected
+            };
+            for (id, doc) in rows {
+                let sealed = cipher
+                    .seal(&format!("plan:{id}"), &doc)
+                    .map_err(crypto_error)?;
+                self.conn.execute(
+                    "UPDATE plans SET doc = ?1 WHERE id = ?2",
+                    params![sealed, id],
+                )?;
             }
         }
         self.chat_cipher = Some(cipher);
@@ -619,6 +645,149 @@ impl Store {
             ],
         )?;
         Ok(())
+    }
+
+    /// Salva (o aggiorna) un piano di esecuzione, cifrato come la chat (ADR-0152).
+    pub fn plan_put(&self, doc: &Value) -> StoreResult<()> {
+        let id = doc["id"].as_str().unwrap_or_default();
+        self.conn.execute(
+            "INSERT INTO plans (id, idem, status, updated_at, doc) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(id) DO UPDATE SET status = excluded.status, updated_at = excluded.updated_at, doc = excluded.doc",
+            params![
+                id,
+                doc["idempotency_key"].as_str(),
+                doc["status"].as_str().unwrap_or("pending"),
+                doc["updated_at"].as_str().unwrap_or_default(),
+                self.seal_chat(&format!("plan:{id}"), &doc.to_string())?
+            ],
+        )?;
+        // Restano gli ultimi 200 piani.
+        self.conn.execute(
+            "DELETE FROM plans WHERE id NOT IN (SELECT id FROM plans ORDER BY updated_at DESC LIMIT 200)",
+            [],
+        )?;
+        Ok(())
+    }
+
+    fn plan_doc(&self, id: &str, text: String) -> StoreResult<Value> {
+        let clear = if text.starts_with(crate::chat_crypto::PREFIX) {
+            self.open_chat(&format!("plan:{id}"), text)?
+        } else {
+            text
+        };
+        serde_json::from_str(&clear).map_err(|e| crypto_error(e.to_string()))
+    }
+
+    pub fn plan_get(&self, id: &str) -> StoreResult<Option<Value>> {
+        let row = self
+            .conn
+            .query_row("SELECT doc FROM plans WHERE id = ?1", [id], |r| {
+                r.get::<_, String>(0)
+            })
+            .optional()?;
+        row.map(|text| self.plan_doc(id, text)).transpose()
+    }
+
+    pub fn plan_by_key(&self, key: &str) -> StoreResult<Option<Value>> {
+        let row = self
+            .conn
+            .query_row("SELECT id, doc FROM plans WHERE idem = ?1", [key], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+            })
+            .optional()?;
+        row.map(|(id, text)| self.plan_doc(&id, text)).transpose()
+    }
+
+    pub fn plans_recent(&self, limit: u32) -> StoreResult<Vec<Value>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, doc FROM plans ORDER BY updated_at DESC LIMIT ?1")?;
+        let rows: Vec<(String, String)> = stmt
+            .query_map([limit], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        rows.into_iter()
+            .map(|(id, text)| self.plan_doc(&id, text))
+            .collect()
+    }
+
+    /// Piani rimasti in esecuzione quando il Core si è chiuso: diventano «interrupted».
+    pub fn plans_interrupt_running(&self) -> StoreResult<usize> {
+        let ids: Vec<String> = {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT id FROM plans WHERE status = 'running'")?;
+            let collected = stmt
+                .query_map([], |r| r.get(0))?
+                .collect::<Result<Vec<String>, _>>()?;
+            collected
+        };
+        for id in &ids {
+            if let Some(mut doc) = self.plan_get(id)? {
+                doc["status"] = serde_json::json!("interrupted");
+                if let Some(events) = doc["events"].as_array_mut() {
+                    events.push(serde_json::json!({"at": crate::now(), "step": "", "kind": "interrupted",
+                        "detail": "Core chiuso durante l'esecuzione: riprendi il piano quando vuoi"}));
+                }
+                self.plan_put(&doc)?;
+            }
+        }
+        Ok(ids.len())
+    }
+
+    /// Registra un'esecuzione di uno strumento (ADR-0151); restano le ultime 5000.
+    pub fn tool_run_add(
+        &self,
+        tool: &str,
+        at: &str,
+        ms: f64,
+        ok: bool,
+        code: Option<&str>,
+    ) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT INTO tool_runs (tool, at, ms, ok, code) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![tool, at, ms, ok, code],
+        )?;
+        self.conn.execute(
+            "DELETE FROM tool_runs WHERE id <= (SELECT MAX(id) FROM tool_runs) - 5000",
+            [],
+        )?;
+        Ok(())
+    }
+
+    /// Conteggi, latenza e ultimo errore per strumento.
+    pub fn tool_stats(&self) -> StoreResult<Vec<Value>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT tool, COUNT(*), SUM(1 - ok), AVG(ms), MAX(ms), MAX(at),
+                    (SELECT code FROM tool_runs e WHERE e.tool = r.tool AND e.ok = 0 ORDER BY id DESC LIMIT 1)
+             FROM tool_runs r GROUP BY tool ORDER BY tool",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            let runs: i64 = r.get(1)?;
+            let failures: i64 = r.get(2)?;
+            Ok(json!({
+                "tool": r.get::<_, String>(0)?, "runs": runs, "failures": failures,
+                "avg_ms": (r.get::<_, f64>(3)? * 10.0).round() / 10.0,
+                "max_ms": (r.get::<_, f64>(4)? * 10.0).round() / 10.0,
+                "last_at": r.get::<_, String>(5)?, "last_error": r.get::<_, Option<String>>(6)?,
+                "state": crate::toolsys::health_state(runs as u64, failures as u64),
+            }))
+        })?;
+        rows.collect()
+    }
+
+    /// Ultime esecuzioni, dalla più recente, di uno strumento o di tutti.
+    pub fn tool_history(&self, tool: Option<&str>, limit: u32) -> StoreResult<Vec<Value>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT tool, at, ms, ok, code FROM tool_runs WHERE (?1 IS NULL OR tool = ?1) ORDER BY id DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![tool, limit], |r| {
+            Ok(json!({
+                "tool": r.get::<_, String>(0)?, "at": r.get::<_, String>(1)?,
+                "duration_ms": (r.get::<_, f64>(2)? * 10.0).round() / 10.0,
+                "ok": r.get::<_, i64>(3)? == 1, "error_code": r.get::<_, Option<String>>(4)?,
+            }))
+        })?;
+        rows.collect()
     }
 
     /// Chat attiva: quella in cui finiscono i nuovi messaggi.

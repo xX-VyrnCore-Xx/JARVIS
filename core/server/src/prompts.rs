@@ -145,6 +145,25 @@ pub fn role_for(prompt: &str) -> Role {
     }
 }
 
+/// Nome leggibile del ruolo (per le spiegazioni dell'instradamento).
+pub fn role_label(role: Role) -> &'static str {
+    match role {
+        Role::General => "generale",
+        Role::Business => "direzione aziendale",
+        Role::Security => "sicurezza difensiva",
+        Role::Systems => "sistemi IT",
+        Role::Coding => "sviluppo",
+        Role::AppBuilder => "costruzione di applicazioni",
+        Role::CodeReview => "revisione del codice",
+        Role::Research => "ricerca",
+        Role::Translation => "traduzione",
+        Role::Writing => "scrittura",
+        Role::Analysis => "analisi dei dati",
+        Role::Planning => "pianificazione",
+        Role::Learning => "didattica",
+    }
+}
+
 pub fn role_guidance(role: Role) -> &'static str {
     match role {
         Role::General => "",
