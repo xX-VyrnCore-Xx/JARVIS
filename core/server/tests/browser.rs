@@ -10,6 +10,16 @@ use jarvis_core::browser::{browse, find_browser, submit_form};
 use jarvis_core::web::WebConfig;
 use serde_json::json;
 
+/// I test avviano un browser vero: uno alla volta, altrimenti su una macchina carica gli avvii a freddo si
+/// rallentano a vicenda (guasto intermittente visto in CI).
+static ONE_BROWSER_AT_A_TIME: Mutex<()> = Mutex::new(());
+
+fn exclusive() -> std::sync::MutexGuard<'static, ()> {
+    ONE_BROWSER_AT_A_TIME
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+}
+
 fn browser_or_skip() -> bool {
     if find_browser().is_some() {
         return true;
@@ -86,6 +96,7 @@ fn web() -> WebConfig {
 
 #[test]
 fn browser_renders_follows_links_and_submits_forms_within_the_web_policy() {
+    let _one = exclusive();
     if !browser_or_skip() {
         return;
     }
@@ -156,6 +167,7 @@ fn browser_renders_follows_links_and_submits_forms_within_the_web_policy() {
 
 #[test]
 fn private_addresses_are_refused_before_launching_the_page() {
+    let _one = exclusive();
     if !browser_or_skip() {
         return;
     }
@@ -166,6 +178,7 @@ fn private_addresses_are_refused_before_launching_the_page() {
 
 #[test]
 fn chat_browses_freely_but_submits_forms_only_after_confirmation_with_masked_secrets() {
+    let _one = exclusive();
     if !browser_or_skip() {
         return;
     }

@@ -419,9 +419,13 @@ impl Browser {
     }
 }
 
+/// Attesa massima per l'avvio a freddo del browser: su una macchina carica (CI, avvio dopo l'accensione) 20 secondi
+/// erano al limite, e un avvio più lento di così è comunque un guasto da segnalare.
+const START_SECONDS: u64 = 60;
+
 /// Legge `DevToolsActivePort` dal profilo: porta e percorso del WebSocket del browser.
 fn wait_devtools(profile: &Path) -> Result<String, ToolError> {
-    let until = Instant::now() + Duration::from_secs(20);
+    let until = Instant::now() + Duration::from_secs(START_SECONDS);
     while Instant::now() < until {
         if let Ok(t) = std::fs::read_to_string(profile.join("DevToolsActivePort")) {
             let mut lines = t.lines();
@@ -433,7 +437,7 @@ fn wait_devtools(profile: &Path) -> Result<String, ToolError> {
     }
     Err(err(
         "web.browser_unavailable",
-        "il browser non si è avviato entro 20 secondi",
+        format!("il browser non si è avviato entro {START_SECONDS} secondi"),
     ))
 }
 
