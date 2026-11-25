@@ -89,27 +89,62 @@ pub fn remove(dir: &Path, name: &str) -> Result<bool, String> {
     Ok(removed)
 }
 
-/// Una richiesta JSON-RPC; restituisce il campo `result` o il messaggio d'errore del server.
-fn rpc(url: &str, token: Option<&str>, method: &str, params: Value) -> Result<Value, String> {
+/// Identificativo di sessione del server: solo caratteri ASCII visibili e lunghezza limitata, per non
+/// riflettere nelle intestazioni nulla di inatteso.
+fn clean_session(value: &str) -> Option<String> {
+    (!value.is_empty() && value.len() <= 200 && value.bytes().all(|b| (0x21..=0x7e).contains(&b)))
+        .then(|| value.to_string())
+}
+
+/// Risposta JSON-RPC contenuta in un flusso `text/event-stream` **già concluso** (un POST che il server chiude
+/// dopo l'evento): la prima riga `data:` con un oggetto che ha `result` o `error`. I flussi che restano aperti
+/// non sono supportati (la lettura ha comunque un limite di dimensione e di tempo).
+fn sse_response(body: &str) -> Option<Value> {
+    body.lines()
+        .filter_map(|line| line.strip_prefix("data:"))
+        .filter_map(|data| serde_json::from_str::<Value>(data.trim()).ok())
+        .find(|v| v.get("result").is_some() || v.get("error").is_some())
+}
+
+/// Una richiesta JSON-RPC. Restituisce il campo `result` (o l'errore del server) e l'eventuale identificativo
+/// di sessione assegnato dal server (`Mcp-Session-Id`). Senza `id` è una notifica: la risposta può essere vuota.
+fn rpc(
+    url: &str,
+    token: Option<&str>,
+    session: Option<&str>,
+    method: &str,
+    params: Value,
+    notification: bool,
+) -> Result<(Value, Option<String>), String> {
     let agent = ureq::AgentBuilder::new()
         .timeout(TIMEOUT)
         .redirects(0)
         .build();
     let mut request = agent
         .post(url)
-        .set("Accept", "application/json")
+        .set("Accept", "application/json, text/event-stream")
         .set("Content-Type", "application/json");
     if let Some(token) = token {
         request = request.set("Authorization", &format!("Bearer {token}"));
     }
+    if let Some(session) = session {
+        request = request.set("Mcp-Session-Id", session);
+    }
+    let payload = if notification {
+        json!({"jsonrpc": "2.0", "method": method, "params": params})
+    } else {
+        json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
+    };
     let response = request
-        .send_string(
-            &json!({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).to_string(),
-        )
+        .send_string(&payload.to_string())
         .map_err(|e| match e {
             ureq::Error::Status(code, _) => format!("Il server MCP ha risposto con HTTP {code}"),
             ureq::Error::Transport(t) => format!("Il server MCP non è raggiungibile: {}", t.kind()),
         })?;
+    let session_id = response.header("mcp-session-id").and_then(clean_session);
+    let event_stream = response
+        .content_type()
+        .eq_ignore_ascii_case("text/event-stream");
     let mut body = Vec::new();
     response
         .into_reader()
@@ -119,8 +154,16 @@ fn rpc(url: &str, token: Option<&str>, method: &str, params: Value) -> Result<Va
     if body.len() as u64 > MAX_RESPONSE {
         return Err("La risposta del server MCP supera 256 KiB".into());
     }
-    let doc: Value = serde_json::from_slice(&body)
-        .map_err(|_| "Risposta del server MCP non valida (serve JSON)")?;
+    if notification && body.iter().all(u8::is_ascii_whitespace) {
+        return Ok((Value::Null, session_id));
+    }
+    let doc: Value = if event_stream {
+        sse_response(&String::from_utf8_lossy(&body))
+            .ok_or("Risposta del server MCP non valida (flusso di eventi senza risposta)")?
+    } else {
+        serde_json::from_slice(&body)
+            .map_err(|_| "Risposta del server MCP non valida (serve JSON)")?
+    };
     if let Some(error) = doc.get("error") {
         return Err(error["message"]
             .as_str()
@@ -129,18 +172,43 @@ fn rpc(url: &str, token: Option<&str>, method: &str, params: Value) -> Result<Va
             .take(300)
             .collect());
     }
-    Ok(doc["result"].clone())
+    Ok((doc["result"].clone(), session_id))
+}
+
+/// Apre la sessione: `initialize`, poi la notifica `initialized`. Restituisce l'identificativo di sessione, se
+/// il server ne usa uno (come fa il server MCP di Hugging Face), e la risposta di `initialize`.
+fn open(url: &str, token: Option<&str>) -> Result<(Option<String>, Value), String> {
+    let (init, session) = rpc(
+        url,
+        token,
+        None,
+        "initialize",
+        json!({"protocolVersion": PROTOCOL, "capabilities": {}, "clientInfo": {"name": "jarvis", "version": env!("CARGO_PKG_VERSION")}}),
+        false,
+    )?;
+    // La notifica è doverosa per il protocollo ma non decisiva: un errore qui non blocca la richiesta.
+    let _ = rpc(
+        url,
+        token,
+        session.as_deref(),
+        "notifications/initialized",
+        json!({}),
+        true,
+    );
+    Ok((session, init))
 }
 
 /// Strumenti offerti da un server.
 pub fn list_tools(url: &str, token: Option<&str>) -> Result<Value, String> {
-    let init = rpc(
+    let (session, init) = open(url, token)?;
+    let (result, _) = rpc(
         url,
         token,
-        "initialize",
-        json!({"protocolVersion": PROTOCOL, "capabilities": {}, "clientInfo": {"name": "jarvis", "version": env!("CARGO_PKG_VERSION")}}),
+        session.as_deref(),
+        "tools/list",
+        json!({}),
+        false,
     )?;
-    let result = rpc(url, token, "tools/list", json!({}))?;
     let tools: Vec<Value> = result["tools"]
         .as_array()
         .into_iter()
@@ -166,17 +234,14 @@ pub fn call_tool(
     if tool.is_empty() || tool.len() > 100 {
         return Err("Nome dello strumento non valido".into());
     }
-    rpc(
+    let (session, _) = open(url, token)?;
+    let (result, _) = rpc(
         url,
         token,
-        "initialize",
-        json!({"protocolVersion": PROTOCOL, "capabilities": {}, "clientInfo": {"name": "jarvis", "version": env!("CARGO_PKG_VERSION")}}),
-    )?;
-    let result = rpc(
-        url,
-        token,
+        session.as_deref(),
         "tools/call",
         json!({"name": tool, "arguments": arguments}),
+        false,
     )?;
     let text: String = result["content"]
         .as_array()
@@ -196,6 +261,25 @@ pub fn call_tool(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn event_stream_responses_are_read_when_finished() {
+        let body = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\"}\n\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[]}}\n\n";
+        assert_eq!(sse_response(body).unwrap()["result"]["tools"], json!([]));
+        assert!(sse_response("data: non json\n\n").is_none());
+        assert!(sse_response("").is_none());
+    }
+
+    #[test]
+    fn session_ids_are_restricted_to_visible_ascii() {
+        assert_eq!(
+            clean_session("6dabf7af-d213-4e99").as_deref(),
+            Some("6dabf7af-d213-4e99")
+        );
+        for bad in ["", "con spazio", "a\r\nX-Evil: 1", "è", &"x".repeat(201)] {
+            assert!(clean_session(bad).is_none(), "{bad:?}");
+        }
+    }
 
     #[test]
     fn addresses_and_names_are_restricted() {

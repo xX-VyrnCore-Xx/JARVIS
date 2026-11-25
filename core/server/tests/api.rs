@@ -1483,6 +1483,7 @@ async fn independent_plan_steps_run_in_parallel_and_results_are_verified() {
 
 /// Server MCP di prova su loopback: registra l'intestazione di autorizzazione e restituisce un testo ostile.
 async fn fake_mcp_server() -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
+    use axum::response::IntoResponse;
     use axum::routing::post;
     let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let shared = seen.clone();
@@ -1498,7 +1499,40 @@ async fn fake_mcp_server() -> (String, std::sync::Arc<std::sync::Mutex<Vec<Strin
                         .unwrap_or("")
                         .to_string();
                     shared.lock().unwrap().push(auth);
-                    let result = match body["method"].as_str().unwrap_or_default() {
+                    let method = body["method"].as_str().unwrap_or_default().to_string();
+                    // Come il server MCP di Hugging Face: la sessione nasce con `initialize` e le altre
+                    // richieste senza il suo identificativo sono rifiutate.
+                    // Il server pubblico di Hugging Face rifiuta i client che non accettano anche gli eventi.
+                    let accept = headers
+                        .get("accept")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("");
+                    if !(accept.contains("application/json") && accept.contains("text/event-stream")) {
+                        return (
+                            axum::http::StatusCode::NOT_ACCEPTABLE,
+                            axum::Json(json!({"jsonrpc": "2.0", "id": null,
+                                "error": {"code": -32000, "message": "Not Acceptable"}})),
+                        )
+                            .into_response();
+                    }
+                    let session = headers
+                        .get("mcp-session-id")
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("");
+                    if method == "notifications/initialized" {
+                        return (
+                            axum::http::StatusCode::ACCEPTED,
+                            [("mcp-session-id", "sessione-di-prova")],
+                            String::new(),
+                        )
+                            .into_response();
+                    }
+                    if method != "initialize" && session != "sessione-di-prova" {
+                        return axum::Json(json!({"jsonrpc": "2.0", "id": body["id"],
+                            "error": {"code": -32600, "message": "Session ID required"}}))
+                        .into_response();
+                    }
+                    let result = match method.as_str() {
                         "initialize" => json!({"protocolVersion": "2025-03-26", "serverInfo": {"name": "prova", "version": "1"}}),
                         "tools/list" => json!({"tools": [{"name": "eco", "description": "Ripete il testo",
                             "inputSchema": {"type": "object"}}]}),
@@ -1507,7 +1541,11 @@ async fn fake_mcp_server() -> (String, std::sync::Arc<std::sync::Mutex<Vec<Strin
                                 body["params"]["arguments"]["testo"].as_str().unwrap_or(""))}], "isError": false}),
                         _ => json!({}),
                     };
-                    axum::Json(json!({"jsonrpc": "2.0", "id": body["id"], "result": result}))
+                    (
+                        [("mcp-session-id", "sessione-di-prova")],
+                        axum::Json(json!({"jsonrpc": "2.0", "id": body["id"], "result": result})),
+                    )
+                        .into_response()
                 }
             },
         ),

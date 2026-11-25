@@ -52,7 +52,7 @@ elenca le ultime esecuzioni (parametri `tool`, `limit`).
 - **Connettori** (ADR-0047): manifest firmati dal proprietario per servizi esterni (Gmail, Calendar, Outlook, GitHub,
   GitLab, Slack, Todoist, Airtable, Open-Meteo), con credenziali nel secret store e le stesse policy.
 - **MCP server**: `POST /api/mcp` espone ad altri agenti solo strumenti di calcolo e sola lettura (ADR-0138).
-- **MCP client** (ADR-0156): `mcp.list` e `mcp.call` usano i server che il proprietario ha autorizzato in `/api/mcp/servers`
+- **MCP client** (ADR-0156, [MCP_INTEGRATION.md](MCP_INTEGRATION.md)): `mcp.list` e `mcp.call` usano i server che il proprietario ha autorizzato in `/api/mcp/servers`
   (HTTPS, token nel deposito dei segreti). `mcp.call` chiede **sempre** la conferma; i risultati sono dati non attendibili.
 - **n8n** (ADR-0093 e successivi): automazioni esterne gestite dal Core.
 - Un plugin nativo caricato dal disco non esiste: l'estensione supportata è il connettore.

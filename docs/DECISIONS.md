@@ -1897,6 +1897,12 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** `GET /api/agents` descrive i sette specialisti e il generalista (competenze dagli strumenti, rischio massimo, contesto isolato o condiviso, risorse); `GET /api/agents/route?q=` mostra quale agente riceverebbe una richiesta e per quali parole chiave; `GET /api/models/route?q=` mostra la rotta per compito, il modello per provider, il ripiego e la riservatezza (credenziali bloccate, dati personali rilevati, profilo condiviso) **senza inviare nulla**. Non si introducono nuovi agenti: si riusano quelli esistenti.
 - **Evidenza:** test API del registro e dell'instradamento.
 
+### ADR-0166 — Hugging Face come server MCP e client MCP con sessioni
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout.
+- **Decisione:** Hugging Face si collega **come server MCP autorizzato dal proprietario** (`https://huggingface.co/mcp`, token di sola lettura facoltativo nel deposito dei segreti), non come provider dentro il Core: dà accesso a ricerca di modelli e dataset senza nuovo codice per i provider e con le garanzie già in vigore (conferma a ogni `mcp.call`, risultati non attendibili, nessuna chiave restituita). Il sondaggio del server pubblico ha mostrato requisiti che il client non soddisfaceva, quindi **il client MCP ora segue Streamable HTTP**: `Accept` con `application/json` e `text/event-stream`, notifica `initialized`, identificativo di sessione (`Mcp-Session-Id`, validato) riportato nelle richieste, lettura di risposte SSE già concluse. Provider cloud, embeddings e voce su servizi esterni **restano fuori** finché non c'è una regola di riservatezza per i dati personali.
+- **Evidenza:** il server fittizio dei test rifiuta le richieste senza `Accept` completo o senza sessione (come quello reale); test unitari del filtro dell'identificativo di sessione e delle risposte SSE; sequenza `initialize`, notifica e `tools/list` verificata con `curl` sul server reale (HTTP 202 per la notifica, strumenti elencati). **Sospeso:** prova end-to-end del client JARVIS contro il server reale (qui la rete passa da un proxy che il client non usa) e chiamate con token.
+
 ### ADR-0165 — Pacchetti di estensione dichiarativi (SDK senza codice di terzi)
 
 - **Data:** 2026-11-25 · **Stato:** implementata nel checkout (fase J della roadmap, nella forma sicura).
@@ -1959,7 +1965,7 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 
 - **Data:** 2026-11-25 · **Stato:** implementata nel checkout (fase F).
 - **Decisione:** `mcp.list` (elenca gli strumenti, rischio medio) e `mcp.call` (chiama uno strumento, **rischio alto e conferma sempre richiesta**). I server si autorizzano solo dal computer del proprietario (`/api/mcp/servers`: nome, indirizzo, token facoltativo nel deposito dei segreti, mai restituito); né un modello né un piano possono aggiungerne. Solo HTTPS (HTTP su loopback), niente credenziali nell'indirizzo, niente reindirizzamenti, risposta massima 256 KiB, timeout 20 s, fino a 8 server. Il risultato è marcato `untrusted` e passa dalla guardia anti-iniezione: è un dato, mai un'istruzione.
-- **Non incluso:** risposte in streaming (SSE) e server che richiedono OAuth.
+- **Non incluso:** flussi SSE a lunga durata e server che richiedono OAuth (le sessioni e le risposte SSE concluse sono in ADR-0166).
 - **Evidenza:** test con un server MCP locale: token inviato, elenco, chiamata con conferma, testo ostile riconosciuto, server sconosciuto rifiutato.
 
 ### ADR-0157 — Digital Environment Twin e valutazione degli agenti

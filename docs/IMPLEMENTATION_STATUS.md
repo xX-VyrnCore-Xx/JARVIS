@@ -1,7 +1,7 @@
 # Stato di implementazione
 
 Fonte autorevole dello stato di ogni requisito dell'evoluzione «piattaforma di intelligenza artificiale personale».
-Aggiornata il 2026-11-25 sul codice di `main` più la PR in corso (ADR fino alla 0165). Legenda: **Implementato** (funziona end-to-end ed è
+Aggiornata il 2026-11-25 sul codice di `main` più la PR in corso (ADR fino alla 0166). Legenda: **Implementato** (funziona end-to-end ed è
 verificato da test), **Parziale** (funziona in parte: il limite è indicato), **Sperimentale** (c'è, non maturo),
 **Pianificato** (assente). Nessuna voce è un segnaposto: ciò che non esiste è dichiarato «Pianificato».
 Verifiche ed esiti per revisione: [ROADMAP.md](ROADMAP.md). Piano dei passi successivi: [IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md).
@@ -23,7 +23,7 @@ Verifiche ed esiti per revisione: [ROADMAP.md](ROADMAP.md). Piano dei passi succ
 | Chaining / Composition | Implementato | piani con riferimenti fra passi, condizioni di successo, modelli di piano (ADR-0152, 0154, 0159) e workflow |
 | Tool SDK | Parziale | SDK dichiarativo per competenze e modelli di piano (ADR-0165, [PLUGIN_SYSTEM.md](PLUGIN_SYSTEM.md)); per nuovi strumenti resta la procedura in TOOL_SYSTEM.md |
 | Plugin manager | Parziale | pacchetti dichiarativi (competenze e procedure) con installazione atomica e rimozione; connettori con manifest e n8n; nessun plugin nativo in codice |
-| MCP | Implementato | server `/api/mcp` (calcolo e sola lettura) e **client** con server autorizzati dal proprietario, conferma sempre richiesta e risultati non attendibili (ADR-0156); manca lo streaming SSE |
+| MCP | Implementato | server `/api/mcp` (calcolo e sola lettura) e **client** con server autorizzati dal proprietario, conferma sempre richiesta e risultati non attendibili (ADR-0156); sessioni Streamable HTTP e guida per Hugging Face in [MCP_INTEGRATION.md](MCP_INTEGRATION.md) (ADR-0166); mancano i flussi SSE a lunga durata e OAuth |
 
 ## 2. Strumenti operativi
 
