@@ -165,6 +165,9 @@ async fn specialist_gets_only_its_tools_and_cannot_leave_its_scope() {
     assert_eq!(
         offered,
         [
+            "mcp.call",
+            "mcp.list",
+            "mcp.read",
             "memory.search",
             "notes.add",
             "notes.search",

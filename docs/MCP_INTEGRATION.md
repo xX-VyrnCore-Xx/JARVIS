@@ -1,7 +1,7 @@
 # Integrazione MCP
 
 > Fonte unica per l'uso del protocollo MCP in JARVIS. Il catalogo degli strumenti è in [TOOL_SYSTEM.md](TOOL_SYSTEM.md);
-> le decisioni sono in `DECISIONS.md` (ADR-0138 server, ADR-0156 client, ADR-0166 sessioni e Hugging Face).
+> le decisioni sono in `DECISIONS.md` (ADR-0138 server, ADR-0156 client, ADR-0166 sessioni e Hugging Face, ADR-0182 robustezza e politica per strumento).
 
 ## Due direzioni
 
@@ -23,6 +23,19 @@
   `text/event-stream`; sono lette anche le risposte SSE **già concluse**. Flussi che restano aperti e server con OAuth non sono
   supportati.
 
+## Robustezza e politica per strumento (ADR-0182)
+
+- **Sessione riusata** per 10 minuti e riaperta da sola se il server la dimentica; elenco strumenti letto a pagine e in cache (5 minuti),
+  con impronta: `changed: true` avvisa che uno strumento è comparso, sparito o ha cambiato schema.
+- **Tentativi limitati:** HTTP 429/502/503/504 si ripetono (al più 3 tentativi, 40 s in tutto); un guasto di rete si ripete solo per le
+  letture, **mai** per `mcp.call` (potrebbe aver avuto effetto).
+- **Argomenti verificati** sullo schema del server (obbligatori, tipi, valori ammessi) prima di partire; immagini e audio restano segnaposto.
+- **Salute e statistiche:** `POST /api/mcp/servers/health {"name": "…"}` (raggiungibilità, latenza, strumenti, strumenti di sola lettura);
+  `GET /api/mcp/servers` mostra chiamate, errori, ultimo esito e latenza.
+- **Politica per strumento** (`POST /api/mcp/servers/policy {"name": "…", "allow": […], "auto": […]}`, solo proprietario): `allow` limita gli
+  strumenti chiamabili; `auto` elenca gli strumenti di **sola lettura** (dichiarati tali dal server, a elenco già letto) che JARVIS può usare
+  **senza conferma** con `mcp.read`. `mcp.call` chiede sempre il consenso.
+
 ## Hugging Face
 
 Il server pubblico `https://huggingface.co/mcp` permette di cercare modelli, dataset e Spaces e di leggere schede e documentazione
@@ -31,13 +44,16 @@ Il server pubblico `https://huggingface.co/mcp` permette di cercare modelli, dat
 
 1. (Facoltativo, consigliato) crea un token di **sola lettura** da <https://hf.co/settings/mcp>. Senza token il server funziona in
    forma anonima con limiti di richieste più bassi.
-2. Autorizzalo dal tuo computer:
+2. Autorizzalo dal tuo computer con il server noto (indirizzo del catalogo; `auto_suggested` approva anche gli strumenti di sola lettura
+   consigliati `hub_repo_search`, `hub_repo_details`, `hf_fs` per l'uso senza conferma: omettilo per essere interpellato a ogni chiamata):
 
 ```bash
 curl -s -X POST http://127.0.0.1:8765/api/mcp/servers \
   -H "Authorization: Bearer $JARVIS_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name": "huggingface", "url": "https://huggingface.co/mcp", "token": "hf_..."}'
+  -d '{"preset": "huggingface", "token": "hf_...", "auto_suggested": true}'
 ```
+
+   La competenza «Modelli e dataset su Hugging Face» guida le richieste («cerca un modello su Hugging Face per…»).
 
 3. Prova `mcp.list` (server `huggingface`) e poi `mcp.call` con lo strumento voluto: JARVIS chiede la conferma a ogni chiamata.
 

@@ -410,15 +410,15 @@ impl Jarvis {
             for (k, v) in &self.cfg.worker_env {
                 cmd.env(k, v);
             }
-            // L'unico motore vocale del Core ammesso è quello sintetico delle verifiche.
-            cmd.env(
-                "JARVIS_VOICE_ENGINE",
-                if self.cfg.voice_engine.as_deref() == Some("fake") {
-                    "fake"
-                } else {
-                    "off"
-                },
-            );
+            // Motore vocale (ADR-0010, ADR-0054): per scelta del proprietario o delle verifiche
+            // (`JARVIS_VOICE_ENGINE`: auto, local, fake, off). Senza scelta il worker usa «auto»: i motori
+            // installati dal setup, e un messaggio chiaro su cosa manca se non ce ne sono. Forzare «off» qui
+            // spegneva riconoscimento, parola di attivazione e sintesi a ogni avvio (ADR-0183).
+            if let Some(engine) = &self.cfg.voice_engine {
+                cmd.env("JARVIS_VOICE_ENGINE", engine);
+            } else {
+                cmd.env_remove("JARVIS_VOICE_ENGINE");
+            }
             cmd.env_remove("JARVIS_TOKEN");
             let spawned = Worker::spawn(cmd).map_err(|e| e.to_contract());
             self.obs.count(if spawned.is_ok() {
@@ -2445,6 +2445,48 @@ impl Jarvis {
         }))
     }
 
+    /// Esporta la memoria in un documento portabile (ADR-0182). Solo dal computer del proprietario.
+    pub fn memory_export(&mut self) -> Result<Value, CoreError> {
+        let out = crate::memcog::export(&self.store).map_err(internal)?;
+        self.record_owner_action("memory.export")?;
+        Ok(out)
+    }
+
+    /// Importa un'esportazione: anteprima (`apply` falso) o scrittura con audit.
+    pub fn memory_import(&mut self, body: &Value) -> Result<Value, CoreError> {
+        let apply = body["apply"].as_bool().unwrap_or(false);
+        let out = crate::memcog::import(&self.store, &body["data"], apply)
+            .map_err(CoreError::BadRequest)?;
+        if apply {
+            self.record_owner_action("memory.import")?;
+        }
+        Ok(out)
+    }
+
+    /// Risolve una contraddizione tenendo la voce scelta dal proprietario.
+    pub fn memory_resolve(&mut self, body: &Value) -> Result<Value, CoreError> {
+        let out = crate::memcog::resolve_contradiction(
+            &self.store,
+            body["subject"].as_str().unwrap_or_default(),
+            body["relation"].as_str().unwrap_or_default(),
+            body["keep"].as_str().unwrap_or_default(),
+        )
+        .map_err(CoreError::BadRequest)?;
+        self.record_owner_action("memory.resolve")?;
+        Ok(out)
+    }
+
+    /// Riassume gli episodi vecchi per settimana: anteprima o applicazione con audit.
+    pub fn memory_compact(&mut self, body: &Value) -> Result<Value, CoreError> {
+        let apply = body["apply"].as_bool().unwrap_or(false);
+        let days = body["days"].as_i64().unwrap_or(30);
+        let out = crate::memcog::compact_episodes(&self.store, days, apply).map_err(internal)?;
+        if apply {
+            self.record_owner_action("memory.compact")?;
+        }
+        Ok(out)
+    }
+
     /// Contraddizioni nella memoria (ADR-0179): stessa coppia soggetto-relazione con oggetti diversi.
     pub fn memory_contradictions(&self) -> Result<Value, CoreError> {
         Ok(json!({"items": crate::reflect::memory_contradictions(&self.store).map_err(internal)?}))
@@ -2966,7 +3008,7 @@ impl Jarvis {
                 "n8n.unavailable",
                 "la routine richiede conferma",
             )),
-            "mcp.list" | "mcp.call" => self.mcp_client_call(tool, arguments),
+            "mcp.list" | "mcp.call" | "mcp.read" => self.mcp_client_call(tool, arguments),
             "security.status" => self.security_status().map_err(|_| {
                 tool_error(
                     "security.unavailable",
@@ -3720,20 +3762,56 @@ impl Jarvis {
         self.secrets.get(&format!("mcp:{name}")).ok().flatten()
     }
 
+    /// Autorizza un server MCP, a mano (`name`, `url`) o da un server noto (`preset`). Con `auto_suggested` il
+    /// proprietario sceglie anche gli strumenti di sola lettura consigliati dal catalogo per l'uso senza conferma.
     pub fn mcp_server_save(&mut self, body: &Value) -> Result<Value, CoreError> {
-        let name = body["name"].as_str().unwrap_or_default();
-        crate::mcp_client::add(
-            &self.cfg.data_dir,
-            name,
-            body["url"].as_str().unwrap_or_default(),
-        )
-        .map_err(CoreError::BadRequest)?;
+        let name = match body["preset"].as_str() {
+            Some(id) => {
+                crate::mcp_client::add_preset(&self.cfg.data_dir, id, body["name"].as_str())
+                    .map_err(CoreError::BadRequest)?
+            }
+            None => {
+                let name = body["name"].as_str().unwrap_or_default().to_string();
+                crate::mcp_client::add(
+                    &self.cfg.data_dir,
+                    &name,
+                    body["url"].as_str().unwrap_or_default(),
+                )
+                .map_err(CoreError::BadRequest)?;
+                name
+            }
+        };
+        let name = name.as_str();
+        if body["auto_suggested"] == true {
+            let suggested = body["preset"]
+                .as_str()
+                .and_then(crate::mcp_client::preset)
+                .map(|p| p["suggested_auto"].clone())
+                .unwrap_or(Value::Null);
+            if suggested.is_array() {
+                crate::mcp_client::set_policy(
+                    &self.cfg.data_dir,
+                    name,
+                    &json!({"auto": suggested}),
+                )
+                .map_err(CoreError::BadRequest)?;
+            }
+        }
         if let Some(token) = body["token"].as_str().filter(|t| !t.is_empty()) {
             self.secrets
                 .put(&format!("mcp:{name}"), token)
                 .map_err(CoreError::Internal)?;
         }
         self.record_owner_action("mcp.server.add")?;
+        Ok(self.mcp_servers())
+    }
+
+    /// Politica per strumento di un server (`allow`, `auto`): decisione del proprietario, nell'audit.
+    pub fn mcp_server_policy(&mut self, body: &Value) -> Result<Value, CoreError> {
+        let name = body["name"].as_str().unwrap_or_default();
+        crate::mcp_client::set_policy(&self.cfg.data_dir, name, body)
+            .map_err(CoreError::BadRequest)?;
+        self.record_owner_action("mcp.server.policy")?;
         Ok(self.mcp_servers())
     }
 
@@ -3761,6 +3839,22 @@ impl Jarvis {
             crate::mcp_client::list_tools(&url, token.as_deref())
         } else {
             let remote = arguments["tool"].as_str().unwrap_or_default();
+            // Politica del proprietario per server (ADR-0182): elenco ammesso e strumenti senza conferma.
+            if !crate::mcp_client::is_allowed(&self.cfg.data_dir, name, remote) {
+                return Err(tool_error(
+                    "mcp.not_allowed",
+                    format!("Lo strumento «{remote}» non è fra quelli ammessi dal proprietario per «{name}»"),
+                ));
+            }
+            if tool == "mcp.read"
+                && !crate::mcp_client::auto_allowed(&self.cfg.data_dir)
+                    .contains(&format!("{name}/{remote}"))
+            {
+                return Err(tool_error(
+                    "mcp.not_auto",
+                    format!("«{remote}» non è approvato per l'uso senza conferma: usa mcp.call, che chiede il tuo consenso"),
+                ));
+            }
             let remote_args = arguments
                 .get("arguments")
                 .cloned()

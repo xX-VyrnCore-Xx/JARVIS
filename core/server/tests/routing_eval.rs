@@ -139,3 +139,22 @@ fn owner_corpus_report() {
         "più del 5% di errori sul corpus del proprietario: {wrong}/{total}"
     );
 }
+
+#[test]
+fn hugging_face_requests_reach_the_research_agent() {
+    for message in [
+        "cerca un modello su Hugging Face per la traduzione",
+        "trovami un dataset su huggingface per il parlato italiano",
+        "confronta due modelli open source per il codice",
+    ] {
+        let got = route(message).map_or(GENERAL, |a| a.name);
+        assert!(
+            got == "research" || got == GENERAL,
+            "{message:?} instradata a {got}"
+        );
+    }
+    assert_eq!(
+        route("cerca un modello su Hugging Face per la traduzione").map(|a| a.name),
+        Some("research")
+    );
+}

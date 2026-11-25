@@ -305,6 +305,14 @@ function check(condition, message) {
   check(contradictions.status === 200 && Array.isArray(contradictions.json?.items), "contraddizioni della memoria");
   const handoffNoDevice = await request("/api/handoffs", { method: "POST", token: ownerToken, body: { to: "inesistente", goal: "prova" } });
   check(handoffNoDevice.status === 400, "passaggio verso un dispositivo sconosciuto rifiutato");
+  const mcpPresets = await request("/api/mcp/presets", { token: ownerToken });
+  check(mcpPresets.status === 200 && mcpPresets.json?.items?.some((p) => p.id === "huggingface" && p.url === "https://huggingface.co/mcp"), "server MCP noti: Hugging Face");
+  const mcpHealthMissing = await request("/api/mcp/servers/health", { method: "POST", token: ownerToken, body: { name: "inesistente" } });
+  check(mcpHealthMissing.status === 404, "salute di un server MCP sconosciuto rifiutata");
+  const memExport = await request("/api/memory/export", { token: ownerToken });
+  check(memExport.status === 200 && memExport.json?.contract === "jarvis.memory-export/1" && Array.isArray(memExport.json?.items), "esportazione della memoria");
+  const memBad = await request("/api/memory/import", { method: "POST", token: ownerToken, body: { data: { contract: "altro" } } });
+  check(memBad.status === 400, "importazione con formato sconosciuto rifiutata");
   const badLogin = await request("/api/auth/login", { method: "POST", body: { username: "nessuno", password: "una frase sbagliata" } });
   check(badLogin.status === 401, "accesso con credenziali sbagliate rifiutato");
 })().catch((error) => {

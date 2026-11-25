@@ -634,7 +634,7 @@ impl Limiter {
     }
 
     fn observe_output(&mut self, key: (Provider, String, Route), answer: &Result<Answer, Failure>) {
-        if matches!(answer, Err(Failure::Truncated)) {
+        if matches!(answer, Err(Failure::Truncated | Failure::Partial(_))) {
             if self.output_pressure.len() < 64 || self.output_pressure.contains_key(&key) {
                 let level = self.output_pressure.entry(key).or_default();
                 *level = (*level + 1).min(2);
@@ -699,6 +699,8 @@ pub enum Failure {
     ModelUnavailable,
     Incomplete,
     Truncated,
+    /// Risposta interrotta dal limite di lunghezza ma con del testo già utile: si continua invece di scartarla.
+    Partial(String),
     Unavailable,
 }
 
@@ -713,7 +715,7 @@ impl Failure {
             Self::InvalidTool => "cloud.invalid_tool",
             Self::RateLimited(_) => "cloud.rate_limited",
             Self::ModelUnavailable => "cloud.model_unavailable",
-            Self::Incomplete | Self::Truncated => "cloud.incomplete_response",
+            Self::Incomplete | Self::Truncated | Self::Partial(_) => "cloud.incomplete_response",
             Self::Unavailable => "cloud.unavailable",
         }
     }
@@ -729,7 +731,7 @@ impl Failure {
             Self::InvalidTool => ("Il modello ha proposto un calcolo non valido. Riformula la richiesta oppure usa un comando esplicito.".into(), false),
             Self::RateLimited(wait) => (format!("Limite del provider raggiunto. Riprova tra {} s o scegli un altro provider.", wait.as_secs_f64().ceil() as u64), true),
             Self::ModelUnavailable => (format!("I modelli selezionati non sono disponibili presso {label}. Verifica il modello in Modelli AI."), true),
-            Self::Incomplete | Self::Truncated => (format!("{label} ha restituito una risposta incompleta. Prova a suddividere la richiesta."), true),
+            Self::Incomplete | Self::Truncated | Self::Partial(_) => (format!("{label} ha restituito una risposta incompleta anche dopo un secondo tentativo con più spazio. Prova a suddividere la richiesta o scegli un modello più veloce in Modelli AI."), true),
             Self::Unavailable => (format!("{label} non ha completato la richiesta. Riprova o scegli un altro provider."), true),
         }
     }
@@ -791,6 +793,7 @@ impl From<&crate::catalog::Tool> for Function {
     }
 }
 
+#[derive(Debug)]
 pub enum Answer {
     Text(String),
     Call(Value),
@@ -850,6 +853,11 @@ impl AgentRequest {
     }
 
     pub fn payload(&self) -> Value {
+        self.payload_with(AGENT_TOKENS)
+    }
+
+    /// Corpo della richiesta con un tetto di token scelto: serve al secondo tentativo dopo una risposta troncata.
+    pub(crate) fn payload_with(&self, tokens: usize) -> Value {
         let mut messages = vec![json!({"role": "system", "content": self.system})];
         for (role, content) in &self.history {
             if matches!(role.as_str(), "user" | "assistant") {
@@ -878,9 +886,9 @@ impl AgentRequest {
         }
         let mut body = match self.provider {
             Provider::Ollama => json!({"model": self.model, "messages": messages, "stream": false,
-                "options": {"num_predict": 2_000}}),
+                "options": {"num_predict": tokens}}),
             Provider::Nim => json!({"model": self.model, "messages": messages, "stream": false,
-                "max_tokens": 2_000, "temperature": 0.2}),
+                "max_tokens": tokens, "temperature": 0.2}),
         };
         if !self.tools.is_empty() {
             body["tools"] = json!(self.tools.iter().map(|tool| &tool.wire).collect::<Vec<_>>());
@@ -896,14 +904,59 @@ impl AgentRequest {
     }
 
     pub(crate) fn execute_at(&self, endpoint: &str) -> Result<Answer, Failure> {
-        chat_at(
+        let mut answer = chat_at(
             endpoint,
             self.provider,
             &self.key,
             self.payload(),
             &self.tools,
             &self.limiter,
-        )
+        );
+        if matches!(answer, Err(Failure::InvalidTool)) {
+            answer = chat_at(
+                endpoint,
+                self.provider,
+                &self.key,
+                self.payload(),
+                &self.tools,
+                &self.limiter,
+            );
+        }
+        // Risposta vuota o troncata (un modello che «ragiona» può esaurire i token prima di rispondere): un secondo
+        // tentativo con il doppio dello spazio, poi la continuazione del testo già scritto (ADR-0184).
+        if matches!(
+            answer,
+            Err(Failure::Incomplete | Failure::Truncated | Failure::Partial(_))
+        ) {
+            answer = chat_at(
+                endpoint,
+                self.provider,
+                &self.key,
+                self.payload_with(AGENT_TOKENS * 2),
+                &self.tools,
+                &self.limiter,
+            );
+        }
+        if let Err(Failure::Partial(first)) = &answer {
+            let base = self.payload_with(AGENT_TOKENS * 2);
+            let finished = complete_partial(
+                &base,
+                first.clone(),
+                &mut |body, _| {
+                    chat_at(
+                        endpoint,
+                        self.provider,
+                        &self.key,
+                        body.clone(),
+                        &[],
+                        &self.limiter,
+                    )
+                },
+                &mut |_| {},
+            );
+            answer = Ok(finished);
+        }
+        answer
     }
 }
 
@@ -1017,6 +1070,47 @@ impl Request {
             limiter.observe_model(target.provider, model, &answer);
         }
         match answer {
+            // Testo già mostrato e poi interrotto dal limite di lunghezza: si prosegue in streaming (ADR-0184).
+            Err(Failure::Partial(first)) => {
+                let timeout = if target.route.is_quick() {
+                    FAST_REQUEST_TIMEOUT
+                } else {
+                    REQUEST_TIMEOUT
+                };
+                let shared = std::cell::RefCell::new(sink);
+                let finished = complete_partial(
+                    &body,
+                    first,
+                    &mut |next, written| {
+                        let mut first_piece = true;
+                        stream_at(
+                            endpoint,
+                            target.provider,
+                            &target.key,
+                            next,
+                            &self.limiter,
+                            timeout,
+                            &mut |piece| {
+                                let mut out = shared.borrow_mut();
+                                if first_piece {
+                                    first_piece = false;
+                                    let glue = joiner(written, piece);
+                                    if !glue.is_empty() {
+                                        (*out)(glue);
+                                    }
+                                }
+                                (*out)(piece);
+                            },
+                        )
+                    },
+                    &mut |note| (*shared.borrow_mut())(note),
+                );
+                Completed {
+                    provider: target.provider,
+                    model: model.clone(),
+                    answer: Ok(finished),
+                }
+            }
             Err(_) if !emitted => finish(self.execute_at(endpoint, false), sink),
             answer => Completed {
                 provider: target.provider,
@@ -1033,7 +1127,14 @@ impl Request {
     fn execute_at(&self, endpoint: &str, fresh: bool) -> Completed {
         let target = &self.target;
         let mut model = &target.model;
-        let ask = |model: &str, preference, tools: &[Function]| {
+        let timeout = if target.route.is_quick() {
+            FAST_REQUEST_TIMEOUT
+        } else {
+            REQUEST_TIMEOUT
+        };
+        // `extra` alza il tetto di token oltre alla pressione già registrata: serve al secondo tentativo dopo una
+        // risposta troncata o rimasta vuota (un modello che «ragiona» può consumare tutto lo spazio).
+        let ask = |model: &str, preference, tools: &[Function], extra: u8| {
             let key = (target.provider, model.to_owned(), target.route);
             let level = self
                 .limiter
@@ -1042,7 +1143,8 @@ impl Request {
                 .output_pressure
                 .get(&key)
                 .copied()
-                .unwrap_or_default();
+                .unwrap_or_default()
+                .saturating_add(extra);
             let answer = chat_timed(
                 endpoint,
                 target.provider,
@@ -1057,11 +1159,7 @@ impl Request {
                 ),
                 tools,
                 &self.limiter,
-                if target.route.is_quick() {
-                    FAST_REQUEST_TIMEOUT
-                } else {
-                    REQUEST_TIMEOUT
-                },
+                timeout,
             );
             let mut limiter = self.limiter.lock().unwrap_or_else(|e| e.into_inner());
             limiter.observe_output(key, &answer);
@@ -1076,20 +1174,77 @@ impl Request {
                     .unwrap_or_else(|e| e.into_inner())
                     .model_available(target.provider, model)
         };
+        let incomplete = |answer: &Result<Answer, Failure>| {
+            matches!(
+                answer,
+                Err(Failure::Incomplete | Failure::Truncated | Failure::Partial(_))
+            )
+        };
+        let mut preference = self.preferences[0];
+        let mut extra = 0u8;
         let mut answer = if available(model) {
-            ask(model, self.preferences[0], &self.tools)
+            ask(model, preference, &self.tools, extra)
         } else {
             Err(Failure::ModelUnavailable)
         };
-        if matches!(
-            answer,
-            Err(Failure::ModelUnavailable | Failure::Incomplete | Failure::Truncated)
-        ) && available(&target.alternative)
+        // Proposta di strumento non valida (nome sconosciuto, argomenti illeggibili): i modelli non sono
+        // deterministici, un nuovo tentativo spesso basta (ADR-0184).
+        if matches!(answer, Err(Failure::InvalidTool)) && available(model) {
+            answer = ask(model, preference, &self.tools, extra);
+        }
+        // Risposta vuota o troncata: un secondo tentativo con lo stesso modello e più spazio, prima di cambiare modello.
+        if matches!(answer, Err(Failure::Incomplete | Failure::Truncated)) && available(model) {
+            extra = 2;
+            answer = ask(model, preference, &self.tools, extra);
+        }
+        if (matches!(answer, Err(Failure::ModelUnavailable)) || incomplete(&answer))
+            && !matches!(answer, Err(Failure::Partial(_)))
+            && available(&target.alternative)
         {
             model = &target.alternative;
-            answer = ask(model, self.preferences[1], &self.tools);
+            preference = self.preferences[1];
+            extra = 0;
+            answer = ask(model, preference, &self.tools, extra);
         } else if !self.tools.is_empty() && matches!(answer, Err(Failure::Rejected(400 | 422))) {
-            answer = ask(model, self.preferences[0], &[]);
+            answer = ask(model, preference, &[], extra);
+        }
+        // Testo interrotto dal limite di lunghezza: si continua, invece di scartare quanto già scritto.
+        if let Err(Failure::Partial(first)) = &answer {
+            let key = (target.provider, model.to_owned(), target.route);
+            let level = self
+                .limiter
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .output_pressure
+                .get(&key)
+                .copied()
+                .unwrap_or_default()
+                .saturating_add(extra);
+            let base = payload(
+                target.provider,
+                model,
+                &self.message,
+                &target.history,
+                &[],
+                (target.route, preference, level),
+            );
+            let finished = complete_partial(
+                &base,
+                first.clone(),
+                &mut |body, _| {
+                    chat_timed(
+                        endpoint,
+                        target.provider,
+                        &target.key,
+                        body.clone(),
+                        &[],
+                        &self.limiter,
+                        timeout,
+                    )
+                },
+                &mut |_| {},
+            );
+            answer = Ok(finished);
         }
         Completed {
             provider: target.provider,
@@ -1097,6 +1252,73 @@ impl Request {
             answer,
         }
     }
+}
+
+/// Tetto di token di una richiesta dell'agente (prima 2000, troppo poco per i modelli che ragionano).
+const AGENT_TOKENS: usize = 4_096;
+
+/// Quante volte si chiede al modello di proseguire una risposta interrotta dal limite di lunghezza.
+const MAX_CONTINUATIONS: usize = 2;
+
+/// Avviso aggiunto quando, dopo le continuazioni, la risposta resta interrotta.
+const TRUNCATION_NOTE: &str =
+    "[La risposta è stata interrotta dal limite di lunghezza del modello: scrivi «continua» per proseguire.]";
+
+/// Come unire il testo già scritto e la sua continuazione, senza spaziature doppie né parole spezzate.
+fn joiner(text: &str, more: &str) -> &'static str {
+    let (Some(last), Some(first)) = (text.chars().last(), more.chars().next()) else {
+        return "";
+    };
+    if last.is_whitespace() || first.is_whitespace() || first.is_ascii_punctuation() {
+        ""
+    } else {
+        " "
+    }
+}
+
+/// Corpo di una richiesta di continuazione: stessi messaggi, il testo già scritto come risposta del modello e
+/// l'invito a proseguire. Senza strumenti: una continuazione è solo testo.
+fn continuation_body(base: &Value, written: &str) -> Value {
+    let mut body = base.clone();
+    if let Some(messages) = body["messages"].as_array_mut() {
+        messages.push(json!({"role": "assistant", "content": written}));
+        messages.push(json!({"role": "user", "content":
+            "Continua esattamente da dove ti sei interrotto, senza ripetere nulla di quanto hai già scritto."}));
+    }
+    if let Some(map) = body.as_object_mut() {
+        map.remove("tools");
+        map.remove("tool_choice");
+    }
+    body
+}
+
+/// Porta a termine una risposta interrotta: fino a `MAX_CONTINUATIONS` richieste di prosecuzione; se non basta o la
+/// continuazione fallisce, si consegna **il testo ottenuto** con un avviso, mai un errore che butta il lavoro fatto.
+/// `step` riceve il corpo della richiesta e il testo già scritto (per attaccare bene il primo frammento in
+/// streaming); `emit_note` mostra l'avviso finale a chi sta leggendo in streaming.
+fn complete_partial(
+    base: &Value,
+    first: String,
+    step: &mut dyn FnMut(&Value, &str) -> Result<Answer, Failure>,
+    emit_note: &mut dyn FnMut(&str),
+) -> Answer {
+    let mut written = first;
+    for _ in 0..MAX_CONTINUATIONS {
+        match step(&continuation_body(base, &written), &written) {
+            Ok(Answer::Text(more)) => {
+                written.push_str(joiner(&written, &more));
+                written.push_str(&more);
+                return Answer::Text(written);
+            }
+            Err(Failure::Partial(more)) => {
+                written.push_str(joiner(&written, &more));
+                written.push_str(&more);
+            }
+            _ => break,
+        }
+    }
+    emit_note(&format!("\n\n{TRUNCATION_NOTE}"));
+    Answer::Text(format!("{written}\n\n{TRUNCATION_NOTE}"))
 }
 
 fn payload(
@@ -1158,13 +1380,22 @@ fn decode(provider: Provider, body: &Value, tools: &[Function]) -> Result<Answer
         Provider::Ollama => &body["done_reason"],
         Provider::Nim => &body["choices"][0]["finish_reason"],
     };
-    if reason == "length" {
-        return Err(Failure::Truncated);
-    }
     let message = match provider {
         Provider::Ollama => &body["message"],
         Provider::Nim => &body["choices"][0]["message"],
     };
+    if reason == "length" {
+        // Il testo già prodotto non si butta: chi chiama prova a continuarlo. Senza testo (un modello che ha
+        // «ragionato» fino al limite) resta una risposta troncata, da ripetere con più spazio.
+        let partial = message["content"]
+            .as_str()
+            .map(str::trim)
+            .filter(|t| !t.is_empty() && message["tool_calls"].is_null());
+        return Err(match partial {
+            Some(text) => Failure::Partial(text.chars().take(16_000).collect()),
+            None => Failure::Truncated,
+        });
+    }
     if !message["tool_calls"].is_null() {
         let calls = message["tool_calls"]
             .as_array()
@@ -1360,6 +1591,12 @@ fn send(
                 if attempt < CONNECT_RETRIES && crate::net::classify(t).transient() =>
             {
                 std::thread::sleep(Duration::from_millis(400 * 3u64.pow(attempt)));
+                attempt += 1;
+            }
+            // Guasti passeggeri del provider (500, 502, 503, 504): la richiesta di una risposta non ha effetti da
+            // duplicare, quindi si ripete fino a due volte con attesa crescente (ADR-0184).
+            Err(ureq::Error::Status(500 | 502 | 503 | 504, _)) if attempt < CONNECT_RETRIES => {
+                std::thread::sleep(Duration::from_millis(600 * 3u64.pow(attempt)));
                 attempt += 1;
             }
             _ => break result,
@@ -1665,7 +1902,8 @@ mod tests {
     }
 
     #[test]
-    fn a_truncated_stream_keeps_its_error_and_an_empty_one_falls_back_to_the_full_request() {
+    fn a_truncated_stream_keeps_its_text_with_a_note_and_an_empty_one_falls_back_to_the_full_request(
+    ) {
         let truncated = [
             r#"{"message":{"content":"Inizio"},"done":false}"#,
             r#"{"message":{"content":""},"done":true,"done_reason":"length"}"#,
@@ -1675,8 +1913,13 @@ mod tests {
         let mut pieces = Vec::new();
         let result = fixture_request(Provider::Ollama)
             .execute_streaming_at(&endpoint, &mut |piece| pieces.push(piece.to_string()));
-        assert_eq!(pieces, ["Inizio"]);
-        assert!(matches!(result.answer, Err(Failure::Truncated)));
+        // ADR-0184: il testo già mostrato non si butta; se la continuazione non riesce arriva con un avviso.
+        assert_eq!(pieces.concat(), format!("Inizio\n\n{TRUNCATION_NOTE}"));
+        assert!(
+            matches!(&result.answer, Ok(Answer::Text(t)) if t.starts_with("Inizio") && t.ends_with(TRUNCATION_NOTE)),
+            "{:?}",
+            result.answer
+        );
         server.join().unwrap();
 
         // Nessun frammento: si ripete con la richiesta completa e il testo arriva in un blocco.
@@ -1770,6 +2013,17 @@ mod tests {
                 }),
                 &[]
             ),
+            Err(Failure::Partial(text)) if text == "parziale"
+        ));
+        // Senza testo (un modello che ha «ragionato» fino al limite) resta una risposta troncata.
+        assert!(matches!(
+            decode(
+                Provider::Nim,
+                &json!({
+                    "choices": [{"finish_reason": "length", "message": {"content": null, "reasoning_content": "penso…"}}]
+                }),
+                &[]
+            ),
             Err(Failure::Truncated)
         ));
         assert!(matches!(
@@ -1780,7 +2034,7 @@ mod tests {
                 }),
                 &[]
             ),
-            Err(Failure::Truncated)
+            Err(Failure::Partial(_))
         ));
         assert!(matches!(
             decode(
@@ -2153,6 +2407,241 @@ mod tests {
                 Err(Failure::InvalidTool)
             ));
         }
+    }
+    // ------------------------------------------------------------------------ risposte incomplete (ADR-0184)
+
+    use std::sync::Arc;
+
+    /// Server di prova con stato e codice di ritorno per ogni richiesta; registra i corpi ricevuti.
+    fn serve_scripted(
+        script: Vec<(u16, String)>,
+    ) -> (String, Arc<Mutex<Vec<Value>>>, std::thread::JoinHandle<()>) {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/chat", listener.local_addr().unwrap());
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let log = seen.clone();
+        let server = std::thread::spawn(move || {
+            for (status, response) in script {
+                let (mut socket, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(socket.try_clone().unwrap());
+                let mut length = 0;
+                loop {
+                    let mut line = String::new();
+                    reader.read_line(&mut line).unwrap();
+                    if line == "\r\n" || line.is_empty() {
+                        break;
+                    }
+                    if let Some((name, value)) = line.trim().split_once(':') {
+                        if name.eq_ignore_ascii_case("content-length") {
+                            length = value.trim().parse().unwrap();
+                        }
+                    }
+                }
+                let mut body = vec![0; length];
+                reader.read_exact(&mut body).unwrap();
+                log.lock()
+                    .unwrap()
+                    .push(serde_json::from_slice(&body).unwrap());
+                write!(socket, "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}", response.len()).unwrap();
+            }
+        });
+        (endpoint, seen, server)
+    }
+
+    fn nim(content: &str, reason: &str) -> String {
+        json!({"choices": [{"finish_reason": reason, "message": {"content": content}}]}).to_string()
+    }
+
+    #[test]
+    fn a_truncated_answer_is_continued_and_the_pieces_are_joined() {
+        let (endpoint, seen, server) = serve_scripted(vec![
+            (200, nim("La capitale d'Italia è", "length")),
+            (200, nim("Roma.", "stop")),
+        ]);
+        let result = fixture_request(Provider::Nim).execute_at(&endpoint, true);
+        assert!(
+            matches!(&result.answer, Ok(Answer::Text(text)) if text == "La capitale d'Italia è Roma."),
+            "{:?}",
+            result.answer
+        );
+        let bodies = seen.lock().unwrap();
+        let messages = bodies[1]["messages"].as_array().unwrap();
+        let last_two: Vec<&str> = messages[messages.len() - 2..]
+            .iter()
+            .map(|m| m["content"].as_str().unwrap())
+            .collect();
+        assert_eq!(last_two[0], "La capitale d'Italia è");
+        assert!(last_two[1].starts_with("Continua esattamente"));
+        assert!(
+            bodies[1].get("tools").is_none(),
+            "una continuazione è solo testo"
+        );
+        drop(bodies);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn an_answer_that_stays_truncated_is_delivered_with_a_note_and_never_lost() {
+        let (endpoint, _seen, server) = serve_scripted(vec![
+            (200, nim("Prima parte.", "length")),
+            (200, nim("Seconda parte.", "length")),
+            (200, nim("Terza parte.", "length")),
+        ]);
+        let result = fixture_request(Provider::Nim).execute_at(&endpoint, true);
+        let Ok(Answer::Text(text)) = result.answer else {
+            panic!("serve un testo: {:?}", result.answer)
+        };
+        assert!(
+            text.contains("Prima parte.")
+                && text.contains("Seconda parte.")
+                && text.contains("Terza parte.")
+        );
+        assert!(text.ends_with(TRUNCATION_NOTE), "{text}");
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn an_answer_left_empty_by_a_reasoning_model_is_retried_with_more_room() {
+        let empty = json!({"choices": [{"finish_reason": "stop",
+            "message": {"content": null, "reasoning_content": "sto ragionando a lungo"}}]})
+        .to_string();
+        let (endpoint, seen, server) =
+            serve_scripted(vec![(200, empty), (200, nim("Fatto.", "stop"))]);
+        let result = fixture_request(Provider::Nim).execute_at(&endpoint, true);
+        assert!(
+            matches!(&result.answer, Ok(Answer::Text(t)) if t == "Fatto."),
+            "{:?}",
+            result.answer
+        );
+        let bodies = seen.lock().unwrap();
+        assert!(
+            bodies[1]["max_tokens"].as_u64().unwrap() > bodies[0]["max_tokens"].as_u64().unwrap(),
+            "il secondo tentativo ha più spazio"
+        );
+        drop(bodies);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn provider_server_errors_are_retried_before_giving_up() {
+        let (endpoint, seen, server) =
+            serve_scripted(vec![(503, "{}".into()), (200, nim("Eccomi.", "stop"))]);
+        let result = fixture_request(Provider::Nim).execute_at(&endpoint, true);
+        assert!(
+            matches!(&result.answer, Ok(Answer::Text(t)) if t == "Eccomi."),
+            "{:?}",
+            result.answer
+        );
+        assert_eq!(seen.lock().unwrap().len(), 2);
+        server.join().unwrap();
+        // Un 400 non si ripete: è la richiesta a essere sbagliata.
+        let (endpoint, seen, server) = serve_scripted(vec![(400, "{}".into())]);
+        let result = fixture_request(Provider::Nim).execute_at(&endpoint, true);
+        assert!(result.answer.is_err());
+        assert_eq!(seen.lock().unwrap().len(), 1);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn the_agent_gets_more_room_and_continues_a_truncated_text() {
+        let empty = json!({"choices": [{"finish_reason": "length", "message": {"content": null}}]})
+            .to_string();
+        let (endpoint, seen, server) = serve_scripted(vec![
+            (200, empty),
+            (200, nim("Report parziale", "length")),
+            (200, nim("e completo.", "stop")),
+        ]);
+        let result = AgentRequest::new(
+            Provider::Nim,
+            "modello".into(),
+            "chiave".into(),
+            "sistema".into(),
+            "obiettivo".into(),
+            Vec::new(),
+            Vec::new(),
+            Default::default(),
+        )
+        .execute_at(&endpoint);
+        assert!(
+            matches!(&result, Ok(Answer::Text(t)) if t == "Report parziale e completo."),
+            "{result:?}"
+        );
+        let bodies = seen.lock().unwrap();
+        assert_eq!(bodies[0]["max_tokens"], AGENT_TOKENS as u64);
+        assert_eq!(bodies[1]["max_tokens"], (AGENT_TOKENS * 2) as u64);
+        drop(bodies);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn streaming_continues_a_text_cut_by_the_length_limit_and_forwards_every_piece() {
+        let first = [
+            r#"data: {"choices":[{"delta":{"content":"uno due"},"finish_reason":null}]}"#,
+            r#"data: {"choices":[{"delta":{},"finish_reason":"length"}]}"#,
+        ]
+        .join("\n");
+        let second = [
+            r#"data: {"choices":[{"delta":{"content":"tre"},"finish_reason":null}]}"#,
+            r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+        ]
+        .join("\n");
+        let (endpoint, server) = serve(vec![
+            (true, "text/event-stream", first),
+            (true, "text/event-stream", second),
+        ]);
+        let mut pieces = Vec::new();
+        let result = fixture_request(Provider::Nim)
+            .execute_streaming_at(&endpoint, &mut |piece| pieces.push(piece.to_string()));
+        assert!(
+            matches!(&result.answer, Ok(Answer::Text(t)) if t == "uno due tre"),
+            "{:?}",
+            result.answer
+        );
+        assert_eq!(pieces.concat(), "uno due tre");
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn invalid_tool_proposals_are_retried_once() {
+        let catalog = crate::catalog::Catalog::load().unwrap();
+        let unknown = json!({"choices": [{"finish_reason": "tool_calls", "message": {"content": null,
+            "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "inesistente", "arguments": "{}"}}]}}]})
+        .to_string();
+        let (endpoint, seen, server) =
+            serve_scripted(vec![(200, unknown), (200, nim("Sono le tre.", "stop"))]);
+        let request = AgentRequest::new(
+            Provider::Nim,
+            "m".into(),
+            "k".into(),
+            "s".into(),
+            "o".into(),
+            Vec::new(),
+            vec![Function::from(catalog.get("time.now").unwrap())],
+            Default::default(),
+        );
+        assert!(
+            matches!(request.execute_at(&endpoint), Ok(Answer::Text(t)) if t == "Sono le tre.")
+        );
+        assert_eq!(seen.lock().unwrap().len(), 2);
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn failures_that_remain_are_explained_with_what_was_already_tried() {
+        let (message, retryable) = Failure::Incomplete.user_message(Provider::Nim);
+        assert!(
+            message.contains("secondo tentativo") && message.contains("suddividere"),
+            "{message}"
+        );
+        assert!(retryable);
+        assert_eq!(
+            Failure::Partial("x".into()).code(),
+            "cloud.incomplete_response"
+        );
+        assert_eq!(joiner("fine.", "Poi"), " ");
+        assert_eq!(joiner("a ", "b"), "");
+        assert_eq!(joiner("a", ", b"), "");
     }
 }
 

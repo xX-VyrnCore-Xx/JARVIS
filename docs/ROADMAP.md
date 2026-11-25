@@ -244,6 +244,12 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Database, memoria e animazioni macOS (2026-11-24, base `013b7b5`).** ADR-0124, ADR-0125. Pragma e manutenzione del database, indici di memoria verificati e ricostruiti, ricerca a candidati con recenza, statistiche e doppioni; animazioni SwiftUI. Verifiche: fmt, clippy, `cargo test --locked`, test Python e contratti. **Sospeso:** resa e fluidità delle animazioni (Swift solo CI).
 
+**Voce non disponibile (2026-11-25, ADR-0183).** Causa: il Core forzava il motore vocale su «off». Corretto; l'app macOS ascolta ora con il riconoscimento del Mac sul dispositivo (da confermare il compromesso di riservatezza). Swift solo CI, nessuna prova con microfono.
+
+**Risposte incomplete NIM (2026-11-25, ADR-0184).** Testo troncato conservato e proseguito (max 2 volte), secondo tentativo con più token, retry 5xx, strumento non valido ritentato. Verificato con server simulato; nessuna prova su NIM reale.
+
+**MCP, Hugging Face e memoria (2026-11-25, ADR-0182).** Client MCP con sessione riusata, elenco a pagine con impronta, tentativi limitati, argomenti verificati, salute e statistiche; politica per strumento e `mcp.read` per le letture approvate; Hugging Face con un gesto (server noto, competenza, agente di ricerca); memoria esportabile e importabile, contraddizioni risolvibili, episodi riassunti e scadenza adattiva. Non provato il client contro il server reale (rete di questo ambiente).
+
 **Plancia dal mock-up (2026-11-25, ADR-0181).** Schede reali (specialisti, progetti, sistema, attività, notifiche, media, monitoraggio), meteo e media facoltativi, avatar con colore per stato e alone che pulsa con la voce, ritratto fornito dall'utente. Swift verificato solo dalla CI; resa non vista; Windows e Android da fare.
 
 **Evoluzione cognitiva, incremento 8 (2026-11-25, ADR-0180).** Passaggio di attività fra dispositivi (una sola ripresa, nessun permesso trasferito) e livelli di autonomia per nodo; corretto un difetto che scartava in silenzio le notifiche di fine piano.

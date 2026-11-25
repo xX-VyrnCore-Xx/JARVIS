@@ -909,3 +909,41 @@ fn the_dashboard_summary_collects_agents_projects_tasks_and_counters_without_any
     assert_eq!(j.dashboard_weather_target().0.as_deref(), Some("Torino"));
     assert_eq!(j.dashboard_summary().unwrap()["weather_configured"], true);
 }
+
+#[test]
+fn memory_can_be_exported_resolved_compacted_and_re_imported_through_the_core_with_audit() {
+    // ADR-0182: portabilità e cura della memoria.
+    let mut j = jarvis();
+    j.chat("ricorda che il mio cane si chiama Fido").unwrap();
+    j.chat("ricorda che il mio cane si chiama Rex").unwrap();
+    let found = j.memory_contradictions().unwrap();
+    let group = &found["items"][0];
+    let keep = group["memory_ids"][1].as_str().unwrap().to_string();
+    let out = j
+        .memory_resolve(
+            &json!({"subject": group["subject"], "relation": group["relation"], "keep": keep}),
+        )
+        .unwrap();
+    assert_eq!(out["kept"], keep.as_str());
+    assert!(j.memory_contradictions().unwrap()["items"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    let doc = j.memory_export().unwrap();
+    assert_eq!(doc["items"].as_array().unwrap().len(), 1);
+    let again = j
+        .memory_import(&json!({"data": doc.clone(), "apply": true}))
+        .unwrap();
+    assert_eq!(again["duplicates"], 1, "{again}");
+    assert!(j
+        .memory_import(&json!({"data": {"contract": "x"}}))
+        .is_err());
+    assert_eq!(
+        j.memory_compact(&json!({"days": 30})).unwrap()["applied"],
+        false
+    );
+    let audit = j.audit_log(300).unwrap().to_string();
+    for action in ["memory.resolve", "memory.export", "memory.import"] {
+        assert!(audit.contains(action), "{action}");
+    }
+}

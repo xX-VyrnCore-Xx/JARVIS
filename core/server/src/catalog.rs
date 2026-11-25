@@ -52,6 +52,7 @@ const SOURCES: &[&str] = &[
     tool_file!("math.calc"),
     tool_file!("mcp.call"),
     tool_file!("mcp.list"),
+    tool_file!("mcp.read"),
     tool_file!("memory.update"),
     tool_file!("mission.cancel"),
     tool_file!("mission.list"),
