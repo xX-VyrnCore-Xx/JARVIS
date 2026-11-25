@@ -504,8 +504,10 @@ fn tokens(content: &[u8]) -> Vec<Token> {
 fn decode_pdf_string(bytes: &[u8]) -> String {
     if bytes.starts_with(&[0xfe, 0xff]) {
         let units: Vec<u16> = bytes[2..]
-            .chunks_exact(2)
-            .map(|p| u16::from_be_bytes([p[0], p[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|p| u16::from_be_bytes(*p))
             .collect();
         return String::from_utf16_lossy(&units);
     }
