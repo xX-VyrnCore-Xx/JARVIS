@@ -1,0 +1,38 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "clipboard.write",
+  "version": "1.0.0",
+  "summary": "Scrive un testo negli appunti di sistema sostituendo il contenuto; richiede sempre la conferma del proprietario",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "text"
+    ],
+    "properties": {
+      "text": {
+        "type": "string",
+        "maxLength": 20000
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "write_local",
+  "risk": "medium",
+  "permissions": [
+    "core.clipboard:write"
+  ],
+  "errors": [
+    "clipboard.invalid",
+    "clipboard.unavailable"
+  ],
+  "timeout_ms": 8000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "required"
+}

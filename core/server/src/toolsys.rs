@@ -67,7 +67,7 @@ pub fn dependencies(name: &str) -> Vec<&'static str> {
         "web.browse" | "web.form" => vec!["browser"],
         "n8n.create" => vec!["n8n"],
         n if n.starts_with("screen.") => vec!["screen-capture"],
-        n if n.starts_with("app.") => vec!["desktop-session"],
+        n if n.starts_with("app.") || n.starts_with("clipboard.") => vec!["desktop-session"],
         _ => vec![],
     }
 }
@@ -146,6 +146,8 @@ pub fn parallel_safe(name: &str) -> bool {
                 | "log.analyze"
                 | "deps.list"
                 | "table.summary"
+                | "pdf.extract"
+                | "sheet.read"
                 | "web.search"
                 | "web.fetch"
                 | "weather.forecast"

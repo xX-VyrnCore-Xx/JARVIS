@@ -1,7 +1,7 @@
 # Stato di implementazione
 
 Fonte autorevole dello stato di ogni requisito dell'evoluzione «piattaforma di intelligenza artificiale personale».
-Aggiornata il 2026-11-25 sul codice di `main` più la PR in corso (ADR fino alla 0161). Legenda: **Implementato** (funziona end-to-end ed è
+Aggiornata il 2026-11-25 sul codice di `main` più la PR in corso (ADR fino alla 0162). Legenda: **Implementato** (funziona end-to-end ed è
 verificato da test), **Parziale** (funziona in parte: il limite è indicato), **Sperimentale** (c'è, non maturo),
 **Pianificato** (assente). Nessuna voce è un segnaposto: ciò che non esiste è dichiarato «Pianificato».
 Verifiche ed esiti per revisione: [ROADMAP.md](ROADMAP.md). Piano dei passi successivi: [IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md).
@@ -44,8 +44,8 @@ Ricerca con più fonti e confronto (competenza «ricerca»), documentazione: **P
 **Pianificato**.
 
 **Produttività.** Cose da fare, note, promemoria, calcolo, analisi dei dati (`data.stats`, `biz.*`), notifiche: **Implementato**.
-Riepilogo di tabelle CSV (`table.summary`): **Implementato**. Posta e calendario (Gmail, Outlook, Google Calendar tramite connettori; richiedono la configurazione OAuth del proprietario),
-progetti (missioni, piani, cose da fare): **Parziale**. PDF, fogli XLSX, presentazioni, contatti, appunti: **Pianificato**.
+Riepilogo di tabelle CSV (`table.summary`), lettura di fogli XLSX (`sheet.read`), testo dei PDF (`pdf.extract`, solo PDF con testo) e appunti di sistema (`clipboard.read`/`write`, sempre con conferma): **Implementato** (ADR-0162). Posta e calendario (Gmail, Outlook, Google Calendar tramite connettori; richiedono la configurazione OAuth del proprietario),
+progetti (missioni, piani, cose da fare): **Parziale**. Scrittura di PDF e XLSX, OCR, presentazioni, contatti: **Pianificato**.
 
 **IA e multimodale.** Memoria semantica, episodica e procedurale con grafo, recupero, riconoscimento e sintesi vocale (voce
 maschile), OCR locale, delega agli agenti, scelta del modello: **Implementato**. Pianificazione (piani scritti dal

@@ -21,6 +21,7 @@ pub mod connectors;
 mod container_runtime;
 pub mod datatools;
 pub mod devtools;
+pub mod docs;
 pub mod executive;
 pub mod expert;
 pub mod guard;

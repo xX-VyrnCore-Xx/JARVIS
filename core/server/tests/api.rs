@@ -2617,3 +2617,99 @@ async fn testing_a_cloud_key_requires_the_owner_and_a_configured_provider() {
         StatusCode::BAD_REQUEST
     );
 }
+
+/// ZIP minimo con voci memorizzate (senza compressione), per i file XLSX di prova.
+fn stored_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
+    let (mut out, mut central) = (Vec::new(), Vec::new());
+    for (name, data) in entries {
+        let offset = out.len() as u32;
+        out.extend_from_slice(&[0x50, 0x4b, 3, 4, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        out.extend_from_slice(&[0, 0]);
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(data);
+        central.extend_from_slice(&[
+            0x50, 0x4b, 1, 2, 20, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ]);
+        central.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        central.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        central.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        central.extend_from_slice(&[0; 12]);
+        central.extend_from_slice(&offset.to_le_bytes());
+        central.extend_from_slice(name.as_bytes());
+    }
+    let cd = out.len() as u32;
+    out.extend_from_slice(&central);
+    out.extend_from_slice(&[0x50, 0x4b, 5, 6, 0, 0, 0, 0]);
+    out.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+    out.extend_from_slice(&(entries.len() as u16).to_le_bytes());
+    out.extend_from_slice(&(central.len() as u32).to_le_bytes());
+    out.extend_from_slice(&cd.to_le_bytes());
+    out.extend_from_slice(&[0, 0]);
+    out
+}
+
+#[tokio::test]
+async fn document_tools_read_pdf_and_xlsx_and_the_clipboard_needs_confirmation() {
+    let e = env();
+    let work = e.data.join("workspace");
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::write(
+        work.join("rapporto.pdf"),
+        b"%PDF-1.4\n1 0 obj << /Type /Page >> endobj\n2 0 obj << /Length 40 >>\nstream\nBT 72 700 Td (Fatturato 2025) Tj ET\nendstream endobj\n%%EOF",
+    )
+    .unwrap();
+    let xlsx = stored_zip(&[
+        ("xl/workbook.xml", br#"<workbook xmlns:r="x"><sheets><sheet name="Dati" sheetId="1" r:id="rId1"/></sheets></workbook>"#),
+        ("xl/_rels/workbook.xml.rels", br#"<Relationships><Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>"#),
+        ("xl/sharedStrings.xml", br#"<sst><si><t>Voce</t></si><si><t>Importo</t></si><si><t>Affitto</t></si></sst>"#),
+        ("xl/worksheets/sheet1.xml", br#"<worksheet><sheetData>
+            <row r="1"><c r="A1" t="s"><v>0</v></c><c r="B1" t="s"><v>1</v></c></row>
+            <row r="2"><c r="A2" t="s"><v>2</v></c><c r="B2"><v>900</v></c></row></sheetData></worksheet>"#),
+    ]);
+    std::fs::write(work.join("conti.xlsx"), xlsx).unwrap();
+
+    let (status, created) = e
+        .api(
+            "POST",
+            "/api/plans",
+            Some(json!({"goal": "Leggi documenti", "run": true, "steps": [
+                {"id": "pdf", "tool": "pdf.extract", "arguments": {"path": "rapporto.pdf"}},
+                {"id": "xls", "tool": "sheet.read", "arguments": {"path": "conti.xlsx", "summary": true}}]})),
+        )
+        .await;
+    assert_eq!(status, 200, "{created}");
+    let id = created["id"].as_str().unwrap().to_string();
+    let done = wait_plan(&e, &id, &["succeeded", "failed"]).await;
+    assert_eq!(done["status"], "succeeded", "{done}");
+    assert!(done["steps"][0]["output"]["text"]
+        .as_str()
+        .unwrap()
+        .contains("Fatturato 2025"));
+    assert_eq!(done["steps"][0]["output"]["untrusted"], true);
+    assert_eq!(done["steps"][1]["output"]["rows"][1][1], "900");
+    assert_eq!(
+        done["steps"][1]["output"]["summary"]["columns"][1]["type"],
+        "intero"
+    );
+
+    // Gli appunti non si leggono né si scrivono senza la conferma del proprietario.
+    let (_, clip) = e
+        .api(
+            "POST",
+            "/api/plans",
+            Some(json!({"goal": "Appunti", "run": true, "steps": [
+                {"id": "c", "tool": "clipboard.read", "arguments": {}}]})),
+        )
+        .await;
+    let waiting = wait_plan(
+        &e,
+        clip["id"].as_str().unwrap(),
+        &["waiting", "failed", "succeeded"],
+    )
+    .await;
+    assert_eq!(waiting["status"], "waiting", "{waiting}");
+    assert_eq!(waiting["steps"][0]["status"], "waiting_confirmation");
+}

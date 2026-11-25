@@ -1897,6 +1897,14 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** `GET /api/agents` descrive i sette specialisti e il generalista (competenze dagli strumenti, rischio massimo, contesto isolato o condiviso, risorse); `GET /api/agents/route?q=` mostra quale agente riceverebbe una richiesta e per quali parole chiave; `GET /api/models/route?q=` mostra la rotta per compito, il modello per provider, il ripiego e la riservatezza (credenziali bloccate, dati personali rilevati, profilo condiviso) **senza inviare nulla**. Non si introducono nuovi agenti: si riusano quelli esistenti.
 - **Evidenza:** test API del registro e dell'instradamento.
 
+### ADR-0162 — Strumenti per documenti: PDF, fogli XLSX e appunti
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout (fase E della roadmap).
+- **Decisione:** `pdf.extract` (testo di un PDF della workspace), `sheet.read` (righe e nomi dei fogli di un XLSX, con `summary` il riepilogo delle colonne come `table.summary`), `clipboard.read` e `clipboard.write` (appunti di sistema). Nessuna dipendenza nuova: ZIP (voci memorizzate o deflate, con limite di espansione contro le «bombe»), XML minimo e flussi di contenuto PDF sono letti con `flate2`, già nel Core. I file si leggono solo dalla workspace (30 MiB al massimo). `pdf.extract` e `sheet.read` sono di sola lettura, a rischio basso, eseguibili in parallelo nei piani e restituiscono il contenuto marcato `untrusted`: è un dato, mai un'istruzione. Gli appunti possono contenere password e testi ostili: **la conferma è sempre richiesta** sia in lettura sia in scrittura (rischio medio, nessun nuovo tentativo automatico) e il testo letto è marcato `untrusted`; senza sessione grafica e programma di sistema (pbcopy/pbpaste, PowerShell, wl-clipboard, xclip, xsel) l'errore è `clipboard.unavailable`.
+- **Limiti dichiarati:** PDF solo con testo semplice (codifica Standard/WinAnsi o UTF-16): niente OCR, niente file cifrati (`pdf.encrypted`), niente font con codifica CID/ToUnicode (`pdf.no_text` con la spiegazione), impaginazione approssimata; XLSX senza ZIP64, date come numeri seriali, formule come ultimo valore calcolato. Non sono incluse la scrittura di PDF e XLSX.
+- **Contratto:** con i nuovi strumenti il catalogo supera 96 voci; il limite di `delegation.schema.json` per gli strumenti proposti a un agente passa da 96 a 128 (aggiunta compatibile come in ADR-0046 e 0121), allineato a `MAX_DELEGATED_TOOLS`.
+- **Evidenza:** test su archivi ZIP, fogli e PDF sintetici (anche compressi, cifrati e senza testo), test del piano con file veri nella workspace e test che gli appunti restano in attesa di conferma.
+
 ### ADR-0161 — Ripianificazione: un piano di recupero proposto dal modello, sempre come bozza
 
 - **Data:** 2026-11-25 · **Stato:** implementata nel checkout (completa la fase B).

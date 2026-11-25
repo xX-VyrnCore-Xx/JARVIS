@@ -64,6 +64,11 @@ installato, senza shell. `log.analyze` riassume un log, `deps.list` elenca le di
 fissate, `table.summary` riassume un CSV, `data.stats`, `text.extract` e `text.diff` analizzano numeri e testi, `time.wait`
 distanzia i passi di un piano. Tutti lavorano dentro la workspace e non usano la rete (ADR-0150, 0155).
 
+## Documenti e appunti
+
+`pdf.extract` (testo di PDF con testo semplice), `sheet.read` (righe e riepilogo di fogli XLSX), `clipboard.read` e `clipboard.write`
+(appunti, **sempre con conferma**). I contenuti letti da file o appunti sono marcati `untrusted`. Limiti e motivazioni nell'ADR-0162.
+
 ## SDK: aggiungere uno strumento
 
 1. Scrivi `contracts/catalog/tools/<nome>.json` (copia un descrittore simile: effetti, rischio, schema, `timeout_ms`).

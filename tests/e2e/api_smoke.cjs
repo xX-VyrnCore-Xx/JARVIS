@@ -264,6 +264,10 @@ function check(condition, message) {
   check(replanMissing.status === 404, "ripianificazione di un piano inesistente rifiutata");
   const replanDone = await request(`/api/plans/${plan.json.id}/replan`, { method: "POST", token: ownerToken, body: {} });
   check(replanDone.status === 400, "un piano riuscito non si ripianifica");
+  const docRegistry = await request("/api/tools/registry", { token: ownerToken });
+  const docTools = ["pdf.extract", "sheet.read", "clipboard.read", "clipboard.write"];
+  const names = (docRegistry.json?.items ?? []).map((t) => t.name);
+  check(docRegistry.status === 200 && docTools.every((n) => names.includes(n)), "strumenti per documenti nel registro");
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

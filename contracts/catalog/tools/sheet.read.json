@@ -1,0 +1,58 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "sheet.read",
+  "version": "1.0.0",
+  "summary": "Legge un foglio XLSX della workspace (righe, nomi dei fogli) e, a richiesta, il riepilogo delle colonne",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "path"
+    ],
+    "properties": {
+      "path": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300
+      },
+      "sheet": {
+        "type": "string",
+        "maxLength": 64
+      },
+      "max_rows": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 1000
+      },
+      "summary": {
+        "type": "boolean"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.workspace:read"
+  ],
+  "errors": [
+    "sheet.invalid",
+    "sheet.not_found",
+    "table.empty",
+    "table.too_large",
+    "table.invalid",
+    "fs.not_found",
+    "fs.not_file",
+    "fs.too_large",
+    "fs.outside_workspace"
+  ],
+  "timeout_ms": 20000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}
