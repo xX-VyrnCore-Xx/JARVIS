@@ -15,6 +15,103 @@ flowchart LR
     T --> V[Observability]
 ```
 
+### Mappa del repository
+
+Il diagramma segue i moduli realmente presenti nel codice (`core/server/src`, `ai/jarvis_ai`, `apps`, `contracts`); le frecce indicano chi chiama chi. Si può usare anche come ingresso per strumenti di visualizzazione dei repository.
+
+```mermaid
+flowchart TB
+    subgraph Client["Client (apps/)"]
+        MAC["macOS SwiftUI: Plancia, chat, avatar"]
+        EGUI["Desktop egui: macOS e Windows"]
+        AND["Android"]
+        WEB["Web"]
+    end
+
+    subgraph Core["Core Rust (core/server/src)"]
+        API["api.rs: HTTP, WebSocket, SSE"]
+        SEC["Sicurezza: accounts, passkeys, permissions, policy, guard, audit, privacy"]
+        ORCH["orchestrator.rs: task, passi, deleghe"]
+        subgraph Brain["Cognizione"]
+            INT["intent, agents, skills"]
+            PLAN["planner, plans, missions, proactive"]
+            MEM["memory, memcog, world, reflect, handoff"]
+        end
+        subgraph Tools["Strumenti"]
+            TSYS["tools, toolsys, toolbox, catalog"]
+            OPS["appcontrol, screen, docs, devtools, assets, workspaces"]
+            NET["web, browser, net, connectors, oauth, mcp_client"]
+        end
+        subgraph Run["Esecuzione e risorse"]
+            SB["sandbox, container_runtime"]
+            SUP["supervisor, perf, watch, automation, n8n"]
+            NODE["nodes, node_agent, tailscale, push"]
+        end
+        CLOUD["cloud.rs: NVIDIA NIM, Ollama, continuazione e retry"]
+        STORE[("store.rs: SQLite, file dati, backup")]
+        OBS["observability, sysstats, dashboard"]
+    end
+
+    subgraph AI["Runtime AI Python (ai/jarvis_ai)"]
+        GW["gateway.py: routing e tool calling"]
+        VOICE["voice.py, visemes.py: STT, TTS, wake word"]
+        WK["worker.py: envelope JSON Lines"]
+    end
+
+    subgraph Contracts["contracts/"]
+        CAT["catalog/tools: contratti degli strumenti"]
+        SCH["schemi envelope e API"]
+    end
+
+    EXT["Servizi esterni: provider cloud, server MCP, Gmail e Calendar, Hugging Face"]
+
+    MAC --> API
+    EGUI --> API
+    AND --> API
+    WEB --> API
+    API --> SEC --> ORCH
+    ORCH --> INT --> PLAN
+    ORCH --> MEM
+    ORCH --> TSYS --> OPS
+    TSYS --> NET
+    TSYS --> SB
+    ORCH --> WK --> GW
+    GW --> VOICE
+    ORCH --> CLOUD
+    NET --> EXT
+    CLOUD --> EXT
+    SUP --> ORCH
+    NODE --> API
+    ORCH --> STORE
+    MEM --> STORE
+    ORCH --> OBS
+    CAT -. valida .-> TSYS
+    SCH -. valida .-> WK
+```
+
+### Ciclo di una richiesta
+
+```mermaid
+sequenceDiagram
+    participant U as Client
+    participant A as API e sicurezza
+    participant O as Orchestrator
+    participant M as Modello cloud
+    participant T as Strumento
+    U->>A: richiesta autenticata
+    A->>O: task registrato
+    O->>M: contesto, strumenti consentiti
+    M-->>O: testo o proposta di strumento
+    O->>A: verifica permessi, autonomia, rischio
+    alt serve conferma
+        A-->>U: conferma richiesta (avatar ambra)
+        U->>A: approva o rifiuta
+    end
+    A->>T: esecuzione confinata
+    T-->>O: esito ed evidenze
+    O-->>U: risposta in streaming, audit registrato
+```
+
 | Modulo | Responsabilità |
 |---|---|
 | Core Runtime | Lifecycle, configurazione, health, risorse, code e scheduling |

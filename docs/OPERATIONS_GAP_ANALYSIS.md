@@ -9,7 +9,7 @@ Data: 2026-11-25. Metodo: elenco di strumenti del catalogo (`contracts/catalog/t
 | 5 | Voce | PARTIAL | Wake word, trascrizione, sintesi, motore di sistema macOS (ADR-0183). Da verificare: barge-in, eco, VAD, dizionario di pronuncia. |
 | 6 | Workspace intelligente | PARTIAL → **nuovo** | Profili con app e cartelle e piano di attivazione (questa sessione). Mancano snapshot, ripristino sessioni, modalità focus. |
 | 7 | Centro operativo personale | PARTIAL | `todo.*`, `notes.*`, briefing giornaliero/settimanale (`/api/proactive/*`), connettori Calendar/Gmail. Mancano obiettivi, blocchi di tempo, tracciamento sessioni. |
-| 8 | Intelligenza per sviluppatori | PARTIAL | `git.*`, `deps.list`, `log.analyze`, `code.check_python`. Mancano indice del codice, grafo delle dipendenze, copertura, diagnosi build. |
+| 8 | Intelligenza per sviluppatori | PARTIAL → **migliorato** | `git.*`, `deps.list`, `log.analyze`, `code.check_python`, `code.map` (simboli, grafo delle dipendenze, impatto; ADR-0189). Mancano indice persistente/incrementale, copertura, diagnosi build. |
 | 9 | Infrastruttura | PARTIAL | `system.*`, `process.list`, `it.subnet`, `/api/docker`, nodi e dispositivi, Tailscale. Mancano inventario server, SSH, certificati, uptime, backup remoti. |
 | 10 | Documenti | PARTIAL | `pdf.extract`, `sheet.read`, `table.summary`, `text.diff`. Mancano DOCX/PPTX, confronto fra documenti, versioni, ricerca semantica. |
 | 11 | Comunicazioni | PARTIAL | Connettori Gmail/Calendar, canali di notifica. Bozze separate dall'invio: da verificare. |
@@ -17,7 +17,7 @@ Data: 2026-11-25. Metodo: elenco di strumenti del catalogo (`contracts/catalog/t
 | 13 | Browser | PARTIAL | `web.browse/form`, `browser.rs`. Mancano schede, profili, monitoraggio siti. |
 | 14 | Risorse digitali | PARTIAL → **nuovo** | `fs.search/list/move/delete` + `fs.usage` (spazio, file grandi, duplicati, temporanei). Mancano tag, ricerca semantica, cartelle smart. |
 | 15 | Background | PARTIAL | Scheduler, automazioni, osservazioni di file (`/api/watches`). Menu bar, avvio automatico, batteria/rete: da verificare. |
-| 16 | Avatar | PARTIAL | Stati inattivo/ascolto/elaborazione/parla. Mancano ricerca, esecuzione, attesa di autorizzazione, errore, offline, completamento, movimento ridotto. |
+| 16 | Avatar | PARTIAL → **migliorato** | Inattivo, ascolto, elaborazione, parla, errore, completamento, movimento ridotto, + attesa di autorizzazione e offline (ADR-0188). Mancano ricerca, esecuzione e collaborazione: serve un segnale reale dal Core. |
 | 17 | Centro di comando | PARTIAL | Plancia e sezioni esistenti. Palette comandi e ricerca globale: da verificare (nessuna trovata in SwiftUI). |
 | 18 | Conoscenza personale | PARTIAL | Memoria cognitiva, note, export/import. Mancano collezioni, riferimenti collegati, freschezza. |
 | 19 | Privacy | PARTIAL → **nuovo** (inventario) | `privacy::redact`, audit, permessi, export della memoria. `/api/privacy/overview` (ADR-0187): inventario locale, provider cloud con chiave, strumenti per effetto, autonomia, connettori, MCP, osservazioni. Manca ancora la vista grafica, la cronologia dei permessi e i controlli di conservazione. |

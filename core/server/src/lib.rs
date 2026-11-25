@@ -17,6 +17,7 @@ pub mod catalog;
 pub mod channels;
 mod chat_crypto;
 pub mod cloud;
+pub mod codemap;
 pub mod config;
 pub mod connector_catalog;
 pub mod connectors;

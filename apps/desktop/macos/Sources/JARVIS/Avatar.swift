@@ -14,6 +14,10 @@ struct Avatar: View {
     var level = 0.0
     /// Allerta (arresto di emergenza o errore): i colori virano al caldo.
     var alert = false
+    /// In attesa della tua autorizzazione (conferme in sospeso): colore ambra, nessuna attività simulata.
+    var awaiting = false
+    /// Core non raggiungibile: avatar spento, senza saturazione.
+    var offline = false
     /// Contatore dei successi: a ogni incremento un'onda verde si espande dal centro.
     var celebrate = 0
     /// Tonalità (0–360°) dell'accento scelto dall'utente; senza, il ciano di JARVIS (circa 190°).
@@ -28,6 +32,7 @@ struct Avatar: View {
     private var stateHue: Double {
         if alert { return -165 }
         let accent = accentHue.map { $0 - 190 } ?? 0
+        if awaiting && !speaking && !listening { return -140 }
         if speaking { return accent - 12 }
         if listening { return accent - 38 }
         if thinking { return accent + 68 }
@@ -43,6 +48,9 @@ struct Avatar: View {
             .background { SpeechHalo(speaking: speaking, thinking: thinking, listening: listening, level: level) }
             .hueRotation(.degrees(stateHue))
             .animation(.easeInOut(duration: 0.6), value: stateHue)
+            .saturation(offline ? 0.12 : 1)
+            .opacity(offline ? 0.55 : 1)
+            .animation(.easeInOut(duration: 0.6), value: offline)
             .overlay {
                 // Successo: un'anello verde si allarga e svanisce (fermo con «Riduci movimento»).
                 Circle()
@@ -65,7 +73,22 @@ struct Avatar: View {
             .onTapGesture { tapped = Date().timeIntervalSinceReferenceDate }
             .accessibilityElement(children: .ignore)
             .accessibilityAddTraits(.isImage)
-            .accessibilityLabel(speaking ? "JARVIS sta parlando" : (listening ? "JARVIS ti sta ascoltando" : (thinking ? "JARVIS sta elaborando" : "Avatar JARVIS")))
+            .accessibilityLabel(AvatarStatus.label(speaking: speaking, listening: listening, thinking: thinking,
+                                                   awaiting: awaiting, alert: alert, offline: offline))
+    }
+}
+
+/// Stato dell'avatar in parole (ADR-0188): ogni stato corrisponde a una condizione reale dell'app, mai a un'animazione
+/// di scena. Priorità: offline, errore, parla, ascolto, elaborazione, attesa di autorizzazione, inattivo.
+enum AvatarStatus {
+    static func label(speaking: Bool, listening: Bool, thinking: Bool, awaiting: Bool, alert: Bool, offline: Bool) -> String {
+        if offline { return "JARVIS non è raggiungibile" }
+        if alert { return "JARVIS segnala un errore o un arresto" }
+        if speaking { return "JARVIS sta parlando" }
+        if listening { return "JARVIS ti sta ascoltando" }
+        if thinking { return "JARVIS sta elaborando" }
+        if awaiting { return "JARVIS attende la tua autorizzazione" }
+        return "Avatar JARVIS"
     }
 }
 
@@ -438,10 +461,13 @@ struct PortraitAvatar: View {
     var listening = false
     var level = 0.0
     var alert = false
+    var awaiting = false
+    var offline = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var stateHue: Double {
         if alert { return -165 }
+        if awaiting && !speaking && !listening { return -140 }
         if speaking { return -12 }
         if listening { return -38 }
         if thinking { return 68 }
@@ -493,6 +519,8 @@ struct PortraitAvatar: View {
             .background { SpeechHalo(speaking: speaking, thinking: thinking, listening: listening, level: level) }
             .hueRotation(.degrees(stateHue))
             .animation(.easeInOut(duration: 0.6), value: stateHue)
+            .saturation(offline ? 0.12 : 1)
+            .opacity(offline ? 0.55 : 1)
         }
         .aspectRatio(1, contentMode: .fit)
         .accessibilityElement(children: .ignore)
