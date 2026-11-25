@@ -2400,7 +2400,9 @@ impl JarvisApp {
                     Some("failed" | "cancelled" | "interrupted")
                 ) && ui
                     .small_button("Ripianifica (bozza di recupero)")
-                    .on_hover_text("Il modello propone un piano di recupero: resta una bozza da rivedere")
+                    .on_hover_text(
+                        "Il modello propone un piano di recupero: resta una bozza da rivedere",
+                    )
                     .clicked()
                 {
                     self.act(
