@@ -27,6 +27,7 @@ pub mod executive;
 pub mod expert;
 pub mod guard;
 pub mod improvements;
+pub mod intent;
 pub mod mcp;
 pub mod mcp_client;
 pub mod memory;

@@ -1,0 +1,39 @@
+Che cavolo sta succedendo?|observation
+Non funziona un cazzo|observation
+Fai tu, basta che funzioni|instruction
+Lascia stare|cancellation
+Mi sono perso|observation
+È un casino|observation
+Dai, sistemalo|instruction
+Come avevamo fatto ieri?|question
+Aspetta, fermati.|cancellation
+Annulla quello che hai appena fatto.|cancellation
+Continua, ma senza modificare il database.|instruction
+Prima fammi vedere cosa vuoi fare.|instruction
+Riprendi quello che stavi facendo.|instruction
+Fallo partire|instruction
+Sistema tutto|instruction
+Cerca quella cosa di ieri|instruction
+Controlla che sia tutto a posto|instruction
+Aggiorna tutto|instruction
+Mettilo online|instruction
+Tieni d'occhio questa cosa|instruction
+Quanta RAM sto usando?|question
+Perché il PC va così lento?|question
+Come sta messo il computer?|question
+Ti ricordi il progetto del server?|question
+Qual è il miglior modello AI gratuito al momento?|question
+Questo file è sicuro?|question
+Secondo te questo progetto è redditizio?|question
+Che ne pensi?|question
+JARVIS, ci sei?|chitchat
+Cosa sei in grado di fare?|question
+Controlla se tutti i test passano|instruction
+Fammi un commit con un messaggio sensato|instruction
+Riavviami il PC tra dieci minuti|instruction
+Ricordati questa cosa|instruction
+Dimentica quello che ti ho appena detto|instruction
+No, intendevo il server di test|correction
+Sì, vai|authorization
+Grazie mille|chitchat
+Perché non parte?|question

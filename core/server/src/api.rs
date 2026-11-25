@@ -656,6 +656,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/plans/templates/delete", post(plan_template_delete))
         .route("/api/plans/from-template", post(plan_from_template))
         .route("/api/plans/propose", post(plan_propose))
+        .route("/api/intent/analyze", post(intent_analyze))
         .route("/api/plugins", get(plugins_list).post(plugin_install))
         .route("/api/plugins/remove", post(plugin_remove))
         .route("/api/improvements", get(improvements_list))
@@ -3443,6 +3444,19 @@ async fn improvement_apply(State(state): State<Shared>, Json(body): Json<Value>)
 async fn improvement_dismiss(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
     let id = body["id"].as_str().unwrap_or_default().to_string();
     reply(with_core(&state, move |j| j.improvement_dismiss(&id)).await)
+}
+
+/// Lettura strutturata di una frase (ADR-0173): tipo, ambiti, entità, riferimenti risolti e ambiguità.
+async fn intent_analyze(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let message = body["message"].as_str().unwrap_or_default().to_string();
+    if message.trim().is_empty() || message.chars().count() > 2000 {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "bad_request",
+            "«message» è obbligatorio (massimo 2000 caratteri)",
+        );
+    }
+    reply(with_core(&state, move |j| j.intent_analyze(&message)).await)
 }
 
 /// Fa proporre un piano al modello cloud (ADR-0160): restituisce una bozza validata, mai un piano avviato.

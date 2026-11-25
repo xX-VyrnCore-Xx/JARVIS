@@ -766,10 +766,73 @@ impl Jarvis {
             .into_iter()
             .map(|s| json!({"id": s["id"], "name": s["name"], "instructions": s["instructions"], "tools": s["tools"]}))
             .collect();
+        // Lettura strutturata della richiesta (ADR-0173): tipo, riferimenti risolti, ambiguità. Passa come
+        // indicazione del Core, nella stessa via delle competenze, senza strumenti né permessi aggiuntivi.
+        let mut skills = skills;
+        if let Some(hint) = crate::intent::hint(&self.intent_analyze(&query)?) {
+            skills.push(json!({
+                "id": "core.intent", "name": "Lettura della richiesta", "instructions": hint, "tools": [],
+            }));
+        }
         if skills.is_empty() {
             return Ok(json!({"messages": messages, "memory": memory}));
         }
         Ok(json!({"messages": messages, "memory": memory, "skills": skills}))
+    }
+
+    /// Contesto recente per il motore di intento: ultimi messaggi, piani e file citati, con l'età di ciascuno.
+    pub fn intent_recent(&self) -> Result<crate::intent::Recent, CoreError> {
+        use crate::intent::{Item, Recent};
+        let now_t = chrono::Utc::now();
+        let age =
+            |at: &str| crate::automation::parse_ts(at).map(|t| (now_t - t).num_minutes().max(0));
+        let messages = self.store.messages_recent(10).map_err(internal)?;
+        let users: Vec<&Value> = messages.iter().filter(|m| m["role"] == "user").collect();
+        let mut recent = Recent {
+            last_user: users
+                .len()
+                .checked_sub(2)
+                .and_then(|i| users[i]["content"].as_str().map(str::to_string)),
+            ..Recent::default()
+        };
+        for m in messages.iter().rev() {
+            let text = m["content"].as_str().unwrap_or_default();
+            let found = crate::intent::entities(text);
+            for file in found["files"].as_array().into_iter().flatten() {
+                let label = file.as_str().unwrap_or_default().to_string();
+                if !recent.files.iter().any(|f| f.label == label) && recent.files.len() < 5 {
+                    recent.files.push(Item {
+                        kind: "file",
+                        label,
+                        state: "citato".into(),
+                        age_minutes: age(m["at"].as_str().unwrap_or_default()),
+                    });
+                }
+            }
+        }
+        for doc in self.store.plans_recent(8).map_err(internal)? {
+            let item = Item {
+                kind: "plan",
+                label: doc["goal"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .chars()
+                    .take(80)
+                    .collect(),
+                state: doc["status"].as_str().unwrap_or_default().to_string(),
+                age_minutes: age(doc["updated_at"].as_str().unwrap_or_default()),
+            };
+            if item.state == "failed" {
+                recent.failures.push(item.clone());
+            }
+            recent.plans.push(item);
+        }
+        Ok(recent)
+    }
+
+    /// Analisi della richiesta con il contesto recente (ADR-0173). Sola lettura, nessun effetto.
+    pub fn intent_analyze(&self, message: &str) -> Result<Value, CoreError> {
+        Ok(crate::intent::analyze(message, &self.intent_recent()?))
     }
 
     fn save(&self, task: &Task) -> Result<(), CoreError> {
@@ -1255,6 +1318,34 @@ impl Jarvis {
                 text.into(),
             );
         }
+        // «Aspetta, fermati», «lascia stare»: fermare è sempre la direzione sicura. Se un piano è in corso lo si
+        // annulla subito (ADR-0173); altrimenti la frase prosegue come richiesta normale con l'indicazione al modello.
+        if crate::intent::classify(message).0 == crate::intent::Kind::Cancellation {
+            let running: Vec<String> = self
+                .store
+                .plans_recent(10)
+                .map_err(internal)?
+                .into_iter()
+                .filter(|p| p["status"] == "running")
+                .filter_map(|p| p["id"].as_str().map(str::to_string))
+                .collect();
+            if !running.is_empty() {
+                let mut stopped = 0;
+                for id in &running {
+                    if self.plan_cancel(id).is_ok() {
+                        stopped += 1;
+                    }
+                }
+                task.transition("planned", "Annullamento richiesto dal proprietario");
+                task.transition("running", "Piani in corso annullati");
+                task.transition("succeeded", "Piani annullati");
+                let text = format!(
+                    "Fermato: ho annullato {stopped} {} in corso. I passi già eseguiti restano nel registro e si possono rivedere da «Piani».",
+                    if stopped == 1 { "piano" } else { "piani" }
+                );
+                return self.finish(task, Outcome::default(), text);
+            }
+        }
         task.transition("planned", "Delega all'agente");
         task.transition("running", "Agente in esecuzione");
         self.save(&task)?;
@@ -1291,7 +1382,13 @@ impl Jarvis {
             .map_or(crate::agents::GENERAL, |a| a.name);
         out.steps
             .push(json!({"kind": "delegation", "agent": agent, "backend": result["backend"]}));
-        for s in inputs["skills"].as_array().into_iter().flatten() {
+        // Le indicazioni del Core (`core.*`) non sono competenze dell'utente e non compaiono fra i passi.
+        for s in inputs["skills"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|s| !s["id"].as_str().is_some_and(|id| id.starts_with("core.")))
+        {
             out.steps
                 .push(json!({"kind": "skill", "skill": s["id"], "name": s["name"]}));
         }
