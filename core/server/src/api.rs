@@ -510,6 +510,8 @@ fn device_route_allowed(method: &str, route: &str, scopes: &[&str]) -> bool {
         ("POST", "/api/passkeys/register"),
         ("POST", "/api/passkeys/assert/options"),
         ("GET", "/api/health"),
+        ("GET", "/api/handoffs"),
+        ("POST", "/api/handoffs/{id}/accept"),
     ];
     let allowed = chat.iter().any(|(m, r)| *m == method && *r == route);
     let confirm =
@@ -667,6 +669,9 @@ pub fn router(state: Shared) -> Router {
         .route("/api/plans/{id}/run", post(plan_run))
         .route("/api/plans/{id}/approve", post(plan_approve))
         .route("/api/plans/{id}/cancel", post(plan_cancel))
+        .route("/api/plans/{id}/pause", post(plan_pause))
+        .route("/api/plans/{id}/constraints", post(plan_constrain))
+        .route("/api/plans/{id}/dry-run", get(plan_dry_run))
         .route("/api/plans/{id}/rollback", post(plan_rollback))
         .route("/api/plans/{id}/replay", post(plan_replay))
         .route("/api/plans/{id}/replan", post(plan_replan))
@@ -689,6 +694,21 @@ pub fn router(state: Shared) -> Router {
         .route("/api/docker", get(docker_status))
         .route("/api/docker/cleanup", post(docker_cleanup))
         .route("/api/autonomy", get(autonomy_get).patch(autonomy_patch))
+        .route("/api/memory/cognitive", get(memory_cognitive))
+        .route("/api/memory/consolidate", post(memory_consolidate))
+        .route("/api/memory/contradictions", get(memory_contradictions))
+        .route("/api/plans/{id}/diagnosis", get(plan_diagnosis))
+        .route("/api/memory/{id}/meta", post(memory_meta))
+        .route("/api/handoffs", get(handoffs_get).post(handoff_post))
+        .route("/api/handoffs/{id}/accept", post(handoff_accept))
+        .route("/api/dashboard", axum::routing::patch(dashboard_patch))
+        .route("/api/dashboard/summary", get(dashboard_summary))
+        .route("/api/dashboard/weather", get(dashboard_weather))
+        .route("/api/world", get(world_get))
+        .route("/api/world/sync", post(world_sync))
+        .route("/api/world/infer", post(world_infer))
+        .route("/api/world/events", get(world_events))
+        .route("/api/world/dependencies", get(world_dependencies))
         .route(
             "/api/permissions",
             get(permissions_get).patch(permissions_patch),
@@ -1359,7 +1379,18 @@ async fn chat(
             return Json(with_correction(out, correction)).into_response();
         }
     }
-    match with_core(&state, move |j| j.chat(&message)).await {
+    let outcome: Result<(crate::orchestrator::Outcome, Vec<String>), CoreError> =
+        with_core(&state, move |j| {
+            let out = j.chat(&message)?;
+            Ok((out, j.take_plan_runners()))
+        })
+        .await;
+    if let Ok((_, runners)) = &outcome {
+        for id in runners {
+            spawn_plan_runner(&state, id.clone());
+        }
+    }
+    match outcome.map(|(out, _)| out) {
         Ok(out) => Json(with_correction(out.to_json(), correction)).into_response(),
         Err(e) => e.into_response(),
     }
@@ -1413,6 +1444,8 @@ async fn chat_stream(
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let core = state.core.clone();
     let deltas = tx.clone();
+    let runtime = tokio::runtime::Handle::current();
+    let shared = state.clone();
     tokio::task::spawn_blocking(move || {
         let mut guard = core.lock().unwrap_or_else(|e| e.into_inner());
         let sink: crate::orchestrator::StreamSink = Box::new(move |d: &str| {
@@ -1427,6 +1460,13 @@ async fn chat_stream(
                 json!({"type": "error", "error": {"code": code, "message": message}})
             }
         };
+        // Una ripresa chiesta in chat («riprendi») affida il piano al pianificatore.
+        let runners = guard.take_plan_runners();
+        drop(guard);
+        let _entered = runtime.enter();
+        for id in runners {
+            spawn_plan_runner(&shared, id);
+        }
         let _ = tx.send(line.to_string() + "\n");
     });
     let stream = futures_util::stream::unfold(rx, |mut rx| async move {
@@ -2036,6 +2076,161 @@ async fn autonomy_patch(
         );
     }
     reply(with_core(&state, move |j| j.autonomy_update(&body)).await)
+}
+
+/// Memoria con importanza, affidabilità, usi e progetto (ADR-0178).
+async fn memory_cognitive(
+    State(state): State<Shared>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let (kind, project) = (q.get("kind").cloned(), q.get("project").cloned());
+    reply(
+        with_core(&state, move |j| {
+            j.memory_cognitive(kind.as_deref(), project.as_deref())
+        })
+        .await,
+    )
+}
+
+async fn memory_contradictions(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.memory_contradictions()).await)
+}
+
+/// Diagnosi di un piano: classe e causa dei passi falliti, strategie alternative, se ripianificare.
+async fn plan_diagnosis(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    reply(with_core(&state, move |j| j.plan_diagnosis(&id)).await)
+}
+
+async fn memory_consolidate(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let apply = body["apply"].as_bool().unwrap_or(false);
+    reply(with_core(&state, move |j| j.memory_consolidate(apply)).await)
+}
+
+async fn memory_meta(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    reply(with_core(&state, move |j| j.memory_set_meta(&id, &body)).await)
+}
+
+/// Passaggio di attività fra dispositivi (ADR-0180). Il proprietario lo crea dal computer del Core; un
+/// dispositivo associato vede e riprende solo quelli a lui destinati. Nessun permesso viene trasferito.
+async fn handoffs_get(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+) -> Response {
+    let who = device
+        .as_ref()
+        .and_then(|d| d.0 .0["device_id"].as_str().map(str::to_string))
+        .unwrap_or_else(|| "owner".into());
+    reply(with_core(&state, move |j| j.handoffs_for(&who)).await)
+}
+
+async fn handoff_post(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Json(body): Json<Value>,
+) -> Response {
+    if device.is_some() {
+        return error(
+            StatusCode::FORBIDDEN,
+            "owner_only",
+            "operazione disponibile solo dal computer del proprietario",
+        );
+    }
+    reply(with_core(&state, move |j| j.handoff_create(&body)).await)
+}
+
+async fn handoff_accept(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Path(id): Path<String>,
+) -> Response {
+    let who = device
+        .as_ref()
+        .and_then(|d| d.0 .0["device_id"].as_str().map(str::to_string))
+        .unwrap_or_else(|| "owner".into());
+    reply(with_core(&state, move |j| j.handoff_accept(&id, &who)).await)
+}
+
+/// Dati della Plancia in una chiamata (ADR-0181).
+async fn dashboard_summary(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.dashboard_summary()).await)
+}
+
+async fn dashboard_patch(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply(with_core(&state, move |j| j.dashboard_update(&body)).await)
+}
+
+/// Meteo della località scelta dal proprietario: nessuna richiesta esterna senza una località; risultato in
+/// cache per mezz'ora; la rete si usa fuori dal blocco del Core.
+async fn dashboard_weather(State(state): State<Shared>) -> Response {
+    static CACHE: std::sync::Mutex<Option<(std::time::Instant, String, Value)>> =
+        std::sync::Mutex::new(None);
+    let (place, web) = with_core(&state, |j| j.dashboard_weather_target()).await;
+    let Some(place) = place else {
+        return Json(json!({"configured": false})).into_response();
+    };
+    if let Some((at, cached_place, view)) = CACHE.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    {
+        if cached_place == place && at.elapsed().as_secs() < crate::dashboard::WEATHER_TTL_S {
+            return Json(view).into_response();
+        }
+    }
+    let fetch = {
+        let place = place.clone();
+        tokio::task::spawn_blocking(move || crate::toolbox::weather(&web, &place, 1)).await
+    };
+    match fetch {
+        Ok(Ok(raw)) => {
+            let view = crate::dashboard::weather_view(&raw);
+            *CACHE.lock().unwrap_or_else(|e| e.into_inner()) =
+                Some((std::time::Instant::now(), place, view.clone()));
+            Json(view).into_response()
+        }
+        Ok(Err(e)) => Json(json!({"configured": true, "available": false, "reason": e.message}))
+            .into_response(),
+        Err(_) => {
+            Json(json!({"configured": true, "available": false, "reason": "lettura interrotta"}))
+                .into_response()
+        }
+    }
+}
+
+/// Stato del mondo (ADR-0175): osservato e dedotto, con versioni e dato vecchio. Lettura per il proprietario.
+async fn world_get(
+    State(state): State<Shared>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let kind = q.get("kind").cloned();
+    let stale = q.get("stale").is_some_and(|v| v == "1" || v == "true");
+    reply(with_core(&state, move |j| j.world(kind.as_deref(), stale)).await)
+}
+
+async fn world_sync(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.world_sync()).await)
+}
+
+async fn world_infer(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply(with_core(&state, move |j| j.world_infer(&body)).await)
+}
+
+async fn world_events(
+    State(state): State<Shared>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let limit = limit(&json!(q), 50) as i64;
+    let key = q.get("key").cloned();
+    reply(with_core(&state, move |j| j.world_events(limit, key.as_deref())).await)
+}
+
+async fn world_dependencies(
+    State(state): State<Shared>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let key = q.get("key").cloned().unwrap_or_default();
+    reply(with_core(&state, move |j| j.world_dependencies(&key)).await)
 }
 
 async fn permissions_patch(
@@ -3084,12 +3279,12 @@ fn spawn_plan_runner(state: &Shared, id: String) {
                 let waiting = status == "waiting";
                 let note = json!({
                     "severity": if status == "succeeded" { "success" } else { "warning" },
-                    "category": "automation",
+                    "category": "system",
                     "title": if waiting { "Un piano attende la tua conferma".to_string() }
                              else { format!("Piano concluso: {status}") },
                     "body": doc["goal"].as_str().unwrap_or_default().chars().take(300).collect::<String>(),
                     "source": {"kind": "module", "id": "plans"},
-                    "dedupe_key": format!("plan:{runner_id}:{status}"), "link": {"view": "plans"},
+                    "dedupe_key": format!("plan:{runner_id}:{status}"), "link": {"view": "tasks"},
                 });
                 let _ = with_core(&worker, move |j| j.notify(note)).await;
             }
@@ -3599,6 +3794,31 @@ async fn plan_replan(
     })
     .await;
     reply(done.map(|doc| said(doc, "plan.replanned", None)))
+}
+
+/// Sospende un piano: il pianificatore si ferma al prossimo passo e si riprende con `/run`.
+async fn plan_pause(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    reply_said(
+        with_core(&state, move |j| j.plan_pause(&id)).await,
+        "plan.paused",
+    )
+}
+
+/// Vincoli modificabili durante l'esecuzione (solo restrizioni; `null` per toglierne uno).
+async fn plan_constrain(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    reply_said(
+        with_core(&state, move |j| j.plan_constrain(&id, &body)).await,
+        "plan.constrained",
+    )
+}
+
+/// Prova a secco: cosa deciderebbe la policy per ogni passo, senza eseguire nulla.
+async fn plan_dry_run(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    reply(with_core(&state, move |j| j.plan_dry_run(&id)).await)
 }
 
 async fn plan_cancel(State(state): State<Shared>, Path(id): Path<String>) -> Response {

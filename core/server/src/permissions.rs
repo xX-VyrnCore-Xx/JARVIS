@@ -236,6 +236,13 @@ pub struct Autonomy {
     agents: std::collections::BTreeMap<String, u8>,
     tools: Vec<(String, u8)>,
     risks: std::collections::BTreeMap<String, u8>,
+    /// Livello per dispositivo/nodo (ADR-0180): si applica agli strumenti eseguiti su quel nodo.
+    devices: std::collections::BTreeMap<String, u8>,
+}
+
+/// Restrizione di un livello su un'operazione con gli effetti dati (usata anche per i nodi).
+pub fn level_restriction_for(level: u8, effects: &str) -> Option<Mode> {
+    level_restriction(level, effects)
 }
 
 fn level_restriction(level: u8, effects: &str) -> Option<Mode> {
@@ -255,6 +262,7 @@ impl Autonomy {
             agents: Default::default(),
             tools: Vec::new(),
             risks: Default::default(),
+            devices: Default::default(),
         }
     }
 
@@ -294,7 +302,15 @@ impl Autonomy {
                 .filter(|(pattern, _)| valid_pattern(pattern))
                 .collect(),
             risks: map("risks"),
+            devices: map("devices"),
         }
+    }
+
+    /// Livello di un dispositivo o nodo: il minimo fra quello generale e quello suo.
+    pub fn device_level(&self, device: &str) -> u8 {
+        self.devices
+            .get(device)
+            .map_or(self.default, |l| (*l).min(self.default))
     }
 
     /// Livello effettivo: il minimo di quelli che si applicano allo strumento, al suo rischio e all'agente.
@@ -323,7 +339,7 @@ impl Autonomy {
         json!({
             "default": self.default,
             "agents": self.agents, "tools": self.tools.iter().cloned().collect::<std::collections::BTreeMap<_, _>>(),
-            "risks": self.risks,
+            "risks": self.risks, "devices": self.devices,
             "levels": ["conversazione", "consultivo", "esecuzione assistita", "autonomia delegata",
                        "proattiva", "avanzata supervisionata (riservata: oggi come 4)"],
             "background_allowed": self.background_allowed(),
@@ -337,12 +353,18 @@ pub fn background_allowed(dir: &Path) -> bool {
 }
 
 /// Modifica i livelli: `default`, `agents`, `tools`, `risks` (`null` elimina una voce). Valida tutto prima di scrivere.
-pub fn update_autonomy(dir: &Path, patch: &Value, agents: &[&str]) -> Result<Value, String> {
+pub fn update_autonomy(
+    dir: &Path,
+    patch: &Value,
+    agents: &[&str],
+    devices: &[String],
+) -> Result<Value, String> {
     let current = Autonomy::load(dir);
     let mut default = current.default;
     let mut agents_map = current.agents;
     let mut tools: std::collections::BTreeMap<String, u8> = current.tools.into_iter().collect();
     let mut risks = current.risks;
+    let mut device_map = current.devices;
     let level = |v: &Value| -> Result<u8, String> {
         v.as_u64()
             .filter(|n| *n <= MAX_LEVEL as u64)
@@ -376,13 +398,16 @@ pub fn update_autonomy(dir: &Path, patch: &Value, agents: &[&str]) -> Result<Val
     };
     edit(&mut agents_map, "agents", &|n| agents.contains(&n))?;
     edit(&mut tools, "tools", &|n| valid_pattern(n))?;
+    edit(&mut device_map, "devices", &|n| {
+        devices.iter().any(|d| d == n)
+    })?;
     edit(&mut risks, "risks", &|n| {
         matches!(n, "low" | "medium" | "high" | "critical")
     })?;
-    if agents_map.len() + tools.len() + risks.len() > MAX_RULES {
+    if agents_map.len() + tools.len() + risks.len() + device_map.len() > MAX_RULES {
         return Err(format!("al massimo {MAX_RULES} voci"));
     }
-    let doc = json!({"default": default, "agents": agents_map, "tools": tools, "risks": risks});
+    let doc = json!({"default": default, "agents": agents_map, "tools": tools, "risks": risks, "devices": device_map});
     std::fs::write(dir.join(AUTONOMY_FILE), doc.to_string()).map_err(|e| e.to_string())?;
     Ok(Autonomy::load(dir).to_json())
 }
@@ -523,6 +548,7 @@ mod tests {
             &d,
             &json!({"default": 3, "agents": {"coding": 2}, "tools": {"fs.*": 1}, "risks": {"critical": 0}}),
             &names,
+            &[],
         )
         .unwrap();
         let rules = Rules::load(&d);
@@ -558,7 +584,7 @@ mod tests {
             &json!({"profile": "read_only", "rules": {"web.fetch": "ask"}}),
         )
         .unwrap();
-        update_autonomy(&d, &json!({"default": 5}), &[]).unwrap();
+        update_autonomy(&d, &json!({"default": 5}), &[], &[]).unwrap();
         let rules = Rules::load(&d);
         assert_eq!(
             rules.verdict_for("fs.write", "write_local", "high", "coding"),
@@ -582,7 +608,7 @@ mod tests {
             json!({"risks": {"enorme": 1}}),
             json!({"agents": []}),
         ] {
-            assert!(update_autonomy(&d, &bad, &names).is_err(), "{bad}");
+            assert!(update_autonomy(&d, &bad, &names, &[]).is_err(), "{bad}");
         }
         std::fs::write(d.join(AUTONOMY_FILE), b"{ non json").unwrap();
         let rules = Rules::load(&d);
@@ -591,5 +617,28 @@ mod tests {
             Some(Mode::Ask)
         );
         assert!(!Autonomy::load(&d).background_allowed());
+    }
+
+    #[test]
+    fn a_device_level_can_only_lower_the_general_one_and_unknown_devices_are_rejected() {
+        let d = dir();
+        let known = vec!["tablet".to_string()];
+        assert!(update_autonomy(&d, &json!({"devices": {"sconosciuto": 1}}), &[], &known).is_err());
+        update_autonomy(
+            &d,
+            &json!({"default": 3, "devices": {"tablet": 1}}),
+            &[],
+            &known,
+        )
+        .unwrap();
+        let a = Autonomy::load(&d);
+        assert_eq!(a.device_level("tablet"), 1);
+        assert_eq!(a.device_level("altro"), 3);
+        // Un livello più alto del generale non allarga: vale il minimo.
+        update_autonomy(&d, &json!({"devices": {"tablet": 5}}), &[], &known).unwrap();
+        assert_eq!(Autonomy::load(&d).device_level("tablet"), 3);
+        assert_eq!(level_restriction_for(1, "write_local"), Some(Mode::Deny));
+        assert_eq!(level_restriction_for(2, "write_external"), Some(Mode::Ask));
+        assert_eq!(level_restriction_for(1, "read"), None);
     }
 }

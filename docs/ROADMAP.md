@@ -244,6 +244,18 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Database, memoria e animazioni macOS (2026-11-24, base `013b7b5`).** ADR-0124, ADR-0125. Pragma e manutenzione del database, indici di memoria verificati e ricostruiti, ricerca a candidati con recenza, statistiche e doppioni; animazioni SwiftUI. Verifiche: fmt, clippy, `cargo test --locked`, test Python e contratti. **Sospeso:** resa e fluidità delle animazioni (Swift solo CI).
 
+**Plancia dal mock-up (2026-11-25, ADR-0181).** Schede reali (specialisti, progetti, sistema, attività, notifiche, media, monitoraggio), meteo e media facoltativi, avatar con colore per stato e alone che pulsa con la voce, ritratto fornito dall'utente. Swift verificato solo dalla CI; resa non vista; Windows e Android da fare.
+
+**Evoluzione cognitiva, incremento 8 (2026-11-25, ADR-0180).** Passaggio di attività fra dispositivi (una sola ripresa, nessun permesso trasferito) e livelli di autonomia per nodo; corretto un difetto che scartava in silenzio le notifiche di fine piano.
+
+**Evoluzione cognitiva, incremento 7 (2026-11-25, ADR-0179).** Autocorrezione: guasti classificati con causa e strategie, nuovi tentativi solo se servono, prove osservabili dopo le scritture, diagnosi dei piani, contraddizioni nella memoria.
+
+**Evoluzione cognitiva, incremento 6 (2026-11-25, ADR-0178).** Memoria con importanza, affidabilità, usi, progetto e consolidamento dei doppioni.
+
+**Evoluzione cognitiva, incremento 5 (2026-11-25, ADR-0177).** Collaborazione fra specialisti: richieste con più ambiti divise, svolte in ordine con contesto condiviso, ripiego sul generalista e risposta aggregata.
+
+**Evoluzione cognitiva, incremento 3–4 (2026-11-25, ADR-0175 e 0176).** Stato del mondo (osservato e dedotto, versioni, dato vecchio, dipendenze, cronologia) e piani sospendibili con vincoli modificabili in esecuzione e prova a secco, anche da chat («aspetta», «riprendi, ma senza modificare», «prima fammi vedere»). Mancano sincronizzazione periodica dello stato, shadow mode, interfacce.
+
 **Evoluzione cognitiva, incremento 2 (2026-11-25, ADR-0174).** Livelli di autonomia 0–5 per agente, strumento e rischio, solo restrittivi; le attività in background si fermano sotto il livello 4; `GET/PATCH /api/autonomy` solo dal computer del Core. Mancano livelli per dispositivo, interfaccia e il significato del livello 5.
 
 **Evoluzione cognitiva, incremento 1 (2026-11-25, ADR-0173, non committato).** Analisi dei divari su tutti i requisiti del documento «Cognitive Architecture» ([GAP_ANALYSIS.md](GAP_ANALYSIS.md), [VALIDATION_REPORT.md](VALIDATION_REPORT.md)); motore di intento e di contesto, annullamento dei piani con «fermati», dati di sviluppo e validazione separati (validazione 87%). Prossimi: livelli di autonomia 0–5 solo restrittivi, stato del mondo, collaborazione fra specialisti, pausa e dry run, memoria con importanza, apprendimento da dimostrazione (bloccato per l'osservazione dell'interfaccia).

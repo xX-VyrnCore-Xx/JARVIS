@@ -128,3 +128,21 @@ notifiche). Editor visivo di workflow, grafo temporale unificato, monitor di inf
 Test unitari e di integrazione del Core, test Python degli agenti e dei contratti, smoke E2E dell'API, test dei client:
 **Implementato** (comandi in [DEVELOPMENT.md](DEVELOPMENT.md); CI su Linux, macOS, Windows, Android). Prove con dispositivi reali,
 Docker, Tailscale e microfono: **sospese** (non disponibili in CI). Test di prestazioni: `tests/perf`.
+
+## Evoluzione cognitiva (ADR-0173–0180)
+
+Confronto per requisito in [GAP_ANALYSIS.md](GAP_ANALYSIS.md); prove in [VALIDATION_REPORT.md](VALIDATION_REPORT.md).
+
+| Componente | Stato | Note |
+| --- | --- | --- |
+| Motore di intento e di contesto | Parziale | `intent.rs`: tipo di enunciato, multi-intento, entità, riferimenti con età del dato, fiducia, chiarimento; regole, non appreso; contesto senza applicazione attiva |
+| Livelli di autonomia 0–5 | Implementato | solo restrittivi; per agente, strumento, rischio e nodo; livello 5 riservato (come 4); sotto il 4 niente attività in background |
+| Stato del mondo | Implementato | osservato e dedotto, versioni, dato vecchio, dipendenze, cronologia; sincronizzazione su richiesta |
+| Pausa, vincoli e prova a secco dei piani | Implementato | anche da chat; shadow mode assente |
+| Collaborazione fra specialisti | Implementato | in sequenza, contesto condiviso, ripiego sul generalista; non parallela |
+| Memoria cognitiva | Implementato | importanza, affidabilità, progetto, consolidamento; manca la scadenza adattiva |
+| Autocorrezione | Implementato | classi di guasto, prove osservabili, diagnosi, contraddizioni; la strategia alternativa resta una proposta |
+| Passaggio fra dispositivi | Implementato | ripresa unica senza trasferire permessi; sincronizzazione offline assente |
+| Apprendimento da dimostrazione | Pianificato (bloccato) | serve osservare l'interfaccia sui sistemi reali |
+| Modelli locali | Escluso | per istruzione del proprietario |
+

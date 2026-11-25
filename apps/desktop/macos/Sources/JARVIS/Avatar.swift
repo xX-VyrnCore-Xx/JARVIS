@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Avatar di JARVIS (ADR-0128): testa olografica interamente disegnata, con tre stati continui:
 /// a riposo (respira, sbatte le palpebre, guarda intorno), in elaborazione (anelli veloci, arco di scansione,
@@ -22,14 +23,26 @@ struct Avatar: View {
     @State private var tapped: TimeInterval = -1_000
     @State private var wave = 1.0
 
+    /// Colore per stato (ADR-0181): ciano a riposo, ciano caldo mentre parla, verde acqua in ascolto, viola mentre
+    /// pensa, rosso in allerta; si somma alla tonalità scelta dall'utente.
+    private var stateHue: Double {
+        if alert { return -165 }
+        let accent = accentHue.map { $0 - 190 } ?? 0
+        if speaking { return accent - 12 }
+        if listening { return accent - 38 }
+        if thinking { return accent + 68 }
+        return accent
+    }
+
     var body: some View {
         AvatarCanvas(think: thinking ? 1 : 0, talk: speaking ? 1 : 0, listen: listening ? 1 : 0, level: level,
                      reduceMotion: reduceMotion, hovering: hovering, tapped: tapped)
             .animation(.easeInOut(duration: 0.7), value: thinking)
             .animation(.easeInOut(duration: 0.5), value: speaking)
             .animation(.easeInOut(duration: 0.4), value: listening)
-            .hueRotation(.degrees(alert ? -165 : (accentHue.map { $0 - 190 } ?? 0)))
-            .animation(.easeInOut(duration: 0.7), value: alert)
+            .background { SpeechHalo(speaking: speaking, thinking: thinking, listening: listening, level: level) }
+            .hueRotation(.degrees(stateHue))
+            .animation(.easeInOut(duration: 0.6), value: stateHue)
             .overlay {
                 // Successo: un'anello verde si allarga e svanisce (fermo con «Riduci movimento»).
                 Circle()
@@ -361,4 +374,129 @@ private enum AvatarArt {
 
 private extension Bool {
     var asDouble: Double { self ? 1 : 0 }
+}
+
+
+/// Alone che pulsa con la voce (ADR-0181): mentre JARVIS parla respira al ritmo di sillabe sintetiche, in ascolto
+/// segue il livello del microfono, mentre pensa ruota lento. Con «Riduci movimento» resta un alone fermo.
+struct SpeechHalo: View {
+    let speaking: Bool
+    let thinking: Bool
+    let listening: Bool
+    let level: Double
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private func energy(_ t: Double) -> Double {
+        if speaking {
+            let a = 0.5 + 0.5 * sin(t * 7.3)
+            let b = 0.5 + 0.5 * sin(t * 11.9 + 1.3)
+            let c = 0.5 + 0.5 * sin(t * 3.1 + 0.4)
+            return min(1, 0.25 + 0.45 * a * c + 0.30 * b)
+        }
+        if listening { return min(1, 0.2 + level * 0.9) }
+        if thinking { return 0.35 + 0.15 * sin(t * 2.2) }
+        return 0.12 + 0.05 * sin(t * 1.1)
+    }
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { context in
+            let t = reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate
+            let e = energy(t)
+            ZStack {
+                Circle()
+                    .fill(RadialGradient(colors: [Color(red: 0.25, green: 0.88, blue: 1.0).opacity(0.10 + 0.34 * e),
+                                                  Color(red: 0.25, green: 0.88, blue: 1.0).opacity(0)],
+                                         center: .center, startRadius: 4, endRadius: 150))
+                    .scaleEffect(1.0 + 0.16 * e)
+                Circle()
+                    .strokeBorder(Color(red: 0.25, green: 0.88, blue: 1.0).opacity(0.10 + 0.40 * e), lineWidth: 1.5)
+                    .scaleEffect(0.92 + 0.14 * e)
+                    .blur(radius: 0.6)
+            }
+            .padding(-26)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Ritratto scelto dall'utente (ADR-0181): se in `Application Support/JARVIS/avatar.png` c'è un'immagine, la
+/// Plancia mostra quella al posto del disegno, con l'alone, l'anello a barre e i colori di stato. Nessuna immagine
+/// è inclusa nel repository: il file lo mette l'utente.
+enum UserPortrait {
+    static func load() -> NSImage? {
+        guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+        let file = dir.appendingPathComponent("JARVIS", isDirectory: true).appendingPathComponent("avatar.png")
+        return NSImage(contentsOf: file)
+    }
+}
+
+struct PortraitAvatar: View {
+    let image: NSImage
+    var speaking = false
+    var thinking = false
+    var listening = false
+    var level = 0.0
+    var alert = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var stateHue: Double {
+        if alert { return -165 }
+        if speaking { return -12 }
+        if listening { return -38 }
+        if thinking { return 68 }
+        return 0
+    }
+
+    private func ring(_ size: CGSize, t: Double) -> Path {
+        var path = Path()
+        let center = CGPoint(x: size.width / 2, y: size.height / 2)
+        let radius = min(size.width, size.height) / 2 - 3
+        let bars = 72
+        for i in 0..<bars {
+            let angle = Double(i) / Double(bars) * 2 * .pi
+            let noise = speaking
+                ? 0.5 + 0.5 * sin(t * 9 + Double(i) * 0.9) * sin(t * 5.3 + Double(i) * 0.37)
+                : (listening ? min(1, level * 1.6) * (0.5 + 0.5 * sin(Double(i) * 0.7 + t * 4)) : 0.12)
+            let length = 3 + 15 * max(0, noise)
+            let inner = CGPoint(x: center.x + CGFloat(cos(angle)) * radius, y: center.y + CGFloat(sin(angle)) * radius)
+            let outer = CGPoint(x: center.x + CGFloat(cos(angle)) * (radius + CGFloat(length)),
+                                y: center.y + CGFloat(sin(angle)) * (radius + CGFloat(length)))
+            path.move(to: inner)
+            path.addLine(to: outer)
+        }
+        return path
+    }
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { context in
+            let t = reduceMotion ? 0 : context.date.timeIntervalSinceReferenceDate
+            let pulse = speaking ? 0.012 * (0.5 + 0.5 * sin(t * 7.3)) : 0.004 * sin(t * 1.4)
+            ZStack {
+                Image(nsImage: image).resizable().scaledToFill()
+                    .clipShape(Circle())
+                    .scaleEffect(0.86 + pulse)
+                    .brightness(speaking ? 0.04 * (0.5 + 0.5 * sin(t * 7.3)) : 0)
+                Circle().strokeBorder(
+                    AngularGradient(colors: [Color(red: 0.25, green: 0.88, blue: 1.0), Color(red: 0.55, green: 0.42, blue: 1.0),
+                                             Color(red: 0.25, green: 0.88, blue: 1.0)], center: .center,
+                                    angle: .degrees(reduceMotion ? 0 : t * 24)),
+                    lineWidth: 2)
+                    .scaleEffect(0.86)
+                GeometryReader { geometry in
+                    ring(geometry.size, t: t)
+                        .stroke(Color(red: 0.25, green: 0.88, blue: 1.0).opacity(0.85),
+                                style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        .scaleEffect(0.86, anchor: .center)
+                }
+            }
+            .background { SpeechHalo(speaking: speaking, thinking: thinking, listening: listening, level: level) }
+            .hueRotation(.degrees(stateHue))
+            .animation(.easeInOut(duration: 0.6), value: stateHue)
+        }
+        .aspectRatio(1, contentMode: .fit)
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isImage)
+        .accessibilityLabel(speaking ? "JARVIS sta parlando" : "Ritratto di JARVIS")
+    }
 }
