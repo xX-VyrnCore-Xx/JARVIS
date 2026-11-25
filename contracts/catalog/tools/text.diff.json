@@ -1,0 +1,42 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "text.diff",
+  "version": "1.0.0",
+  "summary": "Confronta due testi riga per riga: righe tolte, aggiunte e somiglianza",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "a",
+      "b"
+    ],
+    "properties": {
+      "a": {
+        "type": "string",
+        "maxLength": 12000
+      },
+      "b": {
+        "type": "string",
+        "maxLength": 12000
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "none",
+  "risk": "low",
+  "permissions": [
+    "core.compute:execute"
+  ],
+  "errors": [
+    "text.invalid"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

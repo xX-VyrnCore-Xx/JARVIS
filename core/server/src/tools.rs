@@ -153,6 +153,9 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
                 "utf8_bytes": text.len(),
             }))
         }
+        "data.stats" => crate::datatools::stats(args),
+        "text.extract" => crate::datatools::extract(args),
+        "text.diff" => crate::datatools::diff(args),
         "code.validate_json" => Ok(
             match serde_json::from_str::<serde::de::IgnoredAny>(s("text")) {
                 Ok(_) => json!({"valid": true}),

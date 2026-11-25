@@ -753,6 +753,9 @@ pub const TOOLS: &[&str] = &[
     "date.calc",
     "math.calc",
     "text.count",
+    "data.stats",
+    "text.extract",
+    "text.diff",
     "units.convert",
     // Calcoli di direzione aziendale (ADR-0132): le cifre devono venire da uno strumento, non dal modello.
     "biz.vat",

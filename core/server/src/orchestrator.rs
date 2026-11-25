@@ -51,6 +51,9 @@ fn mcp_exposed(name: &str) -> bool {
                 | "math.calc"
                 | "units.convert"
                 | "text.count"
+                | "data.stats"
+                | "text.extract"
+                | "text.diff"
                 | "code.validate_json"
                 | "security.cvss"
                 | "it.subnet"
@@ -2344,6 +2347,44 @@ impl Jarvis {
         }
         self.record_owner_action(if pinned { "memory.pin" } else { "memory.unpin" })?;
         Ok(json!({"id": id, "pinned": pinned}))
+    }
+
+    /// Ricerca nelle chat.
+    pub fn conversation_search(&self, query: &str) -> Result<Value, CoreError> {
+        let items = self.store.messages_search(query, 30).map_err(internal)?;
+        Ok(json!({"query": query, "items": items}))
+    }
+
+    /// Chat in formato Markdown, per salvarla o condividerla.
+    pub fn conversation_export(&self, id: &str) -> Result<Value, CoreError> {
+        let list = self.store.conversation_list(200).map_err(internal)?;
+        let Some(chat) = list.iter().find(|c| c["id"] == id) else {
+            return Err(CoreError::NotFound("chat non trovata".into()));
+        };
+        let messages = self
+            .store
+            .conversation_messages(id, 2000)
+            .map_err(internal)?;
+        let title = chat["title"].as_str().unwrap_or("Chat").to_string();
+        let mut markdown = format!("# {title}\n\n");
+        for message in &messages {
+            let who = if message["role"] == "user" {
+                "Tu"
+            } else {
+                "JARVIS"
+            };
+            markdown.push_str(&format!(
+                "**{who}** · {}\n\n{}\n\n",
+                message["at"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .get(..16)
+                    .unwrap_or_default()
+                    .replace('T', " "),
+                message["content"].as_str().unwrap_or_default()
+            ));
+        }
+        Ok(json!({"title": title, "messages": messages.len(), "markdown": markdown}))
     }
 
     pub fn conversation_select(&mut self, id: &str) -> Result<Value, CoreError> {
