@@ -12,6 +12,8 @@ pub fn category(name: &str) -> &'static str {
     let family = name.split('.').next().unwrap_or(name);
     match family {
         "fs" => "files",
+        "git" | "deps" | "log" => "development",
+        "table" => "analysis",
         "shell" | "process" | "system" | "pc" | "app" | "screen" => "system",
         "code" | "sandbox" => "development",
         "web" | "weather" => "web",
@@ -137,6 +139,13 @@ pub fn parallel_safe(name: &str) -> bool {
                 | "fs.read"
                 | "fs.list"
                 | "fs.search"
+                | "git.status"
+                | "git.log"
+                | "git.diff"
+                | "git.branch"
+                | "log.analyze"
+                | "deps.list"
+                | "table.summary"
                 | "web.search"
                 | "web.fetch"
                 | "weather.forecast"

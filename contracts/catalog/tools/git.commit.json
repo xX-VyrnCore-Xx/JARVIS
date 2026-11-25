@@ -1,0 +1,52 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "git.commit",
+  "version": "1.0.0",
+  "summary": "Registra le modifiche in un commit (hook disattivati); richiede la conferma del proprietario",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "message"
+    ],
+    "properties": {
+      "message": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "paths": {
+        "type": "array",
+        "maxItems": 50,
+        "items": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        }
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "write_local",
+  "risk": "medium",
+  "permissions": [
+    "core.workspace:write"
+  ],
+  "errors": [
+    "git.invalid",
+    "git.not_repository",
+    "git.unavailable",
+    "git.failed",
+    "git.timeout",
+    "fs.outside_workspace"
+  ],
+  "timeout_ms": 15000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "required"
+}

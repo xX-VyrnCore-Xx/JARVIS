@@ -153,6 +153,14 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
                 "utf8_bytes": text.len(),
             }))
         }
+        "git.status" => crate::devtools::status(ctx.workspace),
+        "git.log" => crate::devtools::log(ctx.workspace, args),
+        "git.diff" => crate::devtools::diff(ctx.workspace, args),
+        "git.branch" => crate::devtools::branches(ctx.workspace),
+        "git.commit" => crate::devtools::commit(ctx.workspace, args),
+        "log.analyze" => crate::devtools::analyze(ctx.workspace, args),
+        "deps.list" => crate::devtools::dependencies(ctx.workspace, args),
+        "table.summary" => crate::devtools::summarize(ctx.workspace, args),
         "time.wait" => {
             let seconds = args["seconds"].as_f64().unwrap_or(0.0);
             if !(0.0..=10.0).contains(&seconds) {

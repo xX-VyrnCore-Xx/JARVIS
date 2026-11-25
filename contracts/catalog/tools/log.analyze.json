@@ -1,0 +1,41 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "log.analyze",
+  "version": "1.0.0",
+  "summary": "Riepilogo di un file di log della workspace: livelli, problemi ricorrenti, intervallo di tempo e ultimi errori",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "path"
+    ],
+    "properties": {
+      "path": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.workspace:read"
+  ],
+  "errors": [
+    "fs.not_found",
+    "fs.not_file",
+    "fs.too_large",
+    "fs.outside_workspace"
+  ],
+  "timeout_ms": 15000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

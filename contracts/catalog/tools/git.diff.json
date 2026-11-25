@@ -1,0 +1,43 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "git.diff",
+  "version": "1.0.0",
+  "summary": "Differenze non registrate o preparate (riepilogo e patch ridotta), anche di un solo percorso",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {
+      "path": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300
+      },
+      "staged": {
+        "type": "boolean"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.workspace:read"
+  ],
+  "errors": [
+    "git.not_repository",
+    "git.unavailable",
+    "git.failed",
+    "git.timeout",
+    "fs.outside_workspace"
+  ],
+  "timeout_ms": 15000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}
