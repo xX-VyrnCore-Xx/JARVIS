@@ -1897,6 +1897,44 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** `GET /api/agents` descrive i sette specialisti e il generalista (competenze dagli strumenti, rischio massimo, contesto isolato o condiviso, risorse); `GET /api/agents/route?q=` mostra quale agente riceverebbe una richiesta e per quali parole chiave; `GET /api/models/route?q=` mostra la rotta per compito, il modello per provider, il ripiego e la riservatezza (credenziali bloccate, dati personali rilevati, profilo condiviso) **senza inviare nulla**. Non si introducono nuovi agenti: si riusano quelli esistenti.
 - **Evidenza:** test API del registro e dell'instradamento.
 
+### ADR-0154 — Esecuzione parallela dei piani e condizioni di successo
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario di completare le parti «Pianificate» (fasi A e C della roadmap).
+- **Decisione:** i passi pronti, indipendenti e **senza stato** (calcoli, lettura di file nella workspace, Git in sola lettura, analisi, ricerca e lettura Web: `toolsys::parallel_safe`) girano insieme, fino a 4, ciascuno in un thread con un archivio privato e vuoto. Policy e audit restano **sequenziali e prima** dell'esecuzione; esiti, cronologia di salute e audit sono registrati dopo, in ordine. Gli strumenti con stato (note, memoria, sandbox, workflow, shell, scritture) e quelli che richiedono conferma non entrano mai in un gruppo parallelo. Ogni passo può dichiarare `expect`: condizioni (`exists`, `not_empty`, `eq`, `ne`, `gt`, `ge`, `lt`, `le`, `contains`) sul proprio risultato; se non sono soddisfatte il passo fallisce con `plan.expectation_failed` e vale come errore (ripetizioni e `on_error` compresi). Nuovo strumento `time.wait` (0–10 s) per distanziare i passi.
+- **Evidenza:** tre attese da un secondo completate in meno di 2,4 s; test delle condizioni; tutti i test dei piani precedenti invariati.
+
+### ADR-0155 — Strumenti di sviluppo e dati: Git, log, dipendenze, tabelle
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout (fase D).
+- **Decisione:** `git.status`, `git.log`, `git.diff`, `git.branch` (sola lettura) e `git.commit` (**conferma richiesta**, `--no-verify`); Git gira senza shell, con argomenti fissi, timeout di 10 s, output limitato e hook, `fsmonitor`, programmi di confronto esterni e protocolli pericolosi disattivati; percorsi solo dentro la workspace. `log.analyze` riassume un log (livelli, problemi ricorrenti normalizzati, intervallo, ultimi errori); `deps.list` legge `Cargo.toml`, `package.json`, `requirements.txt` e `go.mod` e segnala le dipendenze non fissate; `table.summary` riassume un CSV (tipi, statistiche, valori frequenti, anteprima). Nessuno usa la rete.
+- **Evidenza:** test su repository Git reale (stato, commit, differenze, cronologia, hook non eseguiti), log, manifest e CSV sintetici.
+
+### ADR-0156 — Client MCP con server autorizzati dal proprietario
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout (fase F).
+- **Decisione:** `mcp.list` (elenca gli strumenti, rischio medio) e `mcp.call` (chiama uno strumento, **rischio alto e conferma sempre richiesta**). I server si autorizzano solo dal computer del proprietario (`/api/mcp/servers`: nome, indirizzo, token facoltativo nel deposito dei segreti, mai restituito); né un modello né un piano possono aggiungerne. Solo HTTPS (HTTP su loopback), niente credenziali nell'indirizzo, niente reindirizzamenti, risposta massima 256 KiB, timeout 20 s, fino a 8 server. Il risultato è marcato `untrusted` e passa dalla guardia anti-iniezione: è un dato, mai un'istruzione.
+- **Non incluso:** risposte in streaming (SSE) e server che richiedono OAuth.
+- **Evidenza:** test con un server MCP locale: token inviato, elenco, chiamata con conferma, testo ostile riconosciuto, server sconosciuto rifiutato.
+
+### ADR-0157 — Digital Environment Twin e valutazione degli agenti
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout (fasi H e I, parte).
+- **Decisione:** `GET /api/twin` riunisce, dalle fonti esistenti, Core (versione, sistema, arresto di emergenza, cifratura), dispositivi e nodi (con capacità e stato), servizi (Docker, provider, server MCP, sandbox), connettori, progetti (missioni, piani, automazioni, cose da fare, chat, ricordi) e strumenti disponibili su questo sistema per categoria. Non contiene segreti, percorsi né contenuti di chat, memoria o file. Ogni lavoro delegato a una specializzazione registra esito, durata e strumenti in `agent_runs`; `GET /api/agents` mostra per ciascun agente lavori, tasso di successo e medie.
+- **Non incluso:** supervisione attiva, risoluzione dei conflitti fra agenti e limiti di risorse per agente oltre ai passi massimi.
+- **Evidenza:** test API del gemello e delle prestazioni degli agenti.
+
+### ADR-0158 — Automazioni guidate da eventi: osservazione di file
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout.
+- **Decisione:** regole `/api/watches` (percorso nella workspace + workflow per id o nome) gestite dal solo proprietario, con al massimo 16 regole. A ogni giro dello scheduler si confronta la firma (dimensione e data; per le cartelle numero di voci e voce più recente); la prima lettura è il punto di partenza e non avvia nulla; un cambiamento avvia il workflow una sola volta con un'esecuzione di tipo `event` (nuovo valore del contratto `workflow-run`). Il workflow conserva le proprie approvazioni: la regola non le amplia. Con l'arresto di emergenza il controllo non avviene.
+- **Evidenza:** test del confronto delle firme e test d'integrazione con un workflow reale (una sola esecuzione, contratto valido, arresto di emergenza).
+
+### ADR-0159 — Modelli di piano: procedure ricorrenti approvate dal proprietario
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout.
+- **Decisione:** modelli con parametri (`{{nome}}`, tipi conservati per i segnaposto interi, predefiniti e obbligatori): cinque incorporati in sola lettura (diagnosi del sistema, stato del repository, analisi di un log, riepilogo di una tabella, controllo di sicurezza) e fino a 30 personali. **L'apprendimento di procedure è controllato**: nulla viene salvato da solo; il proprietario salva un piano riuscito come procedura (`POST /api/plans/templates`, con nome valido e mai quello di un modello incorporato) e poi la ripete con `POST /api/plans/from-template`, sempre entro policy, conferme e budget.
+- **Evidenza:** test della sostituzione dei parametri, dei tipi, dei parametri mancanti e dell'intero ciclo salva, esegui, elimina.
+
 ### ADR-0135 — Correttore dei messaggi scritti
 
 - **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora il correttore grammaticale di prompt»).

@@ -1502,6 +1502,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             memoryOverview
         case .missions: missionTools
         case .security: emergencyCard
+        case .plans: planTemplates
         case .profile: profileEditor
         case .connectors: connectorSetup
         case .devices:
@@ -1856,6 +1857,32 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     }
 
     /// Missioni autonome e iniziative proattive (ADR-0096, ADR-0097).
+    /// Procedure pronte (ADR-0159): si avviano con un gesto; quelle con parametri obbligatori si creano da API.
+    @ViewBuilder private var planTemplates: some View {
+        let templates = (payload["templates"] as? [[String: Any]]) ?? []
+        if !templates.isEmpty {
+            card("Procedure pronte", icon: "play.rectangle") {
+                ForEach(templates.indices, id: \.self) { index in
+                    let template = templates[index]
+                    let params = (template["params"] as? [[String: Any]]) ?? []
+                    let needsInput = params.contains { $0["required"] as? Bool == true }
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(template["name"] as? String ?? "").font(.headline)
+                            Text(template["description"] as? String ?? "").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Crea e avvia", systemImage: "play.fill") {
+                            mutate("/api/plans/from-template", body: ["template": template["name"] as? String ?? "", "run": true])
+                        }
+                        .disabled(needsInput)
+                        .help(needsInput ? "Richiede parametri: crealo da API con POST /api/plans/from-template" : "Avvia la procedura")
+                    }
+                }
+            }
+        }
+    }
+
     /// Arresto di emergenza (ADR-0151): ferma ogni modifica, i lavori in background e le automazioni.
     private var emergencyCard: some View {
         let active = payload["emergency_stop"] as? Bool ?? false
@@ -2287,6 +2314,10 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 let status = try? await core.request("/api/cloud", timeout: 3)
                 result["providers"] = status?["providers"]
                 result["security"] = try? await core.request("/api/security", timeout: 3)
+            }
+            if page == .plans {
+                let templates = try? await core.request("/api/plans/templates", timeout: 5)
+                result["templates"] = templates?["items"]
             }
             if page == .chat {
                 let chats = try? await core.request("/api/conversations", timeout: 5)
