@@ -21,9 +21,11 @@ pub mod connectors;
 mod container_runtime;
 pub mod datatools;
 pub mod devtools;
+pub mod docs;
 pub mod executive;
 pub mod expert;
 pub mod guard;
+pub mod improvements;
 pub mod mcp;
 pub mod mcp_client;
 pub mod memory;
@@ -41,6 +43,7 @@ pub mod permissions;
 pub mod persona;
 pub mod planner;
 pub mod plans;
+pub mod plugins;
 pub mod policy;
 pub mod privacy;
 pub mod proactive;
@@ -71,6 +74,7 @@ pub fn hide_console(cmd: &mut std::process::Command) {
     let _ = cmd;
 }
 pub mod store;
+pub mod supervisor;
 pub mod tls;
 pub mod toolbox;
 pub mod tools;

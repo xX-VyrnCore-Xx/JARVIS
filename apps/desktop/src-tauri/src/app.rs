@@ -269,6 +269,7 @@ enum Event {
     PlanDetail(Result<Value, String>),
     /// Modelli di piano (ADR-0159).
     PlanTemplates(Result<Value, String>),
+    Improvements(Result<Value, String>),
     /// Comando pronunciato dopo «Hey Jarvis» (ADR-0140).
     #[cfg_attr(not(windows), allow(dead_code))]
     WakeCommand(String),
@@ -324,6 +325,7 @@ pub struct JarvisApp {
     plan_selected: Option<String>,
     plan_templates: Vec<Value>,
     plan_templates_loaded: bool,
+    improvements: Vec<Value>,
     template_params: std::collections::HashMap<String, String>,
     plan_goal: String,
     plan_detail: Option<Value>,
@@ -487,6 +489,7 @@ impl JarvisApp {
             plan_selected: None,
             plan_templates: Vec::new(),
             plan_templates_loaded: false,
+            improvements: Vec::new(),
             template_params: std::collections::HashMap::new(),
             plan_goal: String::new(),
             plan_detail: None,
@@ -634,6 +637,12 @@ impl JarvisApp {
                             self.load_conversations();
                         }
                         Err(error) => self.error = Some(error),
+                    }
+                    ctx.request_repaint();
+                }
+                Event::Improvements(result) => {
+                    if let Ok(doc) = result {
+                        self.improvements = doc["items"].as_array().cloned().unwrap_or_default();
                     }
                     ctx.request_repaint();
                 }
@@ -2150,9 +2159,11 @@ impl JarvisApp {
                 let tx = self.tx.clone();
                 std::thread::spawn(move || {
                     let _ = tx.send(Event::PlanTemplates(client.get("/api/plans/templates")));
+                    let _ = tx.send(Event::Improvements(client.get("/api/improvements")));
                 });
             }
         }
+        self.show_improvements(ui, ctx);
         self.show_plan_proposal(ui, ctx);
         self.show_plan_templates(ui, ctx);
         let Some(data) = self.data.clone() else {
@@ -2213,6 +2224,45 @@ impl JarvisApp {
             ui.add_space(4.0);
         }
         self.show_plan_detail(ui, ctx);
+    }
+
+    /// Miglioramenti suggeriti (ADR-0163): JARVIS propone, il proprietario decide. Nulla cambia da solo.
+    fn show_improvements(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if self.improvements.is_empty() {
+            return;
+        }
+        egui::CollapsingHeader::new(format!(
+            "Miglioramenti suggeriti ({})",
+            self.improvements.len()
+        ))
+        .default_open(true)
+        .show(ui, |ui| {
+            for item in self.improvements.clone() {
+                let id = item["id"].as_str().unwrap_or("").to_owned();
+                ui.label(egui::RichText::new(item["title"].as_str().unwrap_or("")).strong());
+                ui.label(egui::RichText::new(item["detail"].as_str().unwrap_or("")).weak());
+                ui.horizontal(|ui| {
+                    if item["action"].is_object() && ui.button("Salva la procedura").clicked() {
+                        self.act(
+                            ctx,
+                            "/api/improvements/apply".into(),
+                            Some(json!({"id": id})),
+                        );
+                        self.plan_templates_loaded = false;
+                        self.improvements.retain(|i| i["id"] != id.as_str());
+                    }
+                    if ui.small_button("Nascondi").clicked() {
+                        self.act(
+                            ctx,
+                            "/api/improvements/dismiss".into(),
+                            Some(json!({"id": id})),
+                        );
+                        self.improvements.retain(|i| i["id"] != id.as_str());
+                    }
+                });
+                ui.separator();
+            }
+        });
     }
 
     /// Piano proposto dal modello (ADR-0160): crea una bozza da rivedere; non la avvia.

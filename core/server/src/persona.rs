@@ -235,6 +235,8 @@ fn sentence(key: &str, detail: Option<&str>) -> String {
         "mcp.server.remove" => "Server MCP rimosso, con il suo token.".into(),
         "plan.created" => "Piano creato: puoi eseguirlo quando vuoi e annullarlo in ogni momento.".into(),
         "plan.replanned" => "Piano di recupero pronto: controlla i passi e il rischio prima di eseguirlo, il piano originale resta com'è.".into(),
+        "improvement.applied" => "Procedura salvata: la trovi fra le procedure pronte e la ripeti con un gesto.".into(),
+        "plugin.installed" => "Pacchetto installato: competenze e procedure restano sotto le tue regole, conferme e audit.".into(),
         "plan.proposed" => "Bozza di piano pronta: controlla i passi e il rischio, poi decidi se crearlo ed eseguirlo.".into(),
         "plan.started" => "Piano in esecuzione: procedo un passo alla volta e mi fermo se serve la tua conferma.".into(),
         "plan.approved" => "Passi approvati: riprendo il piano.".into(),

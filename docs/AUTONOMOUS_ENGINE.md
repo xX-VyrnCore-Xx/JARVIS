@@ -72,3 +72,10 @@ con competenze, strumenti concessi, rischio massimo e contesto **isolato**, più
 spiega perché una richiesta va a un agente (parole chiave attivate). `GET /api/models/route?q=` spiega la rotta per compito,
 il modello per provider e la riservatezza (credenziali bloccate), senza inviare nulla. La delega (ADR-0040) assegna a un agente
 isolato solo gli strumenti del suo ambito.
+
+## Miglioramento controllato e supervisione (ADR-0163, 0164)
+
+- `GET /api/improvements` propone, da evidenze locali, di salvare le procedure ricorrenti e segnala strumenti e agenti inaffidabili;
+  `POST /api/improvements/apply|dismiss` sono del solo proprietario. JARVIS non modifica da solo codice, sicurezza o permessi.
+- `GET /api/agents/supervisor` e `POST /api/agents/limits`: pausa o limite orario per specializzazione; un agente fermo cede al
+  generalista, sempre sotto policy, conferme e audit.

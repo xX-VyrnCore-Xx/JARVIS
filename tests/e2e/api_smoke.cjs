@@ -264,6 +264,22 @@ function check(condition, message) {
   check(replanMissing.status === 404, "ripianificazione di un piano inesistente rifiutata");
   const replanDone = await request(`/api/plans/${plan.json.id}/replan`, { method: "POST", token: ownerToken, body: {} });
   check(replanDone.status === 400, "un piano riuscito non si ripianifica");
+  const docRegistry = await request("/api/tools/registry", { token: ownerToken });
+  const docTools = ["pdf.extract", "sheet.read", "clipboard.read", "clipboard.write"];
+  const names = (docRegistry.json?.items ?? []).map((t) => t.name);
+  check(docRegistry.status === 200 && docTools.every((n) => names.includes(n)), "strumenti per documenti nel registro");
+  const improvements = await request("/api/improvements", { token: ownerToken });
+  check(improvements.status === 200 && Array.isArray(improvements.json?.items) && improvements.json?.policy?.includes("tu decidi"), "suggerimenti di miglioramento senza modifiche automatiche");
+  const noAction = await request("/api/improvements/apply", { method: "POST", token: ownerToken, body: { id: "sconosciuto" } });
+  check(noAction.status === 404, "suggerimento sconosciuto rifiutato");
+  const supervisor = await request("/api/agents/supervisor", { token: ownerToken });
+  check(supervisor.status === 200 && supervisor.json?.items?.every((a) => a.state === "attivo"), "supervisione degli agenti: tutti attivi di default");
+  const badLimit = await request("/api/agents/limits", { method: "POST", token: ownerToken, body: { agent: "inventato", enabled: false } });
+  check(badLimit.status === 400, "limiti per un agente sconosciuto rifiutati");
+  const plugins = await request("/api/plugins", { token: ownerToken });
+  check(plugins.status === 200 && Array.isArray(plugins.json?.items), "elenco dei pacchetti di estensione");
+  const badPlugin = await request("/api/plugins", { method: "POST", token: ownerToken, body: { contract: "jarvis.plugin/1", name: "prova", version: "1.0.0", scripts: { postinstall: "x" }, skills: [] } });
+  check(badPlugin.status === 400, "pacchetto con campi eseguibili rifiutato");
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

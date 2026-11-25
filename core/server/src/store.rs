@@ -758,6 +758,16 @@ impl Store {
     }
 
     /// Prestazioni per agente: lavori, tasso di successo, durata e strumenti medi.
+    /// Lavori di un agente iniziati da `since` (RFC 3339 UTC): serve ai limiti orari della supervisione.
+    pub fn agent_runs_since(&self, agent: &str, since: &str) -> StoreResult<u64> {
+        let n: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM agent_runs WHERE agent = ?1 AND at >= ?2",
+            params![agent, since],
+            |r| r.get(0),
+        )?;
+        Ok(n.max(0) as u64)
+    }
+
     pub fn agent_stats(&self) -> StoreResult<Vec<Value>> {
         let mut stmt = self.conn.prepare(
             "SELECT agent, COUNT(*), SUM(ok), AVG(ms), AVG(tools), MAX(at) FROM agent_runs GROUP BY agent ORDER BY agent",

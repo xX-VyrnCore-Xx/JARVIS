@@ -1,7 +1,7 @@
 # Stato di implementazione
 
 Fonte autorevole dello stato di ogni requisito dell'evoluzione «piattaforma di intelligenza artificiale personale».
-Aggiornata il 2026-11-25 sul codice di `main` più la PR in corso (ADR fino alla 0161). Legenda: **Implementato** (funziona end-to-end ed è
+Aggiornata il 2026-11-25 sul codice di `main` più la PR in corso (ADR fino alla 0166). Legenda: **Implementato** (funziona end-to-end ed è
 verificato da test), **Parziale** (funziona in parte: il limite è indicato), **Sperimentale** (c'è, non maturo),
 **Pianificato** (assente). Nessuna voce è un segnaposto: ciò che non esiste è dichiarato «Pianificato».
 Verifiche ed esiti per revisione: [ROADMAP.md](ROADMAP.md). Piano dei passi successivi: [IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md).
@@ -11,7 +11,7 @@ Verifiche ed esiti per revisione: [ROADMAP.md](ROADMAP.md). Piano dei passi succ
 | Componente | Stato | Note |
 | --- | --- | --- |
 | Registry universale | Implementato | 78 descrittori; `GET /api/tools/registry` con filtri; categoria, piattaforme, offline, reversibilità, dipendenze e hardware derivati (sovrascrivibili) |
-| Discovery | Parziale | Catalogo incorporato, connettori e n8n; nessuna scoperta di plugin dal disco |
+| Discovery | Parziale | Catalogo incorporato, connettori, n8n e pacchetti installati; nessuna scoperta di plugin dal disco |
 | Execution engine | Implementato | validazione, policy, conferma, esecuzione, audit |
 | Selection engine | Parziale | Instradamento agenti per parole chiave e competenze; nessuna selezione appresa |
 | Permission manager | Implementato | policy, profili e regole del proprietario (ADR-0116), arresto di emergenza |
@@ -21,9 +21,9 @@ Verifiche ed esiti per revisione: [ROADMAP.md](ROADMAP.md). Piano dei passi succ
 | Health monitor / History | Implementato | `GET /api/tools/health`, `/history` (ADR-0151) |
 | Versioning | Parziale | versione esatta richiesta dalla policy; nessuna coesistenza di più versioni |
 | Chaining / Composition | Implementato | piani con riferimenti fra passi, condizioni di successo, modelli di piano (ADR-0152, 0154, 0159) e workflow |
-| Tool SDK | Pianificato | esiste la procedura documentata, non un pacchetto per autori esterni |
-| Plugin manager | Parziale | connettori con manifest e n8n; nessun plugin nativo |
-| MCP | Implementato | server `/api/mcp` (calcolo e sola lettura) e **client** con server autorizzati dal proprietario, conferma sempre richiesta e risultati non attendibili (ADR-0156); manca lo streaming SSE |
+| Tool SDK | Parziale | SDK dichiarativo per competenze e modelli di piano (ADR-0165, [PLUGIN_SYSTEM.md](PLUGIN_SYSTEM.md)); per nuovi strumenti resta la procedura in TOOL_SYSTEM.md |
+| Plugin manager | Parziale | pacchetti dichiarativi (competenze e procedure) con installazione atomica e rimozione; connettori con manifest e n8n; nessun plugin nativo in codice |
+| MCP | Implementato | server `/api/mcp` (calcolo e sola lettura) e **client** con server autorizzati dal proprietario, conferma sempre richiesta e risultati non attendibili (ADR-0156); sessioni Streamable HTTP e guida per Hugging Face in [MCP_INTEGRATION.md](MCP_INTEGRATION.md) (ADR-0166); mancano i flussi SSE a lunga durata e OAuth |
 
 ## 2. Strumenti operativi
 
@@ -44,8 +44,8 @@ Ricerca con più fonti e confronto (competenza «ricerca»), documentazione: **P
 **Pianificato**.
 
 **Produttività.** Cose da fare, note, promemoria, calcolo, analisi dei dati (`data.stats`, `biz.*`), notifiche: **Implementato**.
-Riepilogo di tabelle CSV (`table.summary`): **Implementato**. Posta e calendario (Gmail, Outlook, Google Calendar tramite connettori; richiedono la configurazione OAuth del proprietario),
-progetti (missioni, piani, cose da fare): **Parziale**. PDF, fogli XLSX, presentazioni, contatti, appunti: **Pianificato**.
+Riepilogo di tabelle CSV (`table.summary`), lettura di fogli XLSX (`sheet.read`), testo dei PDF (`pdf.extract`, solo PDF con testo) e appunti di sistema (`clipboard.read`/`write`, sempre con conferma): **Implementato** (ADR-0162). Posta e calendario (Gmail, Outlook, Google Calendar tramite connettori; richiedono la configurazione OAuth del proprietario),
+progetti (missioni, piani, cose da fare): **Parziale**. Scrittura di PDF e XLSX, OCR, presentazioni, contatti: **Pianificato**.
 
 **IA e multimodale.** Memoria semantica, episodica e procedurale con grafo, recupero, riconoscimento e sintesi vocale (voce
 maschile), OCR locale, delega agli agenti, scelta del modello: **Implementato**. Pianificazione (piani scritti dal
@@ -78,14 +78,13 @@ dinamico di strumenti: **Pianificato**.
 | Automazione in linguaggio naturale | Parziale | «ogni giorno alle 08:00 …» offline e `workflow.create`; grammatica limitata |
 | Automazione guidata da eventi | Implementato | calendario, webhook dei connettori e **modifiche di file e cartelle** della workspace (ADR-0158); non variazioni di risorse di sistema |
 | Digital Environment Twin | Implementato | `GET /api/twin`: dispositivi, nodi, servizi, connettori, progetti e capacità, senza segreti (ADR-0157); aggiornato a ogni richiesta, non in modo continuo |
-| Auto-miglioramento controllato | Pianificato | JARVIS non modifica il proprio codice, le policy né i privilegi |
+| Auto-miglioramento controllato | Implementato (limitato per scelta) | suggerimenti da evidenze locali; l'unica azione è salvare una procedura approvata dal proprietario; nessuna modifica di codice, sicurezza o permessi (ADR-0163) |
 
 ## 5. Multi-agente ([AUTONOMOUS_ENGINE.md](AUTONOMOUS_ENGINE.md))
 
 Registro, scoperta e mappatura delle competenze (`GET /api/agents`), spiegazione dell'instradamento, delega con contesto
 isolato e ambito di strumenti concesso, protocollo di delega a contratto: **Implementato**. Valutazione delle prestazioni per agente (lavori, successo, durata): **Implementato** (ADR-0157). Contesto condiviso e collaborazione
-fra agenti: **Parziale** (delega a un agente alla volta). Supervisione attiva, risoluzione dei conflitti e quote di risorse per agente:
-**Pianificato** (esistono limiti di passi per agente).
+fra agenti: **Parziale** (delega a un agente alla volta). Supervisione (pausa e quota oraria per agente, decise dal proprietario, ADR-0164) e conflitti (decide il generalista): **Implementato**. Priorità fra agenti in parallelo e quote di tempo o memoria: **Pianificato** (esistono limiti di passi per agente).
 
 ## 6. IA ibrida e instradamento ([AI_SYSTEM.md](AI_SYSTEM.md))
 

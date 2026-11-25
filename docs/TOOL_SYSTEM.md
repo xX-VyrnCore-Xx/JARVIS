@@ -52,7 +52,7 @@ elenca le ultime esecuzioni (parametri `tool`, `limit`).
 - **Connettori** (ADR-0047): manifest firmati dal proprietario per servizi esterni (Gmail, Calendar, Outlook, GitHub,
   GitLab, Slack, Todoist, Airtable, Open-Meteo), con credenziali nel secret store e le stesse policy.
 - **MCP server**: `POST /api/mcp` espone ad altri agenti solo strumenti di calcolo e sola lettura (ADR-0138).
-- **MCP client** (ADR-0156): `mcp.list` e `mcp.call` usano i server che il proprietario ha autorizzato in `/api/mcp/servers`
+- **MCP client** (ADR-0156, [MCP_INTEGRATION.md](MCP_INTEGRATION.md)): `mcp.list` e `mcp.call` usano i server che il proprietario ha autorizzato in `/api/mcp/servers`
   (HTTPS, token nel deposito dei segreti). `mcp.call` chiede **sempre** la conferma; i risultati sono dati non attendibili.
 - **n8n** (ADR-0093 e successivi): automazioni esterne gestite dal Core.
 - Un plugin nativo caricato dal disco non esiste: l'estensione supportata è il connettore.
@@ -64,6 +64,11 @@ installato, senza shell. `log.analyze` riassume un log, `deps.list` elenca le di
 fissate, `table.summary` riassume un CSV, `data.stats`, `text.extract` e `text.diff` analizzano numeri e testi, `time.wait`
 distanzia i passi di un piano. Tutti lavorano dentro la workspace e non usano la rete (ADR-0150, 0155).
 
+## Documenti e appunti
+
+`pdf.extract` (testo di PDF con testo semplice), `sheet.read` (righe e riepilogo di fogli XLSX), `clipboard.read` e `clipboard.write`
+(appunti, **sempre con conferma**). I contenuti letti da file o appunti sono marcati `untrusted`. Limiti e motivazioni nell'ADR-0162.
+
 ## SDK: aggiungere uno strumento
 
 1. Scrivi `contracts/catalog/tools/<nome>.json` (copia un descrittore simile: effetti, rischio, schema, `timeout_ms`).
@@ -71,4 +76,4 @@ distanzia i passi di un piano. Tutti lavorano dentro la workspace e non usano la
 3. Se è di calcolo e sicuro, aggiungilo all'elenco MCP (`mcp_exposed`) e agli strumenti dei modelli cloud (`cloud::TOOLS`).
 4. Scrivi test unitari e un test API; il test dei contratti verifica il descrittore.
 
-Un SDK pacchettizzato per autori esterni è **pianificato** (vedi roadmap).
+Per estendere JARVIS senza scrivere codice nel Core esistono i **pacchetti di estensione** (competenze e modelli di piano): vedi [PLUGIN_SYSTEM.md](PLUGIN_SYSTEM.md). Strumenti nativi di terzi sono **pianificati**: richiedono esecuzione isolata e firma.

@@ -161,6 +161,10 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
         "log.analyze" => crate::devtools::analyze(ctx.workspace, args),
         "deps.list" => crate::devtools::dependencies(ctx.workspace, args),
         "table.summary" => crate::devtools::summarize(ctx.workspace, args),
+        "pdf.extract" => crate::docs::pdf_extract(ctx.workspace, args),
+        "sheet.read" => crate::docs::sheet_read(ctx.workspace, args),
+        "clipboard.read" => crate::docs::clipboard_read(),
+        "clipboard.write" => crate::docs::clipboard_write(args),
         "time.wait" => {
             let seconds = args["seconds"].as_f64().unwrap_or(0.0);
             if !(0.0..=10.0).contains(&seconds) {

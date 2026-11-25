@@ -21,9 +21,11 @@ use crate::observability::{Observability, Timer};
 use crate::store::Store;
 use crate::{automation, now, policy, tools};
 
+mod improvement_runner;
 mod initiatives;
 mod mission_runner;
 mod plan_runner;
+mod plugin_runner;
 pub use mission_runner::{MissionRun, Next};
 
 /// Memoria nel contesto dell'agente (ADR-0022).
@@ -488,7 +490,7 @@ impl Jarvis {
             "delegation_id": uuid::Uuid::new_v4().to_string(),
             "task_id": task.id(),
             "objective": task.doc["objective"],
-            "delegate": match (self.temporary.get(&task.id()), crate::agents::route(task.doc["objective"].as_str().unwrap_or_default())) {
+            "delegate": match (self.temporary.get(&task.id()), self.route_agent(task.doc["objective"].as_str().unwrap_or_default())) {
                 (Some(agent), _) => json!({"agent": "temporary", "temporary": true, "role": agent.role}),
                 (None, Some(a)) => json!({"agent": a.name, "temporary": false, "role": a.role}),
                 (None, None) => json!({"agent": crate::agents::GENERAL, "temporary": false}),
@@ -612,7 +614,7 @@ impl Jarvis {
             .as_str()
             .unwrap_or_default()
             .to_string();
-        let specialist = crate::agents::route(&objective);
+        let specialist = self.route_agent(&objective);
         let explicit = explicit_connector_tool(&objective.to_ascii_lowercase());
         // Una competenza attiva rende disponibili i suoi strumenti anche fuori dall'ambito dello specialista
         // (ADR-0048); policy, conferme e audit restano quelli di ogni strumento.
@@ -666,7 +668,8 @@ impl Jarvis {
         let result = self.call_agent_inner(task, inputs);
         self.obs
             .observe("delegation general_assistant", timer.ms(), result.is_err());
-        let agent = crate::agents::route(task.doc["objective"].as_str().unwrap_or_default())
+        let agent = self
+            .route_agent(task.doc["objective"].as_str().unwrap_or_default())
             .map_or(crate::agents::GENERAL, |a| a.name);
         let attrs = match &result {
             Ok(r) => json!({"agent": agent, "backend": r["backend"]["name"], "result": r["kind"],
@@ -1281,7 +1284,8 @@ impl Jarvis {
             }
         };
         out.backend = Some(result["backend"].clone());
-        let agent = crate::agents::route(task.doc["objective"].as_str().unwrap_or_default())
+        let agent = self
+            .route_agent(task.doc["objective"].as_str().unwrap_or_default())
             .map_or(crate::agents::GENERAL, |a| a.name);
         out.steps
             .push(json!({"kind": "delegation", "agent": agent, "backend": result["backend"]}));
@@ -1536,19 +1540,21 @@ impl Jarvis {
         }
         let role = args["role"].as_str().unwrap_or_default().to_string();
         let objective = args["objective"].as_str().unwrap_or_default().to_string();
-        let default_tools =
-            if crate::agents::route(&objective).is_some_and(|agent| agent.name == "coding") {
-                &[
-                    "fs.list",
-                    "fs.read",
-                    "fs.search",
-                    "code.check_python",
-                    "code.validate_json",
-                    "math.calc",
-                ][..]
-            } else {
-                &SUBAGENT_DEFAULT_TOOLS[..]
-            };
+        let default_tools = if self
+            .route_agent(&objective)
+            .is_some_and(|agent| agent.name == "coding")
+        {
+            &[
+                "fs.list",
+                "fs.read",
+                "fs.search",
+                "code.check_python",
+                "code.validate_json",
+                "math.calc",
+            ][..]
+        } else {
+            &SUBAGENT_DEFAULT_TOOLS[..]
+        };
         let requested: Vec<String> = match args["tools"].as_array() {
             Some(list) if !list.is_empty() => list
                 .iter()
@@ -3610,6 +3616,72 @@ impl Jarvis {
     }
 
     /// Registro degli agenti con competenze, strumenti e rischio massimo (ADR-0153).
+    /// Specializzazione per la richiesta, **dopo la supervisione** (ADR-0164): un agente in pausa o oltre il limite
+    /// orario non lavora e la richiesta va al generalista, sotto le stesse policy.
+    fn route_agent(&self, objective: &str) -> Option<&'static crate::agents::Agent> {
+        let agent = crate::agents::route(objective)?;
+        match self.supervision_of(agent.name).2 {
+            crate::supervisor::Decision::Allowed => Some(agent),
+            _ => None,
+        }
+    }
+
+    /// `(attivo, limite orario, decisione)` di un agente con i lavori dell'ultima ora.
+    fn supervision_of(&self, agent: &str) -> (bool, Option<u64>, crate::supervisor::Decision) {
+        let (enabled, max) = crate::supervisor::limits_of(&self.cfg.data_dir, agent);
+        let used = if max.is_some() {
+            let since = (chrono::Utc::now() - chrono::Duration::hours(1))
+                .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+            self.store.agent_runs_since(agent, &since).unwrap_or(0)
+        } else {
+            0
+        };
+        (enabled, max, crate::supervisor::decide(enabled, max, used))
+    }
+
+    /// Stato di supervisione di ogni specializzazione: regole, lavori dell'ultima ora e decisione attuale.
+    pub fn agent_supervisor(&self) -> Value {
+        let since = (chrono::Utc::now() - chrono::Duration::hours(1))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let items: Vec<Value> = crate::agents::SPECIALISTS
+            .iter()
+            .map(|a| {
+                let (enabled, max, decision) = self.supervision_of(a.name);
+                json!({"agent": a.name, "enabled": enabled, "max_runs_per_hour": max,
+                    "runs_last_hour": self.store.agent_runs_since(a.name, &since).unwrap_or(0),
+                    "state": decision.state()})
+            })
+            .collect();
+        json!({"items": items,
+            "policy": "La supervisione restringe e non allarga: un agente in pausa o oltre quota cede al generalista, sempre sotto policy, conferme e audit.",
+            "conflicts": "Se una richiesta tocca più specializzazioni decide il generalista; la sicurezza difensiva ha la precedenza."})
+    }
+
+    /// Instradamento spiegato, con l'effetto della supervisione (pausa o quota) sull'agente scelto.
+    pub fn agent_route_explained(&self, message: &str) -> Value {
+        let mut agent = crate::agents::explain(message);
+        let chosen = agent["agent"].as_str().map(str::to_string);
+        let supervised = chosen.as_deref().map(|name| self.supervision_of(name).2);
+        if let (Some(name), Some(decision)) = (chosen, supervised) {
+            if decision != crate::supervisor::Decision::Allowed {
+                agent["supervision"] = json!({"agent": name, "state": decision.state(),
+                    "effective": crate::agents::GENERAL,
+                    "reason": "l'agente è in pausa o ha esaurito il limite orario: lavora il generalista, sotto le stesse policy"});
+            }
+        }
+        json!({
+            "agent": agent,
+            "role": crate::prompts::role_label(crate::prompts::role_for(message)),
+        })
+    }
+
+    pub fn agent_limits_set(&mut self, body: &Value) -> Result<Value, CoreError> {
+        let known: Vec<&str> = crate::agents::SPECIALISTS.iter().map(|a| a.name).collect();
+        crate::supervisor::set(&self.cfg.data_dir, &known, body).map_err(CoreError::BadRequest)?;
+        self.record_owner_action("agent.limits")?;
+        Ok(self.agent_supervisor())
+    }
+
     pub fn agent_registry(&self) -> Value {
         let stats = self.store.agent_stats().unwrap_or_default();
         let mut items =
@@ -3620,6 +3692,10 @@ impl Jarvis {
                 .find(|s| s["agent"] == item["name"])
                 .cloned()
                 .unwrap_or_else(|| json!({"runs": 0}));
+            if let Some(name) = item["name"].as_str() {
+                let (enabled, max, decision) = self.supervision_of(name);
+                item["supervision"] = json!({"enabled": enabled, "max_runs_per_hour": max, "state": decision.state()});
+            }
         }
         json!({"items": items, "max_delegated_tools": MAX_DELEGATED_TOOLS})
     }

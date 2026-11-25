@@ -93,7 +93,7 @@ Apri JARVIS e autentica la sessione con Touch ID o con la password del Mac. Il c
 - **Aggiornamenti.** Il Core rileva le release GitHub ogni ora. Una repository pubblica non richiede un token; per una repository privata inserisci nella schermata **Aggiornamenti** un token fine-grained con sola lettura dei contenuti. Il token è custodito cifrato dal Core; le app notificano la release, ma installazione e aggiornamenti Android restano confermati manualmente.
 - **Altre sezioni.** La navigazione nativa include attività, automazioni, memoria, competenze, workspace, connettori, dispositivi, sicurezza, audit e sistema. Alcune viste sono ancora generiche e non includono tutti i flussi guidati. I connettori OAuth aprono nel browser solo URL HTTPS senza credenziali incorporate; completa l'autorizzazione e aggiorna la sezione per verificare lo stato.
 
-[Strumenti e automazioni](docs/AUTONOMY_AND_TOOLS.md) · [Sistema degli strumenti](docs/TOOL_SYSTEM.md) · [Motore autonomo](docs/AUTONOMOUS_ENGINE.md) · [Stato di implementazione](docs/IMPLEMENTATION_STATUS.md) · [Piano di implementazione](docs/IMPLEMENTATION_ROADMAP.md) · [Memoria e sincronizzazione](docs/MEMORY_DATA_SYNC.md) · [Sicurezza e privacy](docs/SECURITY_AND_PRIVACY.md)
+[Strumenti e automazioni](docs/AUTONOMY_AND_TOOLS.md) · [Sistema degli strumenti](docs/TOOL_SYSTEM.md) · [Motore autonomo](docs/AUTONOMOUS_ENGINE.md) · [Pacchetti di estensione](docs/PLUGIN_SYSTEM.md) · [Integrazione MCP](docs/MCP_INTEGRATION.md) · [Stato di implementazione](docs/IMPLEMENTATION_STATUS.md) · [Piano di implementazione](docs/IMPLEMENTATION_ROADMAP.md) · [Memoria e sincronizzazione](docs/MEMORY_DATA_SYNC.md) · [Sicurezza e privacy](docs/SECURITY_AND_PRIVACY.md)
 
 ## Avvia dai sorgenti
 
