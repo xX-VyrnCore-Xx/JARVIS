@@ -278,6 +278,9 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     }
 
     /// L'avatar vira al caldo con l'arresto di emergenza attivo o un errore visibile.
+    /// Conferme in attesa: l'avatar si colora d'ambra finché non decidi.
+    private var avatarAwaiting: Bool { (core.health["pending_confirmations"] as? Int ?? 0) > 0 }
+    private var avatarOffline: Bool { core.phase == .failed }
     private var avatarAlert: Bool { (payload["emergency_stop"] as? Bool ?? false) || error != nil }
 
     private func select(_ value: Section) {
@@ -767,12 +770,13 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             OrbitRings().frame(width: size, height: size)
             if let portrait {
                 PortraitAvatar(image: portrait, speaking: talking, thinking: sending && streamingReply.isEmpty,
-                               listening: wake.phase == .capturing, level: wake.level, alert: avatarAlert)
+                               listening: wake.phase == .capturing, level: wake.level, alert: avatarAlert,
+                               awaiting: avatarAwaiting, offline: avatarOffline)
                     .frame(width: size * 0.82, height: size * 0.82)
             } else {
                 Avatar(thinking: sending && streamingReply.isEmpty, speaking: talking,
                        listening: wake.phase == .capturing, level: wake.level, alert: avatarAlert,
-                       celebrate: celebrateTick).frame(width: size * 0.78, height: size * 0.78)
+                       awaiting: avatarAwaiting, offline: avatarOffline, celebrate: celebrateTick).frame(width: size * 0.78, height: size * 0.78)
             }
         }
         .frame(width: size, height: size)
@@ -1221,7 +1225,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             HStack(spacing: 15) {
                 Avatar(thinking: sending && streamingReply.isEmpty, speaking: avatarSpeaking || !streamingReply.isEmpty,
                        listening: wake.phase == .capturing, level: wake.level, alert: avatarAlert,
-                       celebrate: celebrateTick).frame(width: 76)
+                       awaiting: avatarAwaiting, offline: avatarOffline, celebrate: celebrateTick).frame(width: 76)
                 VStack(alignment: .leading, spacing: 5) {
                     Text("JARVIS").font(.title2.weight(.semibold))
                     if sending {

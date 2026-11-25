@@ -17,7 +17,7 @@ Data: 2026-11-25. Metodo: elenco di strumenti del catalogo (`contracts/catalog/t
 | 13 | Browser | PARTIAL | `web.browse/form`, `browser.rs`. Mancano schede, profili, monitoraggio siti. |
 | 14 | Risorse digitali | PARTIAL → **nuovo** | `fs.search/list/move/delete` + `fs.usage` (spazio, file grandi, duplicati, temporanei). Mancano tag, ricerca semantica, cartelle smart. |
 | 15 | Background | PARTIAL | Scheduler, automazioni, osservazioni di file (`/api/watches`). Menu bar, avvio automatico, batteria/rete: da verificare. |
-| 16 | Avatar | PARTIAL | Stati inattivo/ascolto/elaborazione/parla. Mancano ricerca, esecuzione, attesa di autorizzazione, errore, offline, completamento, movimento ridotto. |
+| 16 | Avatar | PARTIAL → **migliorato** | Inattivo, ascolto, elaborazione, parla, errore, completamento, movimento ridotto, + attesa di autorizzazione e offline (ADR-0188). Mancano ricerca, esecuzione e collaborazione: serve un segnale reale dal Core. |
 | 17 | Centro di comando | PARTIAL | Plancia e sezioni esistenti. Palette comandi e ricerca globale: da verificare (nessuna trovata in SwiftUI). |
 | 18 | Conoscenza personale | PARTIAL | Memoria cognitiva, note, export/import. Mancano collezioni, riferimenti collegati, freschezza. |
 | 19 | Privacy | PARTIAL → **nuovo** (inventario) | `privacy::redact`, audit, permessi, export della memoria. `/api/privacy/overview` (ADR-0187): inventario locale, provider cloud con chiave, strumenti per effetto, autonomia, connettori, MCP, osservazioni. Manca ancora la vista grafica, la cronologia dei permessi e i controlli di conservazione. |

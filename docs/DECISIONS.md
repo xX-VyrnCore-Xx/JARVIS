@@ -2292,6 +2292,12 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Limiti:** niente cronologia dei permessi né criteri di conservazione; la vista grafica resta da fare.
 - **Evidenza:** test d'integrazione `privacy_overview_and_resource_profiles_work_through_the_api` e controllo e2e.
 
+### ADR-0188 — Stati reali dell'avatar e mappa dell'architettura
+
+- **Data:** 2026-11-25. **Stato:** implementata (Swift verificato solo dalla compilazione in CI; resa a schermo non vista).
+- **Decisione:** l'avatar macOS aggiunge due stati legati a condizioni reali: *attesa di autorizzazione* (conferme in sospeso nel Core → colore ambra) e *offline* (Core non raggiungibile → senza saturazione e attenuato). Ogni stato ha un'etichetta di accessibilità con priorità offline > errore > parla > ascolto > elabora > attesa > inattivo. «Riduci movimento» resta rispettato. `docs/ARCHITECTURE.md` ottiene una mappa del repository e un diagramma di sequenza basati sui moduli presenti.
+- **Non incluso:** stati «ricerca», «esecuzione» e «collaborazione tra agenti»: il client non riceve ancora un segnale affidabile per distinguerli dall'elaborazione generica; non si simulano.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.
