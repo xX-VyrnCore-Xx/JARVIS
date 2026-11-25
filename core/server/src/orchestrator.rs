@@ -3641,15 +3641,17 @@ impl Jarvis {
 
     /// Stato di supervisione di ogni specializzazione: regole, lavori dell'ultima ora e decisione attuale.
     pub fn agent_supervisor(&self) -> Value {
+        let stats = self.store.agent_stats().unwrap_or_default();
         let since = (chrono::Utc::now() - chrono::Duration::hours(1))
             .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
         let items: Vec<Value> = crate::agents::SPECIALISTS
             .iter()
             .map(|a| {
                 let (enabled, max, decision) = self.supervision_of(a.name);
-                json!({"agent": a.name, "enabled": enabled, "max_runs_per_hour": max,
+                json!({"agent": a.name, "name": a.name, "role": a.role, "enabled": enabled, "max_runs_per_hour": max,
                     "runs_last_hour": self.store.agent_runs_since(a.name, &since).unwrap_or(0),
-                    "state": decision.state()})
+                    "state": decision.state(),
+                    "performance": stats.iter().find(|s| s["agent"] == a.name).cloned().unwrap_or_else(|| json!({"runs": 0}))})
             })
             .collect();
         json!({"items": items,

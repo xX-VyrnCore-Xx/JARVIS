@@ -6,6 +6,7 @@ compile_error!("JARVIS desktop è supportato solo su macOS e Windows.");
 mod app;
 mod avatar;
 mod client;
+mod markdown;
 #[cfg(target_os = "windows")]
 mod mic;
 mod wake;

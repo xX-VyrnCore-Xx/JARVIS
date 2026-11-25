@@ -78,4 +78,5 @@ isolato solo gli strumenti del suo ambito.
 - `GET /api/improvements` propone, da evidenze locali, di salvare le procedure ricorrenti e segnala strumenti e agenti inaffidabili;
   `POST /api/improvements/apply|dismiss` sono del solo proprietario. JARVIS non modifica da solo codice, sicurezza o permessi.
 - `GET /api/agents/supervisor` e `POST /api/agents/limits`: pausa o limite orario per specializzazione; un agente fermo cede al
-  generalista, sempre sotto policy, conferme e audit.
+  generalista, sempre sotto policy, conferme e audit. La pagina **Agenti** delle app macOS e Windows (ADR-0167) mostra stato e uso e permette
+  pausa e limite orario.

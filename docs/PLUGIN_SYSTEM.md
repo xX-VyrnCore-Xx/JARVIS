@@ -40,7 +40,7 @@ installare senza eseguire nulla di estraneo e ogni suo componente resta soggetto
 
 | Operazione | Endpoint | Chi |
 |---|---|---|
-| Elenco | `GET /api/plugins` | proprietario |
+| Elenco | `GET /api/plugins` (pagina «Pacchetti» nelle app) | proprietario |
 | Installa o aggiorna | `POST /api/plugins` (corpo: il pacchetto) | proprietario, audit `plugin.install` con l'impronta SHA-256 |
 | Rimuovi | `POST /api/plugins/remove` (`{"name": …}`) | proprietario, audit `plugin.remove` |
 
@@ -63,4 +63,6 @@ Un pacchetto può poi usarlo in competenze e modelli, come qualsiasi altro.
 
 - Strumenti nativi caricati da una cartella: richiederebbero un'esecuzione isolata (sandbox) del codice del plugin e una firma
   degli autori; finché non esistono, **non si carica codice di terzi**.
-- Distribuzione e firma dei pacchetti, interfaccia grafica di gestione (oggi via API).
+- Distribuzione e firma dei pacchetti.
+
+La pagina **Pacchetti** delle app macOS e Windows (ADR-0167) elenca i pacchetti installati, li rimuove e installa o aggiorna incollando il JSON.

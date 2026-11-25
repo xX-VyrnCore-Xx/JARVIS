@@ -33,11 +33,12 @@ private enum Section: String, Identifiable {
     case devices = "Dispositivi", skills = "Competenze", security = "Sicurezza", audit = "Audit"
     case system = "Sistema", models = "Modelli AI", updates = "Aggiornamenti", notifications = "Notifiche"
     case missions = "Missioni", profile = "Profilo", plans = "Piani", tools = "Strumenti"
+    case agents = "Agenti", plugins = "Pacchetti"
 
     static let navigation: [(title: String, entries: [Section])] = [
         ("Assistente", [.dashboard, .chat, .tasks, .models, .notifications, .profile]),
-        ("Organizzazione", [.missions, .plans, .workflows, .workspace, .memory, .skills]),
-        ("Collegamenti", [.devices, .tools, .connectors]),
+        ("Organizzazione", [.missions, .plans, .workflows, .workspace, .memory, .skills, .agents]),
+        ("Collegamenti", [.devices, .tools, .plugins, .connectors]),
         ("Amministrazione", [.confirmations, .security, .audit, .system, .updates])
     ]
 
@@ -64,6 +65,8 @@ private enum Section: String, Identifiable {
         case .profile: "person.crop.circle"
         case .plans: "point.3.connected.trianglepath.dotted"
         case .tools: "wrench.and.screwdriver"
+        case .agents: "person.3"
+        case .plugins: "shippingbox"
         }
     }
     var endpoint: String {
@@ -87,6 +90,8 @@ private enum Section: String, Identifiable {
         case .profile: "/api/profile"
         case .plans: "/api/plans"
         case .tools: "/api/tools/registry"
+        case .agents: "/api/agents/supervisor"
+        case .plugins: "/api/plugins"
         }
     }
 }
@@ -106,12 +111,19 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     /// Profilo del proprietario (ADR-0133): bozza modificabile dei campi.
     @State private var profileDraft: [String: String] = [:]
     @State private var planGoal = ""
+    @State private var agentLimits: [String: String] = [:]
+    /// Incrementato a ogni operazione riuscita: l'avatar risponde con un'onda verde.
+    @State private var celebrateTick = 0
+    @State private var pluginJSON = ""
     @State private var profileShare = true
     @State private var changingInvite = false
 
     @State private var section: Section = .dashboard
     @Namespace private var navigationNamespace
     @State private var hoveredEntry: Section?
+    /// Larghezza della barra laterale, scelta dal proprietario e conservata fra un avvio e l'altro.
+    @AppStorage("sidebarWidth") private var sidebarWidth = 256.0
+    @State private var sidebarDragStart: Double?
     @State private var memoryStats: [String: Any] = [:]
     @State private var speakReplies = false
     @State private var systemStats: [String: Any] = [:]
@@ -163,8 +175,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         Group {
             if core.phase == .ready && !core.uiLocked {
                 GeometryReader { geometry in
-                    if geometry.size.width >= 860 {
-                        HStack(spacing: 0) { sidebar.frame(width: 192); Divider(); content }
+                    if geometry.size.width >= 940 {
+                        HStack(spacing: 0) { sidebar.frame(width: sidebarWidth); sidebarResizer; content }
                     } else {
                         VStack(spacing: 0) { compactNavigation; Divider(); content }
                     }
@@ -256,6 +268,9 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         }
     }
 
+    /// L'avatar vira al caldo con l'arresto di emergenza attivo o un errore visibile.
+    private var avatarAlert: Bool { (payload["emergency_stop"] as? Bool ?? false) || error != nil }
+
     private func select(_ value: Section) {
         guard section != value else { return }
         activeLoad = nil
@@ -282,19 +297,20 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             }
             .padding(.horizontal, 6).padding(.top, 6)
             .accessibilityElement(children: .combine)
+            ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     ForEach(Section.navigation.indices, id: \.self) { index in
                         let group = Section.navigation[index]
                         VStack(alignment: .leading, spacing: 3) {
                             Text(group.title.uppercased())
-                                .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                                .padding(.horizontal, 10).padding(.bottom, 2)
+                                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                .padding(.horizontal, 12).padding(.bottom, 3)
                             ForEach(group.entries) { entry in
                                 Button { select(entry) } label: {
-                                    HStack(spacing: 9) {
-                                        Image(systemName: entry.icon).frame(width: 18)
-                                        Text(entry.rawValue).font(.callout.weight(section == entry ? .semibold : .regular))
+                                    HStack(spacing: 11) {
+                                        Image(systemName: entry.icon).font(.system(size: 15)).frame(width: 24)
+                                        Text(entry.rawValue).font(.system(size: 15, weight: section == entry ? .semibold : .regular))
                                         Spacer(minLength: 2)
                                         if let badge = sidebarBadge(entry) {
                                             Text(badge > 99 ? "99+" : "\(badge)")
@@ -307,7 +323,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                                         }
                                     }
                                     .foregroundStyle(section == entry ? Color.white : Color.primary.opacity(0.88))
-                                    .padding(.horizontal, 10).padding(.vertical, 8)
+                                    .padding(.horizontal, 12).padding(.vertical, 11)
                                     .background {
                                         ZStack {
                                             if section == entry {
@@ -329,15 +345,54 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                                     if inside { hoveredEntry = entry } else if hoveredEntry == entry { hoveredEntry = nil }
                                 }
                                 .accessibilityAddTraits(section == entry ? .isSelected : [])
+                                .id(entry)
                             }
                         }
                     }
                 }
+                .padding(.vertical, 14)
+            }
+            .scrollIndicators(.visible)
+            // Sfumatura ai bordi: lascia intuire che l'elenco continua senza tagliare la prima voce a riposo.
+            .mask(
+                VStack(spacing: 0) {
+                    LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 14)
+                    Rectangle()
+                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 14)
+                }
+            )
+            // La pagina attiva si porta in vista quando cambia da un'altra parte dell'app.
+            .onChange(of: section) { _, value in
+                withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo(value, anchor: .center) }
+            }
             }
             sidebarStatus
         }
         .padding(12).background(panel.opacity(0.56))
         .animation(.snappy(duration: 0.28), value: section)
+    }
+
+    /// Maniglia fra barra laterale e contenuto: trascinandola si regola la larghezza (da 232 a 360 punti).
+    private var sidebarResizer: some View {
+        ZStack {
+            Divider()
+            Rectangle().fill(Color.clear).frame(width: 9)
+                .contentShape(Rectangle())
+                .onHover { inside in
+                    if inside { NSCursor.resizeLeftRight.push() } else { NSCursor.pop() }
+                }
+                .gesture(
+                    DragGesture(minimumDistance: 1)
+                        .onChanged { drag in
+                            let start = sidebarDragStart ?? sidebarWidth
+                            sidebarDragStart = start
+                            sidebarWidth = min(360, max(232, start + drag.translation.width))
+                        }
+                        .onEnded { _ in sidebarDragStart = nil }
+                )
+                .accessibilityHidden(true)
+        }
+        .frame(width: 9)
     }
 
     /// Contatore accanto alla voce: conferme in attesa e notifiche da leggere (solo se maggiori di zero).
@@ -653,7 +708,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             ZStack {
                 OrbitRings().frame(width: size, height: size)
                 Avatar(thinking: sending && streamingReply.isEmpty, speaking: avatarSpeaking || !streamingReply.isEmpty,
-                       listening: wake.phase == .capturing, level: wake.level).frame(width: size * 0.78, height: size * 0.78)
+                       listening: wake.phase == .capturing, level: wake.level, alert: avatarAlert,
+                       celebrate: celebrateTick).frame(width: size * 0.78, height: size * 0.78)
             }
             .frame(width: size, height: size)
             WaveformView(active: sending || avatarSpeaking, barCount: 26).frame(maxWidth: size)
@@ -1102,7 +1158,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 15) {
                 Avatar(thinking: sending && streamingReply.isEmpty, speaking: avatarSpeaking || !streamingReply.isEmpty,
-                       listening: wake.phase == .capturing, level: wake.level).frame(width: 76)
+                       listening: wake.phase == .capturing, level: wake.level, alert: avatarAlert,
+                       celebrate: celebrateTick).frame(width: 76)
                 VStack(alignment: .leading, spacing: 5) {
                     Text("JARVIS").font(.title2.weight(.semibold))
                     if sending {
@@ -1507,6 +1564,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             improvementSuggestions
             planProposal
             planTemplates
+        case .agents: agentsIntro
+        case .plugins: pluginInstaller
         case .profile: profileEditor
         case .connectors: connectorSetup
         case .devices:
@@ -1815,6 +1874,53 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     mutate("/api/permissions", method: "PATCH", body: ["rules": [name: value]])
                 }
             }
+        case .agents:
+            let name = item.id
+            let enabled = item.data["enabled"] as? Bool ?? true
+            let state = item["state"] ?? "attivo"
+            let used = item.data["runs_last_hour"] as? Int ?? 0
+            let limit = item.data["max_runs_per_hour"] as? Int
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(state).font(.caption.weight(.medium))
+                        .foregroundStyle(state == "attivo" ? Color.green : (state == "in pausa" ? .orange : .red))
+                    Text("\(used) lavori nell'ultima ora" + (limit.map { " su \($0)" } ?? ""))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                if let performance = item.data["performance"] as? [String: Any], (performance["runs"] as? Int ?? 0) > 0 {
+                    Text("\(performance["runs"] as? Int ?? 0) lavori in totale · \(performance["success_rate"] as? Double ?? 0)% di successi")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button(enabled ? "Metti in pausa" : "Riattiva", systemImage: enabled ? "pause.fill" : "play.fill") {
+                        mutate("/api/agents/limits", body: ["agent": name, "enabled": !enabled])
+                    }
+                    TextField("senza limite", text: Binding(get: { agentLimits[name] ?? "" }, set: { agentLimits[name] = $0 }))
+                        .textFieldStyle(.roundedBorder).frame(width: 110)
+                    Button("Imposta il limite orario") {
+                        let value = (agentLimits[name] ?? "").trimmingCharacters(in: .whitespaces)
+                        if value.isEmpty {
+                            mutate("/api/agents/limits", body: ["agent": name, "max_runs_per_hour": NSNull()])
+                        } else if let n = Int(value), (1...500).contains(n) {
+                            mutate("/api/agents/limits", body: ["agent": name, "max_runs_per_hour": n])
+                        } else {
+                            error = "Il limite orario va da 1 a 500 (vuoto per toglierlo)"
+                            return
+                        }
+                        agentLimits[name] = ""
+                    }
+                }
+            }
+        case .plugins:
+            let skills = (item.data["skills"] as? [Any])?.count ?? 0
+            let templates = (item.data["templates"] as? [Any])?.count ?? 0
+            let digest = String((item["digest"] ?? "").prefix(12))
+            HStack {
+                Text("v\(item["version"] ?? "?") · \(skills) competenze · \(templates) procedure · impronta \(digest)")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Rimuovi", role: .destructive) { mutate("/api/plugins/remove", body: ["name": item.id]) }
+            }
         case .plans:
             let id = urlSegment(item.id)
             let status = item["status"] ?? ""
@@ -1890,6 +1996,39 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     }
                 }
             }
+        }
+    }
+
+    /// Supervisione degli agenti (ADR-0164).
+    private var agentsIntro: some View {
+        card("Supervisione degli agenti", icon: "person.3") {
+            Text("Ogni specializzazione lavora solo sul proprio ambito. Puoi metterla in pausa o darle un limite di lavori all'ora: quando è ferma, la richiesta passa al generalista, sempre sotto le stesse policy e conferme. La supervisione restringe e non allarga.")
+                .font(.callout).foregroundStyle(.secondary)
+            if let conflicts = payload["conflicts"] as? String {
+                Text(conflicts).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// Pacchetti di estensione (ADR-0165): competenze e procedure in JSON, senza codice.
+    private var pluginInstaller: some View {
+        card("Installa o aggiorna un pacchetto", icon: "shippingbox") {
+            Text("Un pacchetto aggiunge competenze e procedure scritte in JSON. Non contiene codice, non usa la rete e non porta chiavi: ciò che porta resta sotto le tue regole, conferme e audit. Si installa tutto o niente.")
+                .font(.callout).foregroundStyle(.secondary)
+            TextEditor(text: $pluginJSON)
+                .font(.system(.caption, design: .monospaced))
+                .frame(minHeight: 130)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(.secondary.opacity(0.3)))
+            Button("Installa", systemImage: "square.and.arrow.down") {
+                guard let object = try? JSONSerialization.jsonObject(with: Data(pluginJSON.utf8)) as? [String: Any] else {
+                    error = "JSON non valido: il pacchetto deve essere un oggetto"
+                    return
+                }
+                pluginJSON = ""
+                mutate("/api/plugins", body: object)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(pluginJSON.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
     }
 
@@ -2447,7 +2586,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             ("/api/skills", "Competenza salvata."), ("/api/memory", "Memoria aggiornata."),
             ("/api/cloud", "Impostazioni dei modelli salvate."), ("/api/updates", "Aggiornamenti controllati."),
             ("/api/permissions", "Permessi aggiornati."), ("/api/backup", "Copia di sicurezza creata."),
-            ("/api/missions", "Missione aggiornata."),
+            ("/api/missions", "Missione aggiornata."), ("/api/agents/limits", "Regole dell’agente aggiornate."),
+            ("/api/plugins", "Pacchetti aggiornati."),
         ]
         if let hit = table.first(where: { path.hasPrefix($0.0) }) { return hit.1 }
         return method == "DELETE" ? "Elemento rimosso." : "Modifica salvata."
@@ -2460,6 +2600,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             do {
                 let result = try await core.request(path, method: method, body: body)
                 info = result["message"] as? String ?? result["reply"] as? String ?? doneMessage(path, method: method)
+                celebrateTick += 1
                 await load(section)
                 await core.refreshHealth()
             } catch { self.error = error.localizedDescription }
