@@ -647,6 +647,10 @@ pub fn router(state: Shared) -> Router {
         .route("/api/mcp/servers/policy", post(mcp_server_policy))
         .route("/api/mcp/presets", get(mcp_presets))
         .route(
+            "/api/performance",
+            get(performance_get).post(performance_set),
+        )
+        .route(
             "/api/workspaces/profiles",
             get(workspace_profiles_list).post(workspace_profile_save),
         )
@@ -3258,6 +3262,18 @@ async fn mcp_server_test(State(state): State<Shared>, Json(body): Json<Value>) -
 }
 
 /// Regole di osservazione dei file (ADR-0158), solo proprietario.
+async fn performance_get(State(state): State<Shared>) -> Response {
+    reply(Ok(with_core(&state, |j| j.performance()).await))
+}
+
+async fn performance_set(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let profile = body["profile"].as_str().unwrap_or_default().to_string();
+    reply_said(
+        with_core(&state, move |j| j.performance_set(&profile)).await,
+        "performance.profile",
+    )
+}
+
 async fn workspace_profiles_list(State(state): State<Shared>) -> Response {
     reply(Ok(with_core(&state, |j| j.workspace_profiles()).await))
 }

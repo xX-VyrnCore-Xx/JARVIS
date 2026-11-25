@@ -21,7 +21,7 @@ Data: 2026-11-25. Metodo: elenco di strumenti del catalogo (`contracts/catalog/t
 | 17 | Centro di comando | PARTIAL | Plancia e sezioni esistenti. Palette comandi e ricerca globale: da verificare (nessuna trovata in SwiftUI). |
 | 18 | Conoscenza personale | PARTIAL | Memoria cognitiva, note, export/import. Mancano collezioni, riferimenti collegati, freschezza. |
 | 19 | Privacy | PARTIAL | `privacy::redact`, audit, permessi, export della memoria. Manca un pannello unico (inventario dati, cronologia permessi). |
-| 20 | Risorse | MISSING | Nessun profilo Eco/Balanced/Performance trovato. |
+| 20 | Risorse | PARTIAL → **nuovo** | Profili Eco/Bilanciato/Prestazioni/Massimo (`/api/performance`, ADR-0186): regolano passi dell'agente, sotto-agenti e frequenza delle metriche. Mancano limiti CPU/RAM, scaricamento modelli, modalità batteria e banda: non applicabili senza misure dell'host. |
 | 21 | Integrazioni | IMPLEMENTED/PARTIAL | Registro connettori, OAuth, plugin, client MCP con salute e politica (ADR-0182). Webhook: `/api/hooks`. |
 | 22 | Emergenze | PARTIAL | `/api/emergency`, diagnosi dei piani. Il ciclo rilevamento→registrazione per gli incidenti elencati non è completo. |
 | 23 | Qualità/prestazioni | PARTIAL | `/api/metrics`. Nessun confronto prima/dopo registrato: non inventato. |
@@ -31,7 +31,7 @@ Data: 2026-11-25. Metodo: elenco di strumenti del catalogo (`contracts/catalog/t
 - Profili di workspace (modulo `workspaces`): CRUD del proprietario, piano di attivazione senza esecuzione, rifiuto di comandi e percorsi esterni.
 
 ## Prossimi interventi consigliati (per priorità)
-1. Profili di risorse Eco/Balanced/Performance (§20, MISSING, indipendente dal resto).
+1. ~~Profili di risorse (§20)~~ fatto (ADR-0186).
 2. Stati dell'avatar mancanti e movimento ridotto (§16): nessuna dipendenza esterna.
 3. Pannello Privacy (§19) sui dati già esistenti.
 4. Indice incrementale del codice e grafo delle dipendenze (§8).

@@ -2277,6 +2277,14 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Conseguenze:** nessuna eliminazione automatica: la pulizia resta a `fs.delete` con conferma. I profili rifiutano comandi, URL e percorsi fuori dalla workspace.
 - **Evidenza:** test unitari dei due moduli, controlli e2e delle nuove rotte.
 
+### ADR-0186 — Profili di risorse
+
+- **Data:** 2026-11-25. **Stato:** implementata.
+- **Decisione:** quattro profili (Eco, Bilanciato, Prestazioni, Massimo) scelti dal proprietario (`/api/performance`). Regolano solo limiti applicati davvero dal Core: passi dell'agente per richiesta (3/4/6/8), agenti temporanei (1/2/3/4) e intervallo delle istantanee delle metriche (15/5/2/1 min). Il predefinito «Bilanciato» coincide con i limiti precedenti (4 passi, 2 agenti, 5 min).
+- **Sicurezza:** nessun profilo tocca permessi, conferme, audit o redazione. La scelta è registrata come azione del proprietario.
+- **Non incluso:** limiti di CPU/RAM, scaricamento dei modelli, batteria e banda: richiedono misure dell'host non verificabili qui.
+- **Evidenza:** test unitari (monotonia, persistenza, valori sconosciuti) e controlli e2e.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

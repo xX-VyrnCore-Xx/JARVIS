@@ -45,6 +45,7 @@ pub mod observability;
 pub mod openapi;
 pub mod orchestrator;
 pub mod passkeys;
+pub mod perf;
 pub mod permissions;
 pub mod persona;
 pub mod planner;

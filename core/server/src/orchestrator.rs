@@ -149,9 +149,7 @@ struct Pending {
 }
 
 /// Passi massimi del ciclo dell'agente per una richiesta (limite `max_steps` della delega).
-const MAX_STEPS: usize = 4;
 /// Agenti temporanei per richiesta e passi di ciascuno (ADR-0040).
-const MAX_SUBAGENTS: usize = 2;
 const SUBAGENT_STEPS: usize = 3;
 /// Strumenti per ciascuna esecuzione di una missione (ADR-0096).
 const MISSION_STEPS: usize = 5;
@@ -513,7 +511,7 @@ impl Jarvis {
             "limits": if let Some(agent) = self.temporary.get(&task.id()) {
                 json!({"max_steps": agent.steps, "max_subdelegations": 0, "allow_cloud": false})
             } else {
-                json!({"max_steps": MAX_STEPS, "max_subdelegations": MAX_SUBAGENTS, "allow_cloud": false})
+                json!({"max_steps": self.limits().max_steps, "max_subdelegations": self.limits().max_subagents, "allow_cloud": false})
             },
             "timeout_ms": self.cfg.delegation_timeout_ms,
             "completion_conditions": ["Esito jarvis.agent-result/1 valido"],
@@ -1640,7 +1638,8 @@ impl Jarvis {
             }
             let retryable = output["code"] == "policy.invalid_arguments";
             history.push(step_record(&tool, &arguments, &digest, status, output));
-            let last = history.len() >= MAX_STEPS || (status == "denied" && !retryable);
+            let last =
+                history.len() >= self.limits().max_steps || (status == "denied" && !retryable);
             result = self.next_step(&task, &inputs, &history, last, &mut out);
         }
     }
@@ -1719,10 +1718,15 @@ impl Jarvis {
                 "un agente temporaneo non può crearne altri".into(),
             ));
         }
-        if out.steps.iter().filter(|s| s["kind"] == "subagent").count() >= MAX_SUBAGENTS {
+        if out.steps.iter().filter(|s| s["kind"] == "subagent").count()
+            >= self.limits().max_subagents
+        {
             return Ok(fail(
                 "agent.limit",
-                format!("al massimo {MAX_SUBAGENTS} agenti temporanei per richiesta"),
+                format!(
+                    "al massimo {} agenti temporanei per richiesta",
+                    self.limits().max_subagents
+                ),
             ));
         }
         let role = args["role"].as_str().unwrap_or_default().to_string();
@@ -2002,7 +2006,7 @@ impl Jarvis {
         inputs["steps_left"] = json!(if last {
             0
         } else {
-            MAX_STEPS.saturating_sub(history.len())
+            self.limits().max_steps.saturating_sub(history.len())
         });
         match self.call_agent(task, &inputs) {
             Ok(r) if r["kind"] == "reply" || (!last && r["kind"] == "tool_call") => {
@@ -2128,7 +2132,7 @@ impl Jarvis {
             task.transition("running", "Confermato dal proprietario");
             let (status, output) = self.run_tool(&task, &tool, &arguments, true, &mut out)?;
             history.push(step_record(&tool, &arguments, &digest, status, output));
-            let last = history.len() >= MAX_STEPS;
+            let last = history.len() >= self.limits().max_steps;
             let result = self.next_step(&task, &inputs, &history, last, &mut out);
             self.drive(task, inputs, result, out, history)
         } else {
@@ -3745,6 +3749,21 @@ impl Jarvis {
         }
         self.record_owner_action("watch.remove")?;
         Ok(self.watches())
+    }
+
+    /// Limiti di lavoro del profilo di risorse attivo (ADR-0186).
+    pub fn limits(&self) -> crate::perf::Limits {
+        crate::perf::current(&self.cfg.data_dir).limits()
+    }
+
+    pub fn performance(&self) -> Value {
+        crate::perf::describe(&self.cfg.data_dir)
+    }
+
+    pub fn performance_set(&mut self, profile: &str) -> Result<Value, CoreError> {
+        crate::perf::set(&self.cfg.data_dir, profile).map_err(CoreError::BadRequest)?;
+        self.record_owner_action("performance.profile")?;
+        Ok(self.performance())
     }
 
     /// Profili di workspace (ADR-0185).
@@ -5375,7 +5394,6 @@ impl Jarvis {
 // ---------------------------------------------------------------------- Metriche persistenti (RNF-07)
 
 /// Intervallo fra due istantanee salvate e periodo di conservazione.
-const METRICS_EVERY: std::time::Duration = std::time::Duration::from_secs(300);
 const METRICS_KEEP_DAYS: i64 = 7;
 /// Giorni di conservazione delle tracce dei task (ADR-0039).
 const TRACE_KEEP_DAYS: i64 = 30;
@@ -5388,7 +5406,7 @@ impl Jarvis {
         if !force
             && self
                 .metrics_saved
-                .is_some_and(|t| t.elapsed() < METRICS_EVERY)
+                .is_some_and(|t| t.elapsed() < self.limits().metrics_every)
         {
             return Ok(None);
         }
