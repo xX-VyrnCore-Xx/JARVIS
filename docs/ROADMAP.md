@@ -244,7 +244,7 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Database, memoria e animazioni macOS (2026-11-24, base `013b7b5`).** ADR-0124, ADR-0125. Pragma e manutenzione del database, indici di memoria verificati e ricostruiti, ricerca a candidati con recenza, statistiche e doppioni; animazioni SwiftUI. Verifiche: fmt, clippy, `cargo test --locked`, test Python e contratti. **Sospeso:** resa e fluidità delle animazioni (Swift solo CI).
 
-**Instradamento misurato e strumenti robusti (2026-11-25, ADR-0171).** Corpus di 65 richieste per l'instradamento (100%) e prova con argomenti ostili sui 21 strumenti puri. Grafica: nessuna modifica in questo passo (resa non verificabile qui). Prossimo passo: ampliare il corpus con richieste reali del proprietario.
+**Instradamento misurato e strumenti robusti (2026-11-25, ADR-0171).** Corpus di 65 richieste sintetiche (100%) e di 101 del proprietario (da 19 a 101 con un secondo stadio a radici di parola; resa su richieste nuove da verificare) e prova con argomenti ostili sui 21 strumenti puri. Grafica: nessuna modifica in questo passo (resa non verificabile qui). Prossimo passo: ampliare il corpus con richieste reali del proprietario.
 
 **Utenti con login e personalità (2026-11-25, ADR-0169).** Account su invito, sessioni, chat isolata senza strumenti, personalità per utente; guida in `docs/USERS.md`. Interfacce di accesso, chat, profilo e pagina Utenti: ADR-0170.
 

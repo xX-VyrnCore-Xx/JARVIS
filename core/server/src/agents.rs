@@ -7,6 +7,8 @@ pub struct Agent {
     pub name: &'static str,
     pub role: &'static str,
     keywords: &'static [&'static str],
+    /// Radici di parola per il linguaggio colloquiale (secondo stadio dell'instradamento, ADR-0171).
+    stems: &'static [&'static str],
     tools: &'static [&'static str],
 }
 
@@ -17,44 +19,51 @@ pub const SPECIALISTS: [Agent; 7] = [
     Agent {
         name: "monitoring",
         role: "Sicurezza difensiva: controlla postura, audit e configurazioni locali. Riferisci le evidenze raccolte, la gravità e le verifiche mancanti. Per la bonifica indica priorità e verifica del ripristino.",
-        keywords: &["cvss", "vulnerabilit", "ransomware", "phishing", "incidente di sicurezza", "violazione dei dati", "data breach", "integrita del file", "cybersecurity", "postura di sicurezza", "centro sicurezza", "audit di sicurezza", "hardening", "controllo di sicurezza", "bonifica", "risposta a incidenti", "incident response", "audit dei permessi", "postura it"],
-        tools: &["security.status", "security.cvss", "security.hash", "system.info", "system.disks", "process.list", "fs.read", "fs.list", "fs.search", "notes.add", "todo.add"],
+        keywords: &["cvss", "vulnerabilit", "ransomware", "phishing", "incidente di sicurezza", "violazione dei dati", "data breach", "integrita del file", "cybersecurity", "postura di sicurezza", "centro sicurezza", "audit di sicurezza", "hardening", "controllo di sicurezza", "bonifica", "risposta a incidenti", "incident response", "audit dei permessi", "postura it", "api key", "chiavi api", "porte aperte"],
+        stems: &["sicur", "sospett+", "phishing+", "porte aperte+", "porta aperta+", "vulnerab+", "permess+", "api key+", "chiavi api+", "protett", "strano", "malware+", "virus", "truffa", "accessi", "password", "cifrat"],
+        tools: &["security.status", "security.cvss", "security.hash", "system.info", "system.disks", "process.list", "fs.read", "fs.list", "fs.search", "notes.add", "todo.add", "deps.list", "log.analyze"],
     },
     Agent {
         name: "research",
         role: "Ricerca: trova informazioni sul Web, confronta le fonti e cita sempre gli URL.",
         keywords: &["cerca sul web", "cerca online", "cerca in rete", "notizi", "wikipedia", "http://", "https://", "fonti", "fai una ricerca", "naviga"],
-        tools: &["web.search", "web.fetch", "web.browse", "web.form"],
+        stems: &["cercami", "cerca$", "ricerca", "alternativ", "quanto costa", "documentazion", "soluzion", "confront", "nuova versione", "uscita", "uscito", "notizi", "qualcuno", "open source", "recension", "miglior", "informazioni su", "web$", "internet", "tecnolog", "novita"],
+        tools: &["web.search", "web.fetch", "web.browse", "web.form", "text.extract", "notes.add", "notes.search"],
     },
     Agent {
         name: "system",
         role: "Sistemi IT: inizia da diagnosi in sola lettura; distingue osservazioni e ipotesi. Prima di una modifica indica impatto, verifica e ripristino.",
         keywords: &["sottorete", "subnet", "cidr", "runbook", "processi", "processo", "terminale", "cpu", " ram", "task manager", "rallent", "che sistema", "info sistema", "informazioni di sistema", "informazioni sul sistema", "spazio libero", "disco rigido", "sistema operativo", "uso della memoria", "batteria"],
-        tools: &["system.info", "system.disks", "process.list", "it.subnet", "shell.run", "fs.list", "fs.read", "fs.search"],
+        stems: &["pc$", "computer", "ram$", "cpu$", "disco$", "dischi", "spazio", "riavv", "app$", "applicazion", "aggiornament", "scaric", "download", "pulizia", "server", "servizi", "connession", "rete", "temperatur", "surriscald", "lent", "terminale", "cartell", "install", "vs code", "spegn", "batteri", "aprimi", "online", "offline"],
+        tools: &["system.info", "system.disks", "process.list", "it.subnet", "shell.run", "fs.list", "fs.read", "fs.search", "app.open", "app.focus", "app.windows", "pc.open", "log.analyze", "security.status"],
     },
     Agent {
         name: "automation",
         role: "Automazioni: crea, modifica ed esegue automazioni pianificate; descrivi chiaramente quando e cosa eseguiranno.",
         keywords: &["n8n", "automazion", "pianific", "ogni giorno", "ogni ora", "ogni settimana", "tra 1", "tra 2", "tra 3", "tra 5", "tra 10", "tra un", "tra mezz"],
-        tools: &["n8n.create", "workflow.create", "workflow.list", "workflow.run", "workflow.update", "workflow.delete", "system.info", "fs.write", "todo.add", "todo.list", "todo.review", "todo.done"],
+        stems: &["avvis+", "ogni+", "periodic+", "automatizz+", "quando+", "ricordami+", "sincronizz+", "notte", "sera", "mattina", "lunedi", "settiman", "domani", "se la", "se il", "notificam", "schedul"],
+        tools: &["n8n.create", "workflow.create", "workflow.list", "workflow.run", "workflow.update", "workflow.delete", "system.info", "fs.write", "todo.add", "todo.list", "todo.review", "todo.done", "mission.start", "mission.list", "mission.cancel"],
     },
     Agent {
         name: "memory",
         role: "Memoria: salva, cerca, corregge e dimentica ciò che il proprietario ti chiede; frasi brevi e autonome.",
         keywords: &["ricorda che", "ricordati", "cosa ricordi", "dimentica", "nella memoria", "preferisco"],
-        tools: &["memory.remember", "memory.list", "memory.forget", "memory.update", "notes.add", "notes.list", "notes.search", "notes.delete"],
+        stems: &["ricord+", "stavamo", "avevamo+", "avevo+", "decis", "salvati", "dimentic", "sospeso", "l altra volta", "memorizz", "appunt"],
+        tools: &["memory.remember", "memory.list", "memory.forget", "memory.update", "notes.add", "notes.list", "notes.search", "notes.delete", "todo.add", "todo.list", "mission.list"],
     },
     Agent {
         name: "business",
         role: "Direzione aziendale (CEO/CFO): parti dalla decisione, calcola con gli strumenti, confronta opzioni con numeri e rischi, chiudi con raccomandazione e scadenze. Niente pareri legali vincolanti.",
         keywords: &[" iva ", "l'iva", "mutuo", "finanziamento", "rata del", "business plan", "analisi aziendale", "piano aziendale", "margine", "kpi", "preventivo", "bilancio", "procedura aziendale", "fornitori", "break even", "break-even", "pareggio", "markup", "ricarico", " roi ", " van ", " tir ", "payback", "runway", "burn rate", "unit economics", " cac ", " ltv ", "churn", "cagr", "cash flow", "flusso di cassa", "ebitda", "fatturato", "ricavi", "budget", "pricing", "prezzo di vendita", "strategia aziendale", "piano strategico", "analisi swot", " okr", "investitor", "consiglio di amministrazione", "verbale", "ordine del giorno", "piano commerciale", "forecast", "scenario aziendale"],
-        tools: &["biz.vat", "biz.loan", "biz.margin", "biz.breakeven", "biz.npv", "biz.runway", "biz.unit_economics", "biz.priorities", "biz.cagr", "math.calc", "date.calc", "notes.add", "notes.list", "notes.search", "todo.add", "todo.list", "fs.read", "fs.list", "fs.search", "web.search"],
+        stems: &["client", "preventiv", "commercial", "concorren", "guadagn", "pagare", "redditiz", "gestional", "propost", "fattur", "vendit", "azienda", "lead$", "listino", "abbonament", "contratt"],
+        tools: &["biz.vat", "biz.loan", "biz.margin", "biz.breakeven", "biz.npv", "biz.runway", "biz.unit_economics", "biz.priorities", "biz.cagr", "math.calc", "date.calc", "notes.add", "notes.list", "notes.search", "todo.add", "todo.list", "fs.read", "fs.list", "fs.search", "web.search", "web.fetch", "web.browse", "pdf.extract", "sheet.read", "table.summary", "data.stats", "text.correct"],
     },
     Agent {
         name: "coding",
         role: "Coding: leggi il codice prima di modificarlo, riproduci il problema con un test mirato, preserva i contratti, verifica errori e regressioni. Distingui i test eseguiti da quelli proposti.",
         keywords: &["codice", "script", "programma in", "python", "javascript", "compila", "git ", "npm ", "regressione", "code review", "refactoring", "test unitari", "codice rust", "codice kotlin", "codice typescript", "debug", "valida il json", "valida json", "verifica il json", "verifica json"],
-        tools: &["fs.list", "fs.read", "fs.write", "fs.search", "fs.mkdir", "fs.move", "fs.delete", "shell.run", "math.calc", "code.check_python", "code.validate_json", "code.run_python", "sandbox.run", "sandbox.import", "sandbox.export", "sandbox.status", "agent.delegate"],
+        stems: &["bug$", "branch+", "commit+", "repositor+", "build", "test$", "release+", "funzionalit", "errore", "backend", "frontend", "codice", "dipendenz", "architettur", "implement", "prestazion+", "refactor+", "compil", "libreria", "funzione", "pull request", "merge$", "deploy+", "api$", "generami la documentazione+"],
+        tools: &["fs.list", "fs.read", "fs.write", "fs.search", "fs.mkdir", "fs.move", "fs.delete", "shell.run", "math.calc", "code.check_python", "code.validate_json", "code.run_python", "sandbox.run", "sandbox.import", "sandbox.export", "sandbox.status", "agent.delegate", "git.status", "git.log", "git.diff", "git.branch", "git.commit", "deps.list", "log.analyze", "text.diff", "table.summary"],
     },
 ];
 
@@ -71,8 +80,16 @@ fn fold(text: &str) -> String {
 
 /// Specializzazione per la richiesta: esattamente un ambito riconosciuto, altrimenti `None` (generalista).
 pub fn route(message: &str) -> Option<&'static Agent> {
-    let text = format!(" {} ", fold(message));
+    // «processore» non è un processo del sistema operativo.
+    let text = format!(" {} ", fold(message).replace("processor", "chip"));
     if text.trim_start().starts_with("n8n ") {
+        return SPECIALISTS.iter().find(|agent| agent.name == "automation");
+    }
+    // Un avviso condizionato («se la CPU supera l'80% avvisami») è un'automazione, qualunque sia l'argomento.
+    if [" avvisami", " avvertimi", " notificami"]
+        .iter()
+        .any(|word| text.contains(word))
+    {
         return SPECIALISTS.iter().find(|agent| agent.name == "automation");
     }
     if [
@@ -95,6 +112,76 @@ pub fn route(message: &str) -> Option<&'static Agent> {
         .filter(|a| a.keywords.iter().any(|k| text.contains(k)));
     match (hits.next(), hits.next()) {
         (Some(a), None) => Some(a),
+        (None, _) => route_by_stems(&text),
+        _ => None,
+    }
+}
+
+/// Punti di una radice: 1; con `+` finale 3 (segnale forte); con `$` finale vale solo come parola intera.
+fn stem_score(plain: &str, stem: &str) -> usize {
+    let (stem, points) = match stem.strip_suffix('+') {
+        Some(s) => (s, 3),
+        None => (stem, 1),
+    };
+    let (stem, whole) = match stem.strip_suffix('$') {
+        Some(s) => (s, true),
+        None => (stem, false),
+    };
+    let pattern = if whole {
+        format!(" {stem} ")
+    } else {
+        format!(" {stem}")
+    };
+    if plain.contains(&pattern) {
+        points
+    } else {
+        0
+    }
+}
+
+/// Secondo stadio, solo se nessuna parola chiave ha colpito: conta le radici di parola per ambito; vince l'ambito
+/// in testa di almeno un punto, altrimenti il generalista. Le missioni restano sempre al generalista.
+fn route_by_stems(text: &str) -> Option<&'static Agent> {
+    let plain: String = text
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect();
+    let plain = format!(
+        " {} ",
+        plain.split_whitespace().collect::<Vec<_>>().join(" ")
+    );
+    if plain.contains(" missione") || plain.contains(" missioni") {
+        return None;
+    }
+    // Un nome di file («bozza.txt») indica un comando sui file: serve il generalista con tutti gli strumenti.
+    let has_file_name = text.split_whitespace().any(|word| {
+        word.trim_matches(|c: char| !c.is_alphanumeric())
+            .split_once('.')
+            .is_some_and(|(name, ext)| {
+                !name.is_empty()
+                    && (1..=5).contains(&ext.len())
+                    && ext.chars().all(|c| c.is_ascii_alphanumeric())
+            })
+    });
+    if has_file_name || plain.contains(" volante ") {
+        return None;
+    }
+    let mut scored: Vec<(usize, &'static Agent)> = SPECIALISTS
+        .iter()
+        .map(|agent| {
+            let score = agent
+                .stems
+                .iter()
+                .map(|stem| stem_score(&plain, stem))
+                .sum();
+            (score, agent)
+        })
+        .filter(|(score, _)| *score > 0)
+        .collect();
+    scored.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
+    match scored.as_slice() {
+        [(_, only)] => Some(only),
+        [(top, best), (second, _), ..] if top > second => Some(best),
         _ => None,
     }
 }

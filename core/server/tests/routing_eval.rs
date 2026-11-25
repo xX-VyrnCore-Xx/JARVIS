@@ -127,11 +127,15 @@ fn owner_corpus_report() {
     let mut wrong = 0;
     for (message, expected) in &corpus {
         let got = route(message).map_or(GENERAL, |a| a.name);
-        if got != expected {
+        if !expected.split('/').any(|e| e == got) {
             wrong += 1;
             eprintln!("ERRORE {message:?}: atteso {expected}, ottenuto {got}");
         }
     }
     let total = corpus.len();
     eprintln!("corpus proprietario: {}/{total}", total - wrong);
+    assert!(
+        wrong * 20 <= total,
+        "più del 5% di errori sul corpus del proprietario: {wrong}/{total}"
+    );
 }

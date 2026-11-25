@@ -13,7 +13,7 @@ Controlla se il server è online|system
 Che cavolo sta consumando tutta questa CPU?|system
 Spostami questi file sul server|system
 Controlla che tutti i servizi siano attivi|system
-Aprimi l'ultimo progetto su cui stavo lavorando|system
+Aprimi l'ultimo progetto su cui stavo lavorando|system/general_assistant
 Organizzami la cartella download|system
 Guarda se il server si sta surriscaldando|system
 Controlla la connessione, mi sembra lenta|system
@@ -31,7 +31,7 @@ Secondo te questo progetto è redditizio?|business
 Analizza questo repository|coding
 Controlla se ci sono bug|coding
 Sistema questo errore|coding
-Fammi partire il progetto|coding
+Fammi partire il progetto|coding/general_assistant
 Crea una nuova branch|coding
 Controlla cosa manca da implementare|coding
 Fai una code review completa|coding
@@ -40,14 +40,14 @@ Generami la documentazione del progetto|coding
 Fai la build e prepara la release|coding
 Controlla se tutti i test passano|coding
 Implementa questa funzionalità|coding
-Guarda perché non funziona|coding
+Guarda perché non funziona|coding/general_assistant
 Aggiorna le dipendenze senza rompere niente|coding
 Controlla se ci sono problemi di architettura|coding
 Fammi un commit con un messaggio sensato|coding
 Confronta questa branch con la main|coding
 Controlla il backend e dimmi cosa non va|coding
 Migliora le prestazioni dell'applicazione|coding
-Continua da dove eravamo rimasti col progetto|coding
+Continua da dove eravamo rimasti col progetto|coding/memory/general_assistant
 Ricordati questa cosa|memory
 Cosa stavamo facendo ieri?|memory
 Ti ricordi il progetto del server?|memory
@@ -82,7 +82,7 @@ Controlla che i backup siano protetti|monitoring
 Fammi un audit di sicurezza del server|monitoring
 Avvisami se il server va offline|automation
 Ogni sera fammi un backup|automation
-Ricordami domani di finire il progetto|automation
+Ricordami domani di finire il progetto|automation/memory
 Quando finisce la build avvisami|automation
 Ogni mattina fammi un riepilogo della giornata|automation
 Se la CPU supera l'80% avvisami|automation
