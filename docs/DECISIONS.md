@@ -1876,6 +1876,27 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** test unitari dei tre strumenti, test API (ricerca, esportazione, 404/409 dello stop, strumenti via MCP), test Python delle regole offline e smoke E2E.
 - **Documenti interessati:** AUTONOMY_AND_TOOLS.md, ROADMAP.md, `contracts/catalog/tools/`.
 
+### ADR-0151 — Registro universale degli strumenti, salute, cronologia e arresto di emergenza
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout · **Fonte:** specifica «Advanced Tool System & Autonomous Intelligence Upgrade» del proprietario.
+- **Analisi preliminare:** il catalogo (`contracts/catalog/tools`), la policy, i permessi del proprietario (ADR-0116), l'audit, gli agenti specializzati, le missioni, i connettori e il server MCP esistevano già e sono stati **riusati**; mancavano un registro normalizzato, la salute e la cronologia di esecuzione, un arresto di emergenza e un piano a grafo. Stack invariato (Rust, Python, SQLite).
+- **Decisione:** `toolsys.rs` ricava per ogni descrittore categoria, piattaforme, disponibilità offline, reversibilità, dipendenze e requisiti (sovrascrivibili dal descrittore, nessuna modifica agli 81 file); `GET /api/tools/registry` (filtri `category`, `risk`, `platform`, `offline`, `q`), `GET /api/tools/health` e `/history`. Ogni esecuzione registra in `tool_runs` strumento, istante, durata, esito e codice d'errore, **mai argomenti né risultati**. Lo stato è `healthy`, `degraded`, `failing` o `unknown`. Il ciclo di vita «blocca/sblocca» riusa le regole del Centro permessi. **Arresto di emergenza** (`POST /api/emergency`): profilo di sola lettura imposto dalla policy (`policy.emergency_stop`), ferma lavori in background, piani, scheduler, missioni e iniziative; solo proprietario, con audit e notifica.
+- **Non incluso:** installazione o rimozione di strumenti nativi, plugin dal disco, SDK pacchettizzato, client MCP (vedi IMPLEMENTATION_STATUS.md).
+- **Evidenza:** test unitari dei campi derivati e dello stato di salute; test API di registro, filtri, salute, cronologia e arresto di emergenza.
+
+### ADR-0152 — Piani di esecuzione
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout.
+- **Decisione:** un piano è un grafo di passi (strumenti del catalogo) con dipendenze, riferimenti tipizzati fra passi (`${passo.campo}`), ripetizioni (≤ 2), `on_error`, operazione inversa e budget di tempo e di passi (≤ 20 passi). Si esegue un passo alla volta fuori dal blocco del Core, con **checkpoint cifrato** dopo ogni passo; ogni strumento passa da policy, regole del proprietario, arresto di emergenza e audit con soggetto `agent:planner`. I passi che richiedono conferma mettono il piano in `waiting` finché il proprietario non li approva (`/approve`). Annullamento, **rollback** dei passi con `undo` (con `confirm` per quelli che richiedono conferma), **replay**, idempotenza per chiave, ripresa dopo la chiusura del Core (`interrupted`). Notifica alla conclusione o all'attesa.
+- **Non incluso:** esecuzione parallela, scomposizione automatica dell'obiettivo, ripianificazione, validazione indipendente (vedi roadmap fasi A–C).
+- **Evidenza:** test unitari di validazione, ordine, riferimenti e blocco dei dipendenti; test API di esecuzione con valori passati fra passi, fallimenti e ripetizioni, conferma, rollback, replay e annullamento.
+
+### ADR-0153 — Registro degli agenti e spiegazione dell'instradamento
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout.
+- **Decisione:** `GET /api/agents` descrive i sette specialisti e il generalista (competenze dagli strumenti, rischio massimo, contesto isolato o condiviso, risorse); `GET /api/agents/route?q=` mostra quale agente riceverebbe una richiesta e per quali parole chiave; `GET /api/models/route?q=` mostra la rotta per compito, il modello per provider, il ripiego e la riservatezza (credenziali bloccate, dati personali rilevati, profilo condiviso) **senza inviare nulla**. Non si introducono nuovi agenti: si riusano quelli esistenti.
+- **Evidenza:** test API del registro e dell'instradamento.
+
 ### ADR-0135 — Correttore dei messaggi scritti
 
 - **Data:** 2026-11-24 · **Stato:** implementata nel checkout · **Fonte:** richiesta del proprietario («migliora il correttore grammaticale di prompt»).

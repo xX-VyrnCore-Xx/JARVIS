@@ -2587,6 +2587,7 @@ impl Jarvis {
             "secrets_store": self.secrets.location(), "devices_active": active,
             "pending_confirmations": self.pending.len(), "web_enabled": self.cfg.web.enabled,
             "web_private_addresses": self.cfg.web.allow_private, "shell_enabled": !policy::shell_disabled(),
+            "emergency_stop": crate::permissions::emergency_active(&self.cfg.data_dir),
             "encryption": {
                 "chat_at_rest": self.store.chat_protected(),
                 "algorithm": "XChaCha20-Poly1305",

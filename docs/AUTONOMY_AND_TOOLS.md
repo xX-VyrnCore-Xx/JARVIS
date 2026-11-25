@@ -105,3 +105,5 @@ Il servizio usa l'immagine versionata `docker.n8n.io/n8nio/n8n:2.48.7`, l'utente
 **Docker, personalità e protezione (ADR-0147–0149).** `sandbox.run` accetta un profilo di risorse (`light`, `standard`, `build`, `data`) con lo stesso isolamento; `GET /api/docker` mostra lo stato del motore. Gli esiti degli strumenti esterni passano da una guardia che segnala istruzioni nascoste; le conferme dicono cosa è stato fatto.
 
 **Analisi e chat (ADR-0150).** `data.stats` (statistiche e valori anomali), `text.extract` (email, indirizzi, date, hashtag, telefoni) e `text.diff` (confronto di testi) sono strumenti di calcolo; le chat si cercano e si esportano in Markdown e i lavori in background si annullano.
+
+**Sistema degli strumenti e piani (ADR-0151–0153).** Registro, salute e cronologia in [TOOL_SYSTEM.md](TOOL_SYSTEM.md); piani a grafo, conferme, rollback, replay e arresto di emergenza in [AUTONOMOUS_ENGINE.md](AUTONOMOUS_ENGINE.md); stato di ogni requisito in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
