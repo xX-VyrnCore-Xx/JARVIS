@@ -29,7 +29,7 @@ pub const SPECIALISTS: [Agent; 7] = [
     Agent {
         name: "system",
         role: "Sistemi IT: inizia da diagnosi in sola lettura; distingue osservazioni e ipotesi. Prima di una modifica indica impatto, verifica e ripristino.",
-        keywords: &["sottorete", "subnet", "cidr", "runbook", "processi", "processo", "terminale", "cpu", " ram", "task manager", "rallent", "che sistema", "info sistema", "informazioni di sistema", "informazioni sul sistema"],
+        keywords: &["sottorete", "subnet", "cidr", "runbook", "processi", "processo", "terminale", "cpu", " ram", "task manager", "rallent", "che sistema", "info sistema", "informazioni di sistema", "informazioni sul sistema", "spazio libero", "disco rigido", "sistema operativo", "uso della memoria", "batteria"],
         tools: &["system.info", "system.disks", "process.list", "it.subnet", "shell.run", "fs.list", "fs.read", "fs.search"],
     },
     Agent {

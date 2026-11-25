@@ -1897,6 +1897,13 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** `GET /api/agents` descrive i sette specialisti e il generalista (competenze dagli strumenti, rischio massimo, contesto isolato o condiviso, risorse); `GET /api/agents/route?q=` mostra quale agente riceverebbe una richiesta e per quali parole chiave; `GET /api/models/route?q=` mostra la rotta per compito, il modello per provider, il ripiego e la riservatezza (credenziali bloccate, dati personali rilevati, profilo condiviso) **senza inviare nulla**. Non si introducono nuovi agenti: si riusano quelli esistenti.
 - **Evidenza:** test API del registro e dell'instradamento.
 
+### ADR-0171 — Valutazione dell'instradamento e robustezza degli strumenti
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout.
+- **Decisione:** l'instradamento verso gli agenti (parole chiave, ADR-0038) si **misura** con un corpus sintetico di 65 richieste italiane con l'agente atteso (`core/server/tests/routing_eval.rs`): accuratezza, elenco degli errori, nessun errore ammesso. La prima misura ha trovato due buchi (spazio libero sul disco, versione del sistema operativo) e un falso positivo evitato («disco volante»); parole chiave aggiunte: «spazio libero», «disco rigido», «sistema operativo», «uso della memoria», «batteria». Una frase come «controlla lo spazio sul disco» dentro una missione resta al generalista (serve agli strumenti delle missioni). Gli strumenti puri (21) sono provati con 23 argomenti ostili (tipi sbagliati, estremi, enormi, Unicode) senza panico (`tests/tools_robustness.rs`).
+- **Non è addestramento:** il Core non contiene modelli addestrabili (ADR-0146); «addestrare» qui significa mettere a punto regole con evidenze misurate. Il corpus è piccolo e scritto a mano: non prova la qualità su richieste reali.
+- **Evidenza:** `cargo test --locked` completo, fmt e Clippy.
+
 ### ADR-0170 — Interfacce degli utenti: accesso, chat, profilo e pagina Utenti
 
 - **Data:** 2026-11-25 · **Stato:** implementata nel checkout.
