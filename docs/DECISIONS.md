@@ -1897,6 +1897,13 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** `GET /api/agents` descrive i sette specialisti e il generalista (competenze dagli strumenti, rischio massimo, contesto isolato o condiviso, risorse); `GET /api/agents/route?q=` mostra quale agente riceverebbe una richiesta e per quali parole chiave; `GET /api/models/route?q=` mostra la rotta per compito, il modello per provider, il ripiego e la riservatezza (credenziali bloccate, dati personali rilevati, profilo condiviso) **senza inviare nulla**. Non si introducono nuovi agenti: si riusano quelli esistenti.
 - **Evidenza:** test API del registro e dell'instradamento.
 
+### ADR-0172 — Richieste di delega: prima un piano da approvare
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout.
+- **Decisione:** una frase breve di delega o troppo ampia («sistema tutto», «aggiorna tutto», «metti/mettilo online», «fai tu», «occupatene tu», «pensaci tu», «risolvi tutto»; massimo 8 parole, riconoscimento esatto) non avvia più azioni a caso: **con un modello cloud configurato** il Core chiede il piano al pianificatore (ADR-0160) con un obiettivo che parte da strumenti di sola lettura e lascia le modifiche da confermare, salva una **bozza** (`pending`, mai avviata) e risponde in chat con numero di passi, rischio massimo e l'elenco; la bozza si rivede e si avvia da «Piani», dove ogni passo rischioso chiede comunque conferma. Vale per `/api/chat` e `/api/chat/stream` del proprietario (non per i dispositivi). **Senza modello, o se la proposta fallisce, la chat prosegue come prima** (nessun errore nuovo). Audit e validazione sono quelli del pianificatore (`plan.propose`); nessuno strumento è eseguito dalla proposta.
+- **Non incluso:** avvio automatico dopo l'approvazione dalla chat, riconoscimento di frasi di delega più lunghe o composte, la stessa funzione per gli utenti (chat senza strumenti).
+- **Evidenza:** test del riconoscimento (frasi sì/no), test HTTP del ripiego senza modello su entrambe le rotte (nessun piano creato). **Sospeso:** prova del percorso con un modello cloud reale (nessuna chiave qui); l'aspetto della risposta nelle app.
+
 ### ADR-0171 — Valutazione dell'instradamento e robustezza degli strumenti
 
 - **Data:** 2026-11-25 · **Stato:** implementata nel checkout.

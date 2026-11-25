@@ -232,6 +232,54 @@ pub fn proposal(
     Ok(doc)
 }
 
+/// Frasi brevi di delega o di richiesta troppo ampia («sistema tutto», «fai tu», «metti online», «aggiorna tutto»):
+/// invece di agire subito, il Core fa proporre un piano al modello e lo lascia come bozza da approvare (ADR-0172).
+pub fn is_delegation(message: &str) -> bool {
+    let folded: String = message
+        .to_lowercase()
+        .chars()
+        .map(|c| match c {
+            'à' => 'a',
+            'è' | 'é' => 'e',
+            'ì' => 'i',
+            'ò' => 'o',
+            'ù' => 'u',
+            c if c.is_alphanumeric() => c,
+            _ => ' ',
+        })
+        .collect();
+    let words: Vec<&str> = folded.split_whitespace().collect();
+    if words.is_empty() || words.len() > 8 {
+        return false;
+    }
+    let text = words.join(" ");
+    [
+        "sistema tutto",
+        "sistemo tutto",
+        "aggiorna tutto",
+        "fai tu",
+        "occupatene tu",
+        "pensaci tu",
+        "pensa tu a tutto",
+        "mettilo online",
+        "mettila online",
+        "metti online",
+        "metti tutto online",
+        "controlla e sistema tutto",
+        "risolvi tutto",
+    ]
+    .iter()
+    .any(|phrase| text == *phrase || text.starts_with(&format!("{phrase} ")))
+}
+
+/// Obiettivo da dare al modello per una frase di delega: la frase resta tra virgolette e vincola il piano.
+pub fn delegation_goal(message: &str) -> String {
+    let clean: String = message.trim().chars().take(120).collect();
+    format!(
+        "Richiesta ampia del proprietario: «{clean}». Parti da strumenti di sola lettura per capire il contesto, poi proponi i passi; le modifiche restano da confermare."
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -331,5 +379,28 @@ mod tests {
         assert!(prompt.contains("- t.0 [low]: riepilogo (argomenti: a*, b)"));
         assert!(prompt.len() < MAX_PROMPT_TOOLS_CHARS + 4_000);
         assert!(prompt.contains("SOLO con un oggetto JSON"));
+    }
+
+    #[test]
+    fn broad_delegations_are_recognised_and_ordinary_requests_are_not() {
+        for yes in [
+            "Sistema tutto",
+            "fai tu, basta che funzioni",
+            "Aggiorna tutto!",
+            "Mettilo online",
+            "occupatene tu",
+        ] {
+            assert!(is_delegation(yes), "{yes}");
+        }
+        for no in [
+            "sistema questo errore",
+            "aggiorna le dipendenze del progetto",
+            "fai tu il calcolo dell'iva al 22% su 100 euro e poi scrivimi la mail",
+            "ciao",
+            "",
+        ] {
+            assert!(!is_delegation(no), "{no}");
+        }
+        assert!(delegation_goal("fai tu").chars().count() <= 300);
     }
 }

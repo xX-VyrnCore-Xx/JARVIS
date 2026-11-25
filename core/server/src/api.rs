@@ -1268,6 +1268,60 @@ async fn run_cloud_chat_inner(
     Ok(out.to_json())
 }
 
+/// Frase di delega o troppo ampia (ADR-0172): con un modello cloud configurato il Core fa proporre un piano e lo
+/// lascia come bozza da approvare, senza avviarlo. Senza modello, o se la proposta fallisce, la chat prosegue normale.
+async fn delegation_reply(state: &Shared, message: &str) -> Option<Value> {
+    if !crate::planner::is_delegation(message) {
+        return None;
+    }
+    let goal = crate::planner::delegation_goal(message);
+    let asked = {
+        let goal = goal.clone();
+        with_core(state, move |j| j.plan_propose_request(&goal)).await
+    };
+    let request = asked.ok().flatten()?;
+    let provider = request.provider;
+    let answer = tokio::task::spawn_blocking(move || request.execute())
+        .await
+        .unwrap_or(Err(crate::cloud::Failure::Unavailable));
+    let done = with_core(state, move |j| {
+        j.plan_propose_finish(&goal, answer, provider, true)
+    })
+    .await
+    .ok()?;
+    let plan = done["plan"].clone();
+    let steps = plan["steps"].as_array().map_or(0, Vec::len);
+    let risk = plan["max_risk"].as_str().unwrap_or("low");
+    let list: Vec<String> = plan["steps"]
+        .as_array()
+        .map(|a| {
+            a.iter()
+                .take(8)
+                .enumerate()
+                .map(|(i, s)| {
+                    format!(
+                        "{}. {}",
+                        i + 1,
+                        s["title"]
+                            .as_str()
+                            .or(s["tool"].as_str())
+                            .unwrap_or("passo")
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let reply = format!(
+        "**Ho preparato un piano di {steps} passi (rischio massimo: {risk}), ma non l'ho avviato.**\n{}\nApri «Piani» per rivederlo e avviarlo: ogni passo rischioso chiede comunque conferma.",
+        list.join("\n")
+    );
+    Some(json!({
+        "task": null, "reply": reply, "confirmation": null, "steps": [],
+        "backend": {"name": "planner", "location": "cloud", "model": provider.id()},
+        "sources": [], "plan": {"id": plan["id"], "goal": plan["goal"], "status": plan["status"], "steps": steps},
+    }))
+}
+
 async fn chat(
     State(state): State<Shared>,
     device: Option<axum::Extension<DeviceCtx>>,
@@ -1298,6 +1352,11 @@ async fn chat(
             correction,
         )
     };
+    if device.is_none() {
+        if let Some(out) = delegation_reply(&state, &message).await {
+            return Json(with_correction(out, correction)).into_response();
+        }
+    }
     match with_core(&state, move |j| j.chat(&message)).await {
         Ok(out) => Json(with_correction(out.to_json(), correction)).into_response(),
         Err(e) => e.into_response(),
@@ -1336,6 +1395,19 @@ async fn chat_stream(
             correction,
         )
     };
+    if device.is_none() {
+        if let Some(out) = delegation_reply(&state, &message).await {
+            let line = json!({"type": "done", "result": with_correction(out, correction)});
+            return (
+                [
+                    (header::CONTENT_TYPE, "application/x-ndjson; charset=utf-8"),
+                    (header::CACHE_CONTROL, "no-store"),
+                ],
+                line.to_string() + "\n",
+            )
+                .into_response();
+        }
+    }
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel::<String>();
     let core = state.core.clone();
     let deltas = tx.clone();
