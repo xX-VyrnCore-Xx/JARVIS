@@ -646,6 +646,18 @@ pub fn router(state: Shared) -> Router {
         .route("/api/mcp/servers/health", post(mcp_server_health))
         .route("/api/mcp/servers/policy", post(mcp_server_policy))
         .route("/api/mcp/presets", get(mcp_presets))
+        .route(
+            "/api/workspaces/profiles",
+            get(workspace_profiles_list).post(workspace_profile_save),
+        )
+        .route(
+            "/api/workspaces/profiles/remove",
+            post(workspace_profile_remove),
+        )
+        .route(
+            "/api/workspaces/profiles/plan",
+            post(workspace_profile_plan),
+        )
         .route("/api/watches", get(watches_list).post(watch_add))
         .route("/api/watches/remove", post(watch_remove))
         .route("/api/twin", get(twin_get))
@@ -3246,6 +3258,33 @@ async fn mcp_server_test(State(state): State<Shared>, Json(body): Json<Value>) -
 }
 
 /// Regole di osservazione dei file (ADR-0158), solo proprietario.
+async fn workspace_profiles_list(State(state): State<Shared>) -> Response {
+    reply(Ok(with_core(&state, |j| j.workspace_profiles()).await))
+}
+
+async fn workspace_profile_save(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply_said(
+        with_core(&state, move |j| j.workspace_profile_save(&body)).await,
+        "workspace.profile.save",
+    )
+}
+
+async fn workspace_profile_remove(
+    State(state): State<Shared>,
+    Json(body): Json<Value>,
+) -> Response {
+    let key = body["id"].as_str().unwrap_or_default().to_string();
+    reply_said(
+        with_core(&state, move |j| j.workspace_profile_remove(&key)).await,
+        "workspace.profile.remove",
+    )
+}
+
+async fn workspace_profile_plan(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let key = body["id"].as_str().unwrap_or_default().to_string();
+    reply(with_core(&state, move |j| j.workspace_profile_plan(&key)).await)
+}
+
 async fn watches_list(State(state): State<Shared>) -> Response {
     reply(Ok(with_core(&state, |j| j.watches()).await))
 }

@@ -2269,6 +2269,14 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Conseguenze:** due test esistenti aggiornati intenzionalmente (troncamento con testo → `Partial`; flusso troncato → testo più nota). Il messaggio all'utente indica cosa è già stato provato. Budget base di `Route::output_tokens` invariati.
 - **Evidenza:** test del modulo `cloud` con server simulato (continuazione, nota finale, vuoto ritentato, 5xx, agente, streaming, strumento non valido). Nessuna prova contro NIM reale.
 
+### ADR-0185 — Operazioni digitali: audit e prima fetta (risorse digitali e profili di workspace)
+
+- **Data:** 2026-11-25. **Stato:** parziale (audit completo, due capacità implementate).
+- **Contesto:** richiesta «Advanced Digital Operations & Human-Machine Interaction Upgrade» (27 aree). Audit in `docs/OPERATIONS_GAP_ANALYSIS.md`.
+- **Decisione:** implementare per prime due capacità assenti, a basso rischio e senza dipendenze nuove: (1) `fs.usage` (modulo `assets`): spazio per cartella e tipo, file grandi, duplicati per SHA-256 e file temporanei, solo lettura, senza collegamenti simbolici, con limiti dichiarati; (2) profili di workspace (modulo `workspaces`, `/api/workspaces/profiles*`): applicazioni e cartelle per progetto; l'attivazione **restituisce un piano** (`app.open` con conferma) e non esegue nulla. Le altre aree restano classificate nell'audit.
+- **Conseguenze:** nessuna eliminazione automatica: la pulizia resta a `fs.delete` con conferma. I profili rifiutano comandi, URL e percorsi fuori dalla workspace.
+- **Evidenza:** test unitari dei due moduli, controlli e2e delle nuove rotte.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

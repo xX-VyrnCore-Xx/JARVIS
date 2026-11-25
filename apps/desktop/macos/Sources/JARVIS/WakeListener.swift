@@ -144,7 +144,7 @@ final class WakeListener: ObservableObject {
     @Published private(set) var level: Double = 0
     @Published private(set) var detail = ""
     /// Motore in uso: `system` (riconoscimento del Mac, sul dispositivo) o `core` (modello del Core).
-    @Published private(set) var engine = "core"
+    @Published private(set) var engineKind = "core"
 
     /// Chiamato con il testo del comando dopo una parola di attivazione.
     var onCommand: ((String) -> Void)?
@@ -262,7 +262,7 @@ final class WakeListener: ObservableObject {
             return false
         }
         detail = ""
-        engine = "system"
+        engineKind = "system"
         phase = .waiting
         while running, !Task.isCancelled {
             if suspended {

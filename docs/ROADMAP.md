@@ -248,6 +248,8 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Risposte incomplete NIM (2026-11-25, ADR-0184).** Testo troncato conservato e proseguito (max 2 volte), secondo tentativo con più token, retry 5xx, strumento non valido ritentato. Verificato con server simulato; nessuna prova su NIM reale.
 
+**Operazioni digitali, prima fetta (2026-11-25, ADR-0185).** Audit in `docs/OPERATIONS_GAP_ANALYSIS.md`; implementati `fs.usage` e i profili di workspace. Il resto delle 27 aree è classificato, non implementato. Prossimo passo: profili di risorse (§20).
+
 **MCP, Hugging Face e memoria (2026-11-25, ADR-0182).** Client MCP con sessione riusata, elenco a pagine con impronta, tentativi limitati, argomenti verificati, salute e statistiche; politica per strumento e `mcp.read` per le letture approvate; Hugging Face con un gesto (server noto, competenza, agente di ricerca); memoria esportabile e importabile, contraddizioni risolvibili, episodi riassunti e scadenza adattiva. Non provato il client contro il server reale (rete di questo ambiente).
 
 **Plancia dal mock-up (2026-11-25, ADR-0181).** Schede reali (specialisti, progetti, sistema, attività, notifiche, media, monitoraggio), meteo e media facoltativi, avatar con colore per stato e alone che pulsa con la voce, ritratto fornito dall'utente. Swift verificato solo dalla CI; resa non vista; Windows e Android da fare.

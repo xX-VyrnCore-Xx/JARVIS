@@ -256,6 +256,14 @@ function check(condition, message) {
   check(mcpServers.status === 200, "elenco dei server MCP autorizzati");
   const watches = await request("/api/watches", { token: ownerToken });
   check(watches.status === 200, "elenco delle osservazioni di file");
+  const wsSave = await request("/api/workspaces/profiles", { method: "POST", token: ownerToken, body: { name: "Prova e2e", apps: ["Terminal"], dirs: ["."] } });
+  check(wsSave.status === 200 && wsSave.json?.name === "Prova e2e", "profilo di workspace salvato");
+  const wsBad = await request("/api/workspaces/profiles", { method: "POST", token: ownerToken, body: { name: "x", apps: ["rm -rf /"] } });
+  check(wsBad.status === 400, "profilo di workspace con comando rifiutato");
+  const wsPlan = await request("/api/workspaces/profiles/plan", { method: "POST", token: ownerToken, body: { id: "Prova e2e" } });
+  check(wsPlan.status === 200 && wsPlan.json?.executes === false && wsPlan.json?.steps?.some((x) => x.tool === "app.open" && x.needs_confirmation === true), "attivazione del profilo: solo piano, nessuna esecuzione");
+  const wsDel = await request("/api/workspaces/profiles/remove", { method: "POST", token: ownerToken, body: { id: "Prova e2e" } });
+  check(wsDel.status === 200, "profilo di workspace rimosso");
   const propose = await request("/api/plans/propose", { method: "POST", token: ownerToken, body: { goal: "Riassumi lo stato del repository" } });
   check([503, 200].includes(propose.status) && (propose.status === 200 || propose.json?.error?.code === "unavailable"), "proposta di piano: senza modello cloud risposta chiara, mai un piano avviato");
   const badGoal = await request("/api/plans/propose", { method: "POST", token: ownerToken, body: { goal: "" } });

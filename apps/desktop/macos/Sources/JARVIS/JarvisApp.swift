@@ -1593,7 +1593,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                  : "Ascolto spento: il microfono non è in uso.")
                 .font(.caption).foregroundStyle(.secondary)
             if wakeListening, wake.phase != .off { Text(wakeStatusText + (wake.detail.isEmpty ? "" : " — " + wake.detail)).font(.caption).foregroundStyle(.cyan) }
-            if wakeListening, wake.engine == "system", wake.phase != .off {
+            if wakeListening, wake.engineKind == "system", wake.phase != .off {
                 Text("Motore: riconoscimento vocale del Mac, sul dispositivo. Mentre ascolta, il Mac trascrive in memoria ciò che dici e JARVIS agisce solo dopo «Hey Jarvis»: nulla viene salvato né inviato. Per far ascoltare soltanto la parola di attivazione serve il motore locale del Core (voice-setup).")
                     .font(.caption).foregroundStyle(.secondary)
             }

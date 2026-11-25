@@ -3747,6 +3747,31 @@ impl Jarvis {
         Ok(self.watches())
     }
 
+    /// Profili di workspace (ADR-0185).
+    pub fn workspace_profiles(&self) -> Value {
+        crate::workspaces::list(&self.cfg.data_dir)
+    }
+
+    pub fn workspace_profile_save(&mut self, body: &Value) -> Result<Value, CoreError> {
+        let profile = crate::workspaces::save_profile(&self.cfg.data_dir, body)
+            .map_err(CoreError::BadRequest)?;
+        self.record_owner_action("workspace.profile.save")?;
+        Ok(profile)
+    }
+
+    pub fn workspace_profile_remove(&mut self, key: &str) -> Result<Value, CoreError> {
+        if !crate::workspaces::remove(&self.cfg.data_dir, key).map_err(CoreError::Internal)? {
+            return Err(CoreError::NotFound("profilo non trovato".into()));
+        }
+        self.record_owner_action("workspace.profile.remove")?;
+        Ok(self.workspace_profiles())
+    }
+
+    pub fn workspace_profile_plan(&self, key: &str) -> Result<Value, CoreError> {
+        crate::workspaces::activation_plan(&self.cfg.data_dir, key)
+            .ok_or_else(|| CoreError::NotFound("profilo non trovato".into()))
+    }
+
     /// Server MCP autorizzati e strumenti remoti (ADR-0156). Solo dal computer del proprietario.
     pub fn mcp_servers(&self) -> Value {
         crate::mcp_client::list(&self.cfg.data_dir, &|name| {

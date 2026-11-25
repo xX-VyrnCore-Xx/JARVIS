@@ -33,9 +33,9 @@ pub const SPECIALISTS: [Agent; 7] = [
     Agent {
         name: "system",
         role: "Sistemi IT: inizia da diagnosi in sola lettura; distingue osservazioni e ipotesi. Prima di una modifica indica impatto, verifica e ripristino.",
-        keywords: &["sottorete", "subnet", "cidr", "runbook", "processi", "processo", "terminale", "cpu", " ram", "task manager", "rallent", "che sistema", "info sistema", "informazioni di sistema", "informazioni sul sistema", "spazio libero", "disco rigido", "sistema operativo", "uso della memoria", "batteria"],
+        keywords: &["sottorete", "subnet", "cidr", "runbook", "processi", "processo", "terminale", "cpu", " ram", "task manager", "rallent", "che sistema", "info sistema", "informazioni di sistema", "informazioni sul sistema", "spazio libero", "disco rigido", "sistema operativo", "uso della memoria", "batteria", "duplicati", "file duplicati", "occupa più spazio", "occupano più spazio", "file più grandi"],
         stems: &["pc$", "computer", "ram$", "cpu$", "disco$", "dischi", "spazio", "riavv", "app$", "applicazion", "aggiornament", "scaric", "download", "pulizia", "server", "servizi", "connession", "rete", "temperatur", "surriscald", "lent", "terminale", "cartell", "install", "vs code", "spegn", "batteri", "aprimi", "offline", "e online"],
-        tools: &["system.info", "system.disks", "process.list", "it.subnet", "shell.run", "fs.list", "fs.read", "fs.search", "app.open", "app.focus", "app.windows", "pc.open", "log.analyze", "security.status"],
+        tools: &["system.info", "system.disks", "process.list", "it.subnet", "shell.run", "fs.list", "fs.read", "fs.search", "fs.usage", "app.open", "app.focus", "app.windows", "pc.open", "log.analyze", "security.status"],
     },
     Agent {
         name: "automation",
