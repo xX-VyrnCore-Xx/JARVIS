@@ -520,6 +520,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/plans/{id}/cancel", post(plan_cancel))
         .route("/api/plans/{id}/rollback", post(plan_rollback))
         .route("/api/plans/{id}/replay", post(plan_replay))
+        .route("/api/plans/{id}/replan", post(plan_replan))
         .route("/api/tailscale", get(tailscale_status))
         .route("/api/tailscale/connect", post(tailscale_connect))
         .route("/api/devices/pairing/cancel", post(cancel_pairing))
@@ -2960,6 +2961,40 @@ async fn plan_approve(
         spawn_plan_runner(&state, id);
     }
     reply_said(approved, "plan.approved")
+}
+
+/// Fa proporre al modello un piano di recupero per un piano fermo (ADR-0161): bozza, mai avviata.
+async fn plan_replan(
+    State(state): State<Shared>,
+    Path(id): Path<String>,
+    body: Option<Json<Value>>,
+) -> Response {
+    let create = body
+        .as_ref()
+        .and_then(|b| b["create"].as_bool())
+        .unwrap_or(false);
+    let asked = {
+        let id = id.clone();
+        with_core(&state, move |j| j.plan_replan_request(&id)).await
+    };
+    let request = match asked {
+        Ok(Some(request)) => request,
+        Ok(None) => {
+            return reply(Err(CoreError::Unavailable(
+                "Per ripianificare serve un modello cloud con una chiave configurata.".into(),
+            )))
+        }
+        Err(e) => return reply(Err(e)),
+    };
+    let provider = request.provider;
+    let answer = tokio::task::spawn_blocking(move || request.execute())
+        .await
+        .unwrap_or(Err(crate::cloud::Failure::Unavailable));
+    let done = with_core(&state, move |j| {
+        j.plan_replan_finish(&id, answer, provider, create)
+    })
+    .await;
+    reply(done.map(|doc| said(doc, "plan.replanned", None)))
 }
 
 async fn plan_cancel(State(state): State<Shared>, Path(id): Path<String>) -> Response {

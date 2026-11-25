@@ -67,6 +67,48 @@ impl Jarvis {
         &self,
         goal: &str,
     ) -> Result<Option<crate::cloud::AgentRequest>, CoreError> {
+        self.plan_model_request(goal, None)
+    }
+
+    /// Richiesta di ripianificazione (ADR-0161) per un piano fermo.
+    pub fn plan_replan_request(
+        &self,
+        id: &str,
+    ) -> Result<Option<crate::cloud::AgentRequest>, CoreError> {
+        let doc = self.plan_load(id)?;
+        let stopped = matches!(
+            doc["status"].as_str(),
+            Some("failed" | "cancelled" | "interrupted")
+        );
+        let broken = doc["steps"].as_array().is_some_and(|s| {
+            s.iter()
+                .any(|x| matches!(x["status"].as_str(), Some("failed" | "skipped")))
+        });
+        if !stopped && !broken {
+            return Err(CoreError::BadRequest(
+                "Il piano non si è fermato: si ripianifica solo un piano fallito, annullato o interrotto.".into(),
+            ));
+        }
+        if doc["replan_depth"].as_u64().unwrap_or(0) >= crate::planner::MAX_REPLANS {
+            return Err(CoreError::BadRequest(
+                "Questo piano è già stato ripianificato più volte: decidi tu come proseguire."
+                    .into(),
+            ));
+        }
+        let goal = doc["goal"].as_str().unwrap_or_default().to_string();
+        self.plan_model_request(&goal, Some(&doc))
+    }
+
+    fn plan_model_request(
+        &self,
+        goal: &str,
+        stopped: Option<&Value>,
+    ) -> Result<Option<crate::cloud::AgentRequest>, CoreError> {
+        if crate::permissions::emergency_active(&self.cfg.data_dir) {
+            return Err(CoreError::Unavailable(
+                "Arresto di emergenza attivo: non propongo piani finché non lo disattivi.".into(),
+            ));
+        }
         let goal = goal.trim();
         if goal.is_empty() || goal.chars().count() > 300 {
             return Err(CoreError::BadRequest(
@@ -114,12 +156,24 @@ impl Jarvis {
                 }
             })
             .collect();
+        let (system, ask) = match stopped {
+            Some(doc) => {
+                let report = crate::planner::replan_report(doc);
+                if crate::cloud::contains_credentials(&report) {
+                    return Err(CoreError::BadRequest(
+                        "Il piano contiene una credenziale: non lo invio al modello.".into(),
+                    ));
+                }
+                (crate::planner::replan_system_prompt(&tools), report)
+            }
+            None => (crate::planner::system_prompt(&tools), goal.to_string()),
+        };
         Ok(Some(crate::cloud::AgentRequest::new(
             provider,
             model,
             key,
-            crate::planner::system_prompt(&tools),
-            goal.to_string(),
+            system,
+            ask,
             Vec::new(),
             Vec::new(),
             self.cloud_limiter.clone(),
@@ -133,6 +187,37 @@ impl Jarvis {
         answer: Result<crate::cloud::Answer, crate::cloud::Failure>,
         provider: crate::cloud::Provider,
         create: bool,
+    ) -> Result<Value, CoreError> {
+        self.plan_finish(goal, answer, provider, create, None)
+    }
+
+    /// Chiude la ripianificazione di `id`: il piano di recupero è una nuova bozza collegata all'originale.
+    pub fn plan_replan_finish(
+        &mut self,
+        id: &str,
+        answer: Result<crate::cloud::Answer, crate::cloud::Failure>,
+        provider: crate::cloud::Provider,
+        create: bool,
+    ) -> Result<Value, CoreError> {
+        let parent = self.plan_load(id)?;
+        let depth = parent["replan_depth"].as_u64().unwrap_or(0) + 1;
+        let goal = parent["goal"].as_str().unwrap_or_default().to_string();
+        self.plan_finish(
+            &goal,
+            answer,
+            provider,
+            create,
+            Some((id.to_string(), depth)),
+        )
+    }
+
+    fn plan_finish(
+        &mut self,
+        goal: &str,
+        answer: Result<crate::cloud::Answer, crate::cloud::Failure>,
+        provider: crate::cloud::Provider,
+        create: bool,
+        parent: Option<(String, u64)>,
     ) -> Result<Value, CoreError> {
         let text = match answer {
             Ok(crate::cloud::Answer::Text(t)) => t,
@@ -155,17 +240,42 @@ impl Jarvis {
         };
         let proposal =
             crate::planner::proposal(&text, goal, &known, &risk).map_err(CoreError::BadRequest)?;
-        self.record_owner_action("plan.propose")?;
+        self.record_owner_action(if parent.is_some() {
+            "plan.replan"
+        } else {
+            "plan.propose"
+        })?;
+        let mut proposal = proposal;
+        if let Some((from, depth)) = &parent {
+            proposal["replan_of"] = json!(from);
+            proposal["replan_depth"] = json!(depth);
+        }
         if !create {
             return Ok(json!({"created": false, "proposal": proposal}));
         }
         let mut input = proposal.clone();
-        for key in ["proposed_by", "max_risk", "risk_by_step"] {
+        for key in [
+            "proposed_by",
+            "max_risk",
+            "risk_by_step",
+            "replan_of",
+            "replan_depth",
+        ] {
             input.as_object_mut().map(|o| o.remove(key));
         }
         let mut doc = self.plan_create(&input)?;
         doc["proposed_by"] = proposal["proposed_by"].clone();
         doc["max_risk"] = proposal["max_risk"].clone();
+        if let Some((from, depth)) = &parent {
+            doc["replan_of"] = json!(from);
+            doc["replan_depth"] = json!(depth);
+            event(
+                &mut doc,
+                "",
+                "replanned",
+                format!("Ripianificazione del piano {from}"),
+            );
+        }
         self.plan_save(&mut doc)?;
         Ok(json!({"created": true, "proposal": proposal, "plan": doc}))
     }

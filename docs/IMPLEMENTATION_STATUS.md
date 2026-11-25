@@ -1,7 +1,7 @@
 # Stato di implementazione
 
 Fonte autorevole dello stato di ogni requisito dell'evoluzione «piattaforma di intelligenza artificiale personale».
-Aggiornata il 2026-11-25 sul codice di `main` più la PR in corso (ADR fino alla 0160). Legenda: **Implementato** (funziona end-to-end ed è
+Aggiornata il 2026-11-25 sul codice di `main` più la PR in corso (ADR fino alla 0161). Legenda: **Implementato** (funziona end-to-end ed è
 verificato da test), **Parziale** (funziona in parte: il limite è indicato), **Sperimentale** (c'è, non maturo),
 **Pianificato** (assente). Nessuna voce è un segnaposto: ciò che non esiste è dichiarato «Pianificato».
 Verifiche ed esiti per revisione: [ROADMAP.md](ROADMAP.md). Piano dei passi successivi: [IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md).
@@ -60,7 +60,7 @@ dinamico di strumenti: **Pianificato**.
 | Annullamento, budget di passi e di tempo, timeout, ripetizioni | Implementato | |
 | Human-in-the-loop, rollback, replay, idempotenza | Implementato | |
 | Esecuzione parallela dei passi | Implementato | fino a 4 passi indipendenti e senza stato insieme; i passi con stato o conferma restano in sequenza (ADR-0154) |
-| Scomposizione automatica dell'obiettivo, ripianificazione | Parziale | missioni e agenti guidati dal modello; modelli di piano per le procedure ricorrenti (ADR-0159); **il modello cloud propone una bozza di piano che il Core valida** (ADR-0160); la ripianificazione automatica dopo un errore non c'è |
+| Scomposizione automatica dell'obiettivo, ripianificazione | Parziale | missioni e agenti guidati dal modello; modelli di piano per le procedure ricorrenti (ADR-0159); **il modello cloud propone una bozza di piano che il Core valida** (ADR-0160); dopo un errore `POST /api/plans/{id}/replan` propone un piano di recupero, sempre come bozza (ADR-0161); l'esecuzione automatica del recupero non c'è |
 | Validazione dei risultati | Implementato | condizioni `expect` per passo; manca un controllo indipendente guidato da un secondo modello |
 | Ciclo di 14 fasi dichiarato | Parziale | contesto, vincoli, permessi, esecuzione, consegna e memoria esistono; pianificazione e validazione non sono ancora un unico ciclo |
 

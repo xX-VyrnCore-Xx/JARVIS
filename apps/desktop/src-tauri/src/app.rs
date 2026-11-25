@@ -2395,6 +2395,22 @@ impl JarvisApp {
                         Some(json!({"confirm": true})),
                     );
                 }
+                if matches!(
+                    detail["status"].as_str(),
+                    Some("failed" | "cancelled" | "interrupted")
+                ) && ui
+                    .small_button("Ripianifica (bozza di recupero)")
+                    .on_hover_text(
+                        "Il modello propone un piano di recupero: resta una bozza da rivedere",
+                    )
+                    .clicked()
+                {
+                    self.act(
+                        ctx,
+                        format!("/api/plans/{id}/replan"),
+                        Some(json!({"create": true})),
+                    );
+                }
                 ui.add_space(4.0);
                 ui.label(egui::RichText::new("Cronologia").strong());
                 for event in detail["events"]

@@ -1828,6 +1828,12 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     Button("Annulla") { mutate("/api/plans/\(id)/cancel", body: [:]) }
                 }
                 Button("Replay") { mutate("/api/plans/\(id)/replay", body: [:]) }
+                if ["failed", "cancelled", "interrupted"].contains(status) {
+                    Button("Ripianifica", systemImage: "arrow.triangle.2.circlepath") {
+                        mutate("/api/plans/\(id)/replan", body: ["create": true])
+                    }
+                    .help("Il modello propone un piano di recupero: resta una bozza da rivedere")
+                }
             }
         case .missions:
             let id = urlSegment(item.id)
