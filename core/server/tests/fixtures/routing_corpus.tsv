@@ -99,3 +99,13 @@ Aiutami a organizzare la giornata|general_assistant
 Non so cosa fare, consigliami qualcosa|general_assistant
 Cosa sei in grado di fare?|general_assistant
 Occupatene tu, fammi sapere cosa serve|general_assistant
+Fallo partire|system/coding/general_assistant
+Sistema tutto|general_assistant
+Cerca quella cosa di ieri|memory
+Controlla che sia tutto a posto|system/coding/monitoring/general_assistant
+Aggiorna tutto|system/coding/general_assistant
+Mettilo online|general_assistant
+Fai come l'altra volta|memory/automation
+Non funziona un cazzo|coding/system/general_assistant
+Tieni d'occhio questa cosa|automation
+Fai tu, basta che funzioni|general_assistant
