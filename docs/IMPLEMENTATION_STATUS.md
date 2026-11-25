@@ -1,7 +1,7 @@
 # Stato di implementazione
 
 Fonte autorevole dello stato di ogni requisito dell'evoluzione «piattaforma di intelligenza artificiale personale».
-Aggiornata il 2026-11-25 sul codice di `main` più la PR in corso. Legenda: **Implementato** (funziona end-to-end ed è
+Aggiornata il 2026-11-25 sul codice di `main` più la PR in corso (ADR fino alla 0159). Legenda: **Implementato** (funziona end-to-end ed è
 verificato da test), **Parziale** (funziona in parte: il limite è indicato), **Sperimentale** (c'è, non maturo),
 **Pianificato** (assente). Nessuna voce è un segnaposto: ciò che non esiste è dichiarato «Pianificato».
 Verifiche ed esiti per revisione: [ROADMAP.md](ROADMAP.md). Piano dei passi successivi: [IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md).
@@ -15,15 +15,15 @@ Verifiche ed esiti per revisione: [ROADMAP.md](ROADMAP.md). Piano dei passi succ
 | Execution engine | Implementato | validazione, policy, conferma, esecuzione, audit |
 | Selection engine | Parziale | Instradamento agenti per parole chiave e competenze; nessuna selezione appresa |
 | Permission manager | Implementato | policy, profili e regole del proprietario (ADR-0116), arresto di emergenza |
-| Validation engine | Parziale | input validato a ogni chiamata; l'output non è validato contro `output_schema` |
+| Validation engine | Parziale | input validato a ogni chiamata; nei piani anche le condizioni di successo sul risultato (`expect`); l'output non è validato contro `output_schema` |
 | Dependency manager | Parziale | dipendenze dichiarate; stato di Docker; nessuna installazione automatica |
 | Lifecycle manager | Parziale | blocco/sblocco e conferma per regola; nessuna installazione o rimozione di strumenti nativi |
 | Health monitor / History | Implementato | `GET /api/tools/health`, `/history` (ADR-0151) |
 | Versioning | Parziale | versione esatta richiesta dalla policy; nessuna coesistenza di più versioni |
-| Chaining / Composition | Implementato | piani con riferimenti fra passi (ADR-0152) e workflow |
+| Chaining / Composition | Implementato | piani con riferimenti fra passi, condizioni di successo, modelli di piano (ADR-0152, 0154, 0159) e workflow |
 | Tool SDK | Pianificato | esiste la procedura documentata, non un pacchetto per autori esterni |
 | Plugin manager | Parziale | connettori con manifest e n8n; nessun plugin nativo |
-| MCP | Parziale | server `/api/mcp` (strumenti di calcolo e sola lettura); nessun client MCP |
+| MCP | Implementato | server `/api/mcp` (calcolo e sola lettura) e **client** con server autorizzati dal proprietario, conferma sempre richiesta e risultati non attendibili (ADR-0156); manca lo streaming SSE |
 
 ## 2. Strumenti operativi
 
@@ -35,17 +35,17 @@ cifrato con verifica: **Parziale**. Servizi, configurazione di sistema, pacchett
 **Sviluppo e infrastruttura.** Esecuzione di codice (sandbox Docker senza rete, profili di risorse): **Implementato**.
 Analisi del codice (sintassi Python, JSON), generazione di codice (guidata dal modello e dalle competenze di sviluppo),
 GitHub e GitLab (connettori), Docker (stato e sandbox; nessuna gestione dei container), nodi remoti, debug e test (competenze +
-sandbox), audit di sicurezza (`security.*` + competenza), integrazione API (connettori): **Parziale**. Git, SSH,
-virtualizzazione, database, build, deploy, CI/CD, dipendenze, analisi dei log: **Pianificato** (oggi si usano attraverso il
-terminale con conferma o la sandbox).
+sandbox), audit di sicurezza (`security.*` + competenza), integrazione API (connettori): **Parziale**. Git (stato, cronologia, differenze, rami in sola lettura; commit con conferma), analisi dei log e
+dipendenze (lettura dei manifest con segnalazione di quelle non fissate): **Implementato**. SSH, virtualizzazione,
+database, build, deploy, CI/CD: **Pianificato** (oggi si usano attraverso il terminale con conferma o la sandbox).
 
 **Web e ricerca.** Ricerca, pagina con browser reale, compilazione di moduli (con conferma), estrazione: **Implementato**.
 Ricerca con più fonti e confronto (competenza «ricerca»), documentazione: **Parziale**. Download, monitoraggio di siti:
 **Pianificato**.
 
 **Produttività.** Cose da fare, note, promemoria, calcolo, analisi dei dati (`data.stats`, `biz.*`), notifiche: **Implementato**.
-Posta e calendario (Gmail, Outlook, Google Calendar tramite connettori; richiedono la configurazione OAuth del proprietario),
-progetti (missioni, piani, cose da fare): **Parziale**. PDF, fogli di calcolo, presentazioni, contatti: **Pianificato**.
+Riepilogo di tabelle CSV (`table.summary`): **Implementato**. Posta e calendario (Gmail, Outlook, Google Calendar tramite connettori; richiedono la configurazione OAuth del proprietario),
+progetti (missioni, piani, cose da fare): **Parziale**. PDF, fogli XLSX, presentazioni, contatti, appunti: **Pianificato**.
 
 **IA e multimodale.** Memoria semantica, episodica e procedurale con grafo, recupero, riconoscimento e sintesi vocale (voce
 maschile), OCR locale, delega agli agenti, scelta del modello: **Implementato**. Pianificazione (piani scritti dal
@@ -59,9 +59,9 @@ dinamico di strumenti: **Pianificato**.
 | Grafo delle dipendenze, checkpoint, persistenza, ripresa | Implementato | piani cifrati nel database; ripresa dopo la chiusura |
 | Annullamento, budget di passi e di tempo, timeout, ripetizioni | Implementato | |
 | Human-in-the-loop, rollback, replay, idempotenza | Implementato | |
-| Esecuzione parallela dei passi | Pianificato | oggi un passo alla volta |
-| Scomposizione automatica dell'obiettivo, ripianificazione | Parziale | missioni e agenti guidati dal modello; il piano a grafo si scrive a mano o via API |
-| Validazione indipendente dei risultati | Pianificato | |
+| Esecuzione parallela dei passi | Implementato | fino a 4 passi indipendenti e senza stato insieme; i passi con stato o conferma restano in sequenza (ADR-0154) |
+| Scomposizione automatica dell'obiettivo, ripianificazione | Parziale | missioni e agenti guidati dal modello; modelli di piano per le procedure ricorrenti (ADR-0159); il piano a grafo nuovo si scrive a mano o via API |
+| Validazione dei risultati | Implementato | condizioni `expect` per passo; manca un controllo indipendente guidato da un secondo modello |
 | Ciclo di 14 fasi dichiarato | Parziale | contesto, vincoli, permessi, esecuzione, consegna e memoria esistono; pianificazione e validazione non sono ancora un unico ciclo |
 
 ## 4. Intelligenza avanzata
@@ -71,21 +71,21 @@ dinamico di strumenti: **Pianificato**.
 | Proattività | Implementato | briefing quotidiano e settimanale, disco, conferme, automazioni in errore, cose lasciate indietro (ADR-0097, 0142) |
 | Consapevolezza del contesto | Parziale | profilo, ora del giorno, memoria, chat; non il contesto applicativo/di progetto |
 | Memoria persistente | Implementato | semantica, episodica, procedurale, ricordi fissati, scadenze, modifica, cancellazione |
-| Apprendimento adattivo | Parziale | preferenze («preferisco…»), valutazioni delle risposte per modello; nessun apprendimento di procedure |
+| Apprendimento adattivo | Parziale | preferenze, valutazioni delle risposte per modello e **procedure salvate dal proprietario** come modelli di piano (ADR-0159); nulla viene appreso da solo |
 | Auto-riparazione | Parziale | ripiego di modello, pulizia dei container rimasti, notifiche di errore, piani interrotti riprendibili |
 | Auto-valutazione | Parziale | valutazioni e profili di risposta; nessun controllo indipendente dei risultati |
 | Assistenza predittiva | Parziale | suggerimenti dei briefing; senza azioni non autorizzate |
 | Automazione in linguaggio naturale | Parziale | «ogni giorno alle 08:00 …» offline e `workflow.create`; grammatica limitata |
-| Automazione guidata da eventi | Parziale | calendario e webhook dei connettori; non modifiche di file o risorse |
-| Digital Environment Twin | Pianificato | esistono elenchi separati (dispositivi, nodi, sistema) |
+| Automazione guidata da eventi | Implementato | calendario, webhook dei connettori e **modifiche di file e cartelle** della workspace (ADR-0158); non variazioni di risorse di sistema |
+| Digital Environment Twin | Implementato | `GET /api/twin`: dispositivi, nodi, servizi, connettori, progetti e capacità, senza segreti (ADR-0157); aggiornato a ogni richiesta, non in modo continuo |
 | Auto-miglioramento controllato | Pianificato | JARVIS non modifica il proprio codice, le policy né i privilegi |
 
 ## 5. Multi-agente ([AUTONOMOUS_ENGINE.md](AUTONOMOUS_ENGINE.md))
 
 Registro, scoperta e mappatura delle competenze (`GET /api/agents`), spiegazione dell'instradamento, delega con contesto
-isolato e ambito di strumenti concesso, protocollo di delega a contratto: **Implementato**. Contesto condiviso e collaborazione
-fra agenti: **Parziale** (delega a un agente alla volta). Supervisione, risoluzione dei conflitti, valutazione e gestione
-delle risorse per agente: **Pianificato** (esistono limiti di passi per agente).
+isolato e ambito di strumenti concesso, protocollo di delega a contratto: **Implementato**. Valutazione delle prestazioni per agente (lavori, successo, durata): **Implementato** (ADR-0157). Contesto condiviso e collaborazione
+fra agenti: **Parziale** (delega a un agente alla volta). Supervisione attiva, risoluzione dei conflitti e quote di risorse per agente:
+**Pianificato** (esistono limiti di passi per agente).
 
 ## 6. IA ibrida e instradamento ([AI_SYSTEM.md](AI_SYSTEM.md))
 

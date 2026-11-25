@@ -248,6 +248,14 @@ function check(condition, message) {
   check(emergency.status === 200 && emergency.json?.active === false, "arresto di emergenza spento");
   const tailscale = await request("/api/tailscale", { token: ownerToken });
   check(tailscale.status === 200 && typeof tailscale.json?.installed === "boolean" && tailscale.json?.allowed === false, "stato di Tailscale senza autorizzare indirizzi");
+  const templates = await request("/api/plans/templates", { token: ownerToken });
+  check(templates.status === 200 && templates.json?.items?.some((i) => i.builtin === true), "modelli di piano incorporati");
+  const twin = await request("/api/twin", { token: ownerToken });
+  check(twin.status === 200 && twin.json && !JSON.stringify(twin.json).includes(ownerToken), "gemello dell'ambiente senza segreti");
+  const mcpServers = await request("/api/mcp/servers", { token: ownerToken });
+  check(mcpServers.status === 200, "elenco dei server MCP autorizzati");
+  const watches = await request("/api/watches", { token: ownerToken });
+  check(watches.status === 200, "elenco delle osservazioni di file");
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

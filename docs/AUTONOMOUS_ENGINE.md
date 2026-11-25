@@ -40,8 +40,20 @@ Limiti: al massimo 20 passi, budget di tempo (predefinito 120 s, massimo 900 s) 
 - **Cronologia**: ogni piano ha una lista di eventi (creazione, avvio, passi, ripetizioni, attese, conclusione).
 - Stati: `pending`, `running`, `waiting`, `succeeded`, `failed`, `cancelled`, `budget_exceeded`, `interrupted`.
 
-Non implementati: esecuzione **parallela** dei passi indipendenti, scomposizione automatica di un obiettivo in un piano,
-ripianificazione guidata dal modello e validazione indipendente dei risultati (vedi roadmap).
+- **Parallelismo** (ADR-0154): i passi pronti, indipendenti e senza stato (`toolsys::parallel_safe`) girano insieme, fino a 4;
+  policy e audit restano sequenziali e prima dell'esecuzione. Gli strumenti con stato o con conferma restano in sequenza.
+- **Condizioni di successo**: `expect: [{field, op, value}]` per passo (`exists`, `not_empty`, `eq`, `ne`, `gt`, `ge`, `lt`, `le`,
+  `contains`); se non sono soddisfatte il passo fallisce con `plan.expectation_failed`.
+- **Modelli** (ADR-0159): `GET /api/plans/templates`, `POST /api/plans/from-template` (parametri `{{nome}}`), salvataggio di un
+  piano riuscito come procedura (`POST /api/plans/templates`). Nulla è appreso da solo: la procedura la approva il proprietario.
+
+Non implementati: scomposizione automatica di un obiettivo nuovo in un piano e ripianificazione guidata dal modello (vedi roadmap).
+
+## Eventi e ambiente (ADR-0157, 0158)
+
+`/api/watches` collega un file o una cartella della workspace a un workflow: un cambiamento lo avvia una sola volta (esecuzione
+di tipo `event`). `GET /api/twin` descrive l'ambiente a cui JARVIS ha accesso (dispositivi, nodi, servizi, connettori, progetti,
+capacità) senza segreti né contenuti.
 
 ## Arresto di emergenza (ADR-0151)
 
@@ -52,7 +64,7 @@ sono sempre registrati. Si disattiva solo dal computer del proprietario.
 ## Agenti (ADR-0153)
 
 `GET /api/agents` elenca gli agenti: sette specialisti (sicurezza, ricerca, sistemi, automazione, memoria, business, coding)
-con competenze, strumenti concessi, rischio massimo e contesto **isolato**, più il generalista. `GET /api/agents/route?q=`
+con competenze, strumenti concessi, rischio massimo e contesto **isolato**, più il generalista, con le prestazioni di ciascuno (lavori, successo, durata). `GET /api/agents/route?q=
 spiega perché una richiesta va a un agente (parole chiave attivate). `GET /api/models/route?q=` spiega la rotta per compito,
 il modello per provider e la riservatezza (credenziali bloccate), senza inviare nulla. La delega (ADR-0040) assegna a un agente
 isolato solo gli strumenti del suo ambito.

@@ -1,0 +1,45 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "table.summary",
+  "version": "1.0.0",
+  "summary": "Riepilogo di una tabella CSV (file della workspace o testo): colonne, tipi, statistiche e valori più frequenti",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {
+      "path": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300
+      },
+      "text": {
+        "type": "string",
+        "maxLength": 200000
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.workspace:read"
+  ],
+  "errors": [
+    "table.empty",
+    "table.too_large",
+    "table.invalid",
+    "fs.not_found",
+    "fs.too_large",
+    "fs.outside_workspace"
+  ],
+  "timeout_ms": 15000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

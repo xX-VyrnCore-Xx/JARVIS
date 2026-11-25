@@ -267,6 +267,8 @@ enum Event {
     ChatExported(Result<Value, String>),
     /// Dettaglio di un piano di esecuzione (ADR-0152).
     PlanDetail(Result<Value, String>),
+    /// Modelli di piano (ADR-0159).
+    PlanTemplates(Result<Value, String>),
     /// Comando pronunciato dopo «Hey Jarvis» (ADR-0140).
     #[cfg_attr(not(windows), allow(dead_code))]
     WakeCommand(String),
@@ -320,6 +322,9 @@ pub struct JarvisApp {
     tools_query: String,
     tools_category: String,
     plan_selected: Option<String>,
+    plan_templates: Vec<Value>,
+    plan_templates_loaded: bool,
+    template_params: std::collections::HashMap<String, String>,
     plan_detail: Option<Value>,
     plan_polled: Instant,
     emergency_active: bool,
@@ -479,6 +484,9 @@ impl JarvisApp {
             tools_query: String::new(),
             tools_category: String::new(),
             plan_selected: None,
+            plan_templates: Vec::new(),
+            plan_templates_loaded: false,
+            template_params: std::collections::HashMap::new(),
             plan_detail: None,
             plan_polled: Instant::now(),
             emergency_active: false,
@@ -624,6 +632,12 @@ impl JarvisApp {
                             self.load_conversations();
                         }
                         Err(error) => self.error = Some(error),
+                    }
+                    ctx.request_repaint();
+                }
+                Event::PlanTemplates(result) => {
+                    if let Ok(doc) = result {
+                        self.plan_templates = doc["items"].as_array().cloned().unwrap_or_default();
                     }
                     ctx.request_repaint();
                 }
@@ -2128,12 +2142,22 @@ impl JarvisApp {
             "Attività complesse eseguite un passo alla volta, con dipendenze, budget di tempo, conferme del \
              proprietario, annullamento degli effetti e cronologia. Si creano da API o dall'assistente.",
         );
+        if !self.plan_templates_loaded {
+            self.plan_templates_loaded = true;
+            if let Some(client) = self.client.clone() {
+                let tx = self.tx.clone();
+                std::thread::spawn(move || {
+                    let _ = tx.send(Event::PlanTemplates(client.get("/api/plans/templates")));
+                });
+            }
+        }
+        self.show_plan_templates(ui, ctx);
         let Some(data) = self.data.clone() else {
             return;
         };
         let items = data["items"].as_array().cloned().unwrap_or_default();
         if items.is_empty() {
-            ui.label("Nessun piano. Crea il primo con POST /api/plans.");
+            ui.label("Nessun piano ancora: avviane uno da un modello qui sopra.");
         }
         for plan in items {
             let id = plan["id"].as_str().unwrap_or("").to_owned();
@@ -2186,6 +2210,64 @@ impl JarvisApp {
             ui.add_space(4.0);
         }
         self.show_plan_detail(ui, ctx);
+    }
+
+    /// Procedure pronte (ADR-0159): un gesto crea e avvia il piano, con i parametri richiesti.
+    fn show_plan_templates(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if self.plan_templates.is_empty() {
+            return;
+        }
+        egui::CollapsingHeader::new("Procedure pronte")
+            .default_open(true)
+            .show(ui, |ui| {
+                for template in self.plan_templates.clone() {
+                    let name = template["name"].as_str().unwrap_or("").to_owned();
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(egui::RichText::new(&name).strong());
+                        ui.label(
+                            egui::RichText::new(template["description"].as_str().unwrap_or(""))
+                                .weak(),
+                        );
+                    });
+                    let mut ready = true;
+                    let mut params = serde_json::Map::new();
+                    for spec in template["params"].as_array().into_iter().flatten() {
+                        let param = spec["name"].as_str().unwrap_or("");
+                        let key = format!("{name}.{param}");
+                        let text = self.template_params.entry(key).or_default();
+                        ui.horizontal(|ui| {
+                            ui.label(param);
+                            ui.add(
+                                egui::TextEdit::singleline(text)
+                                    .desired_width(200.0)
+                                    .hint_text(spec["default"].as_str().unwrap_or(
+                                        if spec["required"] == true {
+                                            "obbligatorio"
+                                        } else {
+                                            ""
+                                        },
+                                    )),
+                            );
+                        });
+                        if !text.trim().is_empty() {
+                            params.insert(param.to_owned(), json!(text.trim()));
+                        } else if spec["required"] == true {
+                            ready = false;
+                        }
+                    }
+                    if ui
+                        .add_enabled(ready, egui::Button::new("Crea e avvia"))
+                        .clicked()
+                    {
+                        self.act(
+                            ctx,
+                            "/api/plans/from-template".into(),
+                            Some(json!({"template": name, "params": params, "run": true})),
+                        );
+                    }
+                    ui.separator();
+                }
+            });
     }
 
     fn show_plan_detail(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {

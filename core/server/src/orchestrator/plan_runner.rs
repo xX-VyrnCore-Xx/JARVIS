@@ -80,6 +80,101 @@ impl Jarvis {
         Ok(json!({"items": items}))
     }
 
+    fn user_templates(&self) -> Vec<Value> {
+        std::fs::read(self.cfg.data_dir.join("plan-templates.json"))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .and_then(|v| v["templates"].as_array().cloned())
+            .unwrap_or_default()
+    }
+
+    /// Modelli di piano: incorporati e quelli salvati dal proprietario (procedure approvate).
+    pub fn plan_templates(&self) -> Value {
+        let mut items: Vec<Value> = serde_json::from_str::<Vec<Value>>(plans::BUILTIN_TEMPLATES)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|mut t| {
+                t["builtin"] = json!(true);
+                t
+            })
+            .collect();
+        items.extend(self.user_templates().into_iter().map(|mut t| {
+            t["builtin"] = json!(false);
+            t
+        }));
+        json!({"items": items})
+    }
+
+    /// Crea un piano da un modello e dai parametri.
+    pub fn plan_from_template(&mut self, body: &Value) -> Result<Value, CoreError> {
+        let name = body["template"].as_str().unwrap_or_default();
+        let templates = self.plan_templates();
+        let template = templates["items"]
+            .as_array()
+            .and_then(|l| l.iter().find(|t| t["name"] == name))
+            .ok_or_else(|| CoreError::NotFound(format!("Modello «{name}» non trovato")))?;
+        let mut plan =
+            plans::instantiate(template, &body["params"]).map_err(CoreError::BadRequest)?;
+        plan["idempotency_key"] = body["idempotency_key"].clone();
+        self.plan_create(&plan)
+    }
+
+    /// Salva un piano come procedura riutilizzabile. Solo il proprietario: nulla viene appreso da solo.
+    pub fn plan_template_save(&mut self, body: &Value) -> Result<Value, CoreError> {
+        let plan = self.plan_load(body["plan_id"].as_str().unwrap_or_default())?;
+        let template = plans::template_from_plan(
+            &plan,
+            body["name"].as_str().unwrap_or_default(),
+            body["description"].as_str().unwrap_or_default(),
+        )
+        .map_err(CoreError::BadRequest)?;
+        let name = template["name"].as_str().unwrap_or_default().to_string();
+        let builtin: Vec<Value> =
+            serde_json::from_str(plans::BUILTIN_TEMPLATES).unwrap_or_default();
+        if builtin.iter().any(|t| t["name"] == name.as_str()) {
+            return Err(CoreError::BadRequest(
+                "Il nome è di un modello incorporato".into(),
+            ));
+        }
+        let mut saved: Vec<Value> = self
+            .user_templates()
+            .into_iter()
+            .filter(|t| t["name"] != name.as_str())
+            .collect();
+        if saved.len() >= 30 {
+            return Err(CoreError::BadRequest(
+                "Al massimo 30 modelli personali".into(),
+            ));
+        }
+        saved.push(template.clone());
+        std::fs::write(
+            self.cfg.data_dir.join("plan-templates.json"),
+            json!({"templates": saved}).to_string(),
+        )
+        .map_err(|e| CoreError::Internal(e.to_string()))?;
+        self.record_owner_action("plan.template.save")?;
+        Ok(template)
+    }
+
+    pub fn plan_template_delete(&mut self, name: &str) -> Result<Value, CoreError> {
+        let before = self.user_templates();
+        let kept: Vec<Value> = before
+            .iter()
+            .filter(|t| t["name"] != name)
+            .cloned()
+            .collect();
+        if kept.len() == before.len() {
+            return Err(CoreError::NotFound("Modello personale non trovato".into()));
+        }
+        std::fs::write(
+            self.cfg.data_dir.join("plan-templates.json"),
+            json!({"templates": kept}).to_string(),
+        )
+        .map_err(|e| CoreError::Internal(e.to_string()))?;
+        self.record_owner_action("plan.template.delete")?;
+        Ok(self.plan_templates())
+    }
+
     pub fn plan_get(&self, id: &str) -> Result<Value, CoreError> {
         self.plan_load(id)
     }
@@ -194,42 +289,8 @@ impl Jarvis {
         confirmed: bool,
     ) -> Result<(&'static str, Value), CoreError> {
         let task = Task::new(goal, json!({"kind": "owner", "id": "owner"}));
-        let version = self
-            .catalog
-            .get(tool)
-            .map(|t| t.version().to_string())
-            .unwrap_or_default();
-        let digest =
-            canonical_digest(&json!({"tool": tool, "version": version, "arguments": arguments}));
-        let (tid, corr) = (task.id(), task.correlation());
-        let decision = policy::decide(
-            &self.catalog,
-            &self.cfg.web,
-            &policy::Request {
-                subject: json!({"kind": "agent", "id": "planner"}),
-                task_id: &tid,
-                correlation_id: &corr,
-                tool,
-                version: &version,
-                arguments,
-                digest: &digest,
-                perms: &crate::permissions::Rules::load(&self.cfg.data_dir),
-            },
-        );
-        // «require_confirmation» passa solo se il proprietario ha approvato esplicitamente il passo.
-        let allowed = decision["decision"] == "allow"
-            || (decision["decision"] == "require_confirmation" && confirmed);
-        self.audit(json!({
-            "correlation_id": corr, "task_id": tid, "actor": {"kind": "agent", "id": "planner"}, "node": "core-local",
-            "action": decision["request"]["action"]["tool"], "decision_id": decision["decision_id"],
-            "outcome": if allowed { "allowed" } else { "denied" },
-        }))?;
-        if !allowed {
-            let code = decision["reasons"][0].as_str().unwrap_or("policy.denied");
-            return Ok((
-                "denied",
-                json!({"code": code, "message": policy::explain(code)}),
-            ));
+        if let Err(denied) = self.plan_authorize(&task, tool, arguments, confirmed)? {
+            return Ok(("denied", denied));
         }
         let mut out = Outcome::default();
         self.run_tool(&task, tool, arguments, confirmed, &mut out)
@@ -304,68 +365,12 @@ impl Jarvis {
             self.plan_save(&mut doc)?;
             return Ok(doc);
         };
-        let step = doc["steps"][index].clone();
-        let step_id = step["id"].as_str().unwrap_or_default().to_string();
-        let tool = step["tool"].as_str().unwrap_or_default().to_string();
-        let rules = crate::permissions::Rules::load(&self.cfg.data_dir);
-        let approved = step["approved"] == true;
-        if self.requires_confirmation(&tool, &rules) && !approved {
-            doc["steps"][index]["status"] = json!("waiting_confirmation");
-            doc["status"] = json!("waiting");
-            event(
-                &mut doc,
-                &step_id,
-                "waiting_confirmation",
-                format!("{tool} richiede la conferma del proprietario"),
-            );
-            self.plan_save(&mut doc)?;
+        let batch = self.parallel_batch(&doc, index);
+        if batch.len() >= 2 {
+            self.plan_run_batch(&mut doc, &batch)?;
+        } else if self.plan_run_single(&mut doc, index)? {
+            // Il piano si è fermato in attesa di conferma: già salvato.
             return Ok(doc);
-        }
-        let arguments = match plans::resolve(&step["arguments"], &doc) {
-            Ok(arguments) => arguments,
-            Err(message) => {
-                finish_step(
-                    &mut doc,
-                    index,
-                    "failed",
-                    json!({"code": "plan.bad_reference", "message": message}),
-                );
-                event(&mut doc, &step_id, "failed", "Riferimento non risolvibile");
-                after_failure(&mut doc, index);
-                self.plan_save(&mut doc)?;
-                return Ok(doc);
-            }
-        };
-        doc["steps"][index]["status"] = json!("running");
-        if doc["steps"][index]["started_at"].is_null() {
-            doc["steps"][index]["started_at"] = json!(now());
-        }
-        let goal = doc["goal"].as_str().unwrap_or_default().to_string();
-        let (status, output) = self.plan_exec(&goal, &tool, &arguments, approved)?;
-        doc["steps_executed"] = json!(doc["steps_executed"].as_u64().unwrap_or(0) + 1);
-        let attempts = doc["steps"][index]["attempts"].as_u64().unwrap_or(0) + 1;
-        doc["steps"][index]["attempts"] = json!(attempts);
-        if status == "succeeded" {
-            finish_step(&mut doc, index, "done", plans::clip_output(&output));
-            event(&mut doc, &step_id, "done", format!("{tool} eseguito"));
-        } else if status != "denied" && attempts <= step["retries"].as_u64().unwrap_or(0) {
-            doc["steps"][index]["status"] = json!("pending");
-            doc["steps"][index]["error"] = output.clone();
-            event(
-                &mut doc,
-                &step_id,
-                "retry",
-                format!("Tentativo {attempts} non riuscito: nuovo tentativo"),
-            );
-        } else {
-            finish_step(&mut doc, index, "failed", output.clone());
-            event(
-                &mut doc,
-                &step_id,
-                "failed",
-                output["code"].as_str().unwrap_or("errore").to_string(),
-            );
-            after_failure(&mut doc, index);
         }
         plans::skip_blocked(&mut doc);
         if plans::next_ready(&doc).is_none() {
@@ -383,6 +388,246 @@ impl Jarvis {
         }
         self.plan_save(&mut doc)?;
         Ok(doc)
+    }
+
+    /// Passi pronti che possono girare insieme al primo: indipendenti, senza stato e senza conferma da attendere.
+    fn parallel_batch(&self, doc: &Value, first: usize) -> Vec<usize> {
+        let rules = crate::permissions::Rules::load(&self.cfg.data_dir);
+        let eligible = |i: usize| -> bool {
+            let step = &doc["steps"][i];
+            let tool = step["tool"].as_str().unwrap_or_default();
+            crate::toolsys::parallel_safe(tool)
+                && (!self.requires_confirmation(tool, &rules) || step["approved"] == true)
+        };
+        if !eligible(first) {
+            return Vec::new();
+        }
+        let mut batch = vec![first];
+        let steps = doc["steps"].as_array().cloned().unwrap_or_default();
+        for (i, step) in steps.iter().enumerate() {
+            if i == first || batch.len() >= plans::MAX_PARALLEL || step["status"] != "pending" {
+                continue;
+            }
+            let ready = step["depends_on"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .all(|d| steps.iter().any(|s| s["id"] == d && s["status"] == "done"));
+            if ready && eligible(i) {
+                batch.push(i);
+            }
+        }
+        batch
+    }
+
+    /// Autorizza una chiamata (policy e audit) senza eseguirla. `Err` porta il risultato di un rifiuto.
+    fn plan_authorize(
+        &mut self,
+        task: &Task,
+        tool: &str,
+        arguments: &Value,
+        confirmed: bool,
+    ) -> Result<Result<(), Value>, CoreError> {
+        let version = self
+            .catalog
+            .get(tool)
+            .map(|t| t.version().to_string())
+            .unwrap_or_default();
+        let digest =
+            canonical_digest(&json!({"tool": tool, "version": version, "arguments": arguments}));
+        let (tid, corr) = (task.id(), task.correlation());
+        let decision = policy::decide(
+            &self.catalog,
+            &self.cfg.web,
+            &policy::Request {
+                subject: json!({"kind": "agent", "id": "planner"}),
+                task_id: &tid,
+                correlation_id: &corr,
+                tool,
+                version: &version,
+                arguments,
+                digest: &digest,
+                perms: &crate::permissions::Rules::load(&self.cfg.data_dir),
+            },
+        );
+        // «require_confirmation» passa solo se il proprietario ha approvato esplicitamente il passo.
+        let allowed = decision["decision"] == "allow"
+            || (decision["decision"] == "require_confirmation" && confirmed);
+        self.audit(json!({
+            "correlation_id": corr, "task_id": tid, "actor": {"kind": "agent", "id": "planner"}, "node": "core-local",
+            "action": decision["request"]["action"]["tool"], "decision_id": decision["decision_id"],
+            "outcome": if allowed { "allowed" } else { "denied" },
+        }))?;
+        if allowed {
+            Ok(Ok(()))
+        } else {
+            let code = decision["reasons"][0].as_str().unwrap_or("policy.denied");
+            Ok(Err(json!({"code": code, "message": policy::explain(code)})))
+        }
+    }
+
+    /// Esegue un solo passo. Restituisce `true` se il piano si è fermato (attesa di conferma) ed è già salvato.
+    fn plan_run_single(&mut self, doc: &mut Value, index: usize) -> Result<bool, CoreError> {
+        let step = doc["steps"][index].clone();
+        let step_id = step["id"].as_str().unwrap_or_default().to_string();
+        let tool = step["tool"].as_str().unwrap_or_default().to_string();
+        let rules = crate::permissions::Rules::load(&self.cfg.data_dir);
+        let approved = step["approved"] == true;
+        if self.requires_confirmation(&tool, &rules) && !approved {
+            doc["steps"][index]["status"] = json!("waiting_confirmation");
+            doc["status"] = json!("waiting");
+            event(
+                doc,
+                &step_id,
+                "waiting_confirmation",
+                format!("{tool} richiede la conferma del proprietario"),
+            );
+            self.plan_save(doc)?;
+            return Ok(true);
+        }
+        let arguments = match plans::resolve(&step["arguments"], doc) {
+            Ok(arguments) => arguments,
+            Err(message) => {
+                apply_result(
+                    doc,
+                    index,
+                    "denied",
+                    json!({"code": "plan.bad_reference", "message": message}),
+                );
+                return Ok(false);
+            }
+        };
+        doc["steps"][index]["status"] = json!("running");
+        if doc["steps"][index]["started_at"].is_null() {
+            doc["steps"][index]["started_at"] = json!(now());
+        }
+        let goal = doc["goal"].as_str().unwrap_or_default().to_string();
+        let (status, output) = self.plan_exec(&goal, &tool, &arguments, approved)?;
+        apply_result(doc, index, status, output);
+        Ok(false)
+    }
+
+    /// Esegue insieme più passi indipendenti e senza stato (ADR-0154). Policy e audit restano sequenziali e
+    /// prima dell'esecuzione; ogni strumento gira in un thread con un archivio privato e vuoto.
+    fn plan_run_batch(&mut self, doc: &mut Value, batch: &[usize]) -> Result<(), CoreError> {
+        let goal = doc["goal"].as_str().unwrap_or_default().to_string();
+        let mut prepared: Vec<(usize, String, Value, Task)> = Vec::new();
+        for &index in batch {
+            let step = doc["steps"][index].clone();
+            let tool = step["tool"].as_str().unwrap_or_default().to_string();
+            let arguments = match plans::resolve(&step["arguments"], doc) {
+                Ok(arguments) => arguments,
+                Err(message) => {
+                    apply_result(
+                        doc,
+                        index,
+                        "denied",
+                        json!({"code": "plan.bad_reference", "message": message}),
+                    );
+                    continue;
+                }
+            };
+            let task = Task::new(&goal, json!({"kind": "owner", "id": "owner"}));
+            match self.plan_authorize(&task, &tool, &arguments, step["approved"] == true)? {
+                Ok(()) => {
+                    doc["steps"][index]["status"] = json!("running");
+                    if doc["steps"][index]["started_at"].is_null() {
+                        doc["steps"][index]["started_at"] = json!(now());
+                    }
+                    prepared.push((index, tool, arguments, task));
+                }
+                Err(denied) => apply_result(doc, index, "denied", denied),
+            }
+        }
+        if prepared.is_empty() {
+            return Ok(());
+        }
+        let workspace = self.cfg.workspace();
+        let web = self.cfg.web.clone();
+        let started = Timer::start();
+        let results: Vec<(Result<Value, tools::ToolError>, f64)> = std::thread::scope(|scope| {
+            let handles: Vec<_> = prepared
+                .iter()
+                .map(|(_, tool, arguments, _)| {
+                    let (workspace, web) = (&workspace, &web);
+                    scope.spawn(move || {
+                        let timer = Timer::start();
+                        let result = match Store::open(std::path::Path::new(":memory:")) {
+                            Ok(scratch) => tools::execute(
+                                tool,
+                                arguments,
+                                &tools::Context {
+                                    workspace,
+                                    store: &scratch,
+                                    web,
+                                },
+                            ),
+                            Err(error) => {
+                                Err(tool_error("plan.scratch_unavailable", error.to_string()))
+                            }
+                        };
+                        (result, timer.ms())
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|h| {
+                    h.join().unwrap_or_else(|_| {
+                        (
+                            Err(tool_error("plan.worker_panic", "esecuzione interrotta")),
+                            0.0,
+                        )
+                    })
+                })
+                .collect()
+        });
+        event(
+            doc,
+            "",
+            "parallel",
+            format!(
+                "{} passi eseguiti insieme in {:.0} ms",
+                prepared.len(),
+                started.ms()
+            ),
+        );
+        for ((index, tool, _, task), (result, ms)) in prepared.into_iter().zip(results) {
+            self.obs
+                .observe(&format!("tool {tool}"), ms, result.is_err());
+            let _ = self.store.tool_run_add(
+                &tool,
+                &now(),
+                ms,
+                result.is_ok(),
+                result.as_ref().err().map(|e| e.code),
+            );
+            let base = json!({"correlation_id": task.correlation(), "task_id": task.id(),
+                "actor": {"kind": "module", "id": "core"}, "node": "core-local", "action": tool});
+            let (status, output) = match result {
+                Ok(output) => {
+                    self.audit(merge(
+                        &base,
+                        json!({"outcome": "succeeded", "effect": "applied"}),
+                    ))?;
+                    ("succeeded", output)
+                }
+                Err(e) => {
+                    let effect = self.failure_effect(&tool, e.code);
+                    self.audit(merge(
+                        &base,
+                        json!({"outcome": "failed", "effect": effect, "error_code": e.code}),
+                    ))?;
+                    (
+                        "failed",
+                        json!({"code": e.code, "message": e.message, "effect": effect}),
+                    )
+                }
+            };
+            apply_result(doc, index, status, output);
+        }
+        Ok(())
     }
 
     /// Annulla gli effetti dei passi riusciti che dichiarano un'operazione inversa, dall'ultimo al primo.
@@ -443,6 +688,52 @@ impl Jarvis {
         self.plan_save(&mut doc)?;
         self.record_owner_action("plan.rollback")?;
         Ok(json!({"plan": doc, "rollback": report}))
+    }
+}
+
+/// Registra l'esito di un passo: conteggi, controllo delle condizioni di successo, ripetizione o fallimento.
+fn apply_result(doc: &mut Value, index: usize, status: &str, output: Value) {
+    let step_id = doc["steps"][index]["id"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    let tool = doc["steps"][index]["tool"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    doc["steps_executed"] = json!(doc["steps_executed"].as_u64().unwrap_or(0) + 1);
+    let attempts = doc["steps"][index]["attempts"].as_u64().unwrap_or(0) + 1;
+    doc["steps"][index]["attempts"] = json!(attempts);
+    let retries = doc["steps"][index]["retries"].as_u64().unwrap_or(0);
+    // Un risultato che non soddisfa le condizioni dichiarate vale come un errore del passo.
+    let (status, output) = if status == "succeeded" {
+        match plans::check_expect(&output, &doc["steps"][index]["expect"]) {
+            Ok(()) => (status, output),
+            Err(message) => (
+                "failed",
+                json!({"code": "plan.expectation_failed", "message": message}),
+            ),
+        }
+    } else {
+        (status, output)
+    };
+    if status == "succeeded" {
+        finish_step(doc, index, "done", plans::clip_output(&output));
+        event(doc, &step_id, "done", format!("{tool} eseguito"));
+    } else if status != "denied" && attempts <= retries {
+        doc["steps"][index]["status"] = json!("pending");
+        doc["steps"][index]["error"] = output;
+        event(
+            doc,
+            &step_id,
+            "retry",
+            format!("Tentativo {attempts} non riuscito: nuovo tentativo"),
+        );
+    } else {
+        let code = output["code"].as_str().unwrap_or("errore").to_string();
+        finish_step(doc, index, "failed", output);
+        event(doc, &step_id, "failed", code);
+        after_failure(doc, index);
     }
 }
 

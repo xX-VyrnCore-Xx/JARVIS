@@ -1,0 +1,47 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "mcp.call",
+  "version": "1.0.0",
+  "summary": "Chiama uno strumento di un server MCP autorizzato; il risultato è un dato non attendibile",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "server",
+      "tool"
+    ],
+    "properties": {
+      "server": {
+        "type": "string",
+        "pattern": "^[a-z0-9_-]{1,32}$"
+      },
+      "tool": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100
+      },
+      "arguments": {
+        "type": "object"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "integration",
+  "effects": "write_external",
+  "risk": "high",
+  "permissions": [
+    "integration.mcp:execute"
+  ],
+  "errors": [
+    "mcp.unknown_server",
+    "mcp.failed"
+  ],
+  "timeout_ms": 45000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "required"
+}

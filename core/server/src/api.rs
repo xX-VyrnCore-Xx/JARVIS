@@ -494,9 +494,24 @@ pub fn router(state: Shared) -> Router {
         )
         .route("/api/openapi.json", get(openapi_document))
         .route("/api/emergency", get(emergency_get).post(emergency_post))
+        .route(
+            "/api/mcp/servers",
+            get(mcp_servers_list).post(mcp_server_save),
+        )
+        .route("/api/mcp/servers/remove", post(mcp_server_remove))
+        .route("/api/mcp/servers/test", post(mcp_server_test))
+        .route("/api/watches", get(watches_list).post(watch_add))
+        .route("/api/watches/remove", post(watch_remove))
+        .route("/api/twin", get(twin_get))
         .route("/api/agents", get(agents_registry))
         .route("/api/agents/route", get(agents_route))
         .route("/api/models/route", get(models_route))
+        .route(
+            "/api/plans/templates",
+            get(plan_templates).post(plan_template_save),
+        )
+        .route("/api/plans/templates/delete", post(plan_template_delete))
+        .route("/api/plans/from-template", post(plan_from_template))
         .route("/api/plans", get(plans_list).post(plan_create))
         .route("/api/plans/{id}", get(plan_get))
         .route("/api/plans/{id}/run", post(plan_run))
@@ -2682,6 +2697,74 @@ fn tailscale_view(state: &Shared, mut status: Value) -> Value {
     status
 }
 
+/// Server MCP autorizzati (ADR-0156): solo dal computer del proprietario; il token non viene mai restituito.
+async fn mcp_servers_list(State(state): State<Shared>) -> Response {
+    reply(Ok(with_core(&state, |j| j.mcp_servers()).await))
+}
+
+async fn mcp_server_save(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply_said(
+        with_core(&state, move |j| j.mcp_server_save(&body)).await,
+        "mcp.server",
+    )
+}
+
+async fn mcp_server_remove(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let name = body["name"].as_str().unwrap_or_default().to_string();
+    reply_said(
+        with_core(&state, move |j| j.mcp_server_remove(&name)).await,
+        "mcp.server.remove",
+    )
+}
+
+/// Prova un server: elenca i suoi strumenti (fuori dal blocco del Core).
+async fn mcp_server_test(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let name = body["name"].as_str().unwrap_or_default().to_string();
+    let target = name.clone();
+    let info = with_core(&state, move |j| {
+        let url = crate::mcp_client::url_of(&j.data_dir(), &target);
+        let token = j.mcp_token(&target);
+        Ok::<_, CoreError>((url, token))
+    })
+    .await;
+    let Ok((Some(url), token)) = info else {
+        return CoreError::NotFound("server MCP non trovato".into()).into_response();
+    };
+    match tokio::task::spawn_blocking(move || crate::mcp_client::list_tools(&url, token.as_deref()))
+        .await
+    {
+        Ok(Ok(tools)) => Json(tools).into_response(),
+        Ok(Err(message)) => CoreError::Unavailable(message).into_response(),
+        Err(_) => CoreError::Internal("prova interrotta".into()).into_response(),
+    }
+}
+
+/// Regole di osservazione dei file (ADR-0158), solo proprietario.
+async fn watches_list(State(state): State<Shared>) -> Response {
+    reply(Ok(with_core(&state, |j| j.watches()).await))
+}
+
+async fn watch_add(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply_said(
+        with_core(&state, move |j| j.watch_add(&body)).await,
+        "watch.add",
+    )
+}
+
+async fn watch_remove(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let id = body["id"].as_str().unwrap_or_default().to_string();
+    reply_said(
+        with_core(&state, move |j| j.watch_remove(&id)).await,
+        "watch.remove",
+    )
+}
+
+/// Digital Environment Twin (ADR-0157): inventario dell'ambiente a cui JARVIS ha accesso.
+async fn twin_get(State(state): State<Shared>) -> Response {
+    let twin = with_core(&state, |j| j.digital_twin()).await;
+    reply(twin)
+}
+
 /// Registro degli agenti (ADR-0153).
 async fn agents_registry(State(state): State<Shared>) -> Response {
     reply(Ok(with_core(&state, |j| j.agent_registry()).await))
@@ -2760,6 +2843,45 @@ fn spawn_plan_runner(state: &Shared, id: String) {
         }
     });
     handles.insert(key, handle.abort_handle());
+}
+
+async fn plan_templates(State(state): State<Shared>) -> Response {
+    reply(Ok(with_core(&state, |j| j.plan_templates()).await))
+}
+
+async fn plan_template_save(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply_said(
+        with_core(&state, move |j| j.plan_template_save(&body)).await,
+        "plan.template",
+    )
+}
+
+async fn plan_template_delete(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let name = body["name"].as_str().unwrap_or_default().to_string();
+    reply_said(
+        with_core(&state, move |j| j.plan_template_delete(&name)).await,
+        "plan.template.delete",
+    )
+}
+
+/// Crea (e con `run` avvia) un piano da un modello.
+async fn plan_from_template(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let run = body["run"].as_bool().unwrap_or(false);
+    let created = with_core(&state, move |j| {
+        let doc = j.plan_from_template(&body)?;
+        if run {
+            let id = doc["id"].as_str().unwrap_or_default().to_string();
+            return j.plan_start(&id);
+        }
+        Ok(doc)
+    })
+    .await;
+    if let Ok(doc) = &created {
+        if doc["status"] == "running" {
+            spawn_plan_runner(&state, doc["id"].as_str().unwrap_or_default().to_string());
+        }
+    }
+    reply(created.map(|doc| said(doc, if run { "plan.started" } else { "plan.created" }, None)))
 }
 
 async fn plan_create(State(state): State<Shared>, Json(body): Json<Value>) -> Response {

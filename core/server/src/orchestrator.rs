@@ -38,7 +38,7 @@ const MEMORY_CHARS: usize = 3000;
 /// Lunghezza massima dei turni più vecchi: la richiesta corrente resta intera.
 const OLD_TURN_CHARS: usize = 1200;
 /// Strumenti proposti al massimo in una delega (il contratto ne ammette 96): 64 non bastavano più dopo ADR-0132.
-const MAX_DELEGATED_TOOLS: usize = 80;
+const MAX_DELEGATED_TOOLS: usize = 128;
 const MAX_MESSAGE: usize = 8000;
 
 /// Strumenti ammessi via MCP: calcolo, conversioni, data e ora e informazioni di sistema. Niente file, memoria,
@@ -1641,6 +1641,13 @@ impl Jarvis {
             sub.doc["state"].as_str().unwrap_or("unknown"),
             json!({"role": role, "tools": tools_used.len()}),
         );
+        let _ = self.store.agent_run_add(
+            "temporary",
+            &now(),
+            status == "succeeded",
+            tools_used.len(),
+            timer.ms(),
+        );
         out.steps.push(json!({"kind": "subagent", "task_id": sub.id(), "role": role, "status": status, "tools": tools_used}));
         Ok((status, output))
     }
@@ -2086,6 +2093,21 @@ impl Jarvis {
             task.doc["state"].as_str().unwrap_or("unknown"),
             json!({"steps": out.steps.len(), "tools": tools}),
         );
+        // Valutazione degli agenti (ADR-0153): ogni lavoro delegato a una specializzazione lascia il suo esito.
+        if let Some(agent) = out
+            .steps
+            .iter()
+            .find(|s| s["kind"] == "delegation")
+            .and_then(|s| s["agent"].as_str())
+        {
+            let _ = self.store.agent_run_add(
+                agent,
+                &now(),
+                task.doc["state"] == "succeeded",
+                tools,
+                created,
+            );
+        }
         if out
             .backend
             .as_ref()
@@ -2690,6 +2712,7 @@ impl Jarvis {
                 "n8n.unavailable",
                 "la routine richiede conferma",
             )),
+            "mcp.list" | "mcp.call" => self.mcp_client_call(tool, arguments),
             "security.status" => self.security_status().map_err(|_| {
                 tool_error(
                     "security.unavailable",
@@ -3148,6 +3171,25 @@ impl Jarvis {
             return Ok(runs);
         }
         self.proactive_poll(now_t);
+        // Eventi (ADR-0158): un file o una cartella osservati sono cambiati.
+        for rule in crate::watch::changed(&self.cfg.data_dir, &self.cfg.workspace()) {
+            let key = rule["workflow"].as_str().unwrap_or_default();
+            match self.find_workflow(key) {
+                Ok((doc, _)) if doc["enabled"] == true => {
+                    if let Ok(run) = self.run_workflow(&doc, "event", None) {
+                        runs.push(run);
+                    }
+                }
+                _ => {
+                    let _ = self.notify(json!({
+                        "severity": "warning", "category": "automation",
+                        "title": "Una regola di osservazione non ha trovato il suo workflow",
+                        "body": format!("«{}»: workflow assente o sospeso.", rule["workflow"].as_str().unwrap_or("?")),
+                        "source": {"kind": "module", "id": "watch"}, "dedupe_key": format!("watch:{}", rule["id"].as_str().unwrap_or_default()),
+                    }));
+                }
+            }
+        }
         // Cose da fare scadute (ADR-0046): una notifica per ciascuna, una sola volta.
         let now_s = now_t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         for t in crate::toolbox::todos_due(&self.store, &now_s) {
@@ -3275,6 +3317,201 @@ impl Jarvis {
         self.owner_audit("workflow.delete")
     }
 
+    /// Digital Environment Twin (ADR-0157): inventario unico e aggiornato di ciò a cui JARVIS ha accesso, ricavato
+    /// dalle fonti esistenti (dispositivi, nodi, servizi, connettori, progetti, risorse, capacità degli strumenti).
+    /// Non contiene segreti, percorsi né il contenuto di chat, memoria o file.
+    pub fn digital_twin(&self) -> Result<Value, CoreError> {
+        let devices = self.devices()?;
+        let active: Vec<&Value> = devices
+            .iter()
+            .filter(|d| d["revoked_at"].is_null())
+            .collect();
+        let nodes = self.nodes()?;
+        let (docker, docker_version) = crate::container_runtime::diagnose();
+        let providers: Vec<Value> = crate::cloud::Provider::ALL
+            .into_iter()
+            .map(|p| {
+                json!({"id": p.id(), "configured": self.secrets.get(&p.secret()).ok().flatten().is_some()})
+            })
+            .collect();
+        let connectors: Vec<Value> = self
+            .connectors()?
+            .iter()
+            .map(|c| json!({"id": c["id"], "name": c["name"], "authorized": c["authorized"]}))
+            .collect();
+        let count = |sql: &str| -> u64 {
+            self.store
+                .conn
+                .query_row(sql, [], |r| r.get::<_, i64>(0))
+                .map_or(0, |n| n.max(0) as u64)
+        };
+        let mut by_category = std::collections::BTreeMap::<String, u64>::new();
+        for tool in self.catalog.iter() {
+            let entry = crate::toolsys::entry(&tool.descriptor);
+            let here = entry["platforms"]
+                .as_array()
+                .is_some_and(|l| l.iter().any(|p| p == std::env::consts::OS));
+            if here {
+                *by_category
+                    .entry(entry["category"].as_str().unwrap_or("general").to_string())
+                    .or_default() += 1;
+            }
+        }
+        let mcp = crate::mcp_client::list(&self.cfg.data_dir, &|_| false);
+        Ok(json!({
+            "generated_at": now(),
+            "core": {
+                "version": env!("CARGO_PKG_VERSION"), "os": std::env::consts::OS, "arch": std::env::consts::ARCH,
+                "emergency_stop": crate::permissions::emergency_active(&self.cfg.data_dir),
+                "chat_encrypted": self.store.chat_protected(),
+            },
+            "devices": {
+                "paired": active.len(),
+                "items": active.iter().take(30).map(|d| json!({
+                    "name": d["name"], "platform": d["platform"], "scopes": d["scopes"], "last_seen_at": d["last_seen_at"],
+                })).collect::<Vec<_>>(),
+            },
+            "nodes": nodes.iter().take(30).map(|n| json!({
+                "name": n["name"], "online": n["online"], "capabilities": n["capabilities"],
+            })).collect::<Vec<_>>(),
+            "services": {
+                "docker": {"state": docker.code(), "version": docker_version},
+                "cloud_providers": providers,
+                "mcp_servers": mcp["items"].as_array().map_or(0, Vec::len),
+                "sandbox_enabled": crate::sandbox::enabled(&self.cfg.data_dir),
+            },
+            "connectors": connectors,
+            "projects": {
+                "missions_active": count("SELECT COUNT(*) FROM missions WHERE status = 'active'"),
+                "plans_running": count("SELECT COUNT(*) FROM plans WHERE status IN ('running','waiting')"),
+                "workflows": count("SELECT COUNT(*) FROM workflows"),
+                "todos_open": count("SELECT COUNT(*) FROM todos WHERE done_at IS NULL"),
+                "conversations": count("SELECT COUNT(*) FROM conversations"),
+                "memories": count("SELECT COUNT(*) FROM memory"),
+            },
+            "tools_available_here": by_category,
+        }))
+    }
+
+    pub fn watches(&self) -> Value {
+        crate::watch::list(&self.cfg.data_dir)
+    }
+
+    pub fn watch_add(&mut self, body: &Value) -> Result<Value, CoreError> {
+        // Il workflow si indica per id (anche il prefisso) o per nome esatto; la regola conserva l'id.
+        let key = body["workflow"]
+            .as_str()
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let doc = match self.find_workflow(&key) {
+            Ok((doc, _)) => doc,
+            Err(_) => {
+                let named: Vec<Value> = self
+                    .workflows()?
+                    .into_iter()
+                    .filter(|w| {
+                        w["name"]
+                            .as_str()
+                            .is_some_and(|n| n.eq_ignore_ascii_case(&key))
+                    })
+                    .collect();
+                match named.as_slice() {
+                    [one] => one.clone(),
+                    [] => return Err(CoreError::NotFound(format!("Nessuna automazione «{key}»"))),
+                    _ => {
+                        return Err(CoreError::BadRequest(
+                            "Più automazioni hanno quel nome: usa l'id".into(),
+                        ))
+                    }
+                }
+            }
+        };
+        let id = doc["workflow_id"].as_str().unwrap_or_default().to_string();
+        let rule = crate::watch::add(
+            &self.cfg.data_dir,
+            &self.cfg.workspace(),
+            body["path"].as_str().unwrap_or_default(),
+            &id,
+        )
+        .map_err(CoreError::BadRequest)?;
+        self.record_owner_action("watch.add")?;
+        Ok(rule)
+    }
+
+    pub fn watch_remove(&mut self, id: &str) -> Result<Value, CoreError> {
+        if !crate::watch::remove(&self.cfg.data_dir, id).map_err(CoreError::Internal)? {
+            return Err(CoreError::NotFound("regola non trovata".into()));
+        }
+        self.record_owner_action("watch.remove")?;
+        Ok(self.watches())
+    }
+
+    /// Server MCP autorizzati e strumenti remoti (ADR-0156). Solo dal computer del proprietario.
+    pub fn mcp_servers(&self) -> Value {
+        crate::mcp_client::list(&self.cfg.data_dir, &|name| {
+            self.secrets
+                .get(&format!("mcp:{name}"))
+                .ok()
+                .flatten()
+                .is_some()
+        })
+    }
+
+    pub fn mcp_token(&self, name: &str) -> Option<String> {
+        self.secrets.get(&format!("mcp:{name}")).ok().flatten()
+    }
+
+    pub fn mcp_server_save(&mut self, body: &Value) -> Result<Value, CoreError> {
+        let name = body["name"].as_str().unwrap_or_default();
+        crate::mcp_client::add(
+            &self.cfg.data_dir,
+            name,
+            body["url"].as_str().unwrap_or_default(),
+        )
+        .map_err(CoreError::BadRequest)?;
+        if let Some(token) = body["token"].as_str().filter(|t| !t.is_empty()) {
+            self.secrets
+                .put(&format!("mcp:{name}"), token)
+                .map_err(CoreError::Internal)?;
+        }
+        self.record_owner_action("mcp.server.add")?;
+        Ok(self.mcp_servers())
+    }
+
+    pub fn mcp_server_remove(&mut self, name: &str) -> Result<Value, CoreError> {
+        let removed =
+            crate::mcp_client::remove(&self.cfg.data_dir, name).map_err(CoreError::Internal)?;
+        if !removed {
+            return Err(CoreError::NotFound("server MCP non trovato".into()));
+        }
+        let _ = self.secrets.delete(&format!("mcp:{name}"));
+        self.record_owner_action("mcp.server.remove")?;
+        Ok(self.mcp_servers())
+    }
+
+    fn mcp_client_call(&self, tool: &str, arguments: &Value) -> Result<Value, tools::ToolError> {
+        let name = arguments["server"].as_str().unwrap_or_default();
+        let Some(url) = crate::mcp_client::url_of(&self.cfg.data_dir, name) else {
+            return Err(tool_error(
+                "mcp.unknown_server",
+                format!("Il server «{name}» non è autorizzato: lo aggiunge il proprietario dalle impostazioni"),
+            ));
+        };
+        let token = self.secrets.get(&format!("mcp:{name}")).ok().flatten();
+        let result = if tool == "mcp.list" {
+            crate::mcp_client::list_tools(&url, token.as_deref())
+        } else {
+            let remote = arguments["tool"].as_str().unwrap_or_default();
+            let remote_args = arguments
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
+            crate::mcp_client::call_tool(&url, token.as_deref(), remote, &remote_args)
+        };
+        result.map_err(|message| tool_error("mcp.failed", message))
+    }
+
     /// Registro universale (ADR-0151): voci normalizzate con salute e regola del proprietario, filtrabili.
     pub fn tool_registry(
         &self,
@@ -3374,8 +3611,16 @@ impl Jarvis {
 
     /// Registro degli agenti con competenze, strumenti e rischio massimo (ADR-0153).
     pub fn agent_registry(&self) -> Value {
-        let items =
+        let stats = self.store.agent_stats().unwrap_or_default();
+        let mut items =
             crate::agents::registry(&|tool| self.catalog.get(tool).map(|t| t.risk().to_string()));
+        for item in &mut items {
+            item["performance"] = stats
+                .iter()
+                .find(|s| s["agent"] == item["name"])
+                .cloned()
+                .unwrap_or_else(|| json!({"runs": 0}));
+        }
         json!({"items": items, "max_delegated_tools": MAX_DELEGATED_TOOLS})
     }
 

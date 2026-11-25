@@ -51,10 +51,18 @@ elenca le ultime esecuzioni (parametri `tool`, `limit`).
 
 - **Connettori** (ADR-0047): manifest firmati dal proprietario per servizi esterni (Gmail, Calendar, Outlook, GitHub,
   GitLab, Slack, Todoist, Airtable, Open-Meteo), con credenziali nel secret store e le stesse policy.
-- **MCP**: `POST /api/mcp` espone ad altri agenti solo strumenti di calcolo e sola lettura (ADR-0138); il Core **non** è
-  ancora un client MCP (vedi stato).
+- **MCP server**: `POST /api/mcp` espone ad altri agenti solo strumenti di calcolo e sola lettura (ADR-0138).
+- **MCP client** (ADR-0156): `mcp.list` e `mcp.call` usano i server che il proprietario ha autorizzato in `/api/mcp/servers`
+  (HTTPS, token nel deposito dei segreti). `mcp.call` chiede **sempre** la conferma; i risultati sono dati non attendibili.
 - **n8n** (ADR-0093 e successivi): automazioni esterne gestite dal Core.
 - Un plugin nativo caricato dal disco non esiste: l'estensione supportata è il connettore.
+
+## Strumenti di sviluppo e dati
+
+`git.status`, `git.log`, `git.diff`, `git.branch` (sola lettura) e `git.commit` (conferma; hook disattivati) usano il Git
+installato, senza shell. `log.analyze` riassume un log, `deps.list` elenca le dipendenze dei manifest e segnala quelle non
+fissate, `table.summary` riassume un CSV, `data.stats`, `text.extract` e `text.diff` analizzano numeri e testi, `time.wait`
+distanzia i passi di un piano. Tutti lavorano dentro la workspace e non usano la rete (ADR-0150, 0155).
 
 ## SDK: aggiungere uno strumento
 

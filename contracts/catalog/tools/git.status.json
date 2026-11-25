@@ -1,0 +1,33 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "git.status",
+  "version": "1.0.0",
+  "summary": "Stato del repository Git della workspace: ramo, file modificati",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {}
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.workspace:read"
+  ],
+  "errors": [
+    "git.not_repository",
+    "git.unavailable",
+    "git.failed",
+    "git.timeout"
+  ],
+  "timeout_ms": 15000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

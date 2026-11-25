@@ -1,0 +1,39 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "deps.list",
+  "version": "1.0.0",
+  "summary": "Dipendenze dichiarate dai manifest (Cargo.toml, package.json, requirements.txt, go.mod) di una cartella della workspace, con segnalazione di quelle non fissate",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {
+      "path": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.workspace:read"
+  ],
+  "errors": [
+    "fs.not_found",
+    "fs.not_directory",
+    "fs.too_large",
+    "fs.outside_workspace"
+  ],
+  "timeout_ms": 15000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

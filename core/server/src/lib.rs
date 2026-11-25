@@ -20,10 +20,12 @@ pub mod connector_catalog;
 pub mod connectors;
 mod container_runtime;
 pub mod datatools;
+pub mod devtools;
 pub mod executive;
 pub mod expert;
 pub mod guard;
 pub mod mcp;
+pub mod mcp_client;
 pub mod memory;
 pub mod missions;
 pub mod n8n;
@@ -73,6 +75,7 @@ pub mod toolbox;
 pub mod tools;
 pub mod toolsys;
 pub mod updates;
+pub mod watch;
 pub mod web;
 
 /// Istante corrente in RFC 3339 UTC con millisecondi (`common.schema.json#/$defs/timestamp`).
