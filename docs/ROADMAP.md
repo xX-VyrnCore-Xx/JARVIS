@@ -244,7 +244,7 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Database, memoria e animazioni macOS (2026-11-24, base `013b7b5`).** ADR-0124, ADR-0125. Pragma e manutenzione del database, indici di memoria verificati e ricostruiti, ricerca a candidati con recenza, statistiche e doppioni; animazioni SwiftUI. Verifiche: fmt, clippy, `cargo test --locked`, test Python e contratti. **Sospeso:** resa e fluidità delle animazioni (Swift solo CI).
 
-**Auto-miglioramento controllato e supervisione degli agenti (2026-11-25, ADR-0163 e 0164).** Suggerimenti da evidenze locali con un'unica azione approvata dal proprietario; pausa e quota oraria per agente. Restano pianificati: SDK e plugin nativi.
+**Auto-miglioramento controllato e supervisione degli agenti (2026-11-25, ADR-0163 e 0164).** Suggerimenti da evidenze locali con un'unica azione approvata dal proprietario; pausa e quota oraria per agente. Pacchetti di estensione dichiarativi (ADR-0165). Restano pianificati: plugin nativi in codice, interfacce per supervisione e pacchetti.
 
 **Strumenti per documenti (2026-11-25, ADR-0162).** PDF, XLSX e appunti senza dipendenze nuove; appunti sempre con conferma.
 

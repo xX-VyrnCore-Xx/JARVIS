@@ -515,6 +515,8 @@ pub fn router(state: Shared) -> Router {
         .route("/api/plans/templates/delete", post(plan_template_delete))
         .route("/api/plans/from-template", post(plan_from_template))
         .route("/api/plans/propose", post(plan_propose))
+        .route("/api/plugins", get(plugins_list).post(plugin_install))
+        .route("/api/plugins/remove", post(plugin_remove))
         .route("/api/improvements", get(improvements_list))
         .route("/api/improvements/apply", post(improvement_apply))
         .route("/api/improvements/dismiss", post(improvement_dismiss))
@@ -2897,6 +2899,24 @@ async fn agent_supervisor(State(state): State<Shared>) -> Response {
 
 async fn agent_limits(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
     reply(with_core(&state, move |j| j.agent_limits_set(&body)).await)
+}
+
+/// Pacchetti di estensione (ADR-0165): solo dal computer del proprietario.
+async fn plugins_list(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| Ok(j.plugins())).await)
+}
+
+async fn plugin_install(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    reply(
+        with_core(&state, move |j| j.plugin_install(&body))
+            .await
+            .map(|v| said(v, "plugin.installed", None)),
+    )
+}
+
+async fn plugin_remove(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let name = body["name"].as_str().unwrap_or_default().to_string();
+    reply(with_core(&state, move |j| j.plugin_remove(&name)).await)
 }
 
 /// Suggerimenti di miglioramento (ADR-0163): solo lettura.

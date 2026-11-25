@@ -1897,6 +1897,14 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** `GET /api/agents` descrive i sette specialisti e il generalista (competenze dagli strumenti, rischio massimo, contesto isolato o condiviso, risorse); `GET /api/agents/route?q=` mostra quale agente riceverebbe una richiesta e per quali parole chiave; `GET /api/models/route?q=` mostra la rotta per compito, il modello per provider, il ripiego e la riservatezza (credenziali bloccate, dati personali rilevati, profilo condiviso) **senza inviare nulla**. Non si introducono nuovi agenti: si riusano quelli esistenti.
 - **Evidenza:** test API del registro e dell'instradamento.
 
+### ADR-0165 — Pacchetti di estensione dichiarativi (SDK senza codice di terzi)
+
+- **Data:** 2026-11-25 · **Stato:** implementata nel checkout (fase J della roadmap, nella forma sicura).
+- **Decisione:** un pacchetto `jarvis.plugin/1` è un JSON con competenze e modelli di piano, installabile dal solo proprietario (`GET/POST /api/plugins`, `POST /api/plugins/remove`). Non contiene codice, non usa la rete e non porta chiavi; campi non previsti sono rifiutati e il peso massimo è 64 KiB. L'installazione è **tutto o niente** (validazione completa prima di scrivere; aggiornamento non valido = versione precedente intatta), i componenti passano dagli stessi validatori di quelli del proprietario (strumenti del catalogo, anche in `undo`, passi, dipendenze, condizioni) e restano soggetti a policy, conferme, budget e audit: un pacchetto non può dare strumenti, togliere conferme o allargare permessi. I modelli prendono il nome `<pacchetto>-<modello>`; la rimozione elimina esattamente ciò che il pacchetto aveva portato (registro `plugins.json`). Audit `plugin.install` (con impronta SHA-256 nella risorsa) e `plugin.remove`.
+- **Perché senza codice:** caricare codice nativo di terzi nel Core, che gestisce permessi, segreti e audit, sarebbe la via più diretta per aggirarli. Prima servono esecuzione isolata e firma degli autori.
+- **Non incluso:** strumenti nativi da cartella, firma e distribuzione dei pacchetti, interfaccia grafica (oggi via API).
+- **Evidenza:** test unitari della validazione (strumenti sconosciuti, campi non ammessi, nomi, limiti, duplicati, pacchetto vuoto) e test d'integrazione: installa, usa la procedura (piano riuscito), aggiorna senza duplicare, versione non valida rifiutata, rimuove tutto.
+
 ### ADR-0163 — Auto-miglioramento controllato: JARVIS propone, il proprietario approva
 
 - **Data:** 2026-11-25 · **Stato:** implementata nel checkout (fase K della roadmap, nella forma sicura).

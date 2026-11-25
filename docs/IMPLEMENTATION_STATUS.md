@@ -1,7 +1,7 @@
 # Stato di implementazione
 
 Fonte autorevole dello stato di ogni requisito dell'evoluzione «piattaforma di intelligenza artificiale personale».
-Aggiornata il 2026-11-25 sul codice di `main` più la PR in corso (ADR fino alla 0164). Legenda: **Implementato** (funziona end-to-end ed è
+Aggiornata il 2026-11-25 sul codice di `main` più la PR in corso (ADR fino alla 0165). Legenda: **Implementato** (funziona end-to-end ed è
 verificato da test), **Parziale** (funziona in parte: il limite è indicato), **Sperimentale** (c'è, non maturo),
 **Pianificato** (assente). Nessuna voce è un segnaposto: ciò che non esiste è dichiarato «Pianificato».
 Verifiche ed esiti per revisione: [ROADMAP.md](ROADMAP.md). Piano dei passi successivi: [IMPLEMENTATION_ROADMAP.md](IMPLEMENTATION_ROADMAP.md).
@@ -11,7 +11,7 @@ Verifiche ed esiti per revisione: [ROADMAP.md](ROADMAP.md). Piano dei passi succ
 | Componente | Stato | Note |
 | --- | --- | --- |
 | Registry universale | Implementato | 78 descrittori; `GET /api/tools/registry` con filtri; categoria, piattaforme, offline, reversibilità, dipendenze e hardware derivati (sovrascrivibili) |
-| Discovery | Parziale | Catalogo incorporato, connettori e n8n; nessuna scoperta di plugin dal disco |
+| Discovery | Parziale | Catalogo incorporato, connettori, n8n e pacchetti installati; nessuna scoperta di plugin dal disco |
 | Execution engine | Implementato | validazione, policy, conferma, esecuzione, audit |
 | Selection engine | Parziale | Instradamento agenti per parole chiave e competenze; nessuna selezione appresa |
 | Permission manager | Implementato | policy, profili e regole del proprietario (ADR-0116), arresto di emergenza |
@@ -21,8 +21,8 @@ Verifiche ed esiti per revisione: [ROADMAP.md](ROADMAP.md). Piano dei passi succ
 | Health monitor / History | Implementato | `GET /api/tools/health`, `/history` (ADR-0151) |
 | Versioning | Parziale | versione esatta richiesta dalla policy; nessuna coesistenza di più versioni |
 | Chaining / Composition | Implementato | piani con riferimenti fra passi, condizioni di successo, modelli di piano (ADR-0152, 0154, 0159) e workflow |
-| Tool SDK | Pianificato | esiste la procedura documentata, non un pacchetto per autori esterni |
-| Plugin manager | Parziale | connettori con manifest e n8n; nessun plugin nativo |
+| Tool SDK | Parziale | SDK dichiarativo per competenze e modelli di piano (ADR-0165, [PLUGIN_SYSTEM.md](PLUGIN_SYSTEM.md)); per nuovi strumenti resta la procedura in TOOL_SYSTEM.md |
+| Plugin manager | Parziale | pacchetti dichiarativi (competenze e procedure) con installazione atomica e rimozione; connettori con manifest e n8n; nessun plugin nativo in codice |
 | MCP | Implementato | server `/api/mcp` (calcolo e sola lettura) e **client** con server autorizzati dal proprietario, conferma sempre richiesta e risultati non attendibili (ADR-0156); manca lo streaming SSE |
 
 ## 2. Strumenti operativi

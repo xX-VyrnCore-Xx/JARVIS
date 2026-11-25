@@ -76,4 +76,4 @@ distanzia i passi di un piano. Tutti lavorano dentro la workspace e non usano la
 3. Se è di calcolo e sicuro, aggiungilo all'elenco MCP (`mcp_exposed`) e agli strumenti dei modelli cloud (`cloud::TOOLS`).
 4. Scrivi test unitari e un test API; il test dei contratti verifica il descrittore.
 
-Un SDK pacchettizzato per autori esterni è **pianificato** (vedi roadmap).
+Per estendere JARVIS senza scrivere codice nel Core esistono i **pacchetti di estensione** (competenze e modelli di piano): vedi [PLUGIN_SYSTEM.md](PLUGIN_SYSTEM.md). Strumenti nativi di terzi sono **pianificati**: richiedono esecuzione isolata e firma.

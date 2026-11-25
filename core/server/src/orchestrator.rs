@@ -25,6 +25,7 @@ mod improvement_runner;
 mod initiatives;
 mod mission_runner;
 mod plan_runner;
+mod plugin_runner;
 pub use mission_runner::{MissionRun, Next};
 
 /// Memoria nel contesto dell'agente (ADR-0022).

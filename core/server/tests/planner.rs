@@ -375,3 +375,95 @@ fn supervision_pauses_an_agent_and_hands_its_work_to_the_generalist() {
         Err(CoreError::BadRequest(_))
     ));
 }
+
+fn package(version: &str, tool: &str) -> serde_json::Value {
+    json!({"contract": "jarvis.plugin/1", "name": "utilita-base", "version": version,
+        "description": "Competenza e procedura di prova",
+        "skills": [{"name": "Conta le parole", "instructions": "Usa il conteggio quando serve.",
+            "triggers": ["conta parole"], "tools": [tool]}],
+        "plan_templates": [{"name": "conta", "description": "Conta le parole", "goal": "Conta {{testo}}",
+            "params": [{"name": "testo", "required": true}],
+            "steps": [{"id": "c", "tool": tool, "arguments": {"text": "{{testo}}"}}]}]})
+}
+
+#[test]
+fn plugin_packages_install_run_update_and_remove_atomically() {
+    let mut j = jarvis();
+    assert!(j.plugins()["items"].as_array().unwrap().is_empty());
+    let skills_before = j.skills().unwrap()["items"].as_array().unwrap().len();
+
+    // Un pacchetto con uno strumento sconosciuto non cambia nulla.
+    let bad = package("1.0.0", "disk.format");
+    assert!(matches!(
+        j.plugin_install(&bad),
+        Err(CoreError::BadRequest(_))
+    ));
+    assert_eq!(
+        j.skills().unwrap()["items"].as_array().unwrap().len(),
+        skills_before
+    );
+    assert!(j.plugins()["items"].as_array().unwrap().is_empty());
+
+    let entry = j.plugin_install(&package("1.0.0", "text.count")).unwrap();
+    assert_eq!(entry["name"], "utilita-base");
+    assert_eq!(entry["templates"][0], "utilita-base-conta");
+    assert_eq!(entry["digest"].as_str().unwrap().len(), 64);
+    assert_eq!(
+        j.skills().unwrap()["items"].as_array().unwrap().len(),
+        skills_before + 1
+    );
+
+    // La procedura del pacchetto si usa come ogni modello, sotto policy e audit.
+    let templates = j.plan_templates();
+    let mine = templates["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["name"] == "utilita-base-conta")
+        .expect("modello del pacchetto");
+    assert_eq!(mine["plugin"], "utilita-base");
+    let plan = j
+        .plan_from_template(
+            &json!({"template": "utilita-base-conta", "params": {"testo": "uno due tre"}}),
+        )
+        .unwrap();
+    let done = run_to_end(&mut j, plan["id"].as_str().unwrap());
+    assert_eq!(done["status"], "succeeded");
+    assert_eq!(done["steps"][0]["output"]["words"], 3);
+
+    // Aggiornare lo stesso pacchetto sostituisce i componenti senza duplicarli.
+    j.plugin_install(&package("1.1.0", "text.count")).unwrap();
+    assert_eq!(j.plugins()["items"].as_array().unwrap().len(), 1);
+    assert_eq!(j.plugins()["items"][0]["version"], "1.1.0");
+    assert_eq!(
+        j.skills().unwrap()["items"].as_array().unwrap().len(),
+        skills_before + 1
+    );
+    let named = j.plan_templates()["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|t| t["name"] == "utilita-base-conta")
+        .count();
+    assert_eq!(named, 1);
+
+    // Una versione non valida lascia installata quella precedente.
+    assert!(j.plugin_install(&package("2.0.0", "disk.format")).is_err());
+    assert_eq!(j.plugins()["items"][0]["version"], "1.1.0");
+
+    j.plugin_remove("utilita-base").unwrap();
+    assert!(j.plugins()["items"].as_array().unwrap().is_empty());
+    assert_eq!(
+        j.skills().unwrap()["items"].as_array().unwrap().len(),
+        skills_before
+    );
+    assert!(j.plan_templates()["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|t| t["name"] != "utilita-base-conta"));
+    assert!(matches!(
+        j.plugin_remove("utilita-base"),
+        Err(CoreError::NotFound(_))
+    ));
+}

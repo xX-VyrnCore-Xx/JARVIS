@@ -43,6 +43,7 @@ pub mod permissions;
 pub mod persona;
 pub mod planner;
 pub mod plans;
+pub mod plugins;
 pub mod policy;
 pub mod privacy;
 pub mod proactive;

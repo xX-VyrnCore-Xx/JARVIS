@@ -298,6 +298,15 @@ impl Jarvis {
         Ok(json!({"items": items}))
     }
 
+    /// Riscrive i modelli personali (compresi quelli dei pacchetti di estensione).
+    pub(super) fn save_templates(&self, templates: &[Value]) -> Result<(), CoreError> {
+        std::fs::write(
+            self.cfg.data_dir.join("plan-templates.json"),
+            json!({"templates": templates}).to_string(),
+        )
+        .map_err(|e| CoreError::Internal(e.to_string()))
+    }
+
     pub(super) fn user_templates(&self) -> Vec<Value> {
         std::fs::read(self.cfg.data_dir.join("plan-templates.json"))
             .ok()
