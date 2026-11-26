@@ -2440,6 +2440,13 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** (1) `service_error_detail` estrae messaggio e motivo dall'errore del servizio (mai il corpo grezzo) con il rimedio per `accessNotConfigured`, `insufficientPermissions` e quota; lo scambio dei token riporta `error_description`; (2) dopo l'accesso, `missing_scopes` confronta i permessi concessi con quelli del manifest e rifiuta l'accesso incompleto spiegando cosa rifare; (3) regole di sola lettura per posta (non lette, ricerca, lettura per id) e calendario, con riepilogo dei risultati; le scritture restano esplicite e con conferma.
 - **Evidenza:** test su errore Google, scope mancanti, regole del gateway e riepilogo eventi.
 
+### ADR-0209 — Download delle immagini Docker senza problemi di permessi
+
+- **Data:** 2026-11-26. **Stato:** implementata (non provata con Docker reale su macOS, Windows e Linux).
+- **Causa probabile:** `docker pull` usava la configurazione dell'utente: `~/.docker/config.json` con l'helper delle credenziali di Docker Desktop (non trovato col `PATH` minimo di un'app avviata dal Finder o da un servizio) o cartelle `~/.docker` non scrivibili; su Linux anche il socket senza gruppo `docker`. L'errore restava generico.
+- **Decisione:** (1) il download dell'immagine pubblica usa una configurazione Docker privata e scrivibile (`<dati>/docker-config`, `config.json` vuoto) tramite `DOCKER_CONFIG`; (2) tutti i comandi Docker ampliano il `PATH` con le cartelle note di Docker; (3) `explain_pull_error` aggiunge causa e rimedio (gruppo `docker`, credenziali, cartella non scrivibile, limite del registro, rete, spazio).
+- **Evidenza:** test su messaggi d'errore e creazione della configurazione privata.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

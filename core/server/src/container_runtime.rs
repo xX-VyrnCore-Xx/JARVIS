@@ -47,8 +47,38 @@ fn local_docker_host() -> String {
     }
 }
 
+/// `PATH` ampliato con le cartelle note di Docker: un'app avviata dal Finder o da un servizio ha un `PATH`
+/// minimo e non trova gli helper (`docker-credential-desktop`, plugin) installati con Docker Desktop.
+fn docker_path() -> Option<std::ffi::OsString> {
+    let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).collect())
+        .unwrap_or_default();
+    let mut extra: Vec<PathBuf> = Vec::new();
+    #[cfg(target_os = "macos")]
+    extra.extend([
+        "/usr/local/bin".into(),
+        "/opt/homebrew/bin".into(),
+        "/Applications/Docker.app/Contents/Resources/bin".into(),
+    ]);
+    #[cfg(all(unix, not(target_os = "macos")))]
+    extra.extend(["/usr/local/bin".into(), "/usr/bin".into()]);
+    #[cfg(windows)]
+    if let Some(root) = std::env::var_os("ProgramFiles") {
+        extra.push(PathBuf::from(root).join("Docker/Docker/resources/bin"));
+    }
+    for dir in extra {
+        if dir.is_dir() && !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    }
+    std::env::join_paths(dirs).ok()
+}
+
 pub(crate) fn docker_command() -> Command {
     let mut command = Command::new(docker_binary());
+    if let Some(path) = docker_path() {
+        command.env("PATH", path);
+    }
     command
         .env_remove("DOCKER_HOST")
         .env_remove("DOCKER_CONTEXT")
@@ -58,6 +88,49 @@ pub(crate) fn docker_command() -> Command {
         .arg(local_docker_host());
     crate::hide_console(&mut command);
     command
+}
+
+/// Cartella di configurazione Docker privata e scrivibile, con un `config.json` vuoto: le immagini pubbliche non
+/// richiedono credenziali, quindi si evitano l'helper delle credenziali e `~/.docker` non scrivibile.
+pub fn private_config_dir(base: &std::path::Path) -> Result<PathBuf, String> {
+    let dir = base.join("docker-config");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("cartella di configurazione Docker non creabile: {e}"))?;
+    let file = dir.join("config.json");
+    if !file.exists() {
+        std::fs::write(&file, "{}\n")
+            .map_err(|e| format!("configurazione Docker non scrivibile: {e}"))?;
+    }
+    Ok(dir)
+}
+
+/// Spiega un errore di `docker pull` con la causa probabile e il rimedio (in italiano).
+pub fn explain_pull_error(detail: &str) -> String {
+    let t = detail.to_ascii_lowercase();
+    let remedy = if t.contains("docker.sock") && t.contains("permission denied")
+        || t.contains("access is denied")
+    {
+        "l'utente non può usare il motore Docker: su Linux aggiungilo al gruppo «docker» e riaccedi; su Windows avvia Docker Desktop con lo stesso utente"
+    } else if t.contains("credential") || t.contains("keychain") {
+        "l'helper delle credenziali di Docker non risponde: sblocca il portachiavi o apri Docker Desktop una volta"
+    } else if t.contains("permission denied") {
+        "Docker non può scrivere nella sua cartella di lavoro: controlla i permessi di ~/.docker e dello spazio su disco"
+    } else if t.contains("toomanyrequests") || t.contains("rate limit") {
+        "il registro ha raggiunto il limite di richieste: riprova più tardi"
+    } else if t.contains("unauthorized") || t.contains("denied: requested access") {
+        "il registro rifiuta l'accesso all'immagine: controlla il nome e la rete aziendale"
+    } else if t.contains("no such host")
+        || t.contains("timeout")
+        || t.contains("tls")
+        || t.contains("eof")
+    {
+        "il registro non è raggiungibile: controlla la connessione, la VPN e il proxy"
+    } else if t.contains("no space left") {
+        "spazio su disco esaurito: libera spazio e riprova"
+    } else {
+        return detail.to_string();
+    };
+    format!("{detail} — {remedy}")
 }
 
 /// Stato di Docker visto dal Core (ADR-0113).
@@ -213,5 +286,28 @@ mod tests {
         );
         assert_eq!(classify(None, false, "boh"), Health::Unknown);
         assert!(Health::DaemonDown.hint().contains("avvia"));
+    }
+
+    #[test]
+    fn pull_errors_get_a_remedy_and_the_private_config_is_created() {
+        let socket = explain_pull_error("permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock");
+        assert!(socket.contains("gruppo «docker»"), "{socket}");
+        let creds = explain_pull_error("error getting credentials - err: exec: \"docker-credential-desktop\": executable file not found");
+        assert!(creds.contains("credenziali"), "{creds}");
+        let config = explain_pull_error("mkdir /home/u/.docker: permission denied");
+        assert!(config.contains("cartella di lavoro"), "{config}");
+        assert_eq!(explain_pull_error("boh"), "boh");
+        let base = std::env::temp_dir().join(format!(
+            "jarvis-dockercfg-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let dir = private_config_dir(&base).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("config.json"))
+                .unwrap()
+                .trim(),
+            "{}"
+        );
+        let _ = std::fs::remove_dir_all(base);
     }
 }
