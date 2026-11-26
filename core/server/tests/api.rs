@@ -448,8 +448,8 @@ async fn security_posture_and_cloud_configuration_are_local_and_hide_keys() {
         )
         .await;
     assert_eq!(code, StatusCode::OK);
-    assert_eq!(report["providers"][1]["configured"], true);
-    assert_eq!(report["providers"][1]["effective_rpm"], 35);
+    assert_eq!(report["providers"][0]["configured"], true);
+    assert_eq!(report["providers"][0]["effective_rpm"], 35);
     assert!(!report.to_string().contains(secret));
     assert!(!std::fs::read_to_string(e.data.join("cloud.json"))
         .unwrap()
@@ -464,7 +464,7 @@ async fn security_posture_and_cloud_configuration_are_local_and_hide_keys() {
         )
         .await;
     assert_eq!(code, StatusCode::OK);
-    assert_eq!(report["providers"][1]["configured"], false);
+    assert_eq!(report["providers"][0]["configured"], false);
     assert_eq!(
         e.api(
             "POST",
@@ -538,10 +538,8 @@ fn cloud_context_requires_opt_in_and_stays_with_the_provider() {
         uuid::Uuid::new_v4().simple()
     ));
     let mut core = test_core(&dir);
-    for provider in ["nvidia_nim", "ollama_cloud"] {
-        core.configure_cloud(&json!({"provider":provider, "model":"synthetic", "key":"synthetic"}))
-            .unwrap();
-    }
+    core.configure_cloud(&json!({"provider":"nvidia_nim", "model":"synthetic", "key":"synthetic"}))
+        .unwrap();
     let turn = |core: &mut Jarvis, question: &str, answer: &str| {
         core.finish_cloud_chat(
             question.into(),
@@ -568,7 +566,7 @@ fn cloud_context_requires_opt_in_and_stays_with_the_provider() {
         .unwrap()
     };
     let standalone = ask(&core, false);
-    assert_eq!(standalone.target.provider.id(), "ollama_cloud");
+    assert_eq!(standalone.target.provider.id(), "nvidia_nim");
     assert_eq!(standalone.target.key, "synthetic");
     assert!(standalone.target.history.is_empty());
     let connected = ask(&core, true);
@@ -1689,7 +1687,7 @@ async fn agents_are_evaluated_and_the_environment_twin_is_consistent() {
             .as_array()
             .unwrap()
             .len(),
-        2
+        1
     );
     assert!(twin["tools_available_here"]["analysis"].as_u64().unwrap() > 5);
     assert!(twin["projects"]["conversations"].as_u64().unwrap() >= 1);
@@ -2091,7 +2089,7 @@ async fn source_followup_uses_only_the_previous_turn_and_stays_local() {
             "POST",
             "/api/cloud/chat",
             Some(json!({
-                "provider": "ollama_cloud", "message": "Qual è la fonte?"
+                "provider": "nvidia_nim", "message": "Qual è la fonte?"
             })),
         )
         .await;
@@ -2544,7 +2542,7 @@ async fn owner_can_rate_a_cloud_answer_using_fixed_categories() {
         .finish_cloud_chat(
             "Domanda sintetica".into(),
             Completed {
-                provider: Provider::Ollama,
+                provider: Provider::Nim,
                 model: "fixture:cloud".into(),
                 answer: Ok(Answer::Text("Risposta sintetica".into())),
             },
@@ -2575,14 +2573,14 @@ async fn owner_can_rate_a_cloud_answer_using_fixed_categories() {
     assert_eq!(e.api("POST", path, Some(rating)).await.0, StatusCode::OK);
     let (status, cloud) = e.api("GET", "/api/cloud", None).await;
     assert_eq!(status, StatusCode::OK);
-    let ollama = cloud["providers"]
+    let nim = cloud["providers"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|provider| provider["id"] == "ollama_cloud")
+        .find(|provider| provider["id"] == "nvidia_nim")
         .unwrap();
     assert_eq!(
-        ollama["feedback_profiles"],
+        nim["feedback_profiles"],
         json!([{"model":"fixture:cloud", "count":1, "length":"standard", "precision":true}])
     );
     assert_eq!(
@@ -2600,7 +2598,7 @@ async fn owner_can_rate_a_cloud_answer_using_fixed_categories() {
     assert!(history["items"][0].get("feedback").is_none());
     assert_eq!(
         history["items"][1]["feedback"],
-        json!({"provider":"ollama_cloud", "model":"fixture:cloud", "rating":"precise"})
+        json!({"provider":"nvidia_nim", "model":"fixture:cloud", "rating":"precise"})
     );
     let (status, sync) = e.api("GET", "/api/chat/sync", None).await;
     assert_eq!(status, StatusCode::OK);
@@ -2615,8 +2613,6 @@ fn the_provider_selected_by_the_owner_is_used_for_chat() {
     let dir =
         std::env::temp_dir().join(format!("jarvis-default-provider-{}", uuid::Uuid::new_v4()));
     let mut core = test_core(&dir);
-    core.configure_cloud(&json!({"provider":"ollama_cloud","key":"fixture-a"}))
-        .unwrap();
     core.configure_cloud(&json!({"provider":"nvidia_nim","key":"fixture-b","use_for_chat":true}))
         .unwrap();
     let request = core
@@ -2626,10 +2622,10 @@ fn the_provider_selected_by_the_owner_is_used_for_chat() {
     assert!(request.tools.is_empty());
     core.configure_cloud(&json!({"provider":"nvidia_nim","remove_key":true}))
         .unwrap();
-    let request = core
+    // Senza chiave non c'è nessun provider da usare: errore chiaro, nessun ripiego su servizi rimossi.
+    assert!(core
         .prepare_cloud_chat(&json!({"provider":"auto","message":"Una domanda sintetica"}))
-        .unwrap();
-    assert_eq!(request.target.provider.id(), "ollama_cloud");
+        .is_err());
     drop(core);
     std::fs::remove_dir_all(dir).unwrap();
 }
@@ -2637,7 +2633,7 @@ fn the_provider_selected_by_the_owner_is_used_for_chat() {
 #[tokio::test]
 async fn testing_a_cloud_key_requires_the_owner_and_a_configured_provider() {
     let e = env();
-    let body = json!({"provider": "ollama_cloud"});
+    let body = json!({"provider": "nvidia_nim"});
     assert_eq!(
         e.call(
             "POST",

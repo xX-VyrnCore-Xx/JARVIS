@@ -91,7 +91,7 @@ fra agenti: **Parziale** (delega a un agente alla volta). Supervisione (pausa e 
 Sette rotte per compito (veloce, ragionamento, codice, contesto lungo, scrittura, traduzione, analisi), ripiego su modello
 alternativo, blocco delle credenziali, profilo e contesto condivisi solo se consentiti, funzionamento offline parziale a regole,
 spiegazione dell'instradamento (`GET /api/models/route`): **Implementato**. **Modelli locali (Ollama in locale)**, scelta in
-base a hardware, costi o capacità multimodali: **Pianificato**. I provider sono Ollama Cloud e NVIDIA NIM (ADR-0023), non
+base a hardware, costi o capacità multimodali: **Pianificato**. Il provider cloud è NVIDIA NIM (ADR-0023; Ollama Cloud rimosso, ADR-0191), non
 servizi obbligatori: senza chiave si lavora offline.
 
 ## 7. Sicurezza e permessi ([SECURITY_AND_PRIVACY.md](SECURITY_AND_PRIVACY.md))

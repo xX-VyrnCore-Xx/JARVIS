@@ -2,7 +2,7 @@
 
 JARVIS è un assistente personale per un singolo proprietario. Il Core coordina chat, strumenti, memoria e automazioni. Puoi tenere il Core sempre attivo sul Mac e usare lo stesso archivio dall'app desktop nativa, da Android e dagli altri computer associati.
 
-L’inferenza usa **Ollama Cloud** o **NVIDIA NIM**. I comandi deterministici e la ricerca nella memoria funzionano sul Core. La voce è sospesa finché non sarà disponibile un provider audio cloud. Le operazioni sensibili passano da policy, conferma e audit.
+L’inferenza usa **NVIDIA NIM**. I comandi deterministici e la ricerca nella memoria funzionano sul Core. La voce è sospesa finché non sarà disponibile un provider audio cloud. Le operazioni sensibili passano da policy, conferma e audit.
 
 ## Installa JARVIS
 
@@ -48,7 +48,7 @@ Gli artefatti sono verificabili con l’attestazione GitHub e le firme Sigstore;
 | Desktop | SwiftUI su macOS, Rust ed egui su Windows; API del Core |
 | Mobile | Kotlin e Jetpack Compose su Android |
 | Dati e memoria | SQLite con rusqlite, FTS5/BM25, vettori lessicali locali e grafo delle conoscenze |
-| Inferenza | Ollama Cloud e NVIDIA NIM, routing per attività e budget, limiter NIM a 35 RPM |
+| Inferenza | NVIDIA NIM, routing per attività e budget, limiter NIM a 35 RPM |
 | Voce | faster-whisper, Piper, openWakeWord e XTTS v2 facoltativo |
 | Automazioni e sandbox | Scheduler Tokio, n8n e Python in container Docker isolati |
 | Sicurezza e distribuzione | rustls, WebAuthn, portachiavi di sistema, GitHub Actions, test API, firme e attestazioni Sigstore |
@@ -85,7 +85,7 @@ Apri JARVIS e autentica la sessione con Touch ID o con la password del Mac. Il c
 
 - **Chat.** Invia richieste al Core e consulta la cronologia della conversazione. Le azioni sensibili restano soggette a policy e conferma.
 - **Promemoria.** Chiedi «controlla le scadenze» o includi il controllo nel briefing: JARVIS evidenzia attività scadute e in scadenza entro 24 ore e propone come procedere. Puoi chiedere un orizzonte fino a sette giorni; nessuna attività viene modificata e nessun messaggio viene inviato automaticamente.
-- **Modelli cloud e voce.** La sezione Modelli AI dell'app desktop permette di configurare o rimuovere le chiavi per Ollama Cloud e NVIDIA NIM; il Core instrada le richieste al provider selezionato. La chat richiede una chiave configurata quando la richiesta richiede inferenza; i comandi espliciti passano dal Core.
+- **Modelli cloud e voce.** La sezione Modelli AI dell'app desktop permette di configurare o rimuovere la chiave di NVIDIA NIM; il Core instrada le richieste al provider selezionato. La chat richiede una chiave configurata quando la richiesta richiede inferenza; i comandi espliciti passano dal Core.
 - **Gmail e Google Calendar.** In **Connettori → Google Workspace**, seleziona il file JSON OAuth di tipo **App desktop** e completa il consenso nel browser. Puoi selezionare lo stesso file per entrambi i servizi. Abilita Gmail API e Google Calendar API nel progetto Google e aggiungi il tuo account agli utenti di test se la schermata di consenso è in modalità test. Dopo il consenso aggiorna Connettori e verifica che il servizio risulti autorizzato. L’accesso già configurato può essere rinnovato riusando il secret cifrato. Su un Core senza app desktop puoi usare `scripts/configure_google_connectors.py` con il token del proprietario in ambiente.
 - **Privacy della chat.** Il Core invia la richiesta testuale con HTTPS a un solo provider per turno. Sui client la cronologia è esclusa per impostazione predefinita. Il provider elabora in chiaro il testo ricevuto. Memoria, workspace e risultati degli strumenti restano nel Core. Messaggi, fonti e documenti dei task sono cifrati nell’archivio attivo.
 - **Dispositivi e notifiche.** Associa client Android o desktop tramite invito monouso. Le notifiche push Android richiedono Firebase; il Core continua a conservarle anche quando un client non è connesso.
