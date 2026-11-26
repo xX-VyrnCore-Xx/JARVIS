@@ -344,13 +344,30 @@ def _describe_tool_result(result: dict) -> str:
         results = output.get("results", [])
         if not results:
             return f"Nessun risultato per «{output.get('query')}» ({output.get('provider')})."
-        lines = [f"[{r['rank']}] {r['title']} — {r['url']}" + (f"\n    {r['snippet'][:200]}" if r.get("snippet") else "") for r in results]
+        label = {"alta": "affidabile", "media": "da verificare", "bassa": "poco affidabile"}
+        lines = [f"[{r['rank']}] {r['title']} — {r['url']}"
+                 + (f" ({label.get((r.get('reliability') or {}).get('level'), '')})" if (r.get("reliability") or {}).get("level") in label else "")
+                 + (f"\n    {r['snippet'][:200]}" if r.get("snippet") else "") for r in results]
         note = ""
         if output.get("fallback_from"):
             note = (f"\n(Il motore {output.get('fallback_from')} non ha risposto: {output.get('fallback_reason')}. "
                     "Questi risultati vengono da Wikipedia e possono essere meno ampi.)")
+        if output.get("freshness"):
+            note += "\n(Hai chiesto notizie recenti: controlla la data nella pagina prima di fidarti.)"
         return (f"Risultati per «{output.get('query')}» (fonte: {output.get('provider')}, {output.get('retrieved_at')}):\n"
                 + "\n".join(lines) + note + "\n\nPer leggere una pagina: «apri <url>».")
+    if tool == "map.search":
+        places = output.get("places") or []
+        if not places:
+            return f"Non trovo «{output.get('query')}» sulla mappa."
+        lines = [f"[{i + 1}] {p.get('display_name')} — {p['lat']:.5f}, {p['lon']:.5f} — {p.get('map_url')}" for i, p in enumerate(places[:5])]
+        return f"Luoghi per «{output.get('query')}» (fonte: {output.get('source')}):\n" + "\n".join(lines)
+    if tool == "map.route":
+        steps = output.get("steps") or []
+        lines = [f"{i + 1}. {st['instruction']}" + (f" ({int(st['distance_m'])} m)" if st.get("distance_m") else "") for i, st in enumerate(steps[:12])]
+        more = f"\n… e altri {len(steps) - 12} passi." if len(steps) > 12 else ""
+        return (f"Da {output['from'].get('name')} a {output['to'].get('name')}, {output.get('summary')}\n" + "\n".join(lines) + more
+                + f"\n\nMappa: {output.get('map_url')}\n({output.get('note')})")
     if tool == "web.fetch":
         content = (output.get("content") or "").strip()
         excerpt = content[:1200] + ("…" if len(content) > 1200 else "")
@@ -572,6 +589,11 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
      lambda m: {"key": _KEY_ALIASES.get(m[2].lower(), m[2].lower()),
                 **({"modifiers": [_MODIFIERS[p.strip().lower()] for p in m[1].split("+") if p.strip()]} if m[1].strip() else {})}),
     (re.compile(r"^\s*(?:cosa c'è sullo schermo|cosa vedi sullo schermo|leggi (?:lo|il mio) schermo|che testo c'è sullo schermo)\s*\??\s*$", re.I), "screen.read", lambda m: {}),
+    # Mappa e percorsi (OpenStreetMap): «indicazioni da Torino a Milano a piedi», «mostrami Roma sulla mappa».
+    (re.compile(r"^\s*(?:indicazioni|percorso|strada|come (?:arrivo|si arriva|vado))(?: stradali)?\s+da\s+(.+?)\s+a\s+(.+?)(?:\s+(a piedi|in bici|in auto))?\s*\??\s*$", re.I), "map.route",
+     lambda m: {"from": m[1].strip(), "to": m[2].strip(), "mode": {"a piedi": "piedi", "in bici": "bici"}.get((m[3] or "").lower(), "auto")}),
+    (re.compile(r"^\s*(?:mostrami|trova|cerca|dov'è|dove si trova)\s+(.{2,120}?)\s+(?:sulla mappa|su una mappa|su openstreetmap)\s*\??\s*$|^\s*mappa di\s+(.{2,120}?)\s*$|^\s*coordinate di\s+(.{2,120}?)\s*\??\s*$", re.I), "map.search",
+     lambda m: {"query": (m[1] or m[2] or m[3]).strip()}),
     # Un monitor preciso: «leggi il secondo monitor», «cosa c'è sul monitor 2» (1 è il principale).
     (re.compile(r"^\s*(?:leggi|cosa c'è(?: su| sul)?|cosa vedi(?: su| sul)?)\s+(?:lo schermo del |il )?(?:(primo|secondo|terzo|quarto)|monitor\s+([1-8]))(?:\s+monitor)?\s*\??\s*$", re.I), "screen.read",
      lambda m: {"display": {"primo": 1, "secondo": 2, "terzo": 3, "quarto": 4}.get((m[1] or "").lower()) or int(m[2])}),

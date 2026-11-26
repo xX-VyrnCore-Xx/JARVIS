@@ -474,6 +474,90 @@ pub fn resolve_contradiction(
     Ok(json!({"kept": keep, "removed": removed}))
 }
 
+/// Strumenti il cui esito vale solo sul momento (ora, calcoli, meteo, stato del computer, finestre aperte): una
+/// richiesta che ha usato solo questi non lascia nulla da ricordare (ADR-0199).
+const TRANSIENT_TOOLS: &[&str] = &[
+    "time.now",
+    "time.wait",
+    "date.calc",
+    "math.calc",
+    "units.convert",
+    "weather.forecast",
+    "system.info",
+    "system.disks",
+    "process.list",
+    "app.windows",
+    "app.open",
+    "app.focus",
+    "app.key",
+    "app.type",
+    "screen.status",
+    "media.spotify",
+    "text.count",
+    "data.stats",
+    "it.subnet",
+    "security.hash",
+    "security.status",
+    "fs.list",
+    "git.status",
+];
+
+fn is_transient_tool(tool: &str) -> bool {
+    tool.starts_with("biz.") || TRANSIENT_TOOLS.contains(&tool)
+}
+
+/// Un episodio merita di essere ricordato? No se tutti gli strumenti usati sono momentanei, e nemmeno una risposta
+/// diretta a una domanda breve (saluti, «che ore sono», «come stai»): serve un argomento vero.
+pub fn episode_is_worth_keeping(objective: &str, tools: &[&str]) -> bool {
+    if tools.is_empty() {
+        return objective.trim().chars().count() >= 60;
+    }
+    !tools.iter().all(|t| is_transient_tool(t))
+}
+
+/// Dal testo di un episodio già salvato («Richiesta «…»: a → b, esito ok» o «…: risposta diretta, esito ok»):
+/// `true` se è rumore che non andava salvato.
+pub fn stored_episode_is_noise(text: &str) -> bool {
+    let Some(rest) = text.strip_prefix("Richiesta «") else {
+        return false;
+    };
+    let Some((objective, tail)) = rest.split_once("»: ") else {
+        return false;
+    };
+    let chain = tail.rsplit_once(", esito").map_or(tail, |(c, _)| c).trim();
+    if chain == "risposta diretta" {
+        return !episode_is_worth_keeping(objective, &[]);
+    }
+    let tools: Vec<&str> = chain.split(" → ").map(str::trim).collect();
+    !tools.is_empty() && !episode_is_worth_keeping(objective, &tools)
+}
+
+/// Episodi rumorosi già salvati e non fissati: con `apply` falso è un'anteprima (conteggio ed esempi).
+pub fn clean_noise_episodes(store: &Store, apply: bool) -> StoreResult<Value> {
+    let mut stmt = store.conn.prepare(
+        "SELECT id, text FROM memory WHERE kind = 'episodic'
+           AND COALESCE(source, '') NOT LIKE '%\"pinned\":true%'
+           AND COALESCE(source, '') NOT LIKE '%\"kind\":\"consolidation\"%'",
+    )?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    let noise: Vec<&(String, String)> = rows
+        .iter()
+        .filter(|(_, t)| stored_episode_is_noise(t))
+        .collect();
+    let samples: Vec<&str> = noise.iter().take(8).map(|(_, t)| t.as_str()).collect();
+    let mut removed = 0;
+    if apply {
+        for (id, _) in &noise {
+            if store.memory_delete(id)? {
+                removed += 1;
+            }
+        }
+    }
+    Ok(json!({"found": noise.len(), "removed": removed, "applied": apply, "examples": samples}))
+}
+
 /// Riassume gli episodi più vecchi di `days` giorni in un riassunto per settimana (al massimo 12 punti da 120
 /// caratteri), eliminando gli originali non fissati. Il riassunto è «dedotto», ricorda gli identificativi di
 /// origine in `source` e vive 180 giorni. Con `apply` falso è un'anteprima.
@@ -854,5 +938,51 @@ mod tests {
             soon,
             "quello ignorato scade come previsto"
         );
+    }
+
+    #[test]
+    fn transient_requests_are_not_worth_a_memory_but_real_work_is() {
+        assert!(!episode_is_worth_keeping("che ore sono", &["time.now"]));
+        assert!(!episode_is_worth_keeping(
+            "quanto fa 3+4",
+            &["math.calc", "units.convert"]
+        ));
+        assert!(!episode_is_worth_keeping(
+            "calcola il margine",
+            &["biz.margin"]
+        ));
+        assert!(!episode_is_worth_keeping("ciao come stai", &[]));
+        assert!(episode_is_worth_keeping(
+            "scrivi note.txt: lista della spesa",
+            &["fs.write"]
+        ));
+        assert!(episode_is_worth_keeping(
+            "che ore sono e salvami un promemoria",
+            &["time.now", "todo.add"]
+        ));
+        assert!(episode_is_worth_keeping(
+            "spiegami come funziona il nostro sistema di conferme per le azioni rischiose",
+            &[]
+        ));
+    }
+
+    #[test]
+    fn stored_noise_is_recognised_from_the_episode_text() {
+        assert!(stored_episode_is_noise(
+            "Richiesta «che ore sono»: time.now, esito succeeded"
+        ));
+        assert!(stored_episode_is_noise(
+            "Richiesta «ciao»: risposta diretta, esito succeeded"
+        ));
+        assert!(stored_episode_is_noise(
+            "Richiesta «meteo»: weather.forecast → time.now, esito succeeded"
+        ));
+        assert!(!stored_episode_is_noise(
+            "Richiesta «salva»: fs.write, esito succeeded"
+        ));
+        assert!(!stored_episode_is_noise(
+            "L'utente preferisce risposte brevi"
+        ));
+        assert!(!stored_episode_is_noise("Riassunto della settimana: …"));
     }
 }

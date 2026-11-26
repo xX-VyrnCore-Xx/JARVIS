@@ -2,7 +2,7 @@
   "contract": "jarvis.tool/1",
   "name": "web.search",
   "version": "1.0.0",
-  "summary": "Cerca sul Web tramite il fornitore configurato (Wikipedia o SearXNG) e restituisce risultati con titolo, URL ed estratto. La query esce dal computer: non inserire dati personali.",
+  "summary": "Cerca sul Web (DuckDuckGo senza chiave, con ripiego su Wikipedia; o SearXNG) e restituisce risultati con titolo, URL, estratto e valutazione di attendibilità della fonte. La query esce dal computer: non inserire dati personali.",
   "input_schema": {
     "type": "object",
     "additionalProperties": false,

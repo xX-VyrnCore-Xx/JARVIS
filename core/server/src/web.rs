@@ -445,6 +445,14 @@ pub fn fetch(cfg: &WebConfig, raw: &str) -> Result<Value, ToolError> {
     }))
 }
 
+/// Scarica un indirizzo fisso e fidato (servizi di mappe) rispettando i controlli di rete del Web: restituisce il corpo.
+pub fn get_trusted(cfg: &WebConfig, url: Url) -> Result<Vec<u8>, ToolError> {
+    if !cfg.enabled {
+        return Err(err("web.disabled", "accesso al Web disattivato"));
+    }
+    get(cfg, url, true).map(|page| page.body)
+}
+
 /// Ricerca tramite il fornitore configurato. Con il fornitore predefinito (`Web`) si usa DuckDuckGo e, se non
 /// risponde, è bloccato o non trova nulla, Wikipedia: il risultato dice quale fonte ha risposto e perché.
 pub fn search(cfg: &WebConfig, query: &str, limit: usize) -> Result<Value, ToolError> {
@@ -486,7 +494,159 @@ pub fn search(cfg: &WebConfig, query: &str, limit: usize) -> Result<Value, ToolE
     }
 }
 
+/// Valutazione euristica dell'attendibilità di una fonte dal solo dominio (ADR-0201): non è un giudizio sul
+/// contenuto e va letta come un indizio. Livelli: `alta` (istituzioni, enti scientifici, documentazione ufficiale,
+/// agenzie di stampa), `media` (predefinito) e `bassa` (social, forum e contenuti generati dagli utenti).
+pub fn assess_source(url: &str) -> Value {
+    let Some(parsed) = Url::parse(url).ok() else {
+        return json!({"level": "media", "score": 50, "reason": "indirizzo non analizzabile"});
+    };
+    let host = parsed.host_str().unwrap_or("").to_ascii_lowercase();
+    let host = host.strip_prefix("www.").unwrap_or(&host).to_string();
+    let on = |domains: &[&str]| domains.iter().any(|d| host_matches(&host, d));
+    let (level, mut score, reason): (&str, i32, &str) = if on(&[
+        "reddit.com",
+        "quora.com",
+        "facebook.com",
+        "x.com",
+        "twitter.com",
+        "tiktok.com",
+        "instagram.com",
+        "pinterest.com",
+        "answers.yahoo.com",
+        "brainly.com",
+        "blogspot.com",
+        "wordpress.com",
+        "medium.com",
+        "tumblr.com",
+        "telegram.me",
+        "t.me",
+        "youtube.com",
+        "linkedin.com",
+    ]) {
+        (
+            "bassa",
+            25,
+            "contenuto generato dagli utenti o social: verifica con una fonte primaria",
+        )
+    } else if host.ends_with(".gov")
+        || host.contains(".gov.")
+        || host.ends_with(".edu")
+        || host.contains(".edu.")
+        || host.contains(".ac.")
+        || host.ends_with(".mil")
+        || on(&[
+            "europa.eu",
+            "who.int",
+            "un.org",
+            "nih.gov",
+            "nasa.gov",
+            "arxiv.org",
+            "nature.com",
+            "science.org",
+            "sciencedirect.com",
+            "pubmed.ncbi.nlm.nih.gov",
+            "ieee.org",
+            "acm.org",
+            "iso.org",
+            "w3.org",
+            "ietf.org",
+            "istat.it",
+            "gazzettaufficiale.it",
+            "inps.it",
+        ])
+    {
+        ("alta", 90, "istituzione, ente scientifico o normativo")
+    } else if on(&[
+        "docs.python.org",
+        "developer.mozilla.org",
+        "docs.rs",
+        "rust-lang.org",
+        "kernel.org",
+        "postgresql.org",
+        "developer.apple.com",
+        "learn.microsoft.com",
+        "docs.docker.com",
+        "kubernetes.io",
+        "github.com",
+        "huggingface.co",
+        "tailscale.com",
+        "nvidia.com",
+    ]) {
+        ("alta", 80, "documentazione o progetto ufficiale")
+    } else if on(&[
+        "reuters.com",
+        "apnews.com",
+        "bbc.com",
+        "bbc.co.uk",
+        "ansa.it",
+        "afp.com",
+        "ilsole24ore.com",
+    ]) {
+        ("alta", 75, "agenzia o testata giornalistica consolidata")
+    } else if on(&["wikipedia.org", "britannica.com", "treccani.it"]) {
+        (
+            "media",
+            65,
+            "enciclopedia: buona sintesi, da verificare sulle fonti citate",
+        )
+    } else {
+        ("media", 50, "fonte non classificata")
+    };
+    if parsed.scheme() != "https" {
+        score -= 15;
+    }
+    json!({"level": level, "score": score.clamp(0, 100), "reason": reason,
+        "https": parsed.scheme() == "https", "domain": host})
+}
+
+/// Finestra di freschezza chiesta dalla domanda («oggi», «ultime notizie», «questa settimana»…): `d`, `w`, `m`.
+pub fn recency_window(query: &str) -> Option<&'static str> {
+    let q = query.to_lowercase();
+    let has = |words: &[&str]| words.iter().any(|w| q.contains(w));
+    if has(&[
+        "oggi",
+        "adesso",
+        "in questo momento",
+        "ultime ore",
+        "breaking",
+        "in diretta",
+    ]) {
+        Some("d")
+    } else if has(&[
+        "ultime notizie",
+        "ultimi giorni",
+        "questa settimana",
+        "ultima settimana",
+        "recenti",
+    ]) {
+        Some("w")
+    } else if has(&["questo mese", "ultimo mese", "ultimi mesi"]) {
+        Some("m")
+    } else {
+        None
+    }
+}
+
 fn finish(provider: &str, query: &str, results: Vec<Value>, limit: usize) -> Value {
+    // Ogni risultato porta la sua valutazione; le fonti a bassa attendibilità vanno in coda, senza essere nascoste
+    // e senza cambiare l'ordine degli altri.
+    let mut results: Vec<Value> = results
+        .into_iter()
+        .map(|mut r| {
+            let assessment = assess_source(r["url"].as_str().unwrap_or_default());
+            r["reliability"] = assessment;
+            r
+        })
+        .collect();
+    results.sort_by_key(|r| r["reliability"]["level"] == "bassa");
+    let count = |level: &str| {
+        results
+            .iter()
+            .filter(|r| r["reliability"]["level"] == level)
+            .count()
+    };
+    let summary = json!({"alta": count("alta"), "media": count("media"), "bassa": count("bassa")});
     let results: Vec<Value> = results
         .into_iter()
         .take(limit)
@@ -496,7 +656,14 @@ fn finish(provider: &str, query: &str, results: Vec<Value>, limit: usize) -> Val
             r
         })
         .collect();
-    json!({"provider": provider, "query": query, "retrieved_at": now(), "results": results, "untrusted": true})
+    let mut out = json!({"provider": provider, "query": query, "retrieved_at": now(), "results": results,
+        "untrusted": true, "reliability_summary": summary,
+        "reliability_note": "Valutazione euristica dal solo dominio: è un indizio, non un giudizio sul contenuto."});
+    if let Some(window) = recency_window(query) {
+        out["freshness"] = json!({"requested": window,
+            "note": "La domanda chiede notizie recenti: i risultati sono limitati al periodo richiesto se il motore lo consente; controlla la data nella pagina."});
+    }
+    out
 }
 
 fn wikipedia_results(
@@ -568,6 +735,9 @@ fn duckduckgo_results(
     u.query_pairs_mut()
         .append_pair("q", query)
         .append_pair("kl", "it-it");
+    if let Some(window) = recency_window(query) {
+        u.query_pairs_mut().append_pair("df", window);
+    }
     let page = get(cfg, u, true)?;
     let html = String::from_utf8_lossy(&page.body);
     if html.contains("anomaly-modal") || html.contains("g-recaptcha") {
@@ -880,5 +1050,57 @@ mod tests {
         assert_eq!(results[1]["snippet"], "Il libro ufficiale.");
         assert_eq!(parse_duckduckgo(DDG, 1).len(), 1);
         assert!(parse_duckduckgo("<html>niente</html>", 5).is_empty());
+    }
+
+    #[test]
+    fn sources_are_rated_by_domain_and_weak_ones_go_last() {
+        let level = |u: &str| assess_source(u)["level"].as_str().unwrap().to_string();
+        assert_eq!(level("https://www.istat.it/dati"), "alta");
+        assert_eq!(level("https://comune.milano.gov.it/x"), "alta");
+        assert_eq!(level("https://docs.python.org/3/"), "alta");
+        assert_eq!(level("https://www.reddit.com/r/rust"), "bassa");
+        assert_eq!(level("https://it.wikipedia.org/wiki/Rust"), "media");
+        assert_eq!(level("https://sito-sconosciuto.example/pagina"), "media");
+        assert_eq!(level("non un indirizzo"), "media");
+        let plain = assess_source("http://sito-sconosciuto.example/");
+        assert!(
+            plain["score"].as_i64().unwrap()
+                < assess_source("https://sito-sconosciuto.example/")["score"]
+                    .as_i64()
+                    .unwrap()
+        );
+        let out = finish(
+            "test",
+            "query",
+            vec![
+                json!({"title": "forum", "url": "https://www.reddit.com/x"}),
+                json!({"title": "ente", "url": "https://www.nih.gov/y"}),
+                json!({"title": "blog", "url": "https://esempio.example/z"}),
+            ],
+            10,
+        );
+        let titles: Vec<&str> = out["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|r| r["title"].as_str())
+            .collect();
+        assert_eq!(titles, ["ente", "blog", "forum"]);
+        assert_eq!(out["results"][0]["rank"], 1);
+        assert_eq!(
+            out["reliability_summary"],
+            json!({"alta": 1, "media": 1, "bassa": 1})
+        );
+        assert!(out.get("freshness").is_none());
+    }
+
+    #[test]
+    fn recent_news_requests_set_a_freshness_window() {
+        assert_eq!(recency_window("ultime notizie sul Core"), Some("w"));
+        assert_eq!(recency_window("risultati di oggi"), Some("d"));
+        assert_eq!(recency_window("novità di questo mese"), Some("m"));
+        assert_eq!(recency_window("storia di Roma"), None);
+        let out = finish("test", "meteo adesso", vec![], 5);
+        assert_eq!(out["freshness"]["requested"], "d");
     }
 }

@@ -99,13 +99,26 @@ Container del sandbox (ADR-0115): etichetta `jarvis.sandbox=1`, `--ipc none`, pu
 
 ## Token GitHub: quali permessi dare
 
-JARVIS usa un token GitHub in due punti e non ne chiede altri. Si crea un **token fine-grained** (Impostazioni → Developer settings → Personal access tokens → Fine-grained), con scadenza breve e accesso solo ai repository necessari.
+JARVIS usa un token GitHub in due punti: gli aggiornamenti da un repository privato e il connettore GitHub (repository, file, issue, pull request, Actions). Si crea un **token fine-grained** (Settings → Developer settings → Personal access tokens → Fine-grained), con scadenza breve (30–90 giorni) e accesso solo ai repository necessari. Ogni scrittura chiede la tua conferma; creare o modificare repository, unire una pull request ed eliminare un file sono operazioni «critiche» con conferma esplicita. JARVIS non può eliminare repository né toccare segreti, collaboratori o impostazioni di organizzazione: quei permessi non servono e non vanno concessi.
 
-| Uso | Dove si inserisce | Permessi del token fine-grained |
+**Per gli aggiornamenti** (repository privato): solo `Contents: Read-only` (più `Metadata: Read-only`, automatico) sul repository `xX-VyrnCore-Xx/JARVIS`. Per un repository pubblico non serve token.
+
+**Per il connettore GitHub completo** (repository, file, issue, pull request, Actions):
+
+| Permesso del token fine-grained | Livello | Serve per |
 |---|---|---|
-| Aggiornamenti da un repository **privato** (release e file di installazione) | Aggiornamenti → «Token GitHub» | Repository: solo `xX-VyrnCore-Xx/JARVIS`. **Contents: Read-only**; Metadata: Read-only (automatico). Nient'altro. |
-| Connettore GitHub: elenco repository e issue | Connettori → GitHub | Repository scelti. **Metadata: Read-only**, **Issues: Read-only**. |
-| Connettore GitHub: creare issue | stesso token | in più **Issues: Read and write** (solo se vuoi che JARVIS apra issue). |
-| Connettore GitHub: notifiche | stesso token | I token fine-grained **non** supportano l'API delle notifiche: serve un token *classic* con scope `notifications` (e `repo` per i repository privati). Meglio non usarlo se non serve. |
+| Metadata | Read-only (automatico) | tutto |
+| Contents | Read and write | leggere file e rami, creare o aggiornare file con un commit, creare rami |
+| Issues | Read and write | leggere, creare, commentare e chiudere issue |
+| Pull requests | Read and write | leggere, aprire e unire pull request |
+| Actions | Read and write | vedere le esecuzioni; avviare, rilanciare, annullare, attivare e disattivare i workflow |
+| Workflows | Read and write | creare o modificare i file in `.github/workflows` (senza questo GitHub rifiuta le modifiche ai workflow) |
+| Administration | Read and write | solo per «modifica_repo» (visibilità, archiviazione, ramo predefinito) e, se supportato, per creare repository: concedilo soltanto se ti serve |
 
-Per gli aggiornamenti di un repository pubblico non serve nessun token. Un token classic con scope `repo` funziona ma dà molto più accesso del necessario: preferisci il fine-grained. Il token è salvato nel secret store del Core, non è mai mostrato dopo il salvataggio e viaggia solo verso `api.github.com`.
+Accesso ai repository: «Only select repositories» con quelli che JARVIS deve gestire. **Creare nuovi repository nel tuo account:** i token fine-grained non sempre lo permettono (dipende dal tipo di account e dal permesso Administration); se GitHub risponde 403 o 404 serve un token *classic*.
+
+**Alternativa con un solo token classic:** scope `repo` (repository, file, issue, pull request, Actions) e `workflow` (modificare i file dei workflow). È più semplice ma dà accesso a tutti i tuoi repository: usalo solo se il fine-grained non basta, e aggiungi `notifications` soltanto se vuoi leggere le notifiche (i token fine-grained non supportano quell'API).
+
+**Organizzazioni:** scegli l'organizzazione come «Resource owner» e, se richiesto, fai approvare il token da un proprietario dell'organizzazione.
+
+Il token si inserisce in Connettori → GitHub (o in Aggiornamenti per gli aggiornamenti), resta nel secret store del Core, non è mai mostrato dopo il salvataggio e viaggia solo verso `api.github.com`. Dopo un aggiornamento di JARVIS che aggiunge operazioni (versione 1.1.0 del connettore) **reinstalla il connettore GitHub** per vederle.

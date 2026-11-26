@@ -153,7 +153,7 @@
     "operations": {
       "type": "array",
       "minItems": 1,
-      "maxItems": 20,
+      "maxItems": 40,
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -178,7 +178,10 @@
           "method": {
             "enum": [
               "GET",
-              "POST"
+              "POST",
+              "PUT",
+              "PATCH",
+              "DELETE"
             ]
           },
           "path": {
@@ -205,14 +208,44 @@
             "type": "object"
           },
           "body_encoding": {
-            "description": "Come il Core compone il corpo della richiesta (ADR-0047). «json» (predefinito): gli argomenti restanti in JSON. «gmail_raw» / «gmail_draft»: il Core costruisce un messaggio RFC 822 da to, subject, body (e cc) e lo invia come {raw} o {message:{raw}}. Aggiunta compatibile (facoltativa) della v1.",
+            "description": "Come il Core compone il corpo della richiesta (ADR-0047). «json» (predefinito): gli argomenti restanti in JSON. «gmail_raw» / «gmail_draft»: il Core costruisce un messaggio RFC 822 da to, subject, body (e cc) e lo invia come {raw} o {message:{raw}}. Aggiunta compatibile (facoltativa) della v1. «github_content»: il Core codifica in base64 il campo «text» e lo invia come «content» (file di un repository GitHub).",
             "enum": [
               "json",
               "gmail_raw",
-              "gmail_draft"
+              "gmail_draft",
+              "github_content"
             ]
           }
-        }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "method": {
+                  "enum": [
+                    "PUT",
+                    "PATCH",
+                    "DELETE"
+                  ]
+                }
+              },
+              "required": [
+                "method"
+              ]
+            },
+            "then": {
+              "properties": {
+                "effects": {
+                  "const": "write_external"
+                }
+              },
+              "required": [
+                "effects"
+              ]
+            }
+          }
+        ],
+        "description": "PUT, PATCH e DELETE modificano sempre dati esterni: devono dichiarare effects «write_external» (e quindi chiedono conferma)."
       }
     }
   }

@@ -264,6 +264,10 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Strumenti, Spotify, ricerca web, n8n, monitor, Tailscale (2026-11-26, ADR-0195–0198).** App note anche in minuscolo con ripiego; Spotify unico servizio musicale (macOS e Windows); ricerca DuckDuckGo con ripiego su Wikipedia; scheda n8n con Docker; `screen.read` per monitor; diagnosi Tailscale. Nulla provato su macOS/Windows/Tailscale reali.
 
+**Memoria, profili, MCP, voce, fonti, mappa (2026-11-26, ADR-0199–0202).** Episodi senza rumore e pulizia; eliminazione dal menu; profili di lavoro a mano; Hugging Face MCP con interruttori; sezione Voce con installazione; attendibilità delle fonti; mappa e percorsi OpenStreetMap. Nulla provato su macOS/Windows/servizi reali.
+
+**GitHub esteso (2026-11-26, ADR-0203).** Il connettore passa a 25 operazioni (repository, file, pull request, Actions) con conferma su ogni scrittura; permessi del token documentati. Non provato contro GitHub reale.
+
 **MCP, Hugging Face e memoria (2026-11-25, ADR-0182).** Client MCP con sessione riusata, elenco a pagine con impronta, tentativi limitati, argomenti verificati, salute e statistiche; politica per strumento e `mcp.read` per le letture approvate; Hugging Face con un gesto (server noto, competenza, agente di ricerca); memoria esportabile e importabile, contraddizioni risolvibili, episodi riassunti e scadenza adattiva. Non provato il client contro il server reale (rete di questo ambiente).
 
 **Plancia dal mock-up (2026-11-25, ADR-0181).** Schede reali (specialisti, progetti, sistema, attività, notifiche, media, monitoraggio), meteo e media facoltativi, avatar con colore per stato e alone che pulsa con la voce, ritratto fornito dall'utente. Swift verificato solo dalla CI; resa non vista; Windows e Android da fare.

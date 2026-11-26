@@ -2371,6 +2371,41 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Contesto:** il problema persisteva con Tailscale attivo e connesso. Una causa plausibile è che questo computer non risolva il nome `*.ts.net` (Tailscale in modalità userspace, DNS di Tailscale non in uso) pur funzionando dagli altri dispositivi: la verifica da qui falliva senza dire dove.
 - **Decisione:** `POST /api/tailscale/diagnose` esegue dal Core DNS → porta 443 → certificato HTTPS → risposta di JARVIS (`/api/connectivity`) e indica il primo passo che fallisce con l'azione da fare, includendo avvisi di salute e indirizzi di Tailscale. Pulsante «Diagnostica» nelle app macOS ed egui. Complementa ADR-0192.
 
+### ADR-0199 — Memoria senza rumore, eliminazione dal menu, profili di lavoro e Hugging Face (MCP) nelle sezioni
+
+- **Data:** 2026-11-26. **Stato:** implementata (Swift ed egui verificati solo dalla CI).
+- **Memoria:** gli episodi automatici si salvano solo se valgono qualcosa: una richiesta che ha usato soltanto strumenti momentanei (ora, calcoli, meteo, stato del computer, finestre, Spotify, elenco file…) o una risposta diretta a una domanda breve non lascia più un ricordo («che ore sono» non si salva). `POST /api/memory/cleanup` (`apply: false` anteprima, `true` elimina, con audit) toglie gli episodi rumorosi già salvati; i ricordi fissati e quelli scritti dall'utente non si toccano. Il test `memory_kinds_search_graph_and_episodes` asseriva l'episodio per «che ore sono»: aggiornato di proposito.
+- **Eliminazione:** nella sezione Memoria di macOS ogni ricordo ha un menu (Modifica, Fissa, Elimina) con conferma e il pulsante «Pulisci ricordi inutili»; non serve più passare dalla chat. Anche l'app Windows ha «Pulisci ricordi inutili» (l'eliminazione singola c'era già).
+- **Profili di lavoro a mano:** form nella sezione Workspace (macOS ed egui): nome, descrizione, app e cartelle; `POST /api/workspaces/profiles/activate` apre le app elencate come azione esplicita del proprietario (esito per app, audit). Nessun comando.
+- **Hugging Face e server MCP:** scheda nella sezione Connettori (macOS ed egui): «Collega Hugging Face» con token facoltativo, lettura degli strumenti dal server, interruttore «Senza conferma» per i soli strumenti dichiarati di sola lettura; tutti gli altri chiedono sempre conferma (ADR-0182).
+
+### ADR-0200 — Installazione della voce da una sezione dedicata
+
+- **Data:** 2026-11-26. **Stato:** implementata (non provata: serve rete e un computer reale).
+- **Decisione:** su richiesta esplicita del proprietario, l'installazione del motore vocale locale (faster-whisper, Piper, parola di attivazione) non è più bloccata dal rifiuto «provider audio cloud»: `/api/setup` e `/api/setup/start` sono disponibili salvo `JARVIS_VOICE_SETUP=off`. Nuova sezione «Voce» in macOS (scelta del modello STT e della voce TTS, dimensioni, conferma con download stimato, avanzamento per passo); la pagina di configurazione di Windows c'era già. Resta valida la voce di sistema di macOS (ADR-0183) senza installare nulla.
+- **Limiti:** i download partono solo dopo la conferma; il Core resta senza modelli di linguaggio locali (solo voce).
+
+### ADR-0201 — Attendibilità delle fonti e notizie recenti
+
+- **Data:** 2026-11-26. **Stato:** implementata.
+- **Decisione:** ogni risultato di `web.search` riporta una valutazione euristica dal solo dominio (`alta`, `media`, `bassa`, punteggio e motivo; HTTP semplice penalizzato); le fonti a bassa attendibilità (social, forum, contenuti generati dagli utenti) vanno in coda senza essere nascoste e il riepilogo conta i livelli. Se la domanda chiede dati recenti («oggi», «ultime notizie», «questa settimana») si usa il filtro temporale di DuckDuckGo e il risultato lo dichiara. Il gateway mostra «(affidabile / da verificare / poco affidabile)» accanto a ogni fonte.
+- **Limiti dichiarati:** è un indizio sul sito, non una verifica del contenuto; l'elenco dei domini è curato a mano; nessuna conferma incrociata fra fonti né data di pubblicazione letta dalle pagine.
+
+### ADR-0202 — Mappa e orientamento
+
+- **Data:** 2026-11-26. **Stato:** implementata (non provata contro i servizi reali; MapKit solo in CI).
+- **Decisione:** strumenti di sola lettura `map.search` (luoghi, coordinate, collegamento) e `map.route` (distanza, durata, passi in italiano e tracciato; a piedi, in bici, in auto) con OpenStreetMap Nominatim e OSRM del progetto FOSSGIS, senza chiavi né costi, richieste distanziate di 1,1 s e identificativo dell'app generico. Rotte `/api/map/search` e `/api/map/route`; sezione «Mappa» in macOS con MapKit (segnaposto e percorso). Frasi come «indicazioni da Torino a Milano a piedi» o «mostrami Firenze sulla mappa» sono riconosciute. Fuori dal computer vanno solo i nomi dei luoghi.
+- **Limiti:** JARVIS non conosce la posizione dell'utente (nessun GPS) e il percorso non tiene conto del traffico; i servizi pubblici hanno limiti d'uso equi. L'app Windows non ha ancora la vista grafica (restano chat e collegamento a OpenStreetMap).
+
+### ADR-0203 — Connettore GitHub esteso: repository, file, pull request e Actions
+
+- **Data:** 2026-11-26. **Stato:** implementata (non provata contro GitHub reale).
+- **Contesto:** il proprietario vuole che JARVIS crei repository e workflow, li gestisca e li modifichi. Il connettore aveva solo 4 operazioni (elenco repository, issue, notifiche, crea issue).
+- **Decisione:** il manifest GitHub passa a 25 operazioni: lettura (info repository, rami, file e cartelle, workflow, esecuzioni, pull request) e scrittura (commenti, chiusura issue, **crea repository**, modifica repository, **scrivi o aggiorna file** con un commit — anche in `.github/workflows` —, elimina file, crea ramo, **apri e unisci pull request**, **avvia, rilancia, annulla, attiva e disattiva i workflow**). Ogni scrittura richiede la conferma del proprietario; crea/modifica repository, unione di pull request ed eliminazione di file sono «critiche». `private` è obbligatorio alla creazione, così nessun repository diventa pubblico per distrazione. Non ci sono eliminazione di repository, segreti, collaboratori o amministrazione di organizzazioni.
+- **Framework:** lo schema dei connettori ammette ora `PUT`, `PATCH` e `DELETE`, fino a 40 operazioni e la codifica `github_content` (testo → base64 in `content`); il parametro `file_path` mantiene le barre e rifiuta `..`; per `api.github.com` si inviano le intestazioni raccomandate (`application/vnd.github+json`, versione API).
+- **Permessi del token:** tabella completa in `docs/SECURITY_AND_PRIVACY.md`. Un connettore già installato resta alla versione precedente finché non lo si reinstalla.
+- **Evidenza:** test del manifest (conferma su ogni scrittura, rischio critico, assenza di operazioni distruttive di repository), dei percorsi di file e della codifica del corpo con un server locale.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

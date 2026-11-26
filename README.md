@@ -2,7 +2,7 @@
 
 JARVIS è un assistente personale per un singolo proprietario. Il Core coordina chat, strumenti, memoria e automazioni. Puoi tenere il Core sempre attivo sul Mac e usare lo stesso archivio dall'app desktop nativa, da Android e dagli altri computer associati.
 
-L’inferenza usa **NVIDIA NIM**. I comandi deterministici e la ricerca nella memoria funzionano sul Core. La voce è sospesa finché non sarà disponibile un provider audio cloud. Le operazioni sensibili passano da policy, conferma e audit.
+L’inferenza usa **NVIDIA NIM**. I comandi deterministici e la ricerca nella memoria funzionano sul Core. La voce usa le voci e il riconoscimento di sistema; il motore vocale locale (riconoscimento, sintesi e parola di attivazione) si installa dalla sezione «Voce». Le operazioni sensibili passano da policy, conferma e audit.
 
 ## Installa JARVIS
 
