@@ -375,6 +375,19 @@ impl Jarvis {
                 "body": "I dati precedenti sono stati copiati per il rollback: con JARVIS chiuso, «./jarvis.sh rollback» li ripristina.",
                 "source": {"kind": "module", "id": "release"}})).map_err(|e| format!("{e:?}"))?;
         }
+        // Esito dell'ultima installazione (ADR-0213): se non è riuscita, il proprietario lo vede subito.
+        if let Some(Err(reason)) = crate::selfupdate::take_install_result(&jarvis.cfg.data_dir) {
+            jarvis
+                .obs
+                .log("warn", "release.install_failed", json!({"reason": reason}));
+            jarvis
+                .notify(json!({"severity": "warning", "category": "system",
+                    "title": "Aggiornamento non riuscito",
+                    "body": format!("{reason}. JARVIS è stato riaperto nella versione precedente; il registro è in «updates/apply.log» nella cartella dati."),
+                    "dedupe_key": "update-install-failed",
+                    "source": {"kind": "module", "id": "release"}}))
+                .map_err(|e| format!("{e:?}"))?;
+        }
         Ok(jarvis)
     }
 

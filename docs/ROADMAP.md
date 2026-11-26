@@ -274,6 +274,8 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Ricerche salvate (2026-11-26, ADR-0206).** `research.save/list/read` e `/api/research`: risultati per tipo, fonti con attendibilità, domande aperte, ripresa per titolo.
 
+**Aggiornamento in app (2026-11-26, ADR-0213).** Script di installazione che attende la chiusura, riapre sempre l'app, ripristina in caso di errore e lascia registro ed esito (notifica al riavvio); provato con strumenti simulati, non su macOS/Windows reali.
+
 **Voci aperte (2026-11-26, ADR-0210–0212).** Cronologia dei permessi (`/api/permissions/history`), indice persistente e incrementale per `code.map`, mouse (`app.click`, con conferma; non provato su macOS/Windows reali). Restano: visione dello schermo oltre l'OCR, albero di accessibilità, stati avatar ricerca/esecuzione/collaborazione, viste grafiche (cronologia, ricerche salvate, privacy su Windows).
 
 **Download Docker (2026-11-26, ADR-0209).** Configurazione Docker privata per il download, `PATH` con le cartelle di Docker ed errori con rimedio; non provato con Docker reale.\n\n**Gmail e Calendar (2026-11-26, ADR-0208).** Errori di Google leggibili (API non abilitata, permessi), accesso rifiutato se mancano permessi, richieste in italiano per posta e calendario; non provato con un account reale.
