@@ -13,7 +13,20 @@ const JOBS: &str = "n8n-jobs.json";
 const JOBS_MAX_BYTES: u64 = 32 * 1024;
 
 fn docker(args: &[&str], input: Option<&[u8]>, timeout: Duration) -> Result<String, String> {
+    docker_with(args, input, timeout, None)
+}
+
+/// Come `docker`, con una cartella di configurazione Docker alternativa (`DOCKER_CONFIG`).
+fn docker_with(
+    args: &[&str],
+    input: Option<&[u8]>,
+    timeout: Duration,
+    config: Option<&std::path::Path>,
+) -> Result<String, String> {
     let mut cmd = crate::container_runtime::docker_command();
+    if let Some(config) = config {
+        cmd.env("DOCKER_CONFIG", config);
+    }
     let mut child = cmd
         .args(args)
         .stdin(if input.is_some() {
@@ -162,7 +175,17 @@ impl Manager {
         let me = self.clone();
         std::thread::spawn(move || {
             me.run_pull(start_after, || {
-                docker(&["pull", IMAGE], None, Duration::from_secs(1200)).map(|_| ())
+                // Immagine pubblica: configurazione Docker privata (niente helper delle credenziali né
+                // `~/.docker` non scrivibile), e causa probabile nell'errore.
+                let config = crate::container_runtime::private_config_dir(&me.dir)?;
+                docker_with(
+                    &["pull", IMAGE],
+                    None,
+                    Duration::from_secs(1200),
+                    Some(&config),
+                )
+                .map(|_| ())
+                .map_err(|e| crate::container_runtime::explain_pull_error(&e))
             })
         });
         Ok(self.status())
