@@ -13,7 +13,7 @@ Data: 2026-11-25. Metodo: elenco di strumenti del catalogo (`contracts/catalog/t
 | 9 | Infrastruttura | PARTIAL | `system.*`, `process.list`, `it.subnet`, `/api/docker`, nodi e dispositivi, Tailscale. Mancano inventario server, SSH, certificati, uptime, backup remoti. |
 | 10 | Documenti | PARTIAL → **migliorato** | `pdf.extract`, `sheet.read`, `table.summary`, `text.diff`, `doc.read` (DOCX, PPTX, testo, con provenienza SHA-256) e `doc.compare` (ADR-0193). Mancano OCR, versioni salvate, ricerca semantica, generazione di documenti. |
 | 11 | Comunicazioni | PARTIAL | Connettori Gmail/Calendar, canali di notifica. Bozze separate dall'invio: da verificare. |
-| 12 | Ricerca | PARTIAL | `web.search/fetch/browse`, agente research. Mancano sessioni di ricerca persistenti, valutazione di affidabilità, esportazione. |
+| 12 | Ricerca | PARTIAL → **migliorato** | `web.search/fetch/browse`, agente research; attendibilità delle fonti (ADR-0201); sessioni di ricerca salvate con risultati per tipo e ripresa (ADR-0206). Manca la conferma incrociata automatica fra fonti. |
 | 13 | Browser | PARTIAL | `web.browse/form`, `browser.rs`. Mancano schede, profili, monitoraggio siti. |
 | 14 | Risorse digitali | PARTIAL → **nuovo** | `fs.search/list/move/delete` + `fs.usage` (spazio, file grandi, duplicati, temporanei). Mancano tag, ricerca semantica, cartelle smart. |
 | 15 | Background | PARTIAL | Scheduler, automazioni, osservazioni di file (`/api/watches`). Menu bar, avvio automatico, batteria/rete: da verificare. |

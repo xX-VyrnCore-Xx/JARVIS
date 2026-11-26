@@ -1,0 +1,41 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "research.read",
+  "version": "1.0.0",
+  "summary": "Riapre una ricerca salvata (per id o parte del titolo) con risultati per tipo, fonti e domande aperte, per riprenderla",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {
+      "id": {
+        "type": "string",
+        "maxLength": 40
+      },
+      "title": {
+        "type": "string",
+        "maxLength": 120
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.notes:read"
+  ],
+  "errors": [
+    "research.invalid",
+    "research.not_found",
+    "research.unavailable"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

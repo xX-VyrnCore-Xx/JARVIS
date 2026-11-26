@@ -61,6 +61,7 @@ pub mod promptfix;
 pub mod prompts;
 pub mod push;
 pub mod reflect;
+pub mod research;
 pub mod rollback;
 pub mod screen;
 pub mod secrets;

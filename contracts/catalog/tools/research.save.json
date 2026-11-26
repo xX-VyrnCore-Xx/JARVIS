@@ -1,0 +1,117 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "research.save",
+  "version": "1.0.0",
+  "summary": "Salva o aggiorna una sessione di ricerca (domanda, risultati per tipo, fonti, domande aperte) per poterla riprendere. Senza id ne crea una nuova (serve il titolo); con id aggiunge senza doppioni",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {
+      "id": {
+        "type": "string",
+        "maxLength": 40
+      },
+      "title": {
+        "type": "string",
+        "maxLength": 120
+      },
+      "query": {
+        "type": "string",
+        "maxLength": 300
+      },
+      "status": {
+        "enum": [
+          "open",
+          "done"
+        ]
+      },
+      "findings": {
+        "type": "array",
+        "maxItems": 20,
+        "items": {
+          "anyOf": [
+            {
+              "type": "string",
+              "maxLength": 1000
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "text"
+              ],
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "maxLength": 1000
+                },
+                "kind": {
+                  "enum": [
+                    "verificato",
+                    "non_confermato",
+                    "opinione",
+                    "ipotesi",
+                    "inferenza",
+                    "obsoleto"
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      },
+      "sources": {
+        "type": "array",
+        "maxItems": 20,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "url"
+          ],
+          "properties": {
+            "url": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 200
+            }
+          }
+        }
+      },
+      "questions": {
+        "type": "array",
+        "maxItems": 15,
+        "items": {
+          "type": "string",
+          "maxLength": 300
+        }
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "write_local",
+  "risk": "low",
+  "permissions": [
+    "core.notes:write"
+  ],
+  "errors": [
+    "research.invalid",
+    "research.not_found",
+    "research.full",
+    "research.sensitive",
+    "research.unavailable"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "none"
+}

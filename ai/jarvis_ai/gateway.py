@@ -356,6 +356,17 @@ def _describe_tool_result(result: dict) -> str:
             note += "\n(Hai chiesto notizie recenti: controlla la data nella pagina prima di fidarti.)"
         return (f"Risultati per «{output.get('query')}» (fonte: {output.get('provider')}, {output.get('retrieved_at')}):\n"
                 + "\n".join(lines) + note + "\n\nPer leggere una pagina: «apri <url>».")
+    if tool == "research.list":
+        items = output.get("items") or []
+        if not items:
+            return "Non ho ricerche salvate."
+        return "Ricerche salvate:\n" + "\n".join(
+            f"• [{i['id']}] {i['title']} — {i['findings']} risultati, {i['sources']} fonti, {i['open_questions']} domande aperte ({i['status']})" for i in items)
+    if tool == "research.save":
+        return (f"Ricerca «{output.get('title')}» salvata (id {output.get('id')}): {output.get('findings')} risultati, "
+                f"{output.get('sources')} fonti, {output.get('open_questions')} domande aperte.")
+    if tool == "research.read":
+        return (output.get("markdown") or "Ricerca vuota.") + "\n(Contenuto salvato da me: lo riprendo da qui senza inventare altro.)"
     if tool == "map.search":
         places = output.get("places") or []
         if not places:
@@ -589,6 +600,10 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
      lambda m: {"key": _KEY_ALIASES.get(m[2].lower(), m[2].lower()),
                 **({"modifiers": [_MODIFIERS[p.strip().lower()] for p in m[1].split("+") if p.strip()]} if m[1].strip() else {})}),
     (re.compile(r"^\s*(?:cosa c'è sullo schermo|cosa vedi sullo schermo|leggi (?:lo|il mio) schermo|che testo c'è sullo schermo)\s*\??\s*$", re.I), "screen.read", lambda m: {}),
+    # Ricerche salvate: «le mie ricerche», «riprendi la ricerca sui database».
+    (re.compile(r"^\s*(?:le mie ricerche|elenca le ricerche|ricerche salvate|mostra le ricerche)\s*\??\s*$", re.I), "research.list", lambda m: {}),
+    (re.compile(r"^\s*(?:riprendi|riapri|continua)\s+la ricerca\s+(?:sugli|sulle|sullo|sulla|sui|sul|su|della|delle|degli|dei|del|di)?\s*(.{2,120}?)\s*$", re.I), "research.read",
+     lambda m: {"title": m[1].strip()}),
     # Mappa e percorsi (OpenStreetMap): «indicazioni da Torino a Milano a piedi», «mostrami Roma sulla mappa».
     (re.compile(r"^\s*(?:indicazioni|percorso|strada|come (?:arrivo|si arriva|vado))(?: stradali)?\s+da\s+(.+?)\s+a\s+(.+?)(?:\s+(a piedi|in bici|in auto))?\s*\??\s*$", re.I), "map.route",
      lambda m: {"from": m[1].strip(), "to": m[2].strip(), "mode": {"a piedi": "piedi", "in bici": "bici"}.get((m[3] or "").lower(), "auto")}),

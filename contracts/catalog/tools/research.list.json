@@ -1,0 +1,30 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "research.list",
+  "version": "1.0.0",
+  "summary": "Elenca le ricerche salvate, dalla più recente, con numero di risultati, fonti e domande aperte",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {}
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.notes:read"
+  ],
+  "errors": [
+    "research.unavailable"
+  ],
+  "timeout_ms": 5000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}
