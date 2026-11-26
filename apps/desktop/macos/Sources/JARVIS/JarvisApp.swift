@@ -124,6 +124,10 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var changingInvite = false
 
     @State private var section: Section = .dashboard
+    @State private var n8n: [String: Any] = [:]
+    @State private var n8nName = ""
+    @State private var n8nMinutes = 15
+    @State private var n8nKind = "reminder"
     @State private var paletteOpen = false
     @State private var paletteQuery = ""
     @Namespace private var navigationNamespace
@@ -1687,6 +1691,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         case .users: userAdmin
         case .profile: profileEditor
         case .connectors: connectorSetup
+        case .workflows: n8nCard
         case .devices:
             deviceConnection
         case .models:
@@ -2347,6 +2352,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 let origins = payload["pairing_urls"] as? [String] ?? []
                 let origin = origins.contains(remoteOrigin) ? remoteOrigin : origins.first ?? ""
                 if origins.isEmpty {
+                    Button("Diagnostica Tailscale", systemImage: "stethoscope") { diagnoseTailscale() }
                     Button("Collega con Tailscale", systemImage: "point.3.connected.trianglepath.dotted") {
                         mutate("/api/tailscale/connect", body: [:])
                     }.buttonStyle(.borderedProminent)
@@ -2489,6 +2495,103 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 }.buttonStyle(.borderedProminent)
             }
         }
+    }
+
+    /// Diagnosi del collegamento da questo Mac (DNS, porta, certificato, risposta di JARVIS): dice quale passo si ferma.
+    private func diagnoseTailscale() {
+        error = nil
+        info = "Diagnosi di Tailscale in corso…"
+        Task {
+            do {
+                let result = try await core.request("/api/tailscale/diagnose", method: "POST", body: [:], timeout: 30)
+                info = result["message"] as? String ?? "Diagnosi completata."
+            } catch {
+                info = nil
+                self.error = error.localizedDescription
+            }
+        }
+    }
+
+    // MARK: n8n con Docker (ADR-0197)
+
+    private func loadN8n() async {
+        if let status = try? await core.request("/api/n8n", timeout: 20) { n8n = status }
+    }
+
+    private func n8nCall(_ path: String = "/api/n8n", method: String = "POST", body: [String: Any]) {
+        error = nil
+        info = nil
+        Task {
+            do {
+                let result = try await core.request(path, method: method, body: body, timeout: 200)
+                n8n = result
+                info = result["message"] as? String ?? "Fatto."
+            } catch { self.error = error.localizedDescription }
+            await loadN8n()
+        }
+    }
+
+    /// n8n gira in un container Docker isolato (senza rete, con soli promemoria e controlli pianificati): JARVIS lo
+    /// abilita, lo avvia e lo ferma, e gli passa soltanto modelli interni.
+    private var n8nCard: some View {
+        let enabled = n8n["enabled"] as? Bool ?? false
+        let running = n8n["running"] as? Bool ?? false
+        let dockerOK = n8n["docker_connected"] as? Bool ?? true
+        let jobs = n8n["items"] as? [[String: Any]] ?? []
+        return card("n8n con Docker", icon: "shippingbox") {
+            Text("n8n gira in un container Docker isolato: senza rete, con soli promemoria e controlli pianificati. JARVIS lo avvia e lo ferma; non serve configurare nulla a mano.")
+                .font(.callout).foregroundStyle(.secondary)
+            if enabled, !dockerOK {
+                let hint = (n8n["docker"] as? [String: Any])?["hint"] as? String
+                Label(hint ?? (n8n["error"] as? String ?? "Docker non risponde: avvia Docker Desktop."), systemImage: "exclamationmark.triangle")
+                    .font(.callout).foregroundStyle(.orange)
+            }
+            HStack {
+                Label(!enabled ? "Disattivato" : (running ? "In esecuzione" : "Fermo"),
+                      systemImage: running ? "checkmark.circle.fill" : "pause.circle")
+                    .foregroundStyle(running ? Color.green : .secondary)
+                Spacer()
+                if !enabled {
+                    Button("Abilita n8n") { n8nCall(body: ["enable": true]) }
+                } else if running {
+                    Button("Ferma") { n8nCall(body: ["running": false]) }
+                } else {
+                    Button("Avvia con Docker") { n8nCall(body: ["running": true]) }.disabled(!dockerOK)
+                }
+                Button("Aggiorna") { Task { await loadN8n() } }
+            }
+            if enabled && running {
+                Divider()
+                Text("Nuova routine").font(.subheadline.weight(.semibold))
+                TextField("Nome (fino a 80 caratteri)", text: $n8nName).textFieldStyle(.roundedBorder)
+                HStack {
+                    Picker("Tipo", selection: $n8nKind) {
+                        Text("Promemoria").tag("reminder")
+                        Text("Controllo").tag("audit")
+                    }.pickerStyle(.segmented).frame(maxWidth: 220)
+                    Stepper("Ogni \(n8nMinutes) min", value: $n8nMinutes, in: 1...59)
+                    Spacer()
+                    Button("Crea routine") {
+                        let name = n8nName.trimmingCharacters(in: .whitespacesAndNewlines)
+                        n8nName = ""
+                        n8nCall("/api/n8n/jobs", body: ["name": String(name.prefix(80)), "kind": n8nKind, "minutes": n8nMinutes])
+                    }
+                    .disabled(n8nName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            ForEach(Array(jobs.enumerated()), id: \.offset) { _, job in
+                HStack {
+                    Image(systemName: job["kind"] as? String == "audit" ? "checkmark.shield" : "bell")
+                    Text(job["name"] as? String ?? "Routine")
+                    Text("ogni \(job["minutes"] as? Int ?? 0) min").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    if let id = job["id"] as? String {
+                        Button("Rimuovi", role: .destructive) { n8nCall("/api/n8n/jobs/\(urlSegment(id))", method: "DELETE", body: [:]) }
+                    }
+                }
+            }
+        }
+        .task { await loadN8n() }
     }
 
     private func addPublicHost() {

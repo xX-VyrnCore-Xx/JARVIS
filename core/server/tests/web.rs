@@ -46,6 +46,17 @@ fn serve() -> u16 {
                         json.into_bytes(),
                         String::new(),
                     )
+                } else if path.starts_with("/html/") {
+                    let page = format!(
+                        r#"<a class="result__a" href="//duckduckgo.com/l/?uddg=http%3A%2F%2F127.0.0.1%3A{port}%2Fpagina">Pagina di prova</a>
+                        <a class="result__snippet">Testo del risultato.</a>"#
+                    );
+                    (
+                        "200 OK",
+                        "text/html; charset=utf-8",
+                        page.into_bytes(),
+                        String::new(),
+                    )
                 } else if path == "/pagina" {
                     (
                         "200 OK",
@@ -289,4 +300,34 @@ fn web_calls_are_audited_as_external_destination() {
         .unwrap()
         .iter()
         .any(|e| e["action"] == "web.search" && e["outcome"] == "succeeded"));
+}
+
+#[test]
+fn the_default_search_uses_duckduckgo_and_falls_back_to_wikipedia() {
+    let port = serve();
+    let base = format!("http://127.0.0.1:{port}");
+    let web = |duckduckgo: String| WebConfig {
+        allow_private: true,
+        provider: Provider::Web {
+            duckduckgo,
+            wikipedia: base.clone(),
+        },
+        timeout: Duration::from_secs(1),
+        ..WebConfig::default()
+    };
+    let first = jarvis_core::web::search(&web(base.clone()), "linguaggio rust", 5).unwrap();
+    assert_eq!(first["provider"], "duckduckgo", "{first}");
+    assert_eq!(first["results"][0]["url"], format!("{base}/pagina"));
+    assert_eq!(first["results"][0]["snippet"], "Testo del risultato.");
+    assert!(first.get("fallback_from").is_none());
+    // Un indirizzo che non risponde: ripiego su Wikipedia, con il motivo.
+    let dead = {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        format!("http://127.0.0.1:{}", l.local_addr().unwrap().port())
+    };
+    let second = jarvis_core::web::search(&web(dead), "linguaggio rust", 5).unwrap();
+    assert_eq!(second["provider"], "wikipedia", "{second}");
+    assert_eq!(second["fallback_from"], "duckduckgo");
+    assert!(second["fallback_reason"].is_string());
+    assert!(second["results"].as_array().is_some_and(|r| !r.is_empty()));
 }

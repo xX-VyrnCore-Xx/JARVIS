@@ -659,6 +659,10 @@ pub fn router(state: Shared) -> Router {
         .route("/api/mcp/servers/health", post(mcp_server_health))
         .route("/api/mcp/servers/policy", post(mcp_server_policy))
         .route("/api/mcp/presets", get(mcp_presets))
+        .route(
+            "/api/media/spotify",
+            get(spotify_status).post(spotify_command),
+        )
         .route("/api/privacy/overview", get(privacy_overview))
         .route(
             "/api/performance",
@@ -710,6 +714,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/plans/{id}/replan", post(plan_replan))
         .route("/api/tailscale", get(tailscale_status))
         .route("/api/tailscale/connect", post(tailscale_connect))
+        .route("/api/tailscale/diagnose", post(tailscale_diagnose))
         .route("/api/devices/pairing/cancel", post(cancel_pairing))
         .route("/api/devices/pair", post(pair_device))
         .route("/api/devices/me", get(device_me))
@@ -3277,6 +3282,37 @@ async fn mcp_server_test(State(state): State<Shared>, Json(body): Json<Value>) -
 }
 
 /// Regole di osservazione dei file (ADR-0158), solo proprietario.
+/// Brano in ascolto su Spotify, l'unico servizio musicale collegato (ADR-0195). Sola lettura, non avvia Spotify.
+async fn spotify_status() -> Response {
+    spotify_call(json!({"command": "status"})).await
+}
+
+/// Comando a Spotify dal proprietario (`play`, `pause`, `playpause`, `next`, `previous`); registrato nell'audit.
+async fn spotify_command(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let command = body["command"].as_str().unwrap_or("status").to_string();
+    if command != "status" {
+        let _ = with_core(&state, |j| j.record_owner_action("media.spotify")).await;
+    }
+    spotify_call(json!({"command": command})).await
+}
+
+async fn spotify_call(args: Value) -> Response {
+    let outcome =
+        tokio::task::spawn_blocking(move || crate::appcontrol::execute("media.spotify", &args))
+            .await
+            .unwrap_or_else(|_| {
+                Err(crate::tools::ToolError {
+                    code: "app.failed",
+                    message: "operazione interrotta".into(),
+                })
+            });
+    match outcome {
+        Ok(value) => Json(value).into_response(),
+        Err(e) if e.code == "app.unavailable" => CoreError::Unavailable(e.message).into_response(),
+        Err(e) => CoreError::BadRequest(e.message).into_response(),
+    }
+}
+
 async fn privacy_overview(State(state): State<Shared>) -> Response {
     reply(with_core(&state, |j| j.privacy_overview()).await)
 }
@@ -4038,6 +4074,33 @@ async fn tailscale_status(State(state): State<Shared>) -> Response {
 }
 
 /// Pubblica il Core nella rete privata Tailscale e ne autorizza l'indirizzo: un solo gesto, nessun file.
+/// Diagnosi del collegamento Tailscale da questo computer (DNS, porta, certificato, risposta di JARVIS).
+async fn tailscale_diagnose(State(state): State<Shared>) -> Response {
+    let port = state.port;
+    let mut report = tokio::task::spawn_blocking(move || crate::tailscale::diagnose(port))
+        .await
+        .unwrap_or_else(|_| json!({"ok": false, "steps": [], "verdict": "operazione interrotta"}));
+    let steps: Vec<String> = report["steps"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|s| {
+            format!(
+                "{} {} ({})",
+                if s["ok"] == true { "✓" } else { "✗" },
+                s["step"].as_str().unwrap_or("?"),
+                s["detail"].as_str().unwrap_or("")
+            )
+        })
+        .collect();
+    report["message"] = json!(format!(
+        "{}\n{}",
+        report["verdict"].as_str().unwrap_or(""),
+        steps.join("\n")
+    ));
+    Json(report).into_response()
+}
+
 async fn tailscale_connect(State(state): State<Shared>) -> Response {
     let port = state.port;
     let outcome = tokio::task::spawn_blocking(move || {

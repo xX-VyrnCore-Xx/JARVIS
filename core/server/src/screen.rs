@@ -71,26 +71,40 @@ pub struct Plan {
 }
 
 /// Comando di cattura per un sistema operativo (`macos` o `windows`).
-pub fn capture_plan(os: &str, out: &Path) -> Result<Plan, ToolError> {
+pub fn capture_plan(os: &str, out: &Path, display: Option<u8>) -> Result<Plan, ToolError> {
     let out = out
         .to_str()
         .ok_or_else(|| err("screen.unavailable", "Percorso non valido"))?
         .to_string();
     match os {
-        "macos" => Ok(Plan {
-            program: "/usr/sbin/screencapture".into(),
-            args: vec!["-x".into(), "-t".into(), "png".into(), out],
-            env: vec![],
-        }),
+        "macos" => {
+            // «-D n»: solo il monitor n (1 = principale); senza, la cattura predefinita del sistema.
+            let mut args = vec!["-x".to_string()];
+            if let Some(n) = display {
+                args.extend(["-D".to_string(), n.to_string()]);
+            }
+            args.extend(["-t".into(), "png".into(), out]);
+            Ok(Plan {
+                program: "/usr/sbin/screencapture".into(),
+                args,
+                env: vec![],
+            })
+        }
         "windows" => Ok(Plan {
             program: "powershell.exe".into(),
             args: vec![
                 "-NoProfile".into(),
                 "-NonInteractive".into(),
                 "-Command".into(),
-                "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; $b=[System.Windows.Forms.SystemInformation]::VirtualScreen; $bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height; $g=[System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($b.Left,$b.Top,0,0,$bmp.Size); $bmp.Save($env:JARVIS_OUT,[System.Drawing.Imaging.ImageFormat]::Png)".into(),
+                "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; $b=[System.Windows.Forms.SystemInformation]::VirtualScreen; if ($env:JARVIS_DISPLAY) { $all=[System.Windows.Forms.Screen]::AllScreens; $i=[int]$env:JARVIS_DISPLAY-1; if ($i -lt 0 -or $i -ge $all.Count) { Write-Error 'display not found'; exit 1 }; $b=$all[$i].Bounds }; $bmp=New-Object System.Drawing.Bitmap $b.Width,$b.Height; $g=[System.Drawing.Graphics]::FromImage($bmp); $g.CopyFromScreen($b.Left,$b.Top,0,0,$bmp.Size); $bmp.Save($env:JARVIS_OUT,[System.Drawing.Imaging.ImageFormat]::Png)".into(),
             ],
-            env: vec![("JARVIS_OUT".into(), out)],
+            env: {
+                let mut env = vec![("JARVIS_OUT".to_string(), out)];
+                if let Some(n) = display {
+                    env.push(("JARVIS_DISPLAY".to_string(), n.to_string()));
+                }
+                env
+            },
         }),
         _ => Err(err("screen.unavailable", "La lettura dello schermo è disponibile su macOS e Windows")),
     }
@@ -209,6 +223,38 @@ pub fn tidy(text: &str) -> String {
     lines.join("\n").trim().to_string()
 }
 
+/// Numero di monitor collegati (`None` se non si riesce a contarli): serve a scegliere `display` in `screen.read`.
+fn displays() -> Option<u32> {
+    match std::env::consts::OS {
+        "macos" => {
+            let (ok, out, _) = run(
+                "/usr/sbin/system_profiler",
+                &["SPDisplaysDataType".into()],
+                &[],
+                Duration::from_secs(8),
+            )
+            .ok()?;
+            ok.then(|| {
+                out.lines()
+                    .filter(|l| l.trim_start().starts_with("Resolution:"))
+                    .count() as u32
+            })
+        }
+        "windows" => {
+            let (ok, out, _) = run(
+                "powershell.exe",
+                &["-NoProfile".into(), "-NonInteractive".into(), "-Command".into(),
+                  "Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Screen]::AllScreens.Count".into()],
+                &[],
+                Duration::from_secs(8),
+            )
+            .ok()?;
+            ok.then(|| out.trim().parse().ok()).flatten()
+        }
+        _ => None,
+    }
+}
+
 pub fn status() -> Value {
     let os = std::env::consts::OS;
     let supported = matches!(os, "macos" | "windows");
@@ -219,19 +265,30 @@ pub fn status() -> Value {
                 else if !ocr { "Installa Tesseract OCR (macOS: brew install tesseract tesseract-lang; Windows: winget install UB-Mannheim.TesseractOCR)" }
                 else if os == "macos" { "Se il testo risulta vuoto, abilita JARVIS in Impostazioni di sistema → Privacy e sicurezza → Registrazione schermo" }
                 else { "Pronto" },
+        "displays": displays(),
         "privacy": "L'immagine resta sul computer, viene eliminata subito e solo il testo mascherato ti viene mostrato",
     })
 }
 
 /// Cattura, legge con OCR locale, elimina l'immagine e restituisce il testo con i dati sensibili mascherati.
-pub fn read(data_dir: &Path) -> Result<Value, ToolError> {
+pub fn read(data_dir: &Path, args: &Value) -> Result<Value, ToolError> {
+    let display = match args["display"].as_u64() {
+        None => None,
+        Some(n) if (1..=8).contains(&n) => Some(n as u8),
+        Some(_) => {
+            return Err(err(
+                "screen.unavailable",
+                "Il monitor deve essere un numero da 1 a 8 (1 è il principale)",
+            ))
+        }
+    };
     let os = std::env::consts::OS;
     let tesseract = tesseract_path().ok_or_else(|| {
         err("screen.ocr_missing", "Manca l'OCR locale: installa Tesseract (macOS: brew install tesseract tesseract-lang; Windows: winget install UB-Mannheim.TesseractOCR)")
     })?;
     let folder = prepare(data_dir)?;
     let file = folder.join(format!("{}.png", uuid::Uuid::new_v4().simple()));
-    let plan = capture_plan(os, &file)?;
+    let plan = capture_plan(os, &file, display)?;
     let result = (|| {
         let (ok, _, errors) = run(
             &plan.program,
@@ -297,10 +354,17 @@ mod tests {
     #[test]
     fn capture_commands_exist_for_both_systems_and_pass_paths_safely() {
         let path = Path::new("/tmp/jarvis/screen/abc.png");
-        let mac = capture_plan("macos", path).unwrap();
+        let mac = capture_plan("macos", path, None).unwrap();
         assert_eq!(mac.program, "/usr/sbin/screencapture");
         assert_eq!(mac.args.last().unwrap(), "/tmp/jarvis/screen/abc.png");
-        let win = capture_plan("windows", path).unwrap();
+        let second = capture_plan("macos", path, Some(2)).unwrap();
+        assert_eq!(second.args[..3], ["-x", "-D", "2"]);
+        let win_second = capture_plan("windows", path, Some(2)).unwrap();
+        assert!(win_second
+            .env
+            .contains(&("JARVIS_DISPLAY".to_string(), "2".to_string())));
+        let win = capture_plan("windows", path, None).unwrap();
+        assert!(win.env.iter().all(|(k, _)| k != "JARVIS_DISPLAY"));
         assert_eq!(
             win.env,
             vec![(
@@ -310,7 +374,7 @@ mod tests {
         );
         assert!(win.args.iter().all(|a| !a.contains("abc.png")));
         assert_eq!(
-            capture_plan("linux", path).unwrap_err().code,
+            capture_plan("linux", path, None).unwrap_err().code,
             "screen.unavailable"
         );
     }

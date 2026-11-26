@@ -2346,6 +2346,31 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** ⌘K apre «Vai a…», un elenco filtrabile (senza distinguere maiuscole né accenti) delle sezioni reali dell'app; Invio apre la prima voce. È attiva solo con il Core pronto e l'interfaccia sbloccata. Ogni voce chiama la stessa `select` della barra laterale: nessun pulsante senza funzione.
 - **Non incluso:** ricerca globale su contenuti (memoria, documenti, conversazioni) e azioni rapide: richiedono un indice o endpoint di ricerca unificato.
 
+### ADR-0195 — Apertura delle app e Spotify come unico servizio musicale
+
+- **Data:** 2026-11-26. **Stato:** implementata (macOS e Windows non provati qui: Core su Linux).
+- **Contesto:** «apri spotify» non apriva nulla. Cause trovate: il Core considerava richiesta di controllo solo `apri` seguito da una maiuscola, quindi «apri spotify» non autorizzava `app.open`; il nome non aveva ripiego (indirizzo di protocollo); l'app macOS non dichiarava `NSAppleEventsUsageDescription`, necessaria perché macOS conceda l'automazione.
+- **Decisione:** tabella di app note (Spotify, Safari, Chrome, Mail, Calendario, Note, Terminale, Office, Teams, Slack, Docker, Tailscale…) riconosciute senza distinguere maiuscole e con alias italiani; su macOS `open -a <nome>` con ripiego sull'indirizzo di protocollo (`spotify:`), su Windows l'indirizzo di protocollo con ripiego sul nome. Il gateway Python riconosce le stesse frasi. Nuovo strumento `media.spotify` (stato, play, pausa, successivo, precedente), con conferma del proprietario, che non avvia Spotify e non riceve testo libero. Spotify è l'**unico** servizio musicale collegato: la scheda media di macOS non legge più Musica; `GET/POST /api/media/spotify` serve la scheda di Windows (egui), con comandi nell'audit. Su Windows lo stato si ricava dal titolo della finestra e i comandi usano i tasti multimediali.
+- **Limiti:** su Windows il brano non è leggibile se la finestra di Spotify è nascosta (stato `running`); i tasti multimediali agiscono sulla sessione multimediale attiva. Nessuna prova su un Mac o su Windows reali.
+- **Evidenza:** test sui nomi noti, sui piani con ripiego, sullo stato di Spotify e sulle regole del gateway.
+
+### ADR-0196 — Ricerca web con DuckDuckGo e ripiego su Wikipedia
+
+- **Data:** 2026-11-26. **Stato:** implementata (non provata contro DuckDuckGo reale).
+- **Decisione:** il fornitore predefinito `Web` interroga la pagina HTML di DuckDuckGo (senza chiave né costi), decodifica il reindirizzamento `uddg`, scarta annunci, duplicati e indirizzi non http(s); se non risponde, chiede una verifica o non trova nulla, ripiega su Wikipedia e il risultato lo dichiara (`fallback_from`, `fallback_reason`). `JARVIS_SEARCH_PROVIDER=wikipedia` o `searxng` restano disponibili. Ogni risultato resta dato non attendibile e passa dai controlli di rete esistenti.
+- **Rischio:** la struttura HTML di DuckDuckGo può cambiare e il servizio può bloccare le richieste automatiche: il ripiego è fatto per questo.
+
+### ADR-0197 — n8n con Docker nell'interfaccia e lettura di un monitor preciso
+
+- **Data:** 2026-11-26. **Stato:** implementata (Swift ed egui verificati solo dalla CI).
+- **Decisione:** nella sezione Automazioni di macOS e di Windows c'è la scheda «n8n con Docker»: stato, abilitazione, avvio e arresto del container isolato esistente (senza rete, solo promemoria e controlli pianificati), creazione e rimozione delle routine. Nessuna modifica al Core. `screen.read` accetta `display` (1–8) e `screen.status` riporta il numero di monitor; frasi come «leggi il secondo monitor» sono riconosciute.
+
+### ADR-0198 — Diagnosi Tailscale
+
+- **Data:** 2026-11-26. **Stato:** implementata (non provata con una tailnet reale).
+- **Contesto:** il problema persisteva con Tailscale attivo e connesso. Una causa plausibile è che questo computer non risolva il nome `*.ts.net` (Tailscale in modalità userspace, DNS di Tailscale non in uso) pur funzionando dagli altri dispositivi: la verifica da qui falliva senza dire dove.
+- **Decisione:** `POST /api/tailscale/diagnose` esegue dal Core DNS → porta 443 → certificato HTTPS → risposta di JARVIS (`/api/connectivity`) e indica il primo passo che fallisce con l'azione da fare, includendo avvisi di salute e indirizzi di Tailscale. Pulsante «Diagnostica» nelle app macOS ed egui. Complementa ADR-0192.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

@@ -262,6 +262,8 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Tavolozza ⌘K (2026-11-26, ADR-0194).** Navigazione rapida fra le sezioni dell'app macOS; Swift solo in CI.
 
+**Strumenti, Spotify, ricerca web, n8n, monitor, Tailscale (2026-11-26, ADR-0195–0198).** App note anche in minuscolo con ripiego; Spotify unico servizio musicale (macOS e Windows); ricerca DuckDuckGo con ripiego su Wikipedia; scheda n8n con Docker; `screen.read` per monitor; diagnosi Tailscale. Nulla provato su macOS/Windows/Tailscale reali.
+
 **MCP, Hugging Face e memoria (2026-11-25, ADR-0182).** Client MCP con sessione riusata, elenco a pagine con impronta, tentativi limitati, argomenti verificati, salute e statistiche; politica per strumento e `mcp.read` per le letture approvate; Hugging Face con un gesto (server noto, competenza, agente di ricerca); memoria esportabile e importabile, contraddizioni risolvibili, episodi riassunti e scadenza adattiva. Non provato il client contro il server reale (rete di questo ambiente).
 
 **Plancia dal mock-up (2026-11-25, ADR-0181).** Schede reali (specialisti, progetti, sistema, attività, notifiche, media, monitoraggio), meteo e media facoltativi, avatar con colore per stato e alone che pulsa con la voce, ritratto fornito dall'utente. Swift verificato solo dalla CI; resa non vista; Windows e Android da fare.

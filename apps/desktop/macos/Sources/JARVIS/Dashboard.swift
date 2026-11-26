@@ -450,13 +450,13 @@ struct MonitoringCard: View {
 
 // MARK: - Media (facoltativo, con consenso)
 
-/// Legge e comanda Musica o Spotify con AppleScript. Parte solo dopo il consenso dell'utente (macOS chiede a sua
-/// volta l'autorizzazione all'automazione): senza, nessuno script viene eseguito.
+/// Legge e comanda Spotify con AppleScript: è l'unico servizio musicale collegato (ADR-0195). Parte solo dopo il
+/// consenso dell'utente (macOS chiede a sua volta l'autorizzazione all'automazione): senza, nessuno script viene
+/// eseguito, e Spotify non viene mai avviato da qui.
 @MainActor final class NowPlaying: ObservableObject {
     @Published var title = ""
     @Published var artist = ""
     @Published var playing = false
-    @Published var source = "Music"
     @Published var enabled: Bool = UserDefaults.standard.bool(forKey: "mediaControlEnabled")
 
     func enable() {
@@ -475,7 +475,6 @@ struct MonitoringCard: View {
 
     private func apply(_ parts: [String]) {
         if parts.count >= 4 {
-            source = parts[0]
             playing = parts[1] == "playing"
             title = parts[2]
             artist = parts[3]
@@ -498,28 +497,23 @@ struct MonitoringCard: View {
 
     func command(_ verb: String) {
         guard enabled else { return }
-        let app = source
+        // Solo i tre comandi della tavolozza fissa: nessun testo esterno entra nello script.
+        guard ["previous track", "playpause", "next track"].contains(verb) else { return }
         Task.detached(priority: .userInitiated) {
             var error: NSDictionary?
-            _ = NSAppleScript(source: "tell application \"\(app)\" to \(verb)")?.executeAndReturnError(&error)
+            let script = "if application \"Spotify\" is running then tell application \"Spotify\" to \(verb)"
+            _ = NSAppleScript(source: script)?.executeAndReturnError(&error)
             try? await Task.sleep(for: .milliseconds(400))
             await MainActor.run { self.refresh() }
         }
     }
 }
 
-/// Lettura del brano in ascolto: solo Musica e Spotify, e solo se sono già aperti (non li avvia).
+/// Lettura del brano in ascolto: solo Spotify, e solo se è già aperto (non lo avvia).
 private let nowPlayingReadScript = """
     set out to ""
     tell application "System Events" to set names to name of every application process
-    if names contains "Music" then
-        tell application "Music"
-            if player state is playing or player state is paused then
-                set out to "Music|" & (player state as string) & "|" & (name of current track) & "|" & (artist of current track)
-            end if
-        end tell
-    end if
-    if out is "" and names contains "Spotify" then
+    if names contains "Spotify" then
         tell application "Spotify"
             if player state is playing or player state is paused then
                 set out to "Spotify|" & (player state as string) & "|" & (name of current track) & "|" & (artist of current track)
@@ -533,9 +527,9 @@ struct MediaCard: View {
     @ObservedObject var media: NowPlaying
 
     var body: some View {
-        MockCard(title: "Media / Controllo", icon: "music.note") {
+        MockCard(title: "Spotify", icon: "music.note") {
             if !media.enabled {
-                Text("Facoltativo: JARVIS legge il brano in ascolto da Musica o Spotify. macOS chiederà l'autorizzazione.")
+                Text("Facoltativo: JARVIS legge il brano in ascolto su Spotify, l'unico servizio musicale collegato. macOS chiederà l'autorizzazione.")
                     .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 Button("Attiva il controllo media") { media.enable() }
             } else {
@@ -546,7 +540,7 @@ struct MediaCard: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(media.title.isEmpty ? "Nessun brano" : media.title)
                             .font(.system(size: 12.5, weight: .semibold)).lineLimit(1).foregroundStyle(.white)
-                        Text(media.artist.isEmpty ? "Apri Musica o Spotify" : media.artist)
+                        Text(media.artist.isEmpty ? "Apri Spotify" : media.artist)
                             .font(.system(size: 11)).lineLimit(1).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 0)

@@ -20,6 +20,8 @@
 	<string>14.0</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>JARVIS ascolta il microfono solo per riconoscere «Hey Jarvis». L'audio resta sul tuo computer e viene analizzato soltanto dopo l'attivazione.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>JARVIS usa l'automazione di macOS per aprire le app, mettere in primo piano una finestra e leggere o comandare Spotify (brano in ascolto, pausa, successivo), solo su tua richiesta e con la tua conferma.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>JARVIS usa il riconoscimento vocale del Mac, sul dispositivo, per capire «Hey Jarvis» e il comando che lo segue. Il testo resta in memoria e non viene inviato ad Apple né salvato.</string>
 	<key>NSHighResolutionCapable</key>

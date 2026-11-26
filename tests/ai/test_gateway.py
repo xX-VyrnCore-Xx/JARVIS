@@ -44,6 +44,11 @@ class OfflineBackend(unittest.TestCase):
     def test_intents(self):
         cases = {
             "che ore sono": ("time.now", {}),
+            "apri spotify": ("app.open", {"app": "spotify"}),
+            "avvia l'app Safari": ("app.open", {"app": "Safari"}),
+            "metti in pausa spotify": ("media.spotify", {"command": "pause"}),
+            "prossimo brano": ("media.spotify", {"command": "next"}),
+            "cosa sta suonando su spotify": ("media.spotify", {"command": "status"}),
             "info sistema": ("system.info", {}),
             "elenca file": ("fs.list", {"path": "."}),
             "leggi docs/a.md": ("fs.read", {"path": "docs/a.md"}),

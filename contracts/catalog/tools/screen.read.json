@@ -2,11 +2,17 @@
   "contract": "jarvis.tool/1",
   "name": "screen.read",
   "version": "1.0.0",
-  "summary": "Legge il testo visibile sullo schermo con OCR locale: l'immagine non viene salvata né inviata e i dati sensibili sono mascherati",
+  "summary": "Legge il testo visibile sullo schermo con OCR locale: l'immagine non viene salvata né inviata e i dati sensibili sono mascherati. Con «display» si sceglie il monitor (1 è il principale)",
   "input_schema": {
     "type": "object",
     "additionalProperties": false,
-    "properties": {}
+    "properties": {
+      "display": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 8
+      }
+    }
   },
   "output_schema": {
     "type": "object"

@@ -30,7 +30,11 @@ pub fn category(name: &str) -> &'static str {
 /// Sistemi su cui lo strumento è disponibile: il Core gira su Windows, macOS e Linux; il controllo del desktop
 /// e dello schermo esiste solo dove c'è un'interfaccia grafica supportata.
 pub fn platforms(name: &str) -> Vec<&'static str> {
-    if name.starts_with("app.") || name == "pc.open" || name.starts_with("screen.") {
+    if name.starts_with("app.")
+        || name == "pc.open"
+        || name == "media.spotify"
+        || name.starts_with("screen.")
+    {
         vec!["windows", "macos"]
     } else {
         vec!["windows", "macos", "linux"]

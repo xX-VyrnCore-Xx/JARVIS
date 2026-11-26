@@ -319,6 +319,10 @@ enum Event {
     PairingCreated(Result<Value, String>),
     CloudConfigured(Result<Value, String>, bool),
     CloudTested(Result<Value, String>),
+    /// Brano in ascolto su Spotify, l'unico servizio musicale collegato (ADR-0195).
+    Spotify(Result<Value, String>),
+    /// Stato di n8n in Docker (ADR-0197).
+    N8n(Result<Value, String>),
     /// Esito dell'avvio dell'aggiornamento interno (ADR-0109): se riuscito l'app si chiude.
     UpdateInstalling(Result<Value, String>),
     /// Personalità corrente di JARVIS (ADR-0120).
@@ -461,6 +465,15 @@ pub struct JarvisApp {
     cloud_provider: String,
     cloud_api_key: String,
     cloud_action_busy: bool,
+    spotify: Option<Result<Value, String>>,
+    spotify_busy: bool,
+    spotify_asked: Option<std::time::Instant>,
+    n8n: Option<Result<Value, String>>,
+    n8n_busy: bool,
+    n8n_asked: bool,
+    n8n_name: String,
+    n8n_minutes: u64,
+    n8n_kind_audit: bool,
     cloud_action_error: Option<String>,
     cloud_action_notice: Option<String>,
     cloud_remove_confirm: bool,
@@ -631,6 +644,15 @@ impl JarvisApp {
             cloud_provider: "nvidia_nim".into(),
             cloud_api_key: String::new(),
             cloud_action_busy: false,
+            spotify: None,
+            spotify_busy: false,
+            spotify_asked: None,
+            n8n: None,
+            n8n_busy: false,
+            n8n_asked: false,
+            n8n_name: String::new(),
+            n8n_minutes: 15,
+            n8n_kind_audit: false,
             cloud_action_error: None,
             cloud_action_notice: None,
             cloud_remove_confirm: false,
@@ -970,6 +992,21 @@ impl JarvisApp {
                             self.cloud_action_error = Some(error);
                         }
                     }
+                    ctx.request_repaint();
+                }
+                Event::N8n(result) => {
+                    self.n8n_busy = false;
+                    if let Err(error) = &result {
+                        self.error = Some(error.clone());
+                    }
+                    if let Ok(status) = result {
+                        self.n8n = Some(Ok(status));
+                    }
+                    ctx.request_repaint();
+                }
+                Event::Spotify(result) => {
+                    self.spotify_busy = false;
+                    self.spotify = Some(result);
                     ctx.request_repaint();
                 }
                 Event::CloudTested(result) => {
@@ -1491,6 +1528,160 @@ impl JarvisApp {
         std::thread::spawn(move || {
             let result = client.post("/api/devices/pairing", Some(&json!({"scopes": scopes})));
             let _ = tx.send(Event::PairingCreated(result));
+        });
+        ctx.request_repaint();
+    }
+
+    /// Legge lo stato di n8n o gli invia un'azione (`method` `GET`, `POST` o `DELETE`).
+    fn n8n_call(
+        &mut self,
+        ctx: &egui::Context,
+        method: &'static str,
+        path: String,
+        body: Option<Value>,
+    ) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        if self.n8n_busy {
+            return;
+        }
+        self.n8n_busy = true;
+        let tx = self.tx.clone();
+        std::thread::spawn(move || {
+            let result = match method {
+                "DELETE" => client.delete(&path),
+                "POST" => client.post(&path, body.as_ref()),
+                _ => client.get(&path),
+            };
+            // Dopo un'azione si rilegge lo stato aggiornato.
+            let result = result.and_then(|_| client.get("/api/n8n"));
+            let _ = tx.send(Event::N8n(result));
+        });
+        ctx.request_repaint();
+    }
+
+    /// n8n in un container Docker isolato (ADR-0197): abilita, avvia, ferma e gestisce le routine.
+    fn show_n8n(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if !self.n8n_asked {
+            self.n8n_asked = true;
+            self.n8n_call(ctx, "GET", "/api/n8n".into(), None);
+        }
+        let status = match &self.n8n {
+            Some(Ok(status)) => status.clone(),
+            _ => Value::Null,
+        };
+        let enabled = status["enabled"].as_bool().unwrap_or(false);
+        let running = status["running"].as_bool().unwrap_or(false);
+        let docker_ok = status["docker_connected"].as_bool().unwrap_or(true);
+        egui::Frame::new()
+            .fill(SURFACE)
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(29, 49, 65)))
+            .corner_radius(16)
+            .inner_margin(14)
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.heading("n8n con Docker");
+                ui.label(
+                    egui::RichText::new("Container isolato: senza rete, con soli promemoria e controlli pianificati.")
+                        .small()
+                        .weak(),
+                );
+                if enabled && !docker_ok {
+                    let hint = status["docker"]["hint"]
+                        .as_str()
+                        .or_else(|| status["error"].as_str())
+                        .unwrap_or("Docker non risponde: avvia Docker Desktop.");
+                    ui.colored_label(CAUTION, hint);
+                }
+                ui.horizontal(|ui| {
+                    ui.label(if !enabled {
+                        "Disattivato"
+                    } else if running {
+                        "In esecuzione"
+                    } else {
+                        "Fermo"
+                    });
+                    let idle = !self.n8n_busy;
+                    if !enabled {
+                        if ui.add_enabled(idle, egui::Button::new("Abilita n8n")).clicked() {
+                            self.n8n_call(ctx, "POST", "/api/n8n".into(), Some(json!({"enable": true})));
+                        }
+                    } else if running {
+                        if ui.add_enabled(idle, egui::Button::new("Ferma")).clicked() {
+                            self.n8n_call(ctx, "POST", "/api/n8n".into(), Some(json!({"running": false})));
+                        }
+                    } else if ui
+                        .add_enabled(idle && docker_ok, egui::Button::new("Avvia con Docker"))
+                        .clicked()
+                    {
+                        self.n8n_call(ctx, "POST", "/api/n8n".into(), Some(json!({"running": true})));
+                    }
+                    if ui.add_enabled(idle, egui::Button::new("Aggiorna")).clicked() {
+                        self.n8n_call(ctx, "GET", "/api/n8n".into(), None);
+                    }
+                    if self.n8n_busy {
+                        ui.add(egui::Spinner::new());
+                    }
+                });
+                if enabled && running {
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.n8n_name)
+                                .hint_text("Nome della routine")
+                                .desired_width(200.0),
+                        );
+                        ui.checkbox(&mut self.n8n_kind_audit, "Controllo (invece di promemoria)");
+                        ui.add(egui::DragValue::new(&mut self.n8n_minutes).range(1..=59).suffix(" min"));
+                        let name = self.n8n_name.trim().to_string();
+                        if ui
+                            .add_enabled(!name.is_empty() && !self.n8n_busy, egui::Button::new("Crea routine"))
+                            .clicked()
+                        {
+                            let body = json!({"name": name.chars().take(80).collect::<String>(),
+                                "kind": if self.n8n_kind_audit { "audit" } else { "reminder" },
+                                "minutes": self.n8n_minutes});
+                            self.n8n_name.clear();
+                            self.n8n_call(ctx, "POST", "/api/n8n/jobs".into(), Some(body));
+                        }
+                    });
+                }
+                let jobs = status["items"].as_array().cloned().unwrap_or_default();
+                for job in jobs {
+                    ui.horizontal(|ui| {
+                        ui.label(format!(
+                            "{} · ogni {} min",
+                            job["name"].as_str().unwrap_or("Routine"),
+                            job["minutes"].as_u64().unwrap_or(0)
+                        ));
+                        if let Some(id) = job["id"].as_str() {
+                            if ui.add_enabled(!self.n8n_busy, egui::Button::new("Rimuovi")).clicked() {
+                                self.n8n_call(ctx, "DELETE", format!("/api/n8n/jobs/{id}"), None);
+                            }
+                        }
+                    });
+                }
+            });
+        ui.add_space(10.0);
+    }
+
+    /// Chiede lo stato di Spotify o gli invia un comando (`status`, `playpause`, `next`, `previous`).
+    fn spotify_call(&mut self, ctx: &egui::Context, command: &str) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        if self.spotify_busy {
+            return;
+        }
+        self.spotify_busy = true;
+        self.spotify_asked = Some(std::time::Instant::now());
+        let tx = self.tx.clone();
+        let body = json!({"command": command});
+        std::thread::spawn(move || {
+            let _ = tx.send(Event::Spotify(
+                client.post("/api/media/spotify", Some(&body)),
+            ));
         });
         ctx.request_repaint();
     }
@@ -2122,6 +2313,9 @@ impl JarvisApp {
                 }
                 if let Some(error) = &self.error {
                     ui.colored_label(egui::Color32::LIGHT_RED, error);
+                }
+                if self.current == "automations" {
+                    self.show_n8n(ui, ctx);
                 }
                 let items = self
                     .data
@@ -3552,6 +3746,7 @@ impl JarvisApp {
         }
 
         self.show_dashboard_protection(ui, &data["security"]);
+        self.show_dashboard_spotify(ui, ctx);
         self.show_dashboard_backends(ui, ctx);
 
         if ui.available_width() >= 820.0 {
@@ -3700,6 +3895,69 @@ impl JarvisApp {
                     });
                 }
             });
+    }
+
+    /// Spotify, l'unico servizio musicale collegato: brano in ascolto e comandi. Lo stato si legge ogni 5 secondi
+    /// solo mentre la Plancia è visibile; il Core non avvia Spotify.
+    fn show_dashboard_spotify(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        let due = self
+            .spotify_asked
+            .is_none_or(|at| at.elapsed() >= std::time::Duration::from_secs(5));
+        if due && !self.spotify_busy {
+            self.spotify_call(ctx, "status");
+        }
+        ctx.request_repaint_after(std::time::Duration::from_secs(5));
+        egui::Frame::new()
+            .fill(SURFACE)
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(29, 49, 65)))
+            .corner_radius(16)
+            .inner_margin(14)
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.heading("Spotify");
+                let (line, usable) = match &self.spotify {
+                    None => ("Lettura in corso…".to_string(), false),
+                    Some(Err(error)) => (error.clone(), false),
+                    Some(Ok(value)) => match value["state"].as_str().unwrap_or("closed") {
+                        "closed" => ("Spotify non è aperto: aprilo dal computer.".into(), false),
+                        "running" => (
+                            "Spotify è aperto ma il brano non è leggibile (finestra nascosta)."
+                                .into(),
+                            true,
+                        ),
+                        "stopped" => ("Nessun brano in riproduzione.".into(), true),
+                        state => {
+                            let title = value["title"].as_str().unwrap_or("");
+                            let artist = value["artist"].as_str().unwrap_or("");
+                            let label = if state == "playing" {
+                                "In riproduzione"
+                            } else {
+                                "In pausa"
+                            };
+                            if title.is_empty() {
+                                (label.to_string(), true)
+                            } else if artist.is_empty() {
+                                (format!("{label}: {title}"), true)
+                            } else {
+                                (format!("{label}: {title} — {artist}"), true)
+                            }
+                        }
+                    },
+                };
+                ui.label(line);
+                ui.horizontal(|ui| {
+                    for (label, command) in [("⏮", "previous"), ("⏯", "playpause"), ("⏭", "next")]
+                    {
+                        if ui
+                            .add_enabled(usable && !self.spotify_busy, egui::Button::new(label))
+                            .clicked()
+                        {
+                            self.spotify_call(ctx, command);
+                        }
+                    }
+                });
+            });
+        ui.add_space(10.0);
     }
 
     fn show_dashboard_backends(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
@@ -5040,9 +5298,14 @@ impl JarvisApp {
                 ui.label(format!("Indirizzo del Core: {pairing_url}"));
             } else {
                 ui.label("Con Tailscale installato e connesso su questo computer basta un tocco:");
-                if ui.button("Collega con Tailscale").clicked() {
-                    self.act(ctx, "/api/tailscale/connect".into(), None);
-                }
+                ui.horizontal(|ui| {
+                    if ui.button("Collega con Tailscale").clicked() {
+                        self.act(ctx, "/api/tailscale/connect".into(), None);
+                    }
+                    if ui.button("Diagnostica").clicked() {
+                        self.act(ctx, "/api/tailscale/diagnose".into(), None);
+                    }
+                });
                 ui.small(
                     egui::RichText::new(
                         "Rende JARVIS raggiungibile solo dai tuoi dispositivi Tailscale (mai pubblico) e autorizza l'indirizzo da solo.",
