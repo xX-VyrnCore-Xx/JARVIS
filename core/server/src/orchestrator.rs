@@ -6570,6 +6570,20 @@ impl Jarvis {
                 return Err(CoreError::BadRequest(e));
             }
         };
+        let missing = crate::oauth::missing_scopes(&manifest, &tokens);
+        if !missing.is_empty() {
+            self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "owner", "id": "owner"},
+                              "node": "core-local", "action": "connector.oauth.exchange", "resource": format!("jarvis://connector/{id}"),
+                              "outcome": "failed", "error_code": "connector.oauth_scopes_missing", "effect": "not_applied"}))?;
+            let names: Vec<&str> = missing
+                .iter()
+                .map(|m| m.rsplit('/').next().unwrap_or(m))
+                .collect();
+            return Err(CoreError::BadRequest(format!(
+                "Accesso incompleto: mancano i permessi {}. Rifai l'accesso lasciando spuntate tutte le caselle.",
+                names.join(", ")
+            )));
+        }
         self.save_oauth_tokens(&id, &tokens)?;
         self.store
             .connector_set_authorized(&id, Some(&now()))

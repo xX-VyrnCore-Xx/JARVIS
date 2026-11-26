@@ -2433,6 +2433,13 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** (1) `release.yml` copia anche `ai/requirements-voice.txt` nelle risorse; (2) il Core incorpora il lock aggiornato alla compilazione e, se il file non è accanto al runtime AI, lo scrive in `<dati>/requirements-voice.txt` e usa quello: un'installazione già distribuita funziona anche senza rilasciare di nuovo i pacchetti. Gli hash restano obbligatori (`--require-hashes`).
 - **Evidenza:** test con cartella AI vuota (usa la copia incorporata, con `--hash=sha256:`) e con file presente (ha la precedenza).
 
+### ADR-0208 — Gmail e Google Calendar: errori leggibili, permessi verificati, richieste in italiano
+
+- **Data:** 2026-11-26. **Stato:** implementata (non provata con un account Google reale).
+- **Causa:** con l'accesso completato i connettori sembravano non funzionare perché (1) gli errori di Google si riducevano a «ha risposto 403» o «HTTP 400», senza il motivo (API Gmail/Calendar non abilitata nel progetto Cloud, permessi non concessi, client sbagliato); (2) Google consente di deselezionare i permessi nella schermata di consenso e il Core salvava comunque i token incompleti; (3) il gateway non aveva regole per «leggi le mie email» o «prossimi eventi».
+- **Decisione:** (1) `service_error_detail` estrae messaggio e motivo dall'errore del servizio (mai il corpo grezzo) con il rimedio per `accessNotConfigured`, `insufficientPermissions` e quota; lo scambio dei token riporta `error_description`; (2) dopo l'accesso, `missing_scopes` confronta i permessi concessi con quelli del manifest e rifiuta l'accesso incompleto spiegando cosa rifare; (3) regole di sola lettura per posta (non lette, ricerca, lettura per id) e calendario, con riepilogo dei risultati; le scritture restano esplicite e con conferma.
+- **Evidenza:** test su errore Google, scope mancanti, regole del gateway e riepilogo eventi.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

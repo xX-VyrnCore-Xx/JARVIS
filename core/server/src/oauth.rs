@@ -162,7 +162,26 @@ fn token_request(
     .map_err(|e| e.message)?;
     let body: Value = serde_json::from_slice(&data).unwrap_or(Value::Null);
     if !(200..300).contains(&status) || body["access_token"].as_str().is_none_or(str::is_empty) {
-        return Err(format!("il servizio ha rifiutato i token (HTTP {status})"));
+        let why = body["error_description"]
+            .as_str()
+            .or_else(|| body["error"].as_str())
+            .unwrap_or_default();
+        let hint = match body["error"].as_str().unwrap_or_default() {
+            "invalid_grant" => {
+                " (codice scaduto o già usato, oppure accesso revocato: rifai l'accesso)"
+            }
+            "invalid_client" | "unauthorized_client" => {
+                " (client ID o segreto non corretti: reimporta il file JSON del client)"
+            }
+            "redirect_uri_mismatch" => " (il client OAuth deve essere di tipo «App desktop»)",
+            _ => "",
+        };
+        return Err(if why.is_empty() {
+            format!("il servizio ha rifiutato i token (HTTP {status})")
+        } else {
+            let why: String = why.chars().take(200).collect();
+            format!("il servizio ha rifiutato i token (HTTP {status}): {why}{hint}")
+        });
     }
     let expires_in = body["expires_in"].as_u64().unwrap_or(3600);
     let now = chrono::Utc::now().timestamp() as u64;
@@ -203,6 +222,26 @@ pub fn exchange(
 }
 
 /// Vero se il token scade entro 60 secondi.
+/// Permessi richiesti dal manifest ma non concessi dall'utente (Google consente di deselezionarli nella
+/// schermata di consenso). Vuoto se il servizio non dichiara gli scope concessi.
+pub fn missing_scopes(manifest: &Value, tokens: &Value) -> Vec<String> {
+    let granted: Vec<&str> = tokens["scope"]
+        .as_str()
+        .map(|s| s.split_whitespace().collect())
+        .unwrap_or_default();
+    if granted.is_empty() {
+        return Vec::new();
+    }
+    manifest["auth"]["scopes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|s| !granted.contains(s))
+        .map(str::to_string)
+        .collect()
+}
+
 pub fn expiring(state: &Value) -> bool {
     state["expires_at"]
         .as_u64()
@@ -334,5 +373,13 @@ mod tests {
         assert_eq!(q["redirect_uri"], "http://127.0.0.1:8765");
         assert_eq!(q["access_type"], "offline");
         assert_eq!(q["prompt"], "consent");
+    }
+
+    #[test]
+    fn missing_scopes_are_reported_only_when_the_service_declares_them() {
+        let m = json!({"auth": {"scopes": ["a/x", "a/y"]}});
+        assert_eq!(missing_scopes(&m, &json!({"scope": "a/x"})), vec!["a/y"]);
+        assert!(missing_scopes(&m, &json!({"scope": "a/x a/y"})).is_empty());
+        assert!(missing_scopes(&m, &json!({"scope": null})).is_empty());
     }
 }

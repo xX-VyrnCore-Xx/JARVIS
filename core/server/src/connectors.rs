@@ -334,9 +334,18 @@ pub fn call(
         ));
     }
     if status >= 400 {
+        let detail = service_error_detail(&data);
         return Err(err(
             "connector.http_error",
-            format!("{} ha risposto {status}", url.host_str().unwrap_or("?")),
+            format!(
+                "{} ha risposto {status}{}",
+                url.host_str().unwrap_or("?"),
+                if detail.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {detail}")
+                }
+            ),
         ));
     }
     let content = if ctype.contains("json") {
@@ -360,6 +369,42 @@ pub fn call(
         "connector": manifest["id"], "operation": op_name, "status": status, "data": content,
         "retrieved_at": crate::now(), "untrusted": true,
     }))
+}
+
+/// Estrae da una risposta d'errore dei servizi Google/GitHub il motivo leggibile (messaggio, stato, motivo e
+/// consigli per le cause note: API non abilitata, scope mancanti, quota). Mai il corpo grezzo.
+pub fn service_error_detail(data: &[u8]) -> String {
+    let body: Value = serde_json::from_slice(data).unwrap_or(Value::Null);
+    let error = &body["error"];
+    let message = error["message"]
+        .as_str()
+        .or_else(|| body["message"].as_str())
+        .or_else(|| error.as_str())
+        .unwrap_or_default();
+    let reason = error["errors"][0]["reason"]
+        .as_str()
+        .or_else(|| error["details"][0]["reason"].as_str())
+        .or_else(|| error["status"].as_str())
+        .unwrap_or_default();
+    let text: String = message.chars().take(300).collect();
+    let hint = match reason {
+        "accessNotConfigured" | "SERVICE_DISABLED" => {
+            " — abilita l'API (Gmail API / Google Calendar API) nel progetto Google Cloud del client OAuth"
+        }
+        "insufficientPermissions" | "ACCESS_TOKEN_SCOPE_INSUFFICIENT" => {
+            " — permessi non concessi: rimuovi il connettore e rifai l'accesso spuntando tutte le caselle"
+        }
+        "rateLimitExceeded" | "userRateLimitExceeded" | "RESOURCE_EXHAUSTED" => {
+            " — quota esaurita, riprova più tardi"
+        }
+        _ => "",
+    };
+    match (text.is_empty(), reason.is_empty()) {
+        (true, true) => String::new(),
+        (false, true) => text,
+        (true, false) => format!("{reason}{hint}"),
+        (false, false) => format!("{text} [{reason}]{hint}"),
+    }
 }
 
 /// Messaggio di posta RFC 822 in UTF-8, codificato base64url come richiesto da Gmail (ADR-0047).
@@ -635,5 +680,16 @@ mod mail_tests {
         let bad = json!({"to": "a@b.c\r\nBcc: spia@x.y", "subject": "x", "body": "y"});
         assert!(rfc822(bad.as_object().unwrap()).is_err());
         assert!(rfc822(json!({"subject": "x"}).as_object().unwrap()).is_err());
+    }
+
+    #[test]
+    fn google_errors_become_readable_with_a_hint() {
+        let body = br#"{"error":{"code":403,"message":"Gmail API has not been used in project 1 before.","errors":[{"reason":"accessNotConfigured"}],"status":"PERMISSION_DENIED"}}"#;
+        let d = service_error_detail(body);
+        assert!(
+            d.contains("Gmail API has not been used") && d.contains("abilita l'API"),
+            "{d}"
+        );
+        assert_eq!(service_error_detail(b"<html>"), "");
     }
 }
