@@ -41,13 +41,13 @@ private enum Section: String, Identifiable {
     case devices = "Dispositivi", skills = "Competenze", security = "Sicurezza", audit = "Audit"
     case system = "Sistema", models = "Modelli AI", updates = "Aggiornamenti", notifications = "Notifiche"
     case missions = "Missioni", profile = "Profilo", plans = "Piani", tools = "Strumenti"
-    case agents = "Agenti", plugins = "Pacchetti", users = "Utenti", voice = "Voce", map = "Mappa"
+    case agents = "Agenti", plugins = "Pacchetti", users = "Utenti", voice = "Voce", map = "Mappa", privacy = "Privacy"
 
     static let navigation: [(title: String, entries: [Section])] = [
         ("Assistente", [.dashboard, .chat, .tasks, .models, .voice, .map, .notifications, .profile]),
         ("Organizzazione", [.missions, .plans, .workflows, .workspace, .memory, .skills, .agents]),
         ("Collegamenti", [.devices, .tools, .plugins, .connectors]),
-        ("Amministrazione", [.confirmations, .users, .security, .audit, .system, .updates])
+        ("Amministrazione", [.confirmations, .users, .security, .privacy, .audit, .system, .updates])
     ]
 
     var id: Self { self }
@@ -78,6 +78,7 @@ private enum Section: String, Identifiable {
         case .users: "person.2"
         case .voice: "waveform.circle"
         case .map: "map"
+        case .privacy: "hand.raised.square"
         }
     }
     var endpoint: String {
@@ -106,6 +107,7 @@ private enum Section: String, Identifiable {
         case .users: "/api/users"
         case .voice: "/api/setup"
         case .map: "/api/health"
+        case .privacy: "/api/privacy/overview"
         }
     }
 }
@@ -137,11 +139,14 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     @State private var section: Section = .dashboard
     @State private var n8n: [String: Any] = [:]
+    @State private var n8nPullConfirm = false
     @State private var n8nName = ""
     @State private var n8nMinutes = 15
     @State private var n8nKind = "reminder"
     @State private var paletteOpen = false
     @State private var paletteQuery = ""
+    @State private var paletteResults: [[String: Any]] = []
+    @State private var paletteTask: Task<Void, Never>?
     @Namespace private var navigationNamespace
     @State private var hoveredEntry: Section?
     /// Larghezza della barra laterale, scelta dal proprietario e conservata fra un avvio e l'altro.
@@ -357,6 +362,38 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         }
     }
 
+    /// Ricerca globale con attesa di 300 ms dopo l'ultimo tasto: una sola richiesta per pausa, mai a ogni lettera.
+    private func searchPalette(_ value: String) {
+        paletteTask?.cancel()
+        let text = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.count >= 2 else { paletteResults = []; return }
+        paletteTask = Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            let encoded = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? text
+            if let result = try? await core.request("/api/search?q=\(encoded)", timeout: 15) {
+                paletteResults = result["items"] as? [[String: Any]] ?? []
+            }
+        }
+    }
+
+    private func openSearchHit(_ hit: [String: Any]) {
+        let target: Section = {
+            switch hit["section"] as? String {
+            case "memory": return .memory
+            case "chat": return .chat
+            case "workflows": return .workflows
+            default: return .tools
+            }
+        }()
+        if target == .memory { memoryQuery = paletteQuery }
+        paletteOpen = false
+        paletteQuery = ""
+        paletteResults = []
+        select(target)
+        if target == .memory { refresh += 1 }
+    }
+
     private func openFromPalette(_ entry: Section) {
         paletteOpen = false
         paletteQuery = ""
@@ -366,19 +403,34 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     private var commandPalette: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Vai a…").font(.title3.bold())
-            TextField("Cerca una sezione (per esempio memoria o sicurezza)", text: $paletteQuery)
+            TextField("Cerca una sezione o un contenuto (ricordi, chat, automazioni, strumenti)", text: $paletteQuery)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { if let first = paletteMatches.first { openFromPalette(first) } }
-            if paletteMatches.isEmpty {
-                Text("Nessuna sezione corrisponde.").foregroundStyle(.secondary).frame(height: 240)
+                .onChange(of: paletteQuery) { _, value in searchPalette(value) }
+            if paletteMatches.isEmpty && paletteResults.isEmpty {
+                Text("Nessuna sezione né contenuto corrisponde.").foregroundStyle(.secondary).frame(height: 240)
             } else {
-                List(paletteMatches) { entry in
-                    Button { openFromPalette(entry) } label: {
-                        Label(entry.rawValue, systemImage: entry.icon).frame(maxWidth: .infinity, alignment: .leading)
+                List {
+                    ForEach(paletteMatches) { entry in
+                        Button { openFromPalette(entry) } label: {
+                            Label(entry.rawValue, systemImage: entry.icon).frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
+                    if !paletteResults.isEmpty {
+                        Text("Nei tuoi contenuti").font(.caption).foregroundStyle(.secondary)
+                        ForEach(Array(paletteResults.enumerated()), id: \.offset) { _, hit in
+                            Button { openSearchHit(hit) } label: {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(String((hit["title"] as? String ?? "").prefix(90)))
+                                    Text(hit["group"] as? String ?? "").font(.caption2).foregroundStyle(.secondary)
+                                }.frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                 }
-                .frame(height: 240)
+                .frame(height: 280)
             }
             HStack {
                 Text("Invio apre la prima voce · Esc chiude").font(.caption).foregroundStyle(.secondary)
@@ -1771,6 +1823,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         case .workspace: workspaceProfilesCard
         case .voice: voiceInstaller
         case .map: mapView
+        case .privacy: privacyPanel
         case .devices:
             deviceConnection
         case .models:
@@ -2599,6 +2652,72 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         }
     }
 
+    // MARK: Centro privacy (ADR-0187)
+
+    private func bytesText(_ n: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(n), countStyle: .file)
+    }
+
+    /// Cosa JARVIS conserva, dove, cosa può uscire verso il cloud e cosa è attivo: legge `/api/privacy/overview`.
+    private var privacyPanel: some View {
+        let stored = payload["stored_locally"] as? [String: Any] ?? [:]
+        let entries = (stored["data_dir_entries"] as? [[String: Any]] ?? [])
+            .sorted { ($0["bytes"] as? Int ?? 0) > ($1["bytes"] as? Int ?? 0) }
+        let memory = stored["memory"] as? [String: Any] ?? [:]
+        let cloud = payload["cloud"] as? [String: Any] ?? [:]
+        let providers = cloud["providers_with_key"] as? [[String: Any]] ?? []
+        let tools = payload["tools"] as? [String: Any] ?? [:]
+        let byEffects = (tools["by_effects"] as? [String: Any] ?? [:]).sorted { $0.key < $1.key }
+        let autonomy = payload["autonomy"] as? [String: Any] ?? [:]
+        let background = payload["background"] as? [String: Any] ?? [:]
+        return VStack(alignment: .leading, spacing: 14) {
+            card("Dati conservati sul computer", icon: "internaldrive") {
+                Text("Memoria: \(memory["total"] as? Int ?? 0) ricordi. \(stored["note"] as? String ?? "")")
+                    .font(.callout).foregroundStyle(.secondary)
+                ForEach(Array(entries.prefix(8).enumerated()), id: \.offset) { _, entry in
+                    HStack {
+                        Text(entry["name"] as? String ?? "?").font(.system(.callout, design: .monospaced))
+                        Spacer()
+                        Text(bytesText(entry["bytes"] as? Int ?? 0)).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                HStack {
+                    Button("Gestisci la memoria") { select(.memory) }
+                    Button("Esporta o elimina dati") { select(.system) }
+                }
+            }
+            card("Cosa può uscire verso il cloud", icon: "icloud.and.arrow.up") {
+                Text(cloud["note"] as? String ?? "").font(.callout).foregroundStyle(.secondary)
+                if providers.isEmpty {
+                    Label("Nessun provider cloud ha una chiave: nulla parte dal computer.", systemImage: "checkmark.shield")
+                        .foregroundStyle(.green)
+                } else {
+                    ForEach(Array(providers.enumerated()), id: \.offset) { _, p in
+                        Label("\(p["id"] as? String ?? "provider"): chiave configurata", systemImage: "key.fill")
+                    }
+                }
+                Button("Modelli e chiavi") { select(.models) }
+            }
+            card("Cosa è autorizzato", icon: "wrench.and.screwdriver") {
+                Text("Strumenti disponibili: \(tools["count"] as? Int ?? 0). Autonomia: livello \(autonomy["default"] as? Int ?? 0); lavori in background \(autonomy["background_allowed"] as? Bool == true ? "consentiti" : "non consentiti").")
+                    .font(.callout)
+                ForEach(byEffects, id: \.key) { effect in
+                    HStack { Text(effect.key); Spacer(); Text("\(effect.value as? Int ?? 0)").monospacedDigit().foregroundStyle(.secondary) }
+                        .font(.caption)
+                }
+                HStack {
+                    Text("Connettori: \(payload["connectors"] as? Int ?? 0) · Server MCP: \(payload["mcp_servers"] as? Int ?? 0) · Osservazioni di file: \(background["file_watches"] as? Int ?? 0) · Profilo risorse: \(background["resource_profile"] as? String ?? "?")")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                HStack {
+                    Button("Permessi e autonomia") { select(.security) }
+                    Button("Connettori") { select(.connectors) }
+                    Button("Audit") { select(.audit) }
+                }
+            }
+        }
+    }
+
     // MARK: Mappa (ADR-0202)
 
     private func coordinate(_ value: Any?) -> CLLocationCoordinate2D? {
@@ -3023,6 +3142,10 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         let running = n8n["running"] as? Bool ?? false
         let dockerOK = n8n["docker_connected"] as? Bool ?? true
         let jobs = n8n["items"] as? [[String: Any]] ?? []
+        let imageMissing = enabled && dockerOK && n8n["image_present"] as? Bool == false
+        let pull = n8n["pull"] as? [String: Any] ?? [:]
+        let pulling = pull["status"] as? String == "pulling"
+        let estimate = n8n["image_estimate_mb"] as? Int ?? 0
         return card("n8n con Docker", icon: "shippingbox") {
             Text("n8n gira in un container Docker isolato: senza rete, con soli promemoria e controlli pianificati. JARVIS lo avvia e lo ferma; non serve configurare nulla a mano.")
                 .font(.callout).foregroundStyle(.secondary)
@@ -3040,10 +3163,25 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     Button("Abilita n8n") { n8nCall(body: ["enable": true]) }
                 } else if running {
                     Button("Ferma") { n8nCall(body: ["running": false]) }
+                } else if imageMissing || pulling {
+                    Button("Scarica l'immagine e avvia…", systemImage: "arrow.down.circle") { n8nPullConfirm = true }
+                        .disabled(pulling)
                 } else {
                     Button("Avvia con Docker") { n8nCall(body: ["running": true]) }.disabled(!dockerOK)
                 }
                 Button("Aggiorna") { Task { await loadN8n() } }
+            }
+            if imageMissing && !pulling {
+                Label("L'immagine di n8n non è sul computer (circa \(estimate) MB): serve scaricarla una volta.", systemImage: "arrow.down.circle")
+                    .font(.callout).foregroundStyle(.orange)
+            }
+            if pulling {
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text("Download dell'immagine in corso… \(pull["elapsed_s"] as? Int ?? 0) s").font(.callout)
+                }
+            } else if pull["status"] as? String == "failed" {
+                Label(pull["detail"] as? String ?? "Download non riuscito", systemImage: "xmark.octagon").font(.callout).foregroundStyle(.red)
             }
             if enabled && running {
                 Divider()
@@ -3076,7 +3214,23 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 }
             }
         }
-        .task { await loadN8n() }
+        .alert("Scaricare l'immagine di n8n?", isPresented: $n8nPullConfirm) {
+            Button("Scarica e avvia") { n8nCall(body: ["pull": true, "running": true]) }
+            Button("Annulla", role: .cancel) {}
+        } message: {
+            Text("Docker scaricherà circa \(estimate) MB da docker.n8n.io (una sola volta) e poi avvierà n8n. Puoi continuare a usare JARVIS durante il download.")
+        }
+        .task {
+            await loadN8n()
+            while !Task.isCancelled, section == .workflows {
+                if (n8n["pull"] as? [String: Any])?["status"] as? String == "pulling" {
+                    try? await Task.sleep(for: .seconds(3))
+                    await loadN8n()
+                } else {
+                    try? await Task.sleep(for: .seconds(8))
+                }
+            }
+        }
     }
 
     private func addPublicHost() {

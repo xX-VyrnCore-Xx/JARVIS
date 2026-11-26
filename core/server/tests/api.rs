@@ -2963,3 +2963,23 @@ async fn privacy_overview_and_resource_profiles_work_through_the_api() {
     assert_eq!(status, StatusCode::OK, "{preview}");
     assert_eq!(preview["applied"], false);
 }
+
+#[tokio::test]
+async fn global_search_finds_memories_tools_and_refuses_empty_queries() {
+    let e = env();
+    e.chat("ricorda che il mio cane si chiama Fido").await;
+    let (status, found) = e.api("GET", "/api/search?q=Fido", None).await;
+    assert_eq!(status, StatusCode::OK, "{found}");
+    let items = found["items"].as_array().unwrap();
+    assert!(items
+        .iter()
+        .any(|i| i["group"] == "memoria" && i["title"].as_str().unwrap().contains("Fido")));
+    let (_, tools) = e.api("GET", "/api/search?q=time.now", None).await;
+    assert!(tools["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|i| i["group"] == "strumenti" && i["id"] == "time.now"));
+    let (status, _) = e.api("GET", "/api/search?q=a", None).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}

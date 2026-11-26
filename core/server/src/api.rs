@@ -660,6 +660,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/mcp/servers/health", post(mcp_server_health))
         .route("/api/mcp/servers/policy", post(mcp_server_policy))
         .route("/api/mcp/presets", get(mcp_presets))
+        .route("/api/search", get(global_search))
         .route("/api/map/search", post(map_search))
         .route("/api/map/route", post(map_route))
         .route(
@@ -854,6 +855,24 @@ async fn n8n_status(State(state): State<Shared>) -> Response {
 async fn n8n_runtime(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
     if body["enable"] == true {
         return n8n_action(&state, Some("n8n.enable"), |manager| manager.enable()).await;
+    }
+    if body["pull"] == true {
+        // Scaricamento dell'immagine: solo dal proprietario, che con questa richiesta lo conferma; con
+        // `running: true` il container parte appena l'immagine è pronta.
+        let start_after = body["running"] == true;
+        let manager = state.n8n.clone();
+        let outcome = tokio::task::spawn_blocking(move || manager.start_pull(start_after)).await;
+        let view = match outcome {
+            Ok(Ok(view)) => view,
+            Ok(Err(message)) => return CoreError::BadRequest(message).into_response(),
+            Err(_) => {
+                return CoreError::Internal("operazione n8n interrotta".into()).into_response()
+            }
+        };
+        if let Err(error) = with_core(&state, |j| j.record_owner_action("n8n.pull")).await {
+            return error.into_response();
+        }
+        return Json(view).into_response();
     }
     let Some(running) = body["running"].as_bool() else {
         return CoreError::BadRequest("stato del container mancante".into()).into_response();
@@ -3295,6 +3314,15 @@ async fn mcp_server_test(State(state): State<Shared>, Json(body): Json<Value>) -
 }
 
 /// Regole di osservazione dei file (ADR-0158), solo proprietario.
+/// Ricerca globale su ricordi, chat, automazioni e strumenti (parametro `q`).
+async fn global_search(
+    State(state): State<Shared>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let query = q.get("q").cloned().unwrap_or_default();
+    reply(with_core(&state, move |j| j.global_search(&query)).await)
+}
+
 /// Mappa (ADR-0202): ricerca di luoghi e percorsi con OpenStreetMap, dal proprietario. Le richieste lente girano
 /// fuori dal blocco del Core.
 async fn map_search(State(state): State<Shared>, Json(body): Json<Value>) -> Response {

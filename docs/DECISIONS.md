@@ -2406,6 +2406,19 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Permessi del token:** tabella completa in `docs/SECURITY_AND_PRIVACY.md`. Un connettore già installato resta alla versione precedente finché non lo si reinstalla.
 - **Evidenza:** test del manifest (conferma su ogni scrittura, rischio critico, assenza di operazioni distruttive di repository), dei percorsi di file e della codifica del corpo con un server locale.
 
+### ADR-0204 — Ricerca globale e pannello Privacy
+
+- **Data:** 2026-11-26. **Stato:** implementata (Swift verificato solo dalla CI).
+- **Decisione:** `GET /api/search?q=` cerca in un solo passaggio ricordi, chat, automazioni e strumenti (al massimo 5 voci per gruppo, 2–120 caratteri) e indica la sezione dove aprire ogni risultato; solo dati già visibili al proprietario. La tavolozza ⌘K di macOS mostra le sezioni e, dopo 300 ms dall'ultimo tasto, i contenuti trovati. Nuova sezione «Privacy» (macOS) sopra `/api/privacy/overview` (ADR-0187): dati conservati e dimensioni, provider cloud con chiave, strumenti per effetto, autonomia, connettori, server MCP, osservazioni e scorciatoie alle sezioni che li gestiscono.
+- **Non incluso:** ricerca nei documenti della workspace e nelle note (richiede un indice), cronologia dei permessi e criteri di conservazione.
+
+### ADR-0205 — Immagini Docker mancanti: download con conferma
+
+- **Data:** 2026-11-26. **Stato:** implementata (non provata con Docker reale).
+- **Contesto:** avviare n8n senza l'immagine faceva partire un download implicito di centinaia di MB senza chiedere nulla, con un limite di 3 minuti.
+- **Decisione:** `GET /api/n8n` dice se l'immagine è presente (`image_present`), la stima del download (`image_estimate_mb`, circa 450 MB, non misurata) e lo stato del download (`pull`: `idle`, `pulling`, `ready`, `failed`). Avviare il container senza immagine risponde `image_missing` e non scarica nulla. `POST /api/n8n {"pull": true, "running": true}` è la conferma del proprietario: scarica l'immagine in background (fino a 20 minuti) e poi avvia n8n; l'azione è nell'audit. Le app macOS e Windows mostrano «Scarica l'immagine e avvia…» con finestra di conferma, avanzamento e errore. Il sandbox del codice aveva già `sandbox.prepare`, che richiede conferma per costruire la propria immagine.
+- **Limiti:** nessuna percentuale di avanzamento (Docker non la fornisce in modo stabile): si mostra il tempo trascorso; nessun catalogo generale di immagini oltre a n8n e sandbox.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.
