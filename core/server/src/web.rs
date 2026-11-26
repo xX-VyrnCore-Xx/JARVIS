@@ -24,8 +24,17 @@ const MAX_REDIRECTS: usize = 3;
 
 #[derive(Clone, Debug)]
 pub enum Provider {
-    Wikipedia { base: String },
-    Searxng { base: String },
+    Wikipedia {
+        base: String,
+    },
+    Searxng {
+        base: String,
+    },
+    /// Ricerca generale senza chiave (DuckDuckGo, solo risultati in HTML) con ripiego su Wikipedia (ADR-0196).
+    Web {
+        duckduckgo: String,
+        wikipedia: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -76,8 +85,18 @@ impl WebConfig {
             (Some("searxng"), Some(url)) | (None, Some(url)) => Provider::Searxng {
                 base: url.trim_end_matches('/').into(),
             },
-            _ => Provider::Wikipedia {
+            (Some("wikipedia"), _) => Provider::Wikipedia {
                 base: var("JARVIS_WIKIPEDIA_URL")
+                    .unwrap_or_else(|| format!("https://{lang}.wikipedia.org"))
+                    .trim_end_matches('/')
+                    .into(),
+            },
+            _ => Provider::Web {
+                duckduckgo: var("JARVIS_DUCKDUCKGO_URL")
+                    .unwrap_or_else(|| "https://html.duckduckgo.com".into())
+                    .trim_end_matches('/')
+                    .into(),
+                wikipedia: var("JARVIS_WIKIPEDIA_URL")
                     .unwrap_or_else(|| format!("https://{lang}.wikipedia.org"))
                     .trim_end_matches('/')
                     .into(),
@@ -101,6 +120,7 @@ impl WebConfig {
         let (name, base) = match &self.provider {
             Provider::Wikipedia { base } => ("wikipedia", base),
             Provider::Searxng { base } => ("searxng", base),
+            Provider::Web { duckduckgo, .. } => ("duckduckgo+wikipedia", duckduckgo),
         };
         json!({"enabled": self.enabled, "provider": name, "provider_url": base, "allow": self.allow, "deny": self.deny})
     }
@@ -425,63 +445,48 @@ pub fn fetch(cfg: &WebConfig, raw: &str) -> Result<Value, ToolError> {
     }))
 }
 
-/// Ricerca tramite il fornitore configurato.
+/// Ricerca tramite il fornitore configurato. Con il fornitore predefinito (`Web`) si usa DuckDuckGo e, se non
+/// risponde, è bloccato o non trova nulla, Wikipedia: il risultato dice quale fonte ha risposto e perché.
 pub fn search(cfg: &WebConfig, query: &str, limit: usize) -> Result<Value, ToolError> {
     let limit = limit.clamp(1, 10);
-    let (provider, url) = match &cfg.provider {
-        Provider::Wikipedia { base } => {
-            let mut u = Url::parse(&format!("{base}/w/api.php"))
-                .map_err(|_| err("web.invalid_url", "fornitore non valido"))?;
-            u.query_pairs_mut()
-                .append_pair("action", "query")
-                .append_pair("list", "search")
-                .append_pair("srsearch", query)
-                .append_pair("srlimit", &limit.to_string())
-                .append_pair("format", "json")
-                .append_pair("utf8", "1");
-            ("wikipedia", u)
+    match &cfg.provider {
+        Provider::Wikipedia { base } => Ok(finish(
+            "wikipedia",
+            query,
+            wikipedia_results(cfg, base, query, limit)?,
+            limit,
+        )),
+        Provider::Searxng { base } => Ok(finish(
+            "searxng",
+            query,
+            searxng_results(cfg, base, query)?,
+            limit,
+        )),
+        Provider::Web {
+            duckduckgo,
+            wikipedia,
+        } => {
+            let reason = match duckduckgo_results(cfg, duckduckgo, query, limit) {
+                Ok(results) if !results.is_empty() => {
+                    return Ok(finish("duckduckgo", query, results, limit))
+                }
+                Ok(_) => "nessun risultato".to_string(),
+                Err(e) => e.message,
+            };
+            let mut out = finish(
+                "wikipedia",
+                query,
+                wikipedia_results(cfg, wikipedia, query, limit)?,
+                limit,
+            );
+            out["fallback_from"] = json!("duckduckgo");
+            out["fallback_reason"] = json!(reason.chars().take(160).collect::<String>());
+            Ok(out)
         }
-        Provider::Searxng { base } => {
-            let mut u = Url::parse(&format!("{base}/search"))
-                .map_err(|_| err("web.invalid_url", "fornitore non valido"))?;
-            u.query_pairs_mut()
-                .append_pair("q", query)
-                .append_pair("format", "json");
-            ("searxng", u)
-        }
-    };
-    let page = get(cfg, url, true)?;
-    let data: Value = serde_json::from_slice(&page.body)
-        .map_err(|_| err("web.invalid_response", "risposta del fornitore non JSON"))?;
-    let results: Vec<Value> = match &cfg.provider {
-        Provider::Wikipedia { base } => data["query"]["search"]
-            .as_array()
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|r| {
-                        let title = r["title"].as_str()?;
-                        let mut page = Url::parse(&format!("{base}/wiki/")).ok()?;
-                        page.path_segments_mut().ok()?.pop_if_empty().push(&title.replace(' ', "_"));
-                        Some(json!({"title": title, "url": page.as_str(), "snippet": html_to_text(r["snippet"].as_str().unwrap_or("")).1}))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default(),
-        Provider::Searxng { .. } => data["results"]
-            .as_array()
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|r| {
-                        let url = r["url"].as_str()?;
-                        Url::parse(url).ok().filter(|u| matches!(u.scheme(), "http" | "https"))?;
-                        Some(json!({"title": r["title"].as_str().unwrap_or(url), "url": url, "snippet": r["content"].as_str().unwrap_or("").chars().take(400).collect::<String>()}))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default(),
-    };
+    }
+}
+
+fn finish(provider: &str, query: &str, results: Vec<Value>, limit: usize) -> Value {
     let results: Vec<Value> = results
         .into_iter()
         .take(limit)
@@ -491,9 +496,180 @@ pub fn search(cfg: &WebConfig, query: &str, limit: usize) -> Result<Value, ToolE
             r
         })
         .collect();
-    Ok(
-        json!({"provider": provider, "query": query, "retrieved_at": now(), "results": results, "untrusted": true}),
-    )
+    json!({"provider": provider, "query": query, "retrieved_at": now(), "results": results, "untrusted": true})
+}
+
+fn wikipedia_results(
+    cfg: &WebConfig,
+    base: &str,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<Value>, ToolError> {
+    let mut u = Url::parse(&format!("{base}/w/api.php"))
+        .map_err(|_| err("web.invalid_url", "fornitore non valido"))?;
+    u.query_pairs_mut()
+        .append_pair("action", "query")
+        .append_pair("list", "search")
+        .append_pair("srsearch", query)
+        .append_pair("srlimit", &limit.to_string())
+        .append_pair("format", "json")
+        .append_pair("utf8", "1");
+    let page = get(cfg, u, true)?;
+    let data: Value = serde_json::from_slice(&page.body)
+        .map_err(|_| err("web.invalid_response", "risposta del fornitore non JSON"))?;
+    Ok(data["query"]["search"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|r| {
+                    let title = r["title"].as_str()?;
+                    let mut page = Url::parse(&format!("{base}/wiki/")).ok()?;
+                    page.path_segments_mut().ok()?.pop_if_empty().push(&title.replace(' ', "_"));
+                    Some(json!({"title": title, "url": page.as_str(), "snippet": html_to_text(r["snippet"].as_str().unwrap_or("")).1}))
+                })
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+fn searxng_results(cfg: &WebConfig, base: &str, query: &str) -> Result<Vec<Value>, ToolError> {
+    let mut u = Url::parse(&format!("{base}/search"))
+        .map_err(|_| err("web.invalid_url", "fornitore non valido"))?;
+    u.query_pairs_mut()
+        .append_pair("q", query)
+        .append_pair("format", "json");
+    let page = get(cfg, u, true)?;
+    let data: Value = serde_json::from_slice(&page.body)
+        .map_err(|_| err("web.invalid_response", "risposta del fornitore non JSON"))?;
+    Ok(data["results"]
+        .as_array()
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|r| {
+                    let url = r["url"].as_str()?;
+                    Url::parse(url).ok().filter(|u| matches!(u.scheme(), "http" | "https"))?;
+                    Some(json!({"title": r["title"].as_str().unwrap_or(url), "url": url, "snippet": r["content"].as_str().unwrap_or("").chars().take(400).collect::<String>()}))
+                })
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+fn duckduckgo_results(
+    cfg: &WebConfig,
+    base: &str,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<Value>, ToolError> {
+    let mut u = Url::parse(&format!("{base}/html/"))
+        .map_err(|_| err("web.invalid_url", "fornitore non valido"))?;
+    u.query_pairs_mut()
+        .append_pair("q", query)
+        .append_pair("kl", "it-it");
+    let page = get(cfg, u, true)?;
+    let html = String::from_utf8_lossy(&page.body);
+    if html.contains("anomaly-modal") || html.contains("g-recaptcha") {
+        return Err(err(
+            "web.blocked",
+            "DuckDuckGo chiede una verifica: la ricerca automatica è bloccata",
+        ));
+    }
+    Ok(parse_duckduckgo(&html, limit))
+}
+
+/// Risultati dalla pagina HTML di DuckDuckGo: titolo, indirizzo (decodificato dal reindirizzamento `uddg`) e testo.
+/// Gli annunci e i risultati senza indirizzo http(s) pubblico sono scartati.
+pub fn parse_duckduckgo(html: &str, limit: usize) -> Vec<Value> {
+    let starts: Vec<usize> = html.match_indices("result__a").map(|(i, _)| i).collect();
+    let mut found: Vec<Value> = Vec::new();
+    let mut previous_end = 0;
+    for (n, &at) in starts.iter().enumerate() {
+        let Some(open) = html[..at].rfind("<a ") else {
+            continue;
+        };
+        if html[open..at].contains('>') {
+            continue;
+        }
+        let Some(tag_close) = html[at..].find('>').map(|i| at + i) else {
+            continue;
+        };
+        let tag = &html[open..=tag_close];
+        let Some(inner_end) = html[tag_close..].find("</a>").map(|i| tag_close + i) else {
+            continue;
+        };
+        let next = starts.get(n + 1).copied().unwrap_or(html.len());
+        // Gli annunci hanno un contenitore «result--ad» o un indirizzo di tracciamento.
+        let block = &html[previous_end.min(open)..open];
+        previous_end = inner_end;
+        if block.contains("result--ad") || tag.contains("/y.js") || tag.contains("ad_domain") {
+            continue;
+        }
+        let Some(href) = tag
+            .split_once("href=\"")
+            .and_then(|(_, r)| r.split('"').next())
+        else {
+            continue;
+        };
+        let href = decode_entities(href);
+        let absolute = if let Some(rest) = href.strip_prefix("//") {
+            format!("https://{rest}")
+        } else {
+            href
+        };
+        let Ok(parsed) = Url::parse(&absolute) else {
+            continue;
+        };
+        let target = if parsed
+            .host_str()
+            .is_some_and(|h| h.ends_with("duckduckgo.com"))
+        {
+            match parsed.query_pairs().find(|(k, _)| k == "uddg") {
+                Some((_, v)) => v.into_owned(),
+                None => continue,
+            }
+        } else {
+            absolute
+        };
+        let Some(target_url) = Url::parse(&target)
+            .ok()
+            .filter(|u| matches!(u.scheme(), "http" | "https") && u.host_str().is_some())
+        else {
+            continue;
+        };
+        let title = html_to_text(&html[tag_close + 1..inner_end]).1;
+        let title = title.split_whitespace().collect::<Vec<_>>().join(" ");
+        let snippet = html[inner_end..next]
+            .find("result__snippet")
+            .map(|i| &html[inner_end + i..next])
+            .and_then(|s| {
+                let from = s.find('>')? + 1;
+                let to = s[from..]
+                    .find("</a>")
+                    .into_iter()
+                    .chain(s[from..].find("</td>"))
+                    .min()?;
+                Some(html_to_text(&s[from..from + to]).1)
+            })
+            .map(|t| {
+                t.split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ")
+                    .chars()
+                    .take(400)
+                    .collect::<String>()
+            })
+            .unwrap_or_default();
+        if title.is_empty() || found.iter().any(|r| r["url"] == target_url.as_str()) {
+            continue;
+        }
+        found.push(json!({"title": title, "url": target_url.as_str(), "snippet": snippet}));
+        if found.len() >= limit {
+            break;
+        }
+    }
+    found
 }
 
 /// Estrazione semplice del testo da HTML: titolo e testo leggibile, senza script, stili e commenti.
@@ -675,5 +851,34 @@ mod tests {
         for ip in ["100.64.0.1", "0.0.0.0", "fd00::1", "fe80::1", "224.0.0.1"] {
             assert!(!is_public_ip(ip.parse().unwrap()), "{ip}");
         }
+    }
+
+    const DDG: &str = r#"
+<div class="result results_links result--ad"><a rel="nofollow" class="result__a" href="//duckduckgo.com/y.js?ad_domain=ads.example&amp;u=1">Annuncio</a></div>
+<div class="result results_links_deep"><h2 class="result__title">
+ <a rel="nofollow" class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.rust-lang.org%2Fit%2F&amp;rut=abc">Rust <b>Programming</b> Language</a></h2>
+ <a class="result__snippet" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.rust-lang.org%2Fit%2F">Un linguaggio <b>veloce</b> &amp; sicuro.</a></div>
+<div class="result"><h2><a class="result__a" href="https://doc.rust-lang.org/book/">The Book</a></h2>
+ <a class="result__snippet">Il libro ufficiale.</a></div>
+<div class="result"><h2><a class="result__a" href="//duckduckgo.com/l/?uddg=javascript%3Aalert(1)">Pericoloso</a></h2></div>
+<div class="result"><h2><a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.rust-lang.org%2Fit%2F">Doppione</a></h2></div>
+"#;
+
+    #[test]
+    fn duckduckgo_results_are_decoded_without_ads_unsafe_links_or_duplicates() {
+        let results = parse_duckduckgo(DDG, 10);
+        let urls: Vec<&str> = results.iter().filter_map(|r| r["url"].as_str()).collect();
+        assert_eq!(
+            urls,
+            [
+                "https://www.rust-lang.org/it/",
+                "https://doc.rust-lang.org/book/"
+            ]
+        );
+        assert_eq!(results[0]["title"], "Rust Programming Language");
+        assert_eq!(results[0]["snippet"], "Un linguaggio veloce & sicuro.");
+        assert_eq!(results[1]["snippet"], "Il libro ufficiale.");
+        assert_eq!(parse_duckduckgo(DDG, 1).len(), 1);
+        assert!(parse_duckduckgo("<html>niente</html>", 5).is_empty());
     }
 }

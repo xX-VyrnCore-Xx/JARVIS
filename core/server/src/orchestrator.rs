@@ -3070,7 +3070,7 @@ impl Jarvis {
                 "pc.unavailable",
                 "È richiesta una conferma locale",
             )),
-            "screen.read" if confirmed => crate::screen::read(&self.cfg.data_dir),
+            "screen.read" if confirmed => crate::screen::read(&self.cfg.data_dir, arguments),
             "screen.status" => Ok(crate::screen::status()),
             t if crate::appcontrol::is_control_tool(t)
                 && t != "screen.read"

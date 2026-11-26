@@ -196,6 +196,155 @@ pub fn status(port: u16) -> Value {
     })
 }
 
+/// Un passo della diagnosi: nome, esito e dettaglio breve.
+fn step(name: &str, ok: bool, detail: impl Into<String>) -> Value {
+    json!({"step": name, "ok": ok, "detail": detail.into().chars().take(240).collect::<String>()})
+}
+
+/// Esito della diagnosi dal primo passo che fallisce (`dns`, `connect`, `tls`, `http`) o `ok`.
+pub fn verdict(failed: Option<&str>, serve_text: &str) -> String {
+    match failed {
+        None => "Il collegamento funziona: il nome si risolve, il certificato è valido e JARVIS risponde. Se un altro dispositivo non lo trova, il problema è su quel dispositivo: apri Tailscale lì, controlla che sia connesso con lo stesso account e che «Use Tailscale DNS settings» sia attivo.".into(),
+        Some("dns") => "Questo computer non risolve il nome della macchina, anche se Tailscale è connesso. Cause tipiche: Tailscale avviato in modalità «userspace» (senza interfaccia di rete di sistema: succede con il demone installato da Homebrew), oppure «Use Tailscale DNS settings» disattivato, oppure un DNS/VPN aziendale che lo intercetta. Dagli altri dispositivi il nome può funzionare comunque: prova da lì. Per usare il nome anche su questo computer installa l'app Tailscale per macOS (non il solo demone) e attiva l'uso del DNS di Tailscale.".into(),
+        Some("connect") => format!(
+            "Il nome si risolve ma la porta 443 non risponde: JARVIS non è pubblicato. Tocca «Collega con Tailscale»{}",
+            if serve_text.trim().is_empty() { "." } else { " (Tailscale Serve non mostra nessuna pubblicazione attiva)." }
+        ),
+        Some("tls") => "La connessione HTTPS non si completa: il certificato non è ancora pronto o non è valido. Abilita «HTTPS Certificates» su login.tailscale.com/admin/dns, tocca di nuovo «Collega con Tailscale» e riprova dopo un minuto.".into(),
+        Some(_) => "Il nome risponde in HTTPS ma non è JARVIS: Tailscale Serve punta a un'altra porta. Tocca «Collega con Tailscale» per ripubblicare la porta corretta.".into(),
+    }
+}
+
+/// Diagnosi del collegamento dal punto di vista di questo computer: DNS, porta 443, certificato HTTPS e risposta di
+/// JARVIS (`/api/connectivity`, senza credenziali). Ogni passo ha un tempo massimo; si ferma al primo che fallisce.
+pub fn diagnose(port: u16) -> Value {
+    let status = match run(&["status", "--json"]) {
+        Ok(Some((_, text))) => text,
+        Ok(None) => {
+            return json!({"ok": false, "steps": [], "verdict": "Tailscale non è installato su questo computer."})
+        }
+        Err(error) => {
+            return json!({"ok": false, "steps": [], "verdict": format!("Tailscale non risponde: {error}")})
+        }
+    };
+    let (state, host) = parse_status(&status);
+    let details = parse_details(&status);
+    let mut steps = vec![step(
+        "tailscale",
+        state == "Running",
+        format!("stato {state}"),
+    )];
+    if state != "Running" {
+        return json!({"ok": false, "steps": steps, "health": details.health,
+            "verdict": "Tailscale non è connesso: apri Tailscale e accedi."});
+    }
+    let Some(host) = host else {
+        return json!({"ok": false, "steps": steps, "health": details.health,
+            "verdict": advice(true, None, false, &details, None)});
+    };
+    let serve_text = run(&["serve", "status"])
+        .ok()
+        .flatten()
+        .map(|(_, text)| text)
+        .unwrap_or_default();
+    steps.push(step(
+        "serve",
+        serving_port(&serve_text, port),
+        if serve_text.trim().is_empty() {
+            "nessuna pubblicazione".to_string()
+        } else {
+            serve_text
+                .trim()
+                .lines()
+                .take(3)
+                .collect::<Vec<_>>()
+                .join(" | ")
+        },
+    ));
+    let (tx, rx) = std::sync::mpsc::channel();
+    let target = host.clone();
+    std::thread::spawn(move || {
+        let _ = tx.send(probe_remote(&target));
+    });
+    let probe = rx
+        .recv_timeout(Duration::from_secs(14))
+        .unwrap_or_else(|_| vec![step("dns", false, "nessuna risposta entro 14 secondi")]);
+    let failed = probe
+        .iter()
+        .find(|s| s["ok"] == false)
+        .and_then(|s| s["step"].as_str().map(str::to_string));
+    steps.extend(probe);
+    let ok = failed.is_none();
+    json!({"ok": ok, "host": host, "steps": steps, "health": details.health,
+        "tailscale_ips": details.ips, "verdict": verdict(failed.as_deref(), &serve_text)})
+}
+
+/// DNS → TCP 443 → HTTPS verso `/api/connectivity`, dal Core su questo computer.
+fn probe_remote(host: &str) -> Vec<Value> {
+    use std::net::{TcpStream, ToSocketAddrs};
+    let mut steps = Vec::new();
+    let addrs: Vec<std::net::SocketAddr> = match (host, 443).to_socket_addrs() {
+        Ok(found) => found.collect(),
+        Err(error) => return vec![step("dns", false, format!("{host}: {error}"))],
+    };
+    if addrs.is_empty() {
+        return vec![step("dns", false, format!("{host}: nessun indirizzo"))];
+    }
+    steps.push(step(
+        "dns",
+        true,
+        addrs
+            .iter()
+            .take(2)
+            .map(|a| a.ip().to_string())
+            .collect::<Vec<_>>()
+            .join(", "),
+    ));
+    if let Err(error) = TcpStream::connect_timeout(&addrs[0], Duration::from_secs(4)) {
+        steps.push(step("connect", false, error.to_string()));
+        return steps;
+    }
+    steps.push(step("connect", true, "porta 443 raggiungibile"));
+    let agent = ureq::AgentBuilder::new()
+        .tls_config(crate::net::tls_config())
+        .timeout(Duration::from_secs(6))
+        .redirects(0)
+        .build();
+    match agent
+        .get(&format!("https://{host}/api/connectivity"))
+        .call()
+    {
+        Ok(response) => {
+            let mut raw = String::new();
+            let _ = response
+                .into_reader()
+                .take(8 * 1024)
+                .read_to_string(&mut raw);
+            let body: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
+            let is_jarvis = body["service"] == "jarvis-core";
+            steps.push(step("tls", true, "certificato valido"));
+            steps.push(step(
+                "http",
+                is_jarvis,
+                if is_jarvis {
+                    "risponde JARVIS".to_string()
+                } else {
+                    "la risposta non è di JARVIS".to_string()
+                },
+            ));
+        }
+        Err(ureq::Error::Status(code, _)) => {
+            // Una risposta HTTP significa che DNS, porta e certificato funzionano.
+            steps.push(step("tls", true, "certificato valido"));
+            steps.push(step("http", false, format!("stato HTTP {code}")));
+        }
+        Err(error) => {
+            steps.push(step("tls", false, error.to_string()));
+        }
+    }
+    steps
+}
+
 /// Pubblica il Core locale nella rete privata (`tailscale serve --bg <porta>`). Non usa mai Funnel.
 pub fn publish(port: u16) -> Result<String, String> {
     let port = port.to_string();
@@ -268,5 +417,23 @@ mod tests {
         assert!(serving_port(shown, 8765));
         assert!(!serving_port(shown, 9000));
         assert!(!serving_port("No serve config", 8765));
+    }
+
+    #[test]
+    fn the_verdict_names_the_first_failing_step_and_what_to_do() {
+        assert!(verdict(None, "").contains("funziona"));
+        let dns = verdict(Some("dns"), "");
+        assert!(
+            dns.contains("userspace") && dns.contains("Use Tailscale DNS settings"),
+            "{dns}"
+        );
+        assert!(verdict(Some("connect"), "").contains("Collega con Tailscale"));
+        assert!(
+            verdict(Some("connect"), "No serve config").contains("nessuna pubblicazione attiva")
+        );
+        assert!(verdict(Some("tls"), "").contains("HTTPS Certificates"));
+        assert!(verdict(Some("http"), "").contains("non è JARVIS"));
+        let item = step("dns", false, "x".repeat(500));
+        assert_eq!(item["detail"].as_str().unwrap().chars().count(), 240);
     }
 }

@@ -95,3 +95,17 @@ Container del sandbox (ADR-0115): etichetta `jarvis.sandbox=1`, `--ipc none`, pu
 **Controllo delle applicazioni (ADR-0121).** `app.open`, `app.focus`, `app.type`, `app.key` e `app.windows` agiscono sul computer: richiesta diretta del proprietario, conferma solo sua con il testo esatto, valori passati come argomenti e mai dentro uno script, nessuna credenziale digitata, vietati a dispositivi, automazioni, missioni e agenti temporanei.
 
 **Schermo (ADR-0122).** `screen.read` legge il testo con OCR locale, mostra solo testo con i dati sensibili mascherati, elimina l'immagine subito, richiede la conferma a ogni uso e non passa mai nulla ai modelli cloud.
+
+
+## Token GitHub: quali permessi dare
+
+JARVIS usa un token GitHub in due punti e non ne chiede altri. Si crea un **token fine-grained** (Impostazioni → Developer settings → Personal access tokens → Fine-grained), con scadenza breve e accesso solo ai repository necessari.
+
+| Uso | Dove si inserisce | Permessi del token fine-grained |
+|---|---|---|
+| Aggiornamenti da un repository **privato** (release e file di installazione) | Aggiornamenti → «Token GitHub» | Repository: solo `xX-VyrnCore-Xx/JARVIS`. **Contents: Read-only**; Metadata: Read-only (automatico). Nient'altro. |
+| Connettore GitHub: elenco repository e issue | Connettori → GitHub | Repository scelti. **Metadata: Read-only**, **Issues: Read-only**. |
+| Connettore GitHub: creare issue | stesso token | in più **Issues: Read and write** (solo se vuoi che JARVIS apra issue). |
+| Connettore GitHub: notifiche | stesso token | I token fine-grained **non** supportano l'API delle notifiche: serve un token *classic* con scope `notifications` (e `repo` per i repository privati). Meglio non usarlo se non serve. |
+
+Per gli aggiornamenti di un repository pubblico non serve nessun token. Un token classic con scope `repo` funziona ma dà molto più accesso del necessario: preferisci il fine-grained. Il token è salvato nel secret store del Core, non è mai mostrato dopo il salvataggio e viaggia solo verso `api.github.com`.

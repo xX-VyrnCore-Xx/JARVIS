@@ -35,12 +35,258 @@ pub fn is_control_tool(tool: &str) -> bool {
             | "app.windows"
             | "screen.read"
             | "screen.status"
+            | "media.spotify"
     )
+}
+
+/// Applicazione nota: nomi con cui la si chiede, nome su macOS e destinazione su Windows. Il confronto ignora le
+/// maiuscole, così «apri spotify» funziona come «apri Spotify» (ADR-0195).
+struct Known {
+    aliases: &'static [&'static str],
+    mac: &'static str,
+    /// Indirizzo di protocollo che apre l'app se il nome non basta (macOS e Windows).
+    uri: Option<&'static str>,
+    windows: &'static str,
+}
+
+const KNOWN: &[Known] = &[
+    Known {
+        aliases: &["spotify"],
+        mac: "Spotify",
+        uri: Some("spotify:"),
+        windows: "spotify:",
+    },
+    Known {
+        aliases: &["safari"],
+        mac: "Safari",
+        uri: None,
+        windows: "msedge",
+    },
+    Known {
+        aliases: &["chrome", "google chrome"],
+        mac: "Google Chrome",
+        uri: None,
+        windows: "chrome",
+    },
+    Known {
+        aliases: &["firefox"],
+        mac: "Firefox",
+        uri: None,
+        windows: "firefox",
+    },
+    Known {
+        aliases: &["edge", "microsoft edge"],
+        mac: "Microsoft Edge",
+        uri: None,
+        windows: "msedge",
+    },
+    Known {
+        aliases: &["finder"],
+        mac: "Finder",
+        uri: None,
+        windows: "explorer",
+    },
+    Known {
+        aliases: &["esplora risorse", "explorer"],
+        mac: "Finder",
+        uri: None,
+        windows: "explorer",
+    },
+    Known {
+        aliases: &["mail", "posta"],
+        mac: "Mail",
+        uri: None,
+        windows: "outlook",
+    },
+    Known {
+        aliases: &["calendario", "calendar"],
+        mac: "Calendar",
+        uri: None,
+        windows: "outlookcal:",
+    },
+    Known {
+        aliases: &["note", "notes"],
+        mac: "Notes",
+        uri: None,
+        windows: "notepad",
+    },
+    Known {
+        aliases: &["promemoria", "reminders"],
+        mac: "Reminders",
+        uri: None,
+        windows: "ms-todo:",
+    },
+    Known {
+        aliases: &["messaggi", "messages"],
+        mac: "Messages",
+        uri: None,
+        windows: "ms-phone:",
+    },
+    Known {
+        aliases: &["musica", "music"],
+        mac: "Music",
+        uri: None,
+        windows: "mswindowsmusic:",
+    },
+    Known {
+        aliases: &["foto", "photos"],
+        mac: "Photos",
+        uri: None,
+        windows: "ms-photos:",
+    },
+    Known {
+        aliases: &["terminale", "terminal"],
+        mac: "Terminal",
+        uri: None,
+        windows: "wt",
+    },
+    Known {
+        aliases: &["calcolatrice", "calculator"],
+        mac: "Calculator",
+        uri: None,
+        windows: "calc",
+    },
+    Known {
+        aliases: &[
+            "impostazioni",
+            "impostazioni di sistema",
+            "preferenze di sistema",
+            "settings",
+        ],
+        mac: "System Settings",
+        uri: None,
+        windows: "ms-settings:",
+    },
+    Known {
+        aliases: &["visual studio code", "vs code", "vscode", "code"],
+        mac: "Visual Studio Code",
+        uri: None,
+        windows: "code",
+    },
+    Known {
+        aliases: &["word", "microsoft word"],
+        mac: "Microsoft Word",
+        uri: None,
+        windows: "winword",
+    },
+    Known {
+        aliases: &["excel", "microsoft excel"],
+        mac: "Microsoft Excel",
+        uri: None,
+        windows: "excel",
+    },
+    Known {
+        aliases: &["powerpoint", "microsoft powerpoint"],
+        mac: "Microsoft PowerPoint",
+        uri: None,
+        windows: "powerpnt",
+    },
+    Known {
+        aliases: &["teams", "microsoft teams"],
+        mac: "Microsoft Teams",
+        uri: None,
+        windows: "msteams:",
+    },
+    Known {
+        aliases: &["slack"],
+        mac: "Slack",
+        uri: None,
+        windows: "slack:",
+    },
+    Known {
+        aliases: &["discord"],
+        mac: "Discord",
+        uri: None,
+        windows: "discord:",
+    },
+    Known {
+        aliases: &["whatsapp"],
+        mac: "WhatsApp",
+        uri: None,
+        windows: "whatsapp:",
+    },
+    Known {
+        aliases: &["telegram"],
+        mac: "Telegram",
+        uri: None,
+        windows: "tg:",
+    },
+    Known {
+        aliases: &["zoom"],
+        mac: "zoom.us",
+        uri: None,
+        windows: "zoommtg:",
+    },
+    Known {
+        aliases: &["notion"],
+        mac: "Notion",
+        uri: None,
+        windows: "notion:",
+    },
+    Known {
+        aliases: &["obsidian"],
+        mac: "Obsidian",
+        uri: None,
+        windows: "obsidian:",
+    },
+    Known {
+        aliases: &["docker", "docker desktop"],
+        mac: "Docker",
+        uri: None,
+        windows: "Docker Desktop",
+    },
+    Known {
+        aliases: &["tailscale"],
+        mac: "Tailscale",
+        uri: None,
+        windows: "tailscale-ipn:",
+    },
+];
+
+fn known_app(name: &str) -> Option<&'static Known> {
+    let n = name.trim().to_lowercase();
+    KNOWN.iter().find(|k| k.aliases.contains(&n.as_str()))
+}
+
+/// Nome dell'app in una frase come «apri spotify», «avvia l'app Safari» o «lancia il programma word».
+pub fn known_app_in_request(message: &str) -> Option<&'static str> {
+    let m = message
+        .trim()
+        .trim_end_matches(['.', '!', '?'])
+        .to_lowercase();
+    let rest = ["apri ", "avvia ", "lancia ", "fai partire ", "apri me "]
+        .iter()
+        .find_map(|verb| m.strip_prefix(verb))?;
+    let rest = [
+        "l'applicazione ",
+        "l'app ",
+        "il programma ",
+        "app ",
+        "l'",
+        "il ",
+        "lo ",
+        "la ",
+    ]
+    .iter()
+    .find_map(|article| rest.strip_prefix(article))
+    .unwrap_or(rest);
+    known_app(rest).map(|k| k.mac)
 }
 
 /// Richieste di controllo delle app dal testo: vietate ai dispositivi associati.
 pub fn is_app_request(message: &str) -> bool {
+    if known_app_in_request(message).is_some() || is_spotify_request(message) {
+        return true;
+    }
     let m = message.trim().to_lowercase();
+    // «leggi il secondo monitor», «cosa c'è sul monitor 2»: lettura dello schermo di un monitor preciso.
+    if m.contains("monitor")
+        && ["leggi", "cosa c'è", "cosa vedi"]
+            .iter()
+            .any(|p| m.starts_with(p))
+    {
+        return true;
+    }
     [
         "apri l'app",
         "apri l'applicazione",
@@ -80,6 +326,23 @@ pub fn is_app_request(message: &str) -> bool {
                 .is_some_and(char::is_uppercase)
 }
 
+/// Richieste che riguardano Spotify (apertura, brano in ascolto, comandi): il solo servizio musicale collegato.
+pub fn is_spotify_request(message: &str) -> bool {
+    let m = message.to_lowercase();
+    m.contains("spotify")
+        || [
+            "prossimo brano",
+            "brano successivo",
+            "brano precedente",
+            "cosa sta suonando",
+            "che canzone sta",
+            "che brano sta",
+            "cosa sto ascoltando",
+        ]
+        .iter()
+        .any(|p| m.contains(p))
+}
+
 /// Nome di un'applicazione: lettere, cifre, spazi e `.+_-`; nessun percorso né carattere di shell.
 pub fn valid_app_name(name: &str) -> bool {
     let name = name.trim();
@@ -94,11 +357,49 @@ pub fn valid_app_name(name: &str) -> bool {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Action {
+    Spotify(Media),
     Open(String),
     Focus(String),
     Windows,
     Type(String),
     Key { key: String, modifiers: Vec<String> },
+}
+
+/// Comando per Spotify, l'unico servizio musicale collegato (ADR-0195).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Media {
+    Status,
+    PlayPause,
+    Play,
+    Pause,
+    Next,
+    Previous,
+}
+
+impl Media {
+    fn parse(text: &str) -> Option<Self> {
+        Some(match text.trim().to_lowercase().as_str() {
+            "" | "status" | "stato" => Self::Status,
+            "playpause" | "toggle" => Self::PlayPause,
+            "play" | "riproduci" => Self::Play,
+            "pause" | "pausa" => Self::Pause,
+            "next" | "avanti" | "successivo" => Self::Next,
+            "previous" | "indietro" | "precedente" => Self::Previous,
+            _ => return None,
+        })
+    }
+
+    /// Verbo AppleScript di Spotify (solo da questa tabella, mai da testo dell'utente).
+    fn mac_verb(self) -> Option<&'static str> {
+        match self {
+            Self::Status => None,
+            Self::PlayPause => Some("playpause"),
+            Self::Play => Some("play"),
+            Self::Pause => Some("pause"),
+            Self::Next => Some("next track"),
+            Self::Previous => Some("previous track"),
+        }
+    }
 }
 
 const MODIFIERS: [&str; 4] = ["command", "control", "option", "shift"];
@@ -131,6 +432,14 @@ pub fn parse(tool: &str, args: &Value) -> Result<Action, ToolError> {
         }
     };
     match tool {
+        "media.spotify" => Media::parse(args["command"].as_str().unwrap_or_default())
+            .map(Action::Spotify)
+            .ok_or_else(|| {
+                err(
+                    "app.invalid",
+                    "Comando non valido: status, playpause, play, pause, next o previous",
+                )
+            }),
         "app.open" => Ok(Action::Open(name()?)),
         "app.focus" => Ok(Action::Focus(name()?)),
         "app.windows" => Ok(Action::Windows),
@@ -180,6 +489,8 @@ pub struct Plan {
     pub program: String,
     pub args: Vec<String>,
     pub env: Vec<(String, String)>,
+    /// Alternativa se il comando principale non riesce (per esempio l'indirizzo di protocollo di un'app).
+    pub fallback: Option<Box<Plan>>,
 }
 
 fn osascript(script: &[&str], argv: &[&str]) -> Plan {
@@ -194,6 +505,7 @@ fn osascript(script: &[&str], argv: &[&str]) -> Plan {
         program: "/usr/bin/osascript".into(),
         args,
         env: Vec::new(),
+        fallback: None,
     }
 }
 
@@ -207,6 +519,7 @@ fn powershell(script: &str, env: Vec<(String, String)>) -> Plan {
             script.into(),
         ],
         env,
+        fallback: None,
     }
 }
 
@@ -243,7 +556,50 @@ fn sendkeys_key(key: &str) -> String {
 /// Piano di esecuzione per un sistema operativo (`macos` o `windows`).
 pub fn plan(os: &str, action: &Action) -> Result<Plan, ToolError> {
     match (os, action) {
-        ("macos", Action::Open(app)) => Ok(Plan { program: "/usr/bin/open".into(), args: vec!["-a".into(), app.clone()], env: vec![] }),
+        ("macos", Action::Spotify(command)) => {
+            // Spotify non si avvia da qui: se è chiuso lo stato è «closed» e i comandi non fanno nulla.
+            let verb = command.mac_verb().map(|v| format!("{v}\n")).unwrap_or_default();
+            let script = format!(
+                "if application \"Spotify\" is not running then return \"closed||\"\n\
+                 tell application \"Spotify\"\n{verb}\
+                 set s to player state as string\n\
+                 if s is \"stopped\" then return \"stopped||\"\n\
+                 return s & \"|\" & (name of current track) & \"|\" & (artist of current track)\n\
+                 end tell"
+            );
+            let lines: Vec<&str> = script.lines().collect();
+            Ok(osascript(&lines, &[]))
+        }
+        ("windows", Action::Spotify(command)) => {
+            // Stato dal titolo della finestra («Artista - Brano» in riproduzione); comandi con i tasti multimediali.
+            let key = match command {
+                Media::Status => "",
+                Media::PlayPause => "$press = $true; $vk = 0xB3",
+                Media::Play => "$press = -not $playing; $vk = 0xB3",
+                Media::Pause => "$press = $playing; $vk = 0xB3",
+                Media::Next => "$press = $true; $vk = 0xB0",
+                Media::Previous => "$press = $true; $vk = 0xB1",
+            };
+            let script = format!(
+                "$procs = Get-Process -Name Spotify -ErrorAction SilentlyContinue\n\
+                 if (-not $procs) {{ 'closed||'; exit 0 }}\n\
+                 function Title {{ ($procs | Where-Object {{ $_.MainWindowTitle }} | Select-Object -First 1).MainWindowTitle }}\n\
+                 $t = Title; $playing = ($t -and $t -match ' - ')\n\
+                 {key}\n\
+                 if ($press) {{ Add-Type -Namespace J -Name K -MemberDefinition '[DllImport(\"user32.dll\")] public static extern void keybd_event(byte vk, byte scan, int flags, int extra);'; \
+                 [J.K]::keybd_event($vk,0,0,0); [J.K]::keybd_event($vk,0,2,0); Start-Sleep -Milliseconds 700; $procs = Get-Process -Name Spotify -ErrorAction SilentlyContinue; $t = Title }}\n\
+                 if (-not $t) {{ 'running||' }} elseif ($t -match ' - ') {{ 'playing|' + ($t -replace ' - ','|') }} else {{ 'paused||' }}"
+            );
+            Ok(powershell(&script, vec![]))
+        }
+        ("macos", Action::Open(app)) => {
+            let known = known_app(app);
+            let name = known.map_or(app.as_str(), |k| k.mac);
+            let fallback = known.and_then(|k| k.uri).map(|uri| {
+                Box::new(Plan { program: "/usr/bin/open".into(), args: vec![uri.into()], env: vec![], fallback: None })
+            });
+            Ok(Plan { program: "/usr/bin/open".into(), args: vec!["-a".into(), name.into()], env: vec![], fallback })
+        }
         ("macos", Action::Focus(app)) => Ok(osascript(
             &["on run argv", "tell application (item 1 of argv) to activate", "end run"],
             &[app],
@@ -269,10 +625,22 @@ pub fn plan(os: &str, action: &Action) -> Result<Plan, ToolError> {
             };
             Ok(osascript(&["on run argv", &line, "end run"], &[key]))
         }
-        ("windows", Action::Open(app)) => Ok(powershell(
-            "Start-Process -FilePath $env:JARVIS_APP",
-            vec![("JARVIS_APP".into(), app.clone())],
-        )),
+        ("windows", Action::Open(app)) => {
+            let known = known_app(app);
+            let target = known.map_or(app.as_str(), |k| k.windows);
+            let mut plan = powershell(
+                "Start-Process -FilePath $env:JARVIS_APP",
+                vec![("JARVIS_APP".into(), target.to_string())],
+            );
+            // Se l'indirizzo di protocollo non è registrato si riprova con il nome dell'app.
+            if known.is_some() && target != app.as_str() {
+                plan.fallback = Some(Box::new(powershell(
+                    "Start-Process -FilePath $env:JARVIS_APP",
+                    vec![("JARVIS_APP".into(), app.clone())],
+                )));
+            }
+            Ok(plan)
+        }
         ("windows", Action::Focus(app)) => Ok(powershell(
             "Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.Interaction]::AppActivate($env:JARVIS_APP)",
             vec![("JARVIS_APP".into(), app.clone())],
@@ -403,14 +771,45 @@ pub fn execute(tool: &str, args: &Value) -> Result<Value, ToolError> {
     let action = parse(tool, args)?;
     let os = std::env::consts::OS;
     let planned = plan(os, &action)?;
-    let out = run(&planned)?;
+    let out = match run(&planned) {
+        Ok(out) => out,
+        Err(first) => match &planned.fallback {
+            Some(next) => run(next).map_err(|_| first)?,
+            None => return Err(first),
+        },
+    };
     Ok(match &action {
+        Action::Spotify(_) => parse_spotify(&out),
         Action::Open(app) => json!({"opened": app}),
         Action::Focus(app) => json!({"focused": app}),
         Action::Type(text) => json!({"typed_chars": text.chars().count()}),
         Action::Key { key, modifiers } => json!({"key": key, "modifiers": modifiers}),
         Action::Windows => json!({"windows": parse_windows(os, &out)}),
     })
+}
+
+/// Stato di Spotify da `stato|brano|artista` (macOS) o `stato|artista|brano` (Windows, dal titolo della finestra).
+/// Gli stati sono `playing`, `paused`, `stopped`, `closed` o `running` (aperto ma illeggibile).
+pub fn parse_spotify(out: &str) -> Value {
+    let line = out.trim().lines().last().unwrap_or_default();
+    let mut parts = line.splitn(3, '|');
+    let state = parts.next().unwrap_or("closed").trim().to_lowercase();
+    let (first, second) = (
+        parts.next().unwrap_or_default().trim(),
+        parts.next().unwrap_or_default().trim(),
+    );
+    // Su macOS l'ordine è brano|artista, su Windows artista|brano: si distingue dall'ambiente.
+    let (title, artist) = if cfg!(windows) {
+        (second, first)
+    } else {
+        (first, second)
+    };
+    let state = match state.as_str() {
+        "playing" | "paused" | "stopped" | "closed" | "running" => state,
+        _ => "unknown".to_string(),
+    };
+    json!({"provider": "spotify", "state": state, "playing": state == "playing",
+        "title": title.chars().take(200).collect::<String>(), "artist": artist.chars().take(200).collect::<String>()})
 }
 
 /// Finestre/applicazioni aperte dall'output del sistema.
@@ -519,10 +918,10 @@ mod tests {
             win.env,
             vec![("JARVIS_TEXT".to_string(), hostile.to_string())]
         );
-        let open = plan("windows", &Action::Open("Spotify".into())).unwrap();
+        let open = plan("windows", &Action::Open("Notepad++".into())).unwrap();
         assert_eq!(
             open.env,
-            vec![("JARVIS_APP".to_string(), "Spotify".to_string())]
+            vec![("JARVIS_APP".to_string(), "Notepad++".to_string())]
         );
         assert_eq!(
             plan("macos", &Action::Open("Spotify".into())).unwrap().args,
@@ -596,5 +995,95 @@ mod tests {
         ] {
             assert!(!is_app_request(no), "{no}");
         }
+    }
+
+    #[test]
+    fn known_apps_are_found_without_regard_to_case_and_spotify_has_fallbacks() {
+        for (text, mac) in [
+            ("apri spotify", "Spotify"),
+            ("Apri Spotify", "Spotify"),
+            ("avvia l'app Safari", "Safari"),
+            ("lancia il programma word", "Microsoft Word"),
+            ("apri il calendario.", "Calendar"),
+            ("fai partire spotify", "Spotify"),
+        ] {
+            assert_eq!(known_app_in_request(text), Some(mac), "{text}");
+            assert!(is_app_request(text), "{text}");
+        }
+        for no in [
+            "apri la finestra",
+            "apri note.txt",
+            "apri la workspace",
+            "spegni il pc",
+        ] {
+            assert_eq!(known_app_in_request(no), None, "{no}");
+        }
+        let mac = plan("macos", &Action::Open("spotify".into())).unwrap();
+        assert_eq!(mac.args, vec!["-a", "Spotify"]);
+        assert_eq!(mac.fallback.unwrap().args, vec!["spotify:"]);
+        let win = plan("windows", &Action::Open("Spotify".into())).unwrap();
+        assert_eq!(
+            win.env,
+            vec![("JARVIS_APP".to_string(), "spotify:".to_string())]
+        );
+        assert_eq!(
+            win.fallback.unwrap().env,
+            vec![("JARVIS_APP".to_string(), "Spotify".to_string())]
+        );
+        assert!(plan("macos", &Action::Open("Sconosciuta".into()))
+            .unwrap()
+            .fallback
+            .is_none());
+    }
+
+    #[test]
+    fn spotify_commands_are_validated_planned_and_read_back() {
+        assert_eq!(
+            parse("media.spotify", &json!({})).unwrap(),
+            Action::Spotify(Media::Status)
+        );
+        assert_eq!(
+            parse("media.spotify", &json!({"command": "next"})).unwrap(),
+            Action::Spotify(Media::Next)
+        );
+        assert_eq!(
+            parse("media.spotify", &json!({"command": "rm -rf"}))
+                .unwrap_err()
+                .code,
+            "app.invalid"
+        );
+        assert!(is_control_tool("media.spotify"));
+        for text in [
+            "prossimo brano",
+            "cosa sta suonando",
+            "metti in pausa Spotify",
+        ] {
+            assert!(is_app_request(text), "{text}");
+        }
+        let mac = plan("macos", &Action::Spotify(Media::Next)).unwrap();
+        let script = mac.args.join("\n");
+        assert!(
+            script.contains("is not running then return"),
+            "non avvia Spotify: {script}"
+        );
+        assert!(script.contains("next track"));
+        let status = plan("macos", &Action::Spotify(Media::Status))
+            .unwrap()
+            .args
+            .join("\n");
+        assert!(!status.contains("next track") && !status.contains("playpause"));
+        let win = plan("windows", &Action::Spotify(Media::Play)).unwrap();
+        let ps = win.args.last().unwrap();
+        assert!(
+            ps.contains("0xB3") && ps.contains("$press = -not $playing"),
+            "{ps}"
+        );
+        assert!(win.env.is_empty(), "nessun valore dell'utente nello script");
+        let parsed = parse_spotify("playing|Brano di prova|Artista\n");
+        assert_eq!(parsed["provider"], "spotify");
+        assert_eq!(parsed["state"], "playing");
+        assert_eq!(parsed["playing"], true);
+        assert_eq!(parse_spotify("closed||")["state"], "closed");
+        assert_eq!(parse_spotify("boom|x|y")["state"], "unknown");
     }
 }

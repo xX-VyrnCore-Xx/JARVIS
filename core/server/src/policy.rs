@@ -198,6 +198,10 @@ fn expected_effect(tool: &str, args: &Value) -> String {
             "Aprire l’applicazione «{}» sul computer del proprietario.",
             args["app"].as_str().unwrap_or("?")
         ),
+        "media.spotify" => format!(
+            "Spotify: {} (solo se Spotify è già aperto).",
+            args["command"].as_str().unwrap_or("leggere il brano in ascolto")
+        ),
         "screen.read" => "Catturare lo schermo, leggerne il testo in locale con OCR (dati sensibili mascherati) ed eliminare subito l’immagine. Nulla viene inviato fuori dal computer.".to_string(),
         "app.focus" => format!(
             "Portare in primo piano «{}».",

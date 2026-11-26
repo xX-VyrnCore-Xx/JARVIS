@@ -1,0 +1,49 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "media.spotify",
+  "version": "1.0.0",
+  "summary": "Legge il brano in ascolto su Spotify o lo comanda (play, pausa, successivo, precedente), dopo la conferma del proprietario. Spotify è l'unico servizio musicale collegato",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [],
+    "properties": {
+      "command": {
+        "enum": [
+          "status",
+          "playpause",
+          "play",
+          "pause",
+          "next",
+          "previous"
+        ]
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "prerequisites": [
+    "macOS o Windows con l'app desktop di Spotify già aperta; su macOS serve il permesso Automazione"
+  ],
+  "effects": "write_local",
+  "risk": "low",
+  "permissions": [
+    "core.desktop:execute"
+  ],
+  "errors": [
+    "app.invalid",
+    "app.unavailable",
+    "app.timeout",
+    "app.not_found",
+    "app.permission",
+    "app.failed"
+  ],
+  "timeout_ms": 15000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "required"
+}

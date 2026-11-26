@@ -182,6 +182,16 @@ def _describe_tool_result(result: dict) -> str:
         return f"Lettura dello schermo: {'pronta' if output.get('ready') else 'non pronta'}. {output.get('hint')}. {output.get('privacy')}."
     if tool == "app.open":
         return f"Ho aperto «{output.get('opened')}»."
+    if tool == "media.spotify":
+        state = output.get("state")
+        if state == "closed":
+            return "Spotify non è aperto: dimmi «apri Spotify» e poi riprova."
+        if state == "running":
+            return "Spotify è aperto ma non riesco a leggere il brano (la finestra è nascosta)."
+        if state == "stopped" or not output.get("title"):
+            return "Spotify è fermo: nessun brano in riproduzione."
+        verb = "In riproduzione" if output.get("playing") else "In pausa"
+        return f"{verb} su Spotify: «{output.get('title')}»" + (f" di {output.get('artist')}." if output.get("artist") else ".")
     if tool == "app.focus":
         return f"«{output.get('focused')}» è ora in primo piano."
     if tool == "app.type":
@@ -335,8 +345,12 @@ def _describe_tool_result(result: dict) -> str:
         if not results:
             return f"Nessun risultato per «{output.get('query')}» ({output.get('provider')})."
         lines = [f"[{r['rank']}] {r['title']} — {r['url']}" + (f"\n    {r['snippet'][:200]}" if r.get("snippet") else "") for r in results]
+        note = ""
+        if output.get("fallback_from"):
+            note = (f"\n(Il motore {output.get('fallback_from')} non ha risposto: {output.get('fallback_reason')}. "
+                    "Questi risultati vengono da Wikipedia e possono essere meno ampi.)")
         return (f"Risultati per «{output.get('query')}» (fonte: {output.get('provider')}, {output.get('retrieved_at')}):\n"
-                + "\n".join(lines) + "\n\nPer leggere una pagina: «apri <url>».")
+                + "\n".join(lines) + note + "\n\nPer leggere una pagina: «apri <url>».")
     if tool == "web.fetch":
         content = (output.get("content") or "").strip()
         excerpt = content[:1200] + ("…" if len(content) > 1200 else "")
@@ -483,6 +497,15 @@ def _form_fields(text: str) -> dict:
     return out
 
 
+# Applicazioni che si possono chiedere con il nome in minuscolo; il Core ne conosce i nomi esatti (appcontrol.rs).
+_KNOWN_APPS = (
+    "spotify", "safari", "chrome", "google chrome", "firefox", "edge", "microsoft edge", "finder", "esplora risorse",
+    "mail", "posta", "calendario", "note", "promemoria", "messaggi", "musica", "foto", "terminale", "calcolatrice",
+    "impostazioni", "impostazioni di sistema", "preferenze di sistema", "visual studio code", "vs code", "vscode",
+    "word", "excel", "powerpoint", "teams", "slack", "discord", "whatsapp", "telegram", "zoom", "notion", "obsidian",
+    "docker", "docker desktop", "tailscale",
+)
+
 _RULES: list[tuple[re.Pattern[str], str, Any]] = [
     (re.compile(r"^\s*(?:avvia|inizia|crea|lancia)\s+(?:una\s+)?missione(?:\s+ogni\s+(\d{1,4})\s+minuti)?\s*:\s*(.+)$", re.I | re.S), "mission.start",
      lambda m: {"goal": m.group(2).strip()[:1000], **({"every_minutes": int(m.group(1))} if m.group(1) else {})}),
@@ -532,6 +555,15 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
     (re.compile(r"^\s*(?:apri|avvia|lancia)\s+(?:l'app(?:licazione)?|il programma)\s+(.{2,60}?)\s*$", re.I), "app.open",
      lambda m: {"app": m[1]}),
     (re.compile(r"^\s*apri\s+([A-Z][\w.+-]*(?: [A-Z0-9][\w.+-]*){0,3})\s*$"), "app.open", lambda m: {"app": m[1]}),
+    # App note con il nome in minuscolo («apri spotify»): il Core le riconosce senza distinguere le maiuscole.
+    (re.compile(r"^\s*(?:apri|avvia|lancia|fai partire)\s+(?:l'|il |lo |la )?(" + "|".join(sorted(map(re.escape, _KNOWN_APPS), key=len, reverse=True)) + r")\s*[.!?]?\s*$", re.I), "app.open",
+     lambda m: {"app": m[1]}),
+    # Spotify (l'unico servizio musicale collegato): brano in ascolto e comandi.
+    (re.compile(r"^\s*(?:metti in pausa|pausa|ferma)\s+(?:la musica su\s+)?spotify\s*$", re.I), "media.spotify", lambda m: {"command": "pause"}),
+    (re.compile(r"^\s*(?:riproduci|riprendi|play)\s+(?:la musica su\s+)?spotify\s*$", re.I), "media.spotify", lambda m: {"command": "play"}),
+    (re.compile(r"^\s*(?:prossimo brano|brano successivo|salta(?: il brano)?)(?: su spotify)?\s*$|^\s*spotify\s+(?:avanti|successivo)\s*$", re.I), "media.spotify", lambda m: {"command": "next"}),
+    (re.compile(r"^\s*(?:brano precedente|torna indietro)(?: su spotify)?\s*$|^\s*spotify\s+(?:indietro|precedente)\s*$", re.I), "media.spotify", lambda m: {"command": "previous"}),
+    (re.compile(r"^\s*(?:cosa sta suonando|che (?:brano|canzone) (?:sta suonando|c'è|sto ascoltando)|cosa sto ascoltando)(?: su spotify)?\s*\??\s*$|^\s*spotify\s*\?\s*$", re.I), "media.spotify", lambda m: {"command": "status"}),
     (re.compile(r"^\s*(?:porta|metti) in primo piano\s+(?:l'app(?:licazione)?\s+)?(.{2,60}?)\s*$", re.I), "app.focus",
      lambda m: {"app": m[1]}),
     (re.compile(r"^\s*(?:scrivi|digita)\s+(?:nell'app(?:licazione)?|nella finestra|in primo piano)\s*:\s*(.{1,500})$", re.I | re.S), "app.type",
@@ -540,6 +572,9 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
      lambda m: {"key": _KEY_ALIASES.get(m[2].lower(), m[2].lower()),
                 **({"modifiers": [_MODIFIERS[p.strip().lower()] for p in m[1].split("+") if p.strip()]} if m[1].strip() else {})}),
     (re.compile(r"^\s*(?:cosa c'è sullo schermo|cosa vedi sullo schermo|leggi (?:lo|il mio) schermo|che testo c'è sullo schermo)\s*\??\s*$", re.I), "screen.read", lambda m: {}),
+    # Un monitor preciso: «leggi il secondo monitor», «cosa c'è sul monitor 2» (1 è il principale).
+    (re.compile(r"^\s*(?:leggi|cosa c'è(?: su| sul)?|cosa vedi(?: su| sul)?)\s+(?:lo schermo del |il )?(?:(primo|secondo|terzo|quarto)|monitor\s+([1-8]))(?:\s+monitor)?\s*\??\s*$", re.I), "screen.read",
+     lambda m: {"display": {"primo": 1, "secondo": 2, "terzo": 3, "quarto": 4}.get((m[1] or "").lower()) or int(m[2])}),
     (re.compile(r"^\s*(?:stato della lettura dello schermo|puoi leggere lo schermo)\s*\??\s*$", re.I), "screen.status", lambda m: {}),
     (re.compile(r"\b(quali (?:app|applicazioni|finestre) (?:sono )?aperte|finestre aperte|app aperte)\b", re.I), "app.windows", lambda m: {}),
     # Competenze per aziende, informatica e sicurezza (ADR-0117).
