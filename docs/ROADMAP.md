@@ -274,6 +274,8 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Ricerche salvate (2026-11-26, ADR-0206).** `research.save/list/read` e `/api/research`: risultati per tipo, fonti con attendibilità, domande aperte, ripresa per titolo.
 
+**Pacchetti vocali (2026-11-26, ADR-0207).** L'installazione della voce non trovava `requirements-voice.txt` nell'app installata: ora il file è incluso negli installer e il Core ne ha una copia incorporata.
+
 **MCP, Hugging Face e memoria (2026-11-25, ADR-0182).** Client MCP con sessione riusata, elenco a pagine con impronta, tentativi limitati, argomenti verificati, salute e statistiche; politica per strumento e `mcp.read` per le letture approvate; Hugging Face con un gesto (server noto, competenza, agente di ricerca); memoria esportabile e importabile, contraddizioni risolvibili, episodi riassunti e scadenza adattiva. Non provato il client contro il server reale (rete di questo ambiente).
 
 **Plancia dal mock-up (2026-11-25, ADR-0181).** Schede reali (specialisti, progetti, sistema, attività, notifiche, media, monitoraggio), meteo e media facoltativi, avatar con colore per stato e alone che pulsa con la voce, ritratto fornito dall'utente. Swift verificato solo dalla CI; resa non vista; Windows e Android da fare.

@@ -99,6 +99,7 @@ jobs:
           mkdir -p "$resources/ai" "$resources/contracts"
           cp "core/target/release/jarvis$ext" "$resources/jarvis-core$ext"
           cp -R ai/jarvis_ai "$resources/ai/"
+          cp ai/requirements-voice.txt "$resources/ai/"
           cp -R contracts/. "$resources/contracts/"
           cp apps/desktop/src-tauri/icons/icon.ico "$resources/icon.ico"
       - name: Python autonomo con le dipendenze del runtime AI

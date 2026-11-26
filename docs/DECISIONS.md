@@ -2426,6 +2426,13 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Non incluso:** salvataggio automatico di ogni ricerca (JARVIS salva quando lo ritiene utile o glielo chiedi), esportazione in file dall'app, vista grafica.
 - **Evidenza:** test su accumulo, doppioni, ripresa per titolo, rapporto Markdown, rifiuti e limiti.
 
+### ADR-0207 — Pacchetti vocali: elenco dei requisiti sempre disponibile
+
+- **Data:** 2026-11-26. **Stato:** implementata (non provata con un'installazione reale).
+- **Causa:** il passo «Pacchetti della voce» eseguiva `pip install -r <ai>/requirements-voice.txt`, ma gli installer macOS e Windows copiavano nelle risorse solo `ai/jarvis_ai`: il file con i pacchetti e gli hash non c'era e pip si fermava («file non trovato»). L'archivio `package.py` invece lo includeva, per questo il problema compariva solo con l'app installata.
+- **Decisione:** (1) `release.yml` copia anche `ai/requirements-voice.txt` nelle risorse; (2) il Core incorpora il lock aggiornato alla compilazione e, se il file non è accanto al runtime AI, lo scrive in `<dati>/requirements-voice.txt` e usa quello: un'installazione già distribuita funziona anche senza rilasciare di nuovo i pacchetti. Gli hash restano obbligatori (`--require-hashes`).
+- **Evidenza:** test con cartella AI vuota (usa la copia incorporata, con `--hash=sha256:`) e con file presente (ha la precedenza).
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.
