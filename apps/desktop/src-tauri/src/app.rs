@@ -480,6 +480,8 @@ pub struct JarvisApp {
     n8n_name: String,
     n8n_minutes: u64,
     n8n_kind_audit: bool,
+    n8n_pull_confirm: bool,
+    n8n_polled: Option<std::time::Instant>,
     mcp: Option<Value>,
     mcp_tools: HashMap<String, Vec<Value>>,
     mcp_token: String,
@@ -672,6 +674,8 @@ impl JarvisApp {
             n8n_name: String::new(),
             n8n_minutes: 15,
             n8n_kind_audit: false,
+            n8n_pull_confirm: false,
+            n8n_polled: None,
             mcp: None,
             mcp_tools: HashMap::new(),
             mcp_token: String::new(),
@@ -1907,6 +1911,16 @@ impl JarvisApp {
                         if ui.add_enabled(idle, egui::Button::new("Ferma")).clicked() {
                             self.n8n_call(ctx, "POST", "/api/n8n".into(), Some(json!({"running": false})));
                         }
+                    } else if status["image_present"] == false || status["pull"]["status"] == "pulling" {
+                        if ui
+                            .add_enabled(
+                                idle && status["pull"]["status"] != "pulling",
+                                egui::Button::new("Scarica l'immagine e avvia…"),
+                            )
+                            .clicked()
+                        {
+                            self.n8n_pull_confirm = true;
+                        }
                     } else if ui
                         .add_enabled(idle && docker_ok, egui::Button::new("Avvia con Docker"))
                         .clicked()
@@ -1943,6 +1957,35 @@ impl JarvisApp {
                         }
                     });
                 }
+                if enabled && docker_ok && status["image_present"] == false && status["pull"]["status"] != "pulling" {
+                    ui.colored_label(
+                        CAUTION,
+                        format!(
+                            "L'immagine di n8n non è sul computer (circa {} MB): serve scaricarla una volta.",
+                            status["image_estimate_mb"].as_u64().unwrap_or(0)
+                        ),
+                    );
+                }
+                if status["pull"]["status"] == "pulling" {
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Spinner::new());
+                        ui.label(format!(
+                            "Download dell'immagine in corso… {} s",
+                            status["pull"]["elapsed_s"].as_u64().unwrap_or(0)
+                        ));
+                    });
+                    ctx.request_repaint_after(std::time::Duration::from_secs(3));
+                    // Una lettura ogni 3 secondi, non a ogni ridisegno.
+                    let due = self
+                        .n8n_polled
+                        .is_none_or(|at| at.elapsed() >= std::time::Duration::from_secs(3));
+                    if due && !self.n8n_busy {
+                        self.n8n_polled = Some(std::time::Instant::now());
+                        self.n8n_call(ctx, "GET", "/api/n8n".into(), None);
+                    }
+                } else if status["pull"]["status"] == "failed" {
+                    ui.colored_label(NEGATIVE, status["pull"]["detail"].as_str().unwrap_or("Download non riuscito"));
+                }
                 let jobs = status["items"].as_array().cloned().unwrap_or_default();
                 for job in jobs {
                     ui.horizontal(|ui| {
@@ -1959,6 +2002,23 @@ impl JarvisApp {
                     });
                 }
             });
+        if self.n8n_pull_confirm {
+            egui::Window::new("Scaricare l'immagine di n8n?")
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.label("Docker scaricherà l'immagine di n8n (una sola volta) e poi avvierà il container. Puoi continuare a usare JARVIS durante il download.");
+                    ui.horizontal(|ui| {
+                        if ui.button("Annulla").clicked() {
+                            self.n8n_pull_confirm = false;
+                        }
+                        if ui.button("Scarica e avvia").clicked() {
+                            self.n8n_pull_confirm = false;
+                            self.n8n_call(ctx, "POST", "/api/n8n".into(), Some(json!({"pull": true, "running": true})));
+                        }
+                    });
+                });
+        }
         ui.add_space(10.0);
     }
 

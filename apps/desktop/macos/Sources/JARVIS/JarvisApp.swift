@@ -139,6 +139,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     @State private var section: Section = .dashboard
     @State private var n8n: [String: Any] = [:]
+    @State private var n8nPullConfirm = false
     @State private var n8nName = ""
     @State private var n8nMinutes = 15
     @State private var n8nKind = "reminder"
@@ -3141,6 +3142,10 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         let running = n8n["running"] as? Bool ?? false
         let dockerOK = n8n["docker_connected"] as? Bool ?? true
         let jobs = n8n["items"] as? [[String: Any]] ?? []
+        let imageMissing = enabled && dockerOK && n8n["image_present"] as? Bool == false
+        let pull = n8n["pull"] as? [String: Any] ?? [:]
+        let pulling = pull["status"] as? String == "pulling"
+        let estimate = n8n["image_estimate_mb"] as? Int ?? 0
         return card("n8n con Docker", icon: "shippingbox") {
             Text("n8n gira in un container Docker isolato: senza rete, con soli promemoria e controlli pianificati. JARVIS lo avvia e lo ferma; non serve configurare nulla a mano.")
                 .font(.callout).foregroundStyle(.secondary)
@@ -3158,10 +3163,25 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     Button("Abilita n8n") { n8nCall(body: ["enable": true]) }
                 } else if running {
                     Button("Ferma") { n8nCall(body: ["running": false]) }
+                } else if imageMissing || pulling {
+                    Button("Scarica l'immagine e avvia…", systemImage: "arrow.down.circle") { n8nPullConfirm = true }
+                        .disabled(pulling)
                 } else {
                     Button("Avvia con Docker") { n8nCall(body: ["running": true]) }.disabled(!dockerOK)
                 }
                 Button("Aggiorna") { Task { await loadN8n() } }
+            }
+            if imageMissing && !pulling {
+                Label("L'immagine di n8n non è sul computer (circa \(estimate) MB): serve scaricarla una volta.", systemImage: "arrow.down.circle")
+                    .font(.callout).foregroundStyle(.orange)
+            }
+            if pulling {
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text("Download dell'immagine in corso… \(pull["elapsed_s"] as? Int ?? 0) s").font(.callout)
+                }
+            } else if pull["status"] as? String == "failed" {
+                Label(pull["detail"] as? String ?? "Download non riuscito", systemImage: "xmark.octagon").font(.callout).foregroundStyle(.red)
             }
             if enabled && running {
                 Divider()
@@ -3194,7 +3214,23 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 }
             }
         }
-        .task { await loadN8n() }
+        .alert("Scaricare l'immagine di n8n?", isPresented: $n8nPullConfirm) {
+            Button("Scarica e avvia") { n8nCall(body: ["pull": true, "running": true]) }
+            Button("Annulla", role: .cancel) {}
+        } message: {
+            Text("Docker scaricherà circa \(estimate) MB da docker.n8n.io (una sola volta) e poi avvierà n8n. Puoi continuare a usare JARVIS durante il download.")
+        }
+        .task {
+            await loadN8n()
+            while !Task.isCancelled, section == .workflows {
+                if (n8n["pull"] as? [String: Any])?["status"] as? String == "pulling" {
+                    try? await Task.sleep(for: .seconds(3))
+                    await loadN8n()
+                } else {
+                    try? await Task.sleep(for: .seconds(8))
+                }
+            }
+        }
     }
 
     private func addPublicHost() {

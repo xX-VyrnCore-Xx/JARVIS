@@ -856,6 +856,24 @@ async fn n8n_runtime(State(state): State<Shared>, Json(body): Json<Value>) -> Re
     if body["enable"] == true {
         return n8n_action(&state, Some("n8n.enable"), |manager| manager.enable()).await;
     }
+    if body["pull"] == true {
+        // Scaricamento dell'immagine: solo dal proprietario, che con questa richiesta lo conferma; con
+        // `running: true` il container parte appena l'immagine è pronta.
+        let start_after = body["running"] == true;
+        let manager = state.n8n.clone();
+        let outcome = tokio::task::spawn_blocking(move || manager.start_pull(start_after)).await;
+        let view = match outcome {
+            Ok(Ok(view)) => view,
+            Ok(Err(message)) => return CoreError::BadRequest(message).into_response(),
+            Err(_) => {
+                return CoreError::Internal("operazione n8n interrotta".into()).into_response()
+            }
+        };
+        if let Err(error) = with_core(&state, |j| j.record_owner_action("n8n.pull")).await {
+            return error.into_response();
+        }
+        return Json(view).into_response();
+    }
     let Some(running) = body["running"].as_bool() else {
         return CoreError::BadRequest("stato del container mancante".into()).into_response();
     };

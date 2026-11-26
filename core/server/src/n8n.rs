@@ -2,7 +2,7 @@
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -87,10 +87,22 @@ fn docker(args: &[&str], input: Option<&[u8]>, timeout: Duration) -> Result<Stri
     }
 }
 
+/// Download dell'immagine in corso o concluso (ADR-0205).
+#[derive(Default)]
+struct Pull {
+    status: &'static str,
+    detail: String,
+    started: Option<Instant>,
+}
+
+/// Dimensione indicativa del download dell'immagine n8n (stima, non misurata).
+pub const IMAGE_ESTIMATE_MB: u32 = 450;
+
 pub struct Manager {
     dir: PathBuf,
     name: String,
     mutex: Mutex<()>,
+    pull: Mutex<Pull>,
 }
 
 impl Manager {
@@ -113,7 +125,68 @@ impl Manager {
             dir,
             name: format!("jarvis-n8n-{}", &hash[..12]),
             mutex: Mutex::new(()),
+            pull: Mutex::new(Pull::default()),
         }
+    }
+
+    /// L'immagine è già sul computer?
+    pub fn image_present(&self) -> bool {
+        docker(&["image", "inspect", IMAGE], None, Duration::from_secs(6)).is_ok()
+    }
+
+    fn set_pull(&self, status: &'static str, detail: impl Into<String>) {
+        let mut p = self.pull.lock().unwrap_or_else(|e| e.into_inner());
+        p.status = status;
+        p.detail = detail.into();
+        p.started = (status == "pulling").then(Instant::now);
+    }
+
+    /// Scarica l'immagine in background, **solo dopo la conferma del proprietario** (la rotta è sua), e con
+    /// `start_after` avvia poi il container. Uno stato `pulling`, `ready` o `failed` è visibile in `status()`.
+    pub fn start_pull(self: &Arc<Self>, start_after: bool) -> Result<Value, String> {
+        self.ensure_enabled()?;
+        {
+            let p = self.pull.lock().unwrap_or_else(|e| e.into_inner());
+            if p.status == "pulling" {
+                return Err("Il download dell'immagine è già in corso".into());
+            }
+        }
+        if self.image_present() {
+            if start_after {
+                return self.set_running(true);
+            }
+            self.set_pull("ready", "Immagine già presente");
+            return Ok(self.status());
+        }
+        self.set_pull("pulling", format!("Download di {IMAGE}"));
+        let me = self.clone();
+        std::thread::spawn(move || {
+            me.run_pull(start_after, || {
+                docker(&["pull", IMAGE], None, Duration::from_secs(1200)).map(|_| ())
+            })
+        });
+        Ok(self.status())
+    }
+
+    /// Corpo del download, con l'azione di scaricamento iniettabile (prove senza Docker).
+    fn run_pull(&self, start_after: bool, puller: impl FnOnce() -> Result<(), String>) {
+        match puller() {
+            Err(error) => self.set_pull("failed", error),
+            Ok(()) if start_after => match self.set_running(true) {
+                Ok(_) => self.set_pull("ready", "Immagine scaricata e n8n avviato"),
+                Err(error) => self.set_pull(
+                    "failed",
+                    format!("Immagine scaricata, ma l'avvio non è riuscito: {error}"),
+                ),
+            },
+            Ok(()) => self.set_pull("ready", "Immagine scaricata"),
+        }
+    }
+
+    fn pull_view(&self) -> Value {
+        let p = self.pull.lock().unwrap_or_else(|e| e.into_inner());
+        json!({"status": if p.status.is_empty() { "idle" } else { p.status }, "detail": p.detail,
+            "elapsed_s": p.started.map(|s| s.elapsed().as_secs())})
     }
 
     fn jobs(&self) -> Result<Vec<Value>, String> {
@@ -165,6 +238,11 @@ impl Manager {
         if let Some(error) = jobs_error {
             status["jobs_error"] = json!(error);
         }
+        if status["enabled"] == true && status["docker_connected"] != false {
+            status["image_present"] = json!(self.image_present());
+        }
+        status["image_estimate_mb"] = json!(IMAGE_ESTIMATE_MB);
+        status["pull"] = self.pull_view();
         status
     }
 
@@ -172,6 +250,11 @@ impl Manager {
         self.ensure_enabled()?;
         let _lock = self.mutex.lock().map_err(|e| e.to_string())?;
         match (running, self.state()?) {
+            (true, None) if !self.image_present() => {
+                return Err(format!(
+                    "image_missing: l'immagine di n8n non è sul computer (circa {IMAGE_ESTIMATE_MB} MB). Conferma il download per proseguire."
+                ));
+            }
             (true, None) => {
                 let volume = format!("{}:/home/node/.n8n", self.name);
                 docker(&["run", "-d", "--init", "--read-only", "--user", "1000:1000",
@@ -654,5 +737,38 @@ mod tests {
         );
         std::fs::remove_dir_all(dir).unwrap();
         result.unwrap();
+    }
+
+    #[test]
+    fn the_image_download_reports_its_state_and_can_start_n8n_afterwards() {
+        let dir = std::env::current_dir().unwrap().join(format!(
+            "target/jarvis-n8n-pull-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let manager = Manager::new(dir.clone());
+        assert_eq!(manager.pull_view()["status"], "idle");
+        manager.set_pull("pulling", "Download");
+        assert_eq!(manager.pull_view()["status"], "pulling");
+        manager.run_pull(false, || Ok(()));
+        assert_eq!(manager.pull_view()["status"], "ready");
+        manager.run_pull(false, || Err("rete assente".into()));
+        let failed = manager.pull_view();
+        assert_eq!(failed["status"], "failed");
+        assert_eq!(failed["detail"], "rete assente");
+        // Con l'avvio richiesto ma n8n non abilitato l'avvio fallisce e lo stato lo dice.
+        manager.run_pull(true, || Ok(()));
+        assert_eq!(manager.pull_view()["status"], "failed");
+        assert!(manager.pull_view()["detail"]
+            .as_str()
+            .unwrap()
+            .contains("avvio non è riuscito"));
+        assert!(
+            Arc::new(Manager::new(dir.clone()))
+                .start_pull(false)
+                .is_err(),
+            "n8n va prima abilitato"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
