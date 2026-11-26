@@ -2706,6 +2706,61 @@ impl Jarvis {
         Ok(doc)
     }
 
+    /// Ricerca globale (ADR-0204): ricordi, chat, automazioni e strumenti in un solo elenco, ognuno con la sezione
+    /// dell'app dove aprirlo. Sola lettura, solo dati già visibili al proprietario; al massimo 5 voci per gruppo.
+    pub fn global_search(&self, query: &str) -> Result<Value, CoreError> {
+        let q = query.trim();
+        if q.chars().count() < 2 || q.chars().count() > 120 {
+            return Err(CoreError::BadRequest(
+                "La ricerca richiede da 2 a 120 caratteri".into(),
+            ));
+        }
+        let clip = |s: &str| s.chars().take(140).collect::<String>();
+        let folded = q.to_lowercase();
+        let mut items: Vec<Value> = Vec::new();
+        for m in self.store.memory_search(q, None, 5).map_err(internal)? {
+            items.push(
+                json!({"group": "memoria", "section": "memory", "id": m["id"],
+                "title": clip(m["text"].as_str().unwrap_or("")), "detail": m["kind"]}),
+            );
+        }
+        for m in self.store.messages_search(q, 5).map_err(internal)? {
+            items.push(
+                json!({"group": "chat", "section": "chat", "id": m["conversation_id"],
+                "title": clip(m["snippet"].as_str().unwrap_or("")), "detail": m["at"]}),
+            );
+        }
+        for w in self
+            .workflows()?
+            .iter()
+            .filter(|w| {
+                w["name"]
+                    .as_str()
+                    .is_some_and(|n| n.to_lowercase().contains(&folded))
+            })
+            .take(5)
+        {
+            items.push(json!({"group": "automazioni", "section": "workflows",
+                "id": w["workflow_id"].as_str().or_else(|| w["id"].as_str()),
+                "title": clip(w["name"].as_str().unwrap_or("")), "detail": w["enabled"]}));
+        }
+        let mut tools = 0;
+        for t in self.catalog.iter() {
+            let summary = t.descriptor["summary"].as_str().unwrap_or("");
+            if tools < 8
+                && (t.name().to_lowercase().contains(&folded)
+                    || summary.to_lowercase().contains(&folded))
+            {
+                tools += 1;
+                items.push(
+                    json!({"group": "strumenti", "section": "tools", "id": t.name(),
+                    "title": t.name(), "detail": clip(summary)}),
+                );
+            }
+        }
+        Ok(json!({"query": q, "items": items, "count": items.len()}))
+    }
+
     /// Ricerca nelle chat.
     pub fn conversation_search(&self, query: &str) -> Result<Value, CoreError> {
         let items = self.store.messages_search(query, 30).map_err(internal)?;

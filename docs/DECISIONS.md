@@ -2406,6 +2406,12 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Permessi del token:** tabella completa in `docs/SECURITY_AND_PRIVACY.md`. Un connettore già installato resta alla versione precedente finché non lo si reinstalla.
 - **Evidenza:** test del manifest (conferma su ogni scrittura, rischio critico, assenza di operazioni distruttive di repository), dei percorsi di file e della codifica del corpo con un server locale.
 
+### ADR-0204 — Ricerca globale e pannello Privacy
+
+- **Data:** 2026-11-26. **Stato:** implementata (Swift verificato solo dalla CI).
+- **Decisione:** `GET /api/search?q=` cerca in un solo passaggio ricordi, chat, automazioni e strumenti (al massimo 5 voci per gruppo, 2–120 caratteri) e indica la sezione dove aprire ogni risultato; solo dati già visibili al proprietario. La tavolozza ⌘K di macOS mostra le sezioni e, dopo 300 ms dall'ultimo tasto, i contenuti trovati. Nuova sezione «Privacy» (macOS) sopra `/api/privacy/overview` (ADR-0187): dati conservati e dimensioni, provider cloud con chiave, strumenti per effetto, autonomia, connettori, server MCP, osservazioni e scorciatoie alle sezioni che li gestiscono.
+- **Non incluso:** ricerca nei documenti della workspace e nelle note (richiede un indice), cronologia dei permessi e criteri di conservazione.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

@@ -660,6 +660,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/mcp/servers/health", post(mcp_server_health))
         .route("/api/mcp/servers/policy", post(mcp_server_policy))
         .route("/api/mcp/presets", get(mcp_presets))
+        .route("/api/search", get(global_search))
         .route("/api/map/search", post(map_search))
         .route("/api/map/route", post(map_route))
         .route(
@@ -3295,6 +3296,15 @@ async fn mcp_server_test(State(state): State<Shared>, Json(body): Json<Value>) -
 }
 
 /// Regole di osservazione dei file (ADR-0158), solo proprietario.
+/// Ricerca globale su ricordi, chat, automazioni e strumenti (parametro `q`).
+async fn global_search(
+    State(state): State<Shared>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let query = q.get("q").cloned().unwrap_or_default();
+    reply(with_core(&state, move |j| j.global_search(&query)).await)
+}
+
 /// Mappa (ADR-0202): ricerca di luoghi e percorsi con OpenStreetMap, dal proprietario. Le richieste lente girano
 /// fuori dal blocco del Core.
 async fn map_search(State(state): State<Shared>, Json(body): Json<Value>) -> Response {

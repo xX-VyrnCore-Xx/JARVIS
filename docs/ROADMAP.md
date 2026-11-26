@@ -268,6 +268,8 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **GitHub esteso (2026-11-26, ADR-0203).** Il connettore passa a 25 operazioni (repository, file, pull request, Actions) con conferma su ogni scrittura; permessi del token documentati. Non provato contro GitHub reale.
 
+**Ricerca globale e Privacy (2026-11-26, ADR-0204).** `/api/search`, tavolozza ⌘K con contenuti, sezione Privacy in macOS. Swift solo in CI.
+
 **MCP, Hugging Face e memoria (2026-11-25, ADR-0182).** Client MCP con sessione riusata, elenco a pagine con impronta, tentativi limitati, argomenti verificati, salute e statistiche; politica per strumento e `mcp.read` per le letture approvate; Hugging Face con un gesto (server noto, competenza, agente di ricerca); memoria esportabile e importabile, contraddizioni risolvibili, episodi riassunti e scadenza adattiva. Non provato il client contro il server reale (rete di questo ambiente).
 
 **Plancia dal mock-up (2026-11-25, ADR-0181).** Schede reali (specialisti, progetti, sistema, attività, notifiche, media, monitoraggio), meteo e media facoltativi, avatar con colore per stato e alone che pulsa con la voce, ritratto fornito dall'utente. Swift verificato solo dalla CI; resa non vista; Windows e Android da fare.
