@@ -288,7 +288,67 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
         else { health = [:] }
     }
 
+    /// Verifica l'indirizzo HTTPS (ADR-0192). Un nome Tailscale appena pubblicato può non risolversi o non avere ancora il
+    /// certificato per qualche secondo: in quel caso si riprova fino a tre volte prima di arrendersi, e l'errore
+    /// finale dice che cosa controllare invece di «A server with the specified hostname could not be found».
     func checkHTTPS(_ origin: String) async throws {
+        let host = URLComponents(string: origin)?.host ?? origin
+        var attempt = 0
+        while true {
+            do {
+                try await probeHTTPS(origin)
+                return
+            } catch let failure as CoreFailure {
+                throw failure
+            } catch {
+                attempt += 1
+                let retryable = (error as? URLError).map { Self.isTransient($0.code) } ?? false
+                if retryable, host.hasSuffix(".ts.net"), attempt < 3 {
+                    try await Task.sleep(nanoseconds: 3_000_000_000)
+                    continue
+                }
+                throw CoreFailure(message: Self.explainNetwork(error, host: host))
+            }
+        }
+    }
+
+    private static func isTransient(_ code: URLError.Code) -> Bool {
+        switch code {
+        case .cannotFindHost, .dnsLookupFailed, .timedOut, .secureConnectionFailed,
+             .serverCertificateUntrusted, .serverCertificateHasUnknownRoot, .serverCertificateNotYetValid:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Spiega in italiano gli errori di rete più comuni, con l'azione da fare.
+    static func explainNetwork(_ error: Error, host: String) -> String {
+        guard let failure = error as? URLError else { return error.localizedDescription }
+        let tailnet = host.hasSuffix(".ts.net")
+        switch failure.code {
+        case .cannotFindHost, .dnsLookupFailed:
+            return tailnet
+                ? "Il nome \(host) non si trova. Apri Tailscale su questo dispositivo: deve essere connesso con lo stesso account e con «Use Tailscale DNS settings» attivo. Su login.tailscale.com/admin/dns controlla anche che MagicDNS e HTTPS siano abilitati."
+                : "Il nome \(host) non si trova: controlla l'indirizzo e la connessione di rete."
+        case .notConnectedToInternet, .networkConnectionLost:
+            return "Nessuna connessione di rete: controlla la rete o la connessione a Tailscale."
+        case .timedOut:
+            return tailnet
+                ? "Nessuna risposta da \(host): il computer con JARVIS potrebbe essere spento o Tailscale scollegato."
+                : "Nessuna risposta da \(host) entro il tempo previsto."
+        case .cannotConnectToHost:
+            return "\(host) non accetta connessioni: controlla che il Core sia avviato e pubblicato con «Collega con Tailscale»."
+        case .secureConnectionFailed, .serverCertificateUntrusted, .serverCertificateHasUnknownRoot, .serverCertificateNotYetValid:
+            return tailnet
+                ? "Il certificato HTTPS di \(host) non è ancora pronto: Tailscale lo crea al primo accesso, riprova fra qualche secondo. Se persiste, abilita «HTTPS Certificates» su login.tailscale.com/admin/dns."
+                : "Il certificato HTTPS di \(host) non è valido."
+        default:
+            return failure.localizedDescription
+        }
+    }
+
+    private func probeHTTPS(_ origin: String) async throws {
         guard var endpoint = URLComponents(string: origin), endpoint.scheme == "https",
               endpoint.host != nil, endpoint.user == nil, endpoint.password == nil,
               endpoint.query == nil, endpoint.fragment == nil, endpoint.path.isEmpty else {

@@ -218,7 +218,7 @@ fn a_cloud_guided_mission_advances_one_checked_tool_at_a_time() {
     use jarvis_core::cloud::{Answer, Failure};
     use jarvis_core::orchestrator::Next;
     let mut j = jarvis();
-    j.configure_cloud(&json!({"provider": "ollama_cloud", "key": "chiave-sintetica-di-prova"}))
+    j.configure_cloud(&json!({"provider": "nvidia_nim", "key": "chiave-sintetica-di-prova"}))
         .unwrap();
     let id = j
         .mission_create(&json!({"goal": "controlla lo spazio sul disco e riassumi"}))

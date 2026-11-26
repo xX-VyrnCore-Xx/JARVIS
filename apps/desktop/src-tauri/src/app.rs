@@ -628,7 +628,7 @@ impl JarvisApp {
             connector_oauth_notice: None,
             invite_confirm: true,
             invite_creating: false,
-            cloud_provider: "ollama_cloud".into(),
+            cloud_provider: "nvidia_nim".into(),
             cloud_api_key: String::new(),
             cloud_action_busy: false,
             cloud_action_error: None,
@@ -4660,18 +4660,8 @@ impl JarvisApp {
 
         let mut provider_changed = false;
         egui::ComboBox::from_id_salt("cloud-provider")
-            .selected_text(match self.cloud_provider.as_str() {
-                "nvidia_nim" => "NVIDIA NIM",
-                _ => "Ollama Cloud",
-            })
+            .selected_text("NVIDIA NIM")
             .show_ui(ui, |ui| {
-                provider_changed |= ui
-                    .selectable_value(
-                        &mut self.cloud_provider,
-                        "ollama_cloud".into(),
-                        "Ollama Cloud",
-                    )
-                    .changed();
                 provider_changed |= ui
                     .selectable_value(&mut self.cloud_provider, "nvidia_nim".into(), "NVIDIA NIM")
                     .changed();

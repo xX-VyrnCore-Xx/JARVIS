@@ -38,6 +38,79 @@ pub fn parse_status(raw: &str) -> (String, Option<String>) {
     (state, host)
 }
 
+/// Dettagli che spiegano perché un nome non si trova (ADR-0192): MagicDNS e HTTPS della tailnet, indirizzi privati
+/// e avvisi di salute del client. Se un campo manca nel JSON resta `None` o vuoto: nessuna ipotesi.
+#[derive(Debug, Default, PartialEq)]
+pub struct Details {
+    pub magic_dns: Option<bool>,
+    pub https_enabled: Option<bool>,
+    pub ips: Vec<String>,
+    pub health: Vec<String>,
+}
+
+pub fn parse_details(raw: &str) -> Details {
+    let doc: Value = serde_json::from_str(raw).unwrap_or(Value::Null);
+    let texts = |v: &Value, limit: usize| -> Vec<String> {
+        v.as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|x| x.as_str())
+            .map(|x| x.chars().take(200).collect())
+            .take(limit)
+            .collect()
+    };
+    Details {
+        magic_dns: doc["CurrentTailnet"]["MagicDNSEnabled"].as_bool(),
+        https_enabled: doc["CertDomains"]
+            .as_array()
+            .map(|domains| !domains.is_empty()),
+        ips: texts(&doc["Self"]["TailscaleIPs"], 4),
+        health: texts(&doc["Health"], 5),
+    }
+}
+
+/// Indicazione per l'utente, dalla causa più probabile alla meno: il primo ostacolo reale vince.
+pub fn advice(
+    connected: bool,
+    host: Option<&str>,
+    serving: bool,
+    details: &Details,
+    resolves: Option<bool>,
+) -> String {
+    if !connected {
+        return "Tailscale è installato ma non è connesso: apri Tailscale e accedi.".into();
+    }
+    if host.is_none() || details.magic_dns == Some(false) {
+        return "MagicDNS è disattivato nella tua tailnet, per questo i dispositivi non trovano il nome della macchina («hostname could not be found»): attivalo da login.tailscale.com/admin/dns, poi riprova.".into();
+    }
+    if details.https_enabled == Some(false) {
+        return "HTTPS non è abilitato nella tua tailnet: attiva «HTTPS Certificates» da login.tailscale.com/admin/dns, poi tocca di nuovo «Collega con Tailscale».".into();
+    }
+    if resolves == Some(false) {
+        return "Il nome della macchina non si risolve ancora, nemmeno su questo computer: dopo aver attivato MagicDNS o HTTPS può servire fino a un minuto. Controlla in Tailscale che «Use Tailscale DNS settings» sia attivo, poi riprova. Su telefono e altri computer apri l'app Tailscale e verifica che sia connessa con lo stesso account.".into();
+    }
+    if !serving {
+        return "Tailscale è pronto: tocca «Collega con Tailscale» per rendere raggiungibile JARVIS dai tuoi dispositivi.".into();
+    }
+    "JARVIS è raggiungibile dai tuoi dispositivi Tailscale. Se un dispositivo non trova il nome, apri Tailscale su quel dispositivo: deve essere connesso con lo stesso account e con «Use Tailscale DNS settings» attivo.".into()
+}
+
+/// Il nome si risolve su questo computer? Interrogazione con limite di tempo, senza aspettare oltre 4 secondi.
+fn resolves_here(host: &str) -> bool {
+    use std::net::ToSocketAddrs;
+    let target = format!("{host}:443");
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(
+            target
+                .to_socket_addrs()
+                .map(|mut a| a.next().is_some())
+                .unwrap_or(false),
+        );
+    });
+    rx.recv_timeout(Duration::from_secs(4)).unwrap_or(false)
+}
+
 /// Vero se `tailscale serve status` mostra già il Core locale pubblicato.
 pub fn serving_port(raw: &str, port: u16) -> bool {
     raw.contains(&format!("127.0.0.1:{port}")) || raw.contains(&format!("localhost:{port}"))
@@ -102,15 +175,12 @@ pub fn status(port: u16) -> Value {
         }
     };
     let (state, host) = parse_status(&status);
+    let details = parse_details(&status);
     let connected = state == "Running";
     let serving = connected
         && matches!(run(&["serve", "status"]), Ok(Some((_, text))) if serving_port(&text, port));
-    let message = match (connected, &host, serving) {
-        (false, _, _) => "Tailscale è installato ma non è connesso: apri Tailscale e accedi.",
-        (true, None, _) => "Tailscale è connesso ma non mostra il nome della macchina: abilita MagicDNS e HTTPS nella console di Tailscale.",
-        (true, Some(_), false) => "Tailscale è pronto: tocca «Collega con Tailscale» per rendere raggiungibile JARVIS dai tuoi dispositivi.",
-        (true, Some(_), true) => "JARVIS è raggiungibile dai tuoi dispositivi Tailscale.",
-    };
+    let resolves = host.as_deref().filter(|_| connected).map(resolves_here);
+    let message = advice(connected, host.as_deref(), serving, &details, resolves);
     json!({
         "installed": true,
         "state": state,
@@ -118,6 +188,11 @@ pub fn status(port: u16) -> Value {
         "url": host.as_ref().map(|name| format!("https://{name}")),
         "serving": serving,
         "message": message,
+        "magic_dns": details.magic_dns,
+        "https_enabled": details.https_enabled,
+        "dns_resolves_here": resolves,
+        "tailscale_ips": details.ips,
+        "health": details.health,
     })
 }
 
@@ -151,6 +226,40 @@ mod tests {
         let (state, host) = parse_status(r#"{"BackendState":"NeedsLogin","Self":{"DNSName":""}}"#);
         assert_eq!((state.as_str(), host), ("NeedsLogin", None));
         assert_eq!(parse_status("non json"), (String::new(), None));
+    }
+
+    #[test]
+    fn details_explain_why_a_name_cannot_be_found() {
+        let raw = r#"{"BackendState":"Running","Health":["DNS non raggiungibile"],
+            "CurrentTailnet":{"MagicDNSEnabled":false},"CertDomains":[],
+            "Self":{"DNSName":"casa.tail1.ts.net.","TailscaleIPs":["100.64.0.5","fd7a::5"]}}"#;
+        let details = parse_details(raw);
+        assert_eq!(details.magic_dns, Some(false));
+        assert_eq!(details.https_enabled, Some(false));
+        assert_eq!(details.ips, ["100.64.0.5", "fd7a::5"]);
+        assert_eq!(details.health, ["DNS non raggiungibile"]);
+        assert_eq!(parse_details("non json"), Details::default());
+        // Il primo ostacolo reale vince: prima MagicDNS, poi HTTPS, poi la risoluzione sul computer.
+        let host = Some("casa.tail1.ts.net");
+        let off = advice(true, host, false, &details, Some(false));
+        assert!(off.contains("MagicDNS è disattivato"), "{off}");
+        let no_https = Details {
+            magic_dns: Some(true),
+            https_enabled: Some(false),
+            ..Default::default()
+        };
+        assert!(advice(true, host, false, &no_https, Some(true)).contains("HTTPS Certificates"));
+        let fine = Details {
+            magic_dns: Some(true),
+            https_enabled: Some(true),
+            ..Default::default()
+        };
+        assert!(advice(true, host, true, &fine, Some(false)).contains("non si risolve ancora"));
+        assert!(advice(true, host, false, &fine, Some(true)).contains("Collega con Tailscale"));
+        assert!(advice(true, host, true, &fine, Some(true)).contains("raggiungibile"));
+        assert!(advice(false, None, false, &fine, None).contains("non è connesso"));
+        // Dati assenti nel JSON: nessuna ipotesi, nessun falso allarme.
+        assert!(!advice(true, host, true, &Details::default(), None).contains("disattivato"));
     }
 
     #[test]

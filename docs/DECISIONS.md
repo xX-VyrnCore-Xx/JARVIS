@@ -2305,6 +2305,33 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Limiti dichiarati:** non è un compilatore (macro e importazioni dinamiche sfuggono); i moduli si identificano dal nome del file, quindi nomi uguali in cartelle diverse si fondono; **nessun indice persistente né incrementale**, ogni richiesta rilegge i file.
 - **Evidenza:** test su una workspace sintetica e sui sorgenti del Core.
 
+### ADR-0190 — Token di app rifiutati con 400 o 401
+
+- **Data:** 2026-11-26. **Stato:** implementata in parte (cause ricostruite dal codice; l'errore esatto dell'utente non era noto).
+- **Contesto:** «il servizio rifiuta i token di collegamento alle app» con HTTP 400 o 401. Cause trovate:
+  1. **400, push:** il token FCM con spazi o a capo finali era rifiutato come non valido; quando lo stesso telefono veniva riassociato come nuovo dispositivo, il rifiuto («già associata a un altro principal») non indicava come uscirne.
+  2. **401, autenticazione:** lo schema `Bearer` era riconosciuto solo con la maiuscola esatta; il token del dispositivo con spazi o a capo, oppure in esadecimale maiuscolo, era scartato o non trovato.
+- **Decisione:** i token push si ripuliscono dagli spazi; il rifiuto per token già registrato da un altro dispositivo dice di revocare il vecchio dispositivo; lo schema `Bearer` non distingue maiuscole (RFC 9110); il token del dispositivo si normalizza (spazi e minuscolo) prima del controllo.
+- **Scelte mantenute:** un token FCM resta legato al dispositivo che lo ha registrato, nemmeno il proprietario lo sottrae (test `owner_and_chat_device_manage_only_their_own_encrypted_tokens`); il token del proprietario è confrontato esattamente (`the_owner_token_must_match_exactly`); il codice di associazione resta monouso, valido 10 minuti e bloccato dopo 5 errori. Avevo provato a far passare il token al nuovo dispositivo e l'ho annullato perché contraddice questi test e l'isolamento voluto.
+- **Non risolto per mancanza di dati:** un codice di associazione già consumato (ad esempio un nuovo invio dopo un timeout di rete) risponde ancora 401. Serve il messaggio esatto per capire se è questo il caso.
+- **Evidenza:** test unitari su spazi del token push, messaggio di rifiuto e lettura delle intestazioni.
+
+### ADR-0191 — Rimozione di Ollama Cloud
+
+- **Data:** 2026-11-26. **Stato:** implementata.
+- **Contesto:** Ollama Cloud è diventato a pagamento; il progetto non introduce servizi a pagamento senza autorizzazione.
+- **Decisione:** rimosso il provider `ollama_cloud` dal Core (enum, endpoint, modelli, formato NDJSON, limiti) e dai client macOS ed egui. NVIDIA NIM resta l'unico provider cloud. All'avvio il Core cancella la chiave `cloud:ollama_cloud` e le impostazioni residue (modello e provider preferito); un identificativo `ollama_cloud` ricevuto da un client è rifiutato come provider sconosciuto. Senza chiave NIM la chat cloud non ha provider e lo dice, senza ripiegare su altri servizi.
+- **Non toccato:** Ollama locale (impostazione `ollama_model` e modello di embedding del setup), escluso dal perimetro cloud. Gli ADR precedenti che citano Ollama Cloud restano come storia; questo li sostituisce.
+- **Evidenza:** test aggiornati ai formati NIM, test di cancellazione della chiave e delle impostazioni, test «senza chiave non c'è provider».
+
+### ADR-0192 — Tailscale: diagnosi del nome non trovato
+
+- **Data:** 2026-11-26. **Stato:** implementata (non provata con una tailnet reale: qui manca Tailscale).
+- **Contesto:** il collegamento mostrava «A server with the specified hostname could not be found», cioè il nome `*.ts.net` non si risolve sul dispositivo. Cause tipiche: MagicDNS disattivato nella tailnet, HTTPS non abilitato, DNS di Tailscale non in uso sul dispositivo, nome appena pubblicato.
+- **Decisione:** `GET /api/tailscale` legge da `tailscale status --json` anche `MagicDNSEnabled`, i domini dei certificati, gli indirizzi privati e gli avvisi di salute, e verifica con un limite di 4 s che il nome si risolva su questo computer. Il messaggio indica il primo ostacolo reale (non connesso, MagicDNS, HTTPS, nome non risolto, già pronto) con l'azione da fare. Se un dato manca nel JSON non si inventa nulla. Il client macOS riprova fino a tre volte (3 s) la verifica di un nome `*.ts.net` e traduce gli errori di rete (nome non trovato, timeout, certificato non pronto, connessione rifiutata) in istruzioni in italiano.
+- **Non fatto:** nessun ripiego sull'indirizzo IP: il certificato HTTPS vale per il nome e il Core accetta solo gli host dichiarati.
+- **Evidenza:** test su `parse_details` e `advice` con stati sintetici; Swift verificato solo in CI.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

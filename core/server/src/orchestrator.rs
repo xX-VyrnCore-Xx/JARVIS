@@ -308,6 +308,7 @@ impl Jarvis {
         .map_err(|e| format!("audit: {e}"))?;
         let catalog = Catalog::load()?;
         let secrets = crate::secrets::SecretStore::open(&cfg.data_dir)?;
+        crate::cloud::retire_removed_providers(&cfg.data_dir, &secrets);
         store
             .protect_chat(secrets.chat_cipher.clone())
             .map_err(|e| format!("cifratura della conversazione: {e}"))?;

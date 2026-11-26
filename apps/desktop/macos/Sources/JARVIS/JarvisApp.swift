@@ -155,7 +155,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @AppStorage("jarvis.shareContext") private var useCloudContext = true
     @AppStorage("jarvis.chatBackground") private var chatInBackground = false
     @State private var cloudModel = ""
-    @State private var provider = "ollama_cloud"
+    @State private var provider = "nvidia_nim"
     @State private var apiKey = ""
     @State private var pending: Record?
     @State private var memoryEdit: Record?
@@ -1139,7 +1139,6 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     private func providerName(_ id: String) -> String {
         switch id {
-        case "ollama_cloud": return "Ollama Cloud"
         case "nvidia_nim": return "NVIDIA NIM"
         default: return id
         }
@@ -1706,7 +1705,6 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     private func providerSettings(_ entry: Record?) -> some View {
         card("Provider cloud", icon: "key") {
             Picker("Provider", selection: $provider) {
-                Text("Ollama Cloud").tag("ollama_cloud")
                 Text("NVIDIA NIM").tag("nvidia_nim")
             }
             .onChange(of: provider) { _, _ in

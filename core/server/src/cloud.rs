@@ -13,16 +13,14 @@ const MAX_RESPONSE_BYTES: u64 = 1_048_576;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Provider {
-    Ollama,
     Nim,
 }
 
 impl Provider {
-    pub const ALL: [Self; 2] = [Self::Ollama, Self::Nim];
+    pub const ALL: [Self; 1] = [Self::Nim];
 
     pub fn parse(value: &Value) -> Option<Self> {
         match value.as_str()? {
-            "ollama_cloud" => Some(Self::Ollama),
             "nvidia_nim" => Some(Self::Nim),
             _ => None,
         }
@@ -30,14 +28,12 @@ impl Provider {
 
     pub fn id(self) -> &'static str {
         match self {
-            Self::Ollama => "ollama_cloud",
             Self::Nim => "nvidia_nim",
         }
     }
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Ollama => "Ollama Cloud",
             Self::Nim => "NVIDIA NIM",
         }
     }
@@ -45,26 +41,18 @@ impl Provider {
     /// Elenco dei modelli accessibili con la chiave: serve a verificare le credenziali senza consumare una richiesta di chat.
     fn models_endpoint(self) -> &'static str {
         match self {
-            Self::Ollama => "https://ollama.com/api/tags",
             Self::Nim => "https://integrate.api.nvidia.com/v1/models",
         }
     }
 
     fn endpoint(self) -> &'static str {
         match self {
-            Self::Ollama => "https://ollama.com/api/chat",
             Self::Nim => "https://integrate.api.nvidia.com/v1/chat/completions",
         }
     }
 
     fn model(self, route: Route) -> &'static str {
         match (self, route) {
-            (Self::Ollama, Route::Fast) => "glm-5.3-flash",
-            (Self::Ollama, Route::Reasoning) => "deepseek-v4-pro:0813",
-            (Self::Ollama, Route::Long) => "kimi-k3.1-pro",
-            (Self::Ollama, Route::Coding) => "kimi-k2.7-code",
-            (Self::Ollama, Route::Writing | Route::Translation) => "glm-5.3-flash",
-            (Self::Ollama, Route::Analysis) => "deepseek-v4-pro:0813",
             (Self::Nim, Route::Fast) => "nvidia/nemotron-3.5-lightning-30b-a3b",
             (Self::Nim, Route::Reasoning) => "nvidia/nemotron-3-ultra-550b-a55b",
             (Self::Nim, Route::Long) => "moonshotai/kimi-k3.1-pro",
@@ -104,20 +92,11 @@ impl Provider {
         let configured = settings[self.id()]
             .as_str()
             .filter(|value| valid_model(value));
-        let model = configured
-            .map(|value| {
-                if self == Self::Ollama {
-                    value.strip_suffix(":cloud").unwrap_or(value)
-                } else {
-                    value
-                }
-            })
-            .unwrap_or(default);
+        let model = configured.unwrap_or(default);
         let alternative = if model != default {
             default
         } else if route.is_quick() {
             match self {
-                Self::Ollama => "minimax-m3.1-flash",
                 Self::Nim => "minimaxai/minimax-m3.1-flash",
             }
         } else {
@@ -347,6 +326,34 @@ pub fn settings(dir: &Path) -> Value {
         .unwrap_or_else(|| json!({}))
 }
 
+/// Provider rimossi (ADR-0191): Ollama Cloud è diventato a pagamento e non è più supportato. All'avvio si
+/// cancellano la chiave salvata e le sue impostazioni, così nessuna credenziale di un servizio inutilizzato
+/// resta sul computer; se era il provider preferito, la preferenza torna al predefinito.
+pub fn retire_removed_providers(dir: &Path, secrets: &crate::secrets::SecretStore) {
+    const REMOVED: &[&str] = &["ollama_cloud"];
+    for id in REMOVED {
+        let _ = secrets.delete(&format!("cloud:{id}"));
+    }
+    let mut settings = settings(dir);
+    let mut changed = false;
+    if let Some(map) = settings.as_object_mut() {
+        for id in REMOVED {
+            changed |= map.remove(*id).is_some();
+        }
+        if map
+            .get("default_provider")
+            .and_then(Value::as_str)
+            .is_some_and(|id| REMOVED.contains(&id))
+        {
+            map.remove("default_provider");
+            changed = true;
+        }
+    }
+    if changed {
+        let _ = std::fs::write(dir.join("cloud.json"), settings.to_string());
+    }
+}
+
 /// Riconosce formati di segreti comuni e intestazioni di autenticazione.
 pub fn contains_credentials(text: &str) -> bool {
     const PREFIXES: &[&str] = &[
@@ -507,9 +514,6 @@ pub fn key_format_hint(provider: Provider, key: &str) -> Option<&'static str> {
         Provider::Nim if !key.starts_with("nvapi-") => {
             Some("Le chiavi NVIDIA iniziano di solito con «nvapi-»: se il test fallisce, rigenerala da build.nvidia.com.")
         }
-        Provider::Ollama if key.starts_with("nvapi-") || key.starts_with("sk-") => {
-            Some("Questa sembra la chiave di un altro servizio: per Ollama Cloud usa una chiave creata su ollama.com/settings/keys.")
-        }
         _ => None,
     }
 }
@@ -575,15 +579,14 @@ pub(crate) fn list_models_at(
 
 fn parse_models(provider: Provider, body: &Value) -> Vec<String> {
     let (list, field) = match provider {
-        Provider::Ollama => (&body["models"], "name"),
         Provider::Nim => (&body["data"], "id"),
     };
     let mut names: Vec<String> = list
         .as_array()
         .into_iter()
         .flatten()
-        .filter_map(|m| m[field].as_str().or_else(|| m["model"].as_str()))
-        .map(|name| name.strip_suffix(":cloud").unwrap_or(name).to_string())
+        .filter_map(|m| m[field].as_str())
+        .map(str::to_string)
         .filter(|name| valid_model(name))
         .collect();
     names.sort();
@@ -604,7 +607,6 @@ pub fn valid_model(model: &str) -> bool {
 pub struct Limiter {
     nim_next: Option<Instant>,
     nim_cooldown: Option<Instant>,
-    ollama_cooldown: Option<Instant>,
     output_pressure: HashMap<(Provider, String, Route), u8>,
     unavailable_models: HashMap<(Provider, String), Instant>,
 }
@@ -651,7 +653,6 @@ impl Limiter {
 
     fn deadline(&self, provider: Provider) -> Option<Instant> {
         match provider {
-            Provider::Ollama => self.ollama_cooldown,
             Provider::Nim => self.nim_cooldown,
         }
     }
@@ -681,7 +682,6 @@ impl Limiter {
     fn cooldown(&mut self, provider: Provider, wait: Duration) {
         let target = Some(Instant::now() + wait);
         match provider {
-            Provider::Ollama => self.ollama_cooldown = target,
             Provider::Nim => self.nim_cooldown = target,
         }
     }
@@ -868,12 +868,6 @@ impl AgentRequest {
         for (index, step) in self.steps.iter().enumerate() {
             let name = step.tool.replace('.', "__");
             match self.provider {
-                Provider::Ollama => {
-                    messages.push(json!({"role": "assistant", "content": "",
-                        "tool_calls": [{"function": {"name": name, "arguments": step.arguments}}]}));
-                    messages
-                        .push(json!({"role": "tool", "tool_name": name, "content": crate::guard::sanitize(&step.output)}));
-                }
                 Provider::Nim => {
                     let id = format!("call_{index}");
                     messages.push(json!({"role": "assistant", "content": null,
@@ -885,8 +879,6 @@ impl AgentRequest {
             }
         }
         let mut body = match self.provider {
-            Provider::Ollama => json!({"model": self.model, "messages": messages, "stream": false,
-                "options": {"num_predict": tokens}}),
             Provider::Nim => json!({"model": self.model, "messages": messages, "stream": false,
                 "max_tokens": tokens, "temperature": 0.2}),
         };
@@ -1359,9 +1351,6 @@ fn payload(
     }
     messages.push(json!({"role": "user", "content": prompt}));
     let mut body = match provider {
-        Provider::Ollama => {
-            json!({"model": model, "messages": messages, "stream": false, "options": {"num_predict": output_tokens}})
-        }
         Provider::Nim => {
             json!({"model": model, "messages": messages, "stream": false, "max_tokens": output_tokens, "temperature": 0.2})
         }
@@ -1377,11 +1366,9 @@ fn payload(
 
 fn decode(provider: Provider, body: &Value, tools: &[Function]) -> Result<Answer, Failure> {
     let reason = match provider {
-        Provider::Ollama => &body["done_reason"],
         Provider::Nim => &body["choices"][0]["finish_reason"],
     };
     let message = match provider {
-        Provider::Ollama => &body["message"],
         Provider::Nim => &body["choices"][0]["message"],
     };
     if reason == "length" {
@@ -1656,7 +1643,7 @@ fn chat_timed(
     decode(provider, &body, tools)
 }
 
-/// Risposta in streaming (ADR-0131): NDJSON per Ollama, SSE per NVIDIA NIM. Inoltra ogni frammento di testo a `sink`
+/// Risposta in streaming (ADR-0131): SSE per NVIDIA NIM. Inoltra ogni frammento di testo a `sink`
 /// e ricostruisce lo stesso esito di una risposta completa, con gli stessi controlli (vuota, troncata).
 fn stream_at(
     endpoint: &str,
@@ -1676,7 +1663,6 @@ fn stream_at(
         let line = line.map_err(|_| Failure::Unavailable)?;
         let line = line.trim();
         let data = match provider {
-            Provider::Ollama => line,
             Provider::Nim => match line.strip_prefix("data:") {
                 Some(data) => data.trim(),
                 None => continue,
@@ -1692,7 +1678,6 @@ fn stream_at(
             continue;
         };
         let (piece, finish) = match provider {
-            Provider::Ollama => (chunk["message"]["content"].as_str(), &chunk["done_reason"]),
             Provider::Nim => (
                 chunk["choices"][0]["delta"]["content"].as_str(),
                 &chunk["choices"][0]["finish_reason"],
@@ -1710,7 +1695,6 @@ fn stream_at(
         return Err(Failure::Unavailable);
     }
     let synthetic = match provider {
-        Provider::Ollama => json!({"message": {"content": text}, "done_reason": reason}),
         Provider::Nim => {
             json!({"choices": [{"message": {"content": text}, "finish_reason": reason}]})
         }
@@ -1765,14 +1749,14 @@ mod tests {
                     r#"{"error":"model legacy not found"}"#,
                 ),
                 (
-                    "glm-5.3-flash",
+                    "nvidia/nemotron-3.5-lightning-30b-a3b",
                     "200 OK",
-                    r#"{"message":{"content":"Risposta sintetica"}}"#,
+                    r#"{"choices":[{"message":{"content":"Risposta sintetica"},"finish_reason":"stop"}]}"#,
                 ),
                 (
-                    "glm-5.3-flash",
+                    "nvidia/nemotron-3.5-lightning-30b-a3b",
                     "200 OK",
-                    r#"{"message":{"content":"Seconda risposta sintetica"}}"#,
+                    r#"{"choices":[{"message":{"content":"Seconda risposta sintetica"},"finish_reason":"stop"}]}"#,
                 ),
             ] {
                 let (mut stream, _) = listener.accept().unwrap();
@@ -1804,11 +1788,11 @@ mod tests {
             }
         });
         let prompt = "una domanda sintetica";
-        let target = Provider::Ollama.target(
+        let target = Provider::Nim.target(
             "fixture-only".into(),
             prompt,
             Vec::new(),
-            &json!({"ollama_cloud":"legacy:cloud"}),
+            &json!({"nvidia_nim":"legacy"}),
         );
         let request = Request {
             message: prompt.into(),
@@ -1818,10 +1802,10 @@ mod tests {
             limiter: Default::default(),
         };
         let result = request.execute_at(&endpoint, false);
-        assert_eq!(result.model, "glm-5.3-flash");
+        assert_eq!(result.model, "nvidia/nemotron-3.5-lightning-30b-a3b");
         assert!(matches!(result.answer, Ok(Answer::Text(text)) if text == "Risposta sintetica"));
         let result = request.execute_at(&endpoint, false);
-        assert_eq!(result.model, "glm-5.3-flash");
+        assert_eq!(result.model, "nvidia/nemotron-3.5-lightning-30b-a3b");
         assert!(
             matches!(result.answer, Ok(Answer::Text(text)) if text == "Seconda risposta sintetica")
         );
@@ -1872,14 +1856,8 @@ mod tests {
     }
 
     #[test]
-    fn streaming_forwards_fragments_for_both_wire_formats() {
-        let ollama = [
-            r#"{"message":{"content":"Ciao "},"done":false}"#,
-            r#"{"message":{"content":"mondo"},"done":false}"#,
-            r#"{"message":{"content":""},"done":true,"done_reason":"stop"}"#,
-        ]
-        .join("\n");
-        let nim = [
+    fn streaming_forwards_each_fragment_of_the_sse_stream() {
+        let body = [
             r#"data: {"choices":[{"delta":{"role":"assistant"}}]}"#,
             r#"data: {"choices":[{"delta":{"content":"Ciao "},"finish_reason":null}]}"#,
             r#"data: {"choices":[{"delta":{"content":"mondo"},"finish_reason":null}]}"#,
@@ -1887,31 +1865,27 @@ mod tests {
             "data: [DONE]",
         ]
         .join("\n\n");
-        for (provider, kind, body) in [
-            (Provider::Ollama, "application/x-ndjson", ollama),
-            (Provider::Nim, "text/event-stream", nim),
-        ] {
-            let (endpoint, server) = serve(vec![(true, kind, body)]);
-            let mut pieces = Vec::new();
-            let result = fixture_request(provider)
-                .execute_streaming_at(&endpoint, &mut |piece| pieces.push(piece.to_string()));
-            assert_eq!(pieces, ["Ciao ", "mondo"], "{}", provider.id());
-            assert!(matches!(result.answer, Ok(Answer::Text(text)) if text == "Ciao mondo"));
-            server.join().unwrap();
-        }
+        let (endpoint, server) = serve(vec![(true, "text/event-stream", body)]);
+        let mut pieces = Vec::new();
+        let result = fixture_request(Provider::Nim)
+            .execute_streaming_at(&endpoint, &mut |piece| pieces.push(piece.to_string()));
+        assert_eq!(pieces, ["Ciao ", "mondo"]);
+        assert!(matches!(result.answer, Ok(Answer::Text(text)) if text == "Ciao mondo"));
+        server.join().unwrap();
     }
 
     #[test]
     fn a_truncated_stream_keeps_its_text_with_a_note_and_an_empty_one_falls_back_to_the_full_request(
     ) {
         let truncated = [
-            r#"{"message":{"content":"Inizio"},"done":false}"#,
-            r#"{"message":{"content":""},"done":true,"done_reason":"length"}"#,
+            r#"data: {"choices":[{"delta":{"content":"Inizio"},"finish_reason":null}]}"#,
+            r#"data: {"choices":[{"delta":{},"finish_reason":"length"}]}"#,
+            "data: [DONE]",
         ]
-        .join("\n");
-        let (endpoint, server) = serve(vec![(true, "application/x-ndjson", truncated)]);
+        .join("\n\n");
+        let (endpoint, server) = serve(vec![(true, "text/event-stream", truncated)]);
         let mut pieces = Vec::new();
-        let result = fixture_request(Provider::Ollama)
+        let result = fixture_request(Provider::Nim)
             .execute_streaming_at(&endpoint, &mut |piece| pieces.push(piece.to_string()));
         // ADR-0184: il testo già mostrato non si butta; se la continuazione non riesce arriva con un avviso.
         assert_eq!(pieces.concat(), format!("Inizio\n\n{TRUNCATION_NOTE}"));
@@ -1923,14 +1897,20 @@ mod tests {
         server.join().unwrap();
 
         // Nessun frammento: si ripete con la richiesta completa e il testo arriva in un blocco.
-        let empty = r#"{"message":{"content":""},"done":true,"done_reason":"stop"}"#.to_string();
-        let full = r#"{"message":{"content":"Risposta piena"}}"#.to_string();
+        let empty = [
+            r#"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+            "data: [DONE]",
+        ]
+        .join("\n\n");
+        let full =
+            r#"{"choices":[{"message":{"content":"Risposta piena"},"finish_reason":"stop"}]}"#
+                .to_string();
         let (endpoint, server) = serve(vec![
-            (true, "application/x-ndjson", empty),
+            (true, "text/event-stream", empty),
             (false, "application/json", full),
         ]);
         let mut pieces = Vec::new();
-        let result = fixture_request(Provider::Ollama)
+        let result = fixture_request(Provider::Nim)
             .execute_streaming_at(&endpoint, &mut |piece| pieces.push(piece.to_string()));
         assert_eq!(pieces, ["Risposta piena"]);
         assert!(matches!(result.answer, Ok(Answer::Text(text)) if text == "Risposta piena"));
@@ -2028,9 +2008,9 @@ mod tests {
         ));
         assert!(matches!(
             decode(
-                Provider::Ollama,
+                Provider::Nim,
                 &json!({
-                    "done_reason": "length", "message": {"content": "parziale"}
+                    "choices": [{"finish_reason": "length", "message": {"content": "parziale"}}]
                 }),
                 &[]
             ),
@@ -2038,9 +2018,9 @@ mod tests {
         ));
         assert!(matches!(
             decode(
-                Provider::Ollama,
+                Provider::Nim,
                 &json!({
-                    "message": {"content": " "}
+                    "choices": [{"message": {"content": " "}}]
                 }),
                 &[]
             ),
@@ -2051,7 +2031,7 @@ mod tests {
     #[test]
     fn truncation_adjusts_budget_only_for_the_affected_model_and_route() {
         let mut limiter = Limiter::default();
-        let key = (Provider::Ollama, "fixture:cloud".into(), Route::Fast);
+        let key = (Provider::Nim, "fixture:cloud".into(), Route::Fast);
         for _ in 0..3 {
             limiter.observe_output(key.clone(), &Err(Failure::Truncated));
         }
@@ -2059,14 +2039,14 @@ mod tests {
         assert_eq!(level, 2);
         assert_eq!(limiter.output_pressure.len(), 1);
         let body = payload(
-            Provider::Ollama,
+            Provider::Nim,
             "fixture:cloud",
             "richiesta",
             &[],
             &[],
             (Route::Fast, QualityPreference::default(), level),
         );
-        assert_eq!(body["options"]["num_predict"], 2304);
+        assert_eq!(body["max_tokens"], 2304);
         for _ in 0..2 {
             limiter.observe_output(key.clone(), &Ok(Answer::Text("completa".into())));
         }
@@ -2077,7 +2057,7 @@ mod tests {
     fn feedback_maps_only_to_a_predefined_model_instruction() {
         let preference = QualityPreference::from_counts(0, 1, 0, 1);
         let answer = payload(
-            Provider::Ollama,
+            Provider::Nim,
             "fixture",
             "richiesta",
             &[],
@@ -2204,12 +2184,12 @@ mod tests {
         let clipped = clip_tokens(&text, 80);
         assert!(estimated_tokens(&clipped) <= 80);
         assert!(clipped.starts_with("inizio") && clipped.ends_with("fine"));
-        let target = Provider::Ollama.target("test".into(), &text.repeat(10), vec![], &json!({}));
+        let target = Provider::Nim.target("test".into(), &text.repeat(10), vec![], &json!({}));
         assert_eq!(target.route, Route::Long);
     }
 
     #[test]
-    fn pacing_respects_the_limit_and_keeps_provider_cooldowns_separate() {
+    fn pacing_respects_the_limit_and_the_cooldown() {
         let mut limiter = Limiter::default();
         let now = Instant::now();
         assert_eq!(limiter.reserve(Provider::Nim, now).unwrap(), Duration::ZERO);
@@ -2220,10 +2200,6 @@ mod tests {
             limiter.reserve(Provider::Nim, now),
             Err(Failure::RateLimited(_))
         ));
-        assert_eq!(
-            limiter.reserve(Provider::Ollama, now).unwrap(),
-            Duration::ZERO
-        );
         assert_eq!(retry_after(Some("42"), chrono::Utc::now()).as_secs(), 42);
     }
 
@@ -2303,7 +2279,7 @@ mod tests {
         ));
         assert!(!may_need_calculation("Cos’è una variabile?"));
         let body = payload(
-            Provider::Ollama,
+            Provider::Nim,
             "test",
             prompt,
             &[],
@@ -2313,7 +2289,7 @@ mod tests {
         let system = body["messages"][0]["content"].as_str().unwrap();
         assert!(system.contains("consulente di direzione"));
         let plain = payload(
-            Provider::Ollama,
+            Provider::Nim,
             "test",
             "Cos’è una variabile?",
             &[],
@@ -2334,7 +2310,7 @@ mod tests {
     #[test]
     fn system_prompt_sets_a_grounded_and_composed_persona() {
         let body = payload(
-            Provider::Ollama,
+            Provider::Nim,
             "test",
             "Richiesta",
             &[],
@@ -2375,15 +2351,18 @@ mod tests {
         assert_eq!(body["messages"].as_array().unwrap().len(), 2);
         assert_eq!(body["tools"][0]["function"]["name"], "fs__read");
         assert!(matches!(
-            decode(Provider::Ollama, &json!({"message":{"content":"ok"}}), &tools),
+            decode(
+                Provider::Nim,
+                &json!({"choices":[{"message":{"content":"ok"}}]}),
+                &tools
+            ),
             Ok(Answer::Text(text)) if text == "ok"
         ));
         let function = |name, arguments| json!({"function": {"name":name,"arguments":arguments}});
-        let ollama = |calls| json!({"message":{"tool_calls":calls}});
         let nim = |calls| json!({"choices":[{"message":{"tool_calls":calls}}]});
         let call = function("fs__read", json!({"path":"note.txt"}));
         for response in [
-            decode(Provider::Ollama, &ollama(json!([call])), &tools),
+            decode(Provider::Nim, &nim(json!([call.clone()])), &tools),
             decode(
                 Provider::Nim,
                 &nim(json!([function(
@@ -2673,22 +2652,7 @@ mod agent_tests {
     }
 
     #[test]
-    fn the_agent_transcript_uses_each_providers_tool_message_format() {
-        let ollama = request(Provider::Ollama, true).payload();
-        let m = ollama["messages"].as_array().unwrap();
-        assert_eq!(
-            (m[0]["role"].as_str(), m[1]["role"].as_str()),
-            (Some("system"), Some("user"))
-        );
-        assert_eq!(m[2]["tool_calls"][0]["function"]["name"], "time__now");
-        assert!(m[2]["tool_calls"][0]["function"]["arguments"].is_object());
-        assert_eq!(
-            (m[3]["role"].as_str(), m[3]["tool_name"].as_str()),
-            (Some("tool"), Some("time__now"))
-        );
-        assert_eq!(ollama["tools"][0]["function"]["name"], "time__now");
-        assert!(ollama.get("tool_choice").is_none());
-
+    fn the_agent_transcript_uses_the_providers_tool_message_format() {
         let nim = request(Provider::Nim, true).payload();
         let m = nim["messages"].as_array().unwrap();
         assert_eq!(m[2]["tool_calls"][0]["id"], m[3]["tool_call_id"]);
@@ -2728,12 +2692,10 @@ mod agent_tests {
             reader.read_exact(&mut body).unwrap();
             let body: Value = serde_json::from_slice(&body).unwrap();
             assert_eq!(body["messages"].as_array().unwrap().len(), 4);
-            let reply = r#"{"message":{"content":"","tool_calls":[{"function":{"name":"time__now","arguments":{}}}]}}"#;
+            let reply = r#"{"choices":[{"finish_reason":"tool_calls","message":{"content":null,"tool_calls":[{"id":"c1","type":"function","function":{"name":"time__now","arguments":"{}"}}]}}]}"#;
             write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}", reply.len()).unwrap();
         });
-        let answer = request(Provider::Ollama, true)
-            .execute_at(&endpoint)
-            .unwrap();
+        let answer = request(Provider::Nim, true).execute_at(&endpoint).unwrap();
         assert!(
             matches!(&answer, Answer::Call(c) if c["tool"] == "time.now" && c["version"] == "1.0.0")
         );
@@ -2747,8 +2709,8 @@ mod agent_tests {
             l.local_addr().unwrap().port()
         };
         let started = Instant::now();
-        let Err(failure) = request(Provider::Ollama, false)
-            .execute_at(&format!("http://127.0.0.1:{port}/api/chat"))
+        let Err(failure) =
+            request(Provider::Nim, false).execute_at(&format!("http://127.0.0.1:{port}/api/chat"))
         else {
             panic!("la connessione doveva fallire");
         };
@@ -2758,7 +2720,7 @@ mod agent_tests {
         ));
         // Due nuovi tentativi con attesa 0,4 s + 1,2 s.
         assert!(started.elapsed() >= Duration::from_millis(1500));
-        let (text, retryable) = failure.user_message(Provider::Ollama);
+        let (text, retryable) = failure.user_message(Provider::Nim);
         assert!(text.contains("server non accetta") && retryable);
     }
 
@@ -2787,7 +2749,7 @@ mod agent_tests {
         }
         assert!(key_format_hint(Provider::Nim, "abcdefghijkl").is_some());
         assert!(key_format_hint(Provider::Nim, "nvapi-abcdefghij").is_none());
-        assert!(key_format_hint(Provider::Ollama, "sk-abcdefghijkl").is_some());
+        assert!(key_format_hint(Provider::Nim, "sk-abcdefghijkl").is_some());
     }
 
     #[test]
@@ -2795,10 +2757,13 @@ mod agent_tests {
         use std::io::{BufRead, BufReader, Write};
         assert_eq!(
             parse_models(
-                Provider::Ollama,
-                &json!({"models": [{"name": "glm-5.3-flash:cloud"}, {"model": "kimi-k3.1-pro"}]})
+                Provider::Nim,
+                &json!({"data": [{"id": "nvidia/nemotron-3.5-lightning-30b-a3b"}, {"id": "moonshotai/kimi-k3.1-pro"}]})
             ),
-            vec!["glm-5.3-flash", "kimi-k3.1-pro"]
+            vec![
+                "moonshotai/kimi-k3.1-pro",
+                "nvidia/nemotron-3.5-lightning-30b-a3b"
+            ]
         );
         assert_eq!(
             parse_models(
@@ -2838,5 +2803,36 @@ mod agent_tests {
             list_models_at(&forbidden, Provider::Nim, "k"),
             Err(Failure::Forbidden)
         ));
+    }
+
+    #[test]
+    fn the_removed_ollama_cloud_provider_leaves_no_key_or_preference_behind() {
+        let dir = std::env::current_dir().unwrap().join(format!(
+            "target/jarvis-retire-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let secrets = crate::secrets::SecretStore::open_with(&dir, None).unwrap();
+        secrets
+            .put("cloud:ollama_cloud", "chiave-sintetica")
+            .unwrap();
+        secrets
+            .put("cloud:nvidia_nim", "nvapi-sintetica-12345")
+            .unwrap();
+        std::fs::write(
+            dir.join("cloud.json"),
+            json!({"ollama_cloud": "kimi", "nvidia_nim": "modello", "default_provider": "ollama_cloud"})
+                .to_string(),
+        )
+        .unwrap();
+        retire_removed_providers(&dir, &secrets);
+        assert!(secrets.get("cloud:ollama_cloud").unwrap().is_none());
+        assert!(secrets.get("cloud:nvidia_nim").unwrap().is_some());
+        let settings = settings(&dir);
+        assert!(settings.get("ollama_cloud").is_none());
+        assert!(settings.get("default_provider").is_none());
+        assert_eq!(settings["nvidia_nim"], "modello");
+        assert!(Provider::parse(&json!("ollama_cloud")).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
