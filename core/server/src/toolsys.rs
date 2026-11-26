@@ -150,6 +150,8 @@ pub fn parallel_safe(name: &str) -> bool {
                 | "table.summary"
                 | "pdf.extract"
                 | "sheet.read"
+                | "doc.read"
+                | "doc.compare"
                 | "web.search"
                 | "web.fetch"
                 | "weather.forecast"

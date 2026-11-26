@@ -124,6 +124,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var changingInvite = false
 
     @State private var section: Section = .dashboard
+    @State private var paletteOpen = false
+    @State private var paletteQuery = ""
     @Namespace private var navigationNamespace
     @State private var hoveredEntry: Section?
     /// Larghezza della barra laterale, scelta dal proprietario e conservata fra un avvio e l'altro.
@@ -262,6 +264,53 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             }.padding(24).frame(width: 430)
         }
         .sheet(item: $connectorAction) { item in connectorSheet(item) }
+        .sheet(isPresented: $paletteOpen) { commandPalette }
+        .background {
+            // Tavolozza dei comandi (⌘K): attiva solo con il Core pronto e l'interfaccia sbloccata.
+            Button("Vai a…") { if core.phase == .ready && !core.uiLocked { paletteOpen = true } }
+                .keyboardShortcut("k", modifiers: .command)
+                .frame(width: 0, height: 0).opacity(0).accessibilityHidden(true)
+        }
+    }
+
+    /// Voci della tavolozza: le sezioni dell'app, filtrate senza distinguere maiuscole e accenti.
+    private var paletteMatches: [Section] {
+        let all = Section.navigation.flatMap { $0.entries }
+        let query = paletteQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return all }
+        return all.filter { $0.rawValue.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+    }
+
+    private func openFromPalette(_ entry: Section) {
+        paletteOpen = false
+        paletteQuery = ""
+        select(entry)
+    }
+
+    private var commandPalette: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Vai a…").font(.title3.bold())
+            TextField("Cerca una sezione (per esempio memoria o sicurezza)", text: $paletteQuery)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { if let first = paletteMatches.first { openFromPalette(first) } }
+            if paletteMatches.isEmpty {
+                Text("Nessuna sezione corrisponde.").foregroundStyle(.secondary).frame(height: 240)
+            } else {
+                List(paletteMatches) { entry in
+                    Button { openFromPalette(entry) } label: {
+                        Label(entry.rawValue, systemImage: entry.icon).frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .frame(height: 240)
+            }
+            HStack {
+                Text("Invio apre la prima voce · Esc chiude").font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Chiudi") { paletteOpen = false; paletteQuery = "" }
+            }
+        }
+        .padding(20).frame(width: 440)
     }
 
     private var wakeShouldRun: Bool { core.phase == .ready && !core.uiLocked && wakeListening }

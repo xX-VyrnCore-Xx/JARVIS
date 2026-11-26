@@ -163,6 +163,8 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
         "table.summary" => crate::devtools::summarize(ctx.workspace, args),
         "pdf.extract" => crate::docs::pdf_extract(ctx.workspace, args),
         "sheet.read" => crate::docs::sheet_read(ctx.workspace, args),
+        "doc.read" => crate::docs::doc_read(ctx.workspace, args),
+        "doc.compare" => crate::docs::doc_compare(ctx.workspace, args),
         "clipboard.read" => crate::docs::clipboard_read(),
         "clipboard.write" => crate::docs::clipboard_write(args),
         "time.wait" => {

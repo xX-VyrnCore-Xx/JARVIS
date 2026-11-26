@@ -73,6 +73,8 @@ const SOURCES: &[&str] = &[
     tool_file!("sandbox.run"),
     tool_file!("sandbox.status"),
     tool_file!("sheet.read"),
+    tool_file!("doc.read"),
+    tool_file!("doc.compare"),
     tool_file!("system.disks"),
     tool_file!("table.summary"),
     tool_file!("text.correct"),

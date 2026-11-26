@@ -2332,6 +2332,20 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Non fatto:** nessun ripiego sull'indirizzo IP: il certificato HTTPS vale per il nome e il Core accetta solo gli host dichiarati.
 - **Evidenza:** test su `parse_details` e `advice` con stati sintetici; Swift verificato solo in CI.
 
+### ADR-0193 — Lettura e confronto di documenti (`doc.read`, `doc.compare`)
+
+- **Data:** 2026-11-26. **Stato:** implementata (parziale rispetto a §10).
+- **Decisione:** due strumenti di sola lettura, senza dipendenze nuove (riuso di `zip_entry` e dei lettori PDF). `doc.read` estrae testo da DOCX (paragrafi in ordine, titoli come `#`, indice, conteggi, tabelle contate), PPTX (una voce per diapositiva con note del relatore), PDF con testo e file di testo (md, txt, csv, json, yaml, html, xml…). Ogni risultato porta la provenienza (percorso, dimensioni, SHA-256) ed è marcato come dato non attendibile. `doc.compare` confronta due documenti anche di formato diverso riga per riga sui primi 12 000 caratteri e dichiara se il risultato è parziale o se i file sono identici.
+- **Privacy:** autore e commenti dei DOCX non si leggono; solo titolo e data di modifica.
+- **Limiti dichiarati:** niente OCR, immagini e grafici ignorati, modifiche tracciate non interpretate, tabelle come paragrafi, XLSX resta a `sheet.read`, nessuna ricerca semantica fra documenti né versioni salvate.
+- **Evidenza:** test con DOCX e PPTX sintetici, confronto DOCX contro Markdown, percorsi fuori dalla workspace e formati non supportati.
+
+### ADR-0194 — Tavolozza dei comandi (⌘K) nell'app macOS
+
+- **Data:** 2026-11-26. **Stato:** implementata (Swift verificato solo dalla compilazione in CI).
+- **Decisione:** ⌘K apre «Vai a…», un elenco filtrabile (senza distinguere maiuscole né accenti) delle sezioni reali dell'app; Invio apre la prima voce. È attiva solo con il Core pronto e l'interfaccia sbloccata. Ogni voce chiama la stessa `select` della barra laterale: nessun pulsante senza funzione.
+- **Non incluso:** ricerca globale su contenuti (memoria, documenti, conversazioni) e azioni rapide: richiedono un indice o endpoint di ricerca unificato.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

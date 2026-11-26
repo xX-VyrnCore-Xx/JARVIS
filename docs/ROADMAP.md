@@ -258,6 +258,10 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Ollama Cloud rimosso e Tailscale (2026-11-26, ADR-0191/0192).** NVIDIA NIM è l'unico provider cloud; chiave e impostazioni di Ollama Cloud cancellate all'avvio. Tailscale: diagnosi di MagicDNS/HTTPS/risoluzione e verifica con nuovi tentativi nel client macOS. Non provato con una tailnet reale.
 
+**Documenti DOCX/PPTX (2026-11-26, ADR-0193).** `doc.read` e `doc.compare` con provenienza; autore non letto; nessun OCR.
+
+**Tavolozza ⌘K (2026-11-26, ADR-0194).** Navigazione rapida fra le sezioni dell'app macOS; Swift solo in CI.
+
 **MCP, Hugging Face e memoria (2026-11-25, ADR-0182).** Client MCP con sessione riusata, elenco a pagine con impronta, tentativi limitati, argomenti verificati, salute e statistiche; politica per strumento e `mcp.read` per le letture approvate; Hugging Face con un gesto (server noto, competenza, agente di ricerca); memoria esportabile e importabile, contraddizioni risolvibili, episodi riassunti e scadenza adattiva. Non provato il client contro il server reale (rete di questo ambiente).
 
 **Plancia dal mock-up (2026-11-25, ADR-0181).** Schede reali (specialisti, progetti, sistema, attività, notifiche, media, monitoraggio), meteo e media facoltativi, avatar con colore per stato e alone che pulsa con la voce, ritratto fornito dall'utente. Swift verificato solo dalla CI; resa non vista; Windows e Android da fare.
