@@ -44,6 +44,8 @@ class OfflineBackend(unittest.TestCase):
     def test_intents(self):
         cases = {
             "che ore sono": ("time.now", {}),
+            "le mie ricerche": ("research.list", {}),
+            "riprendi la ricerca sui database": ("research.read", {"title": "database"}),
             "apri spotify": ("app.open", {"app": "spotify"}),
             "avvia l'app Safari": ("app.open", {"app": "Safari"}),
             "metti in pausa spotify": ("media.spotify", {"command": "pause"}),
@@ -212,6 +214,33 @@ class OfflineBackend(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GoogleConnectorRulesTest(unittest.TestCase):
+    """Posta e calendario in linguaggio naturale: solo letture, instradate ai connettori autorizzati."""
+
+    def match(self, message: str):
+        from jarvis_ai.gateway import _RULES
+        for pattern, tool, args in _RULES:
+            found = pattern.search(message)
+            if found:
+                return tool, args(found)
+        return None
+
+    def test_mail_and_calendar_requests(self):
+        self.assertEqual(self.match("leggi le mie email"), ("connector.gmail.cerca", {"q": "in:inbox", "maxResults": 10}))
+        self.assertEqual(self.match("ho mail non lette?")[1]["q"], "is:unread")
+        self.assertEqual(self.match("cerca nelle email: fattura")[1]["q"], "fattura")
+        tool, args = self.match("cosa ho in calendario")
+        self.assertEqual(tool, "connector.google_calendar.eventi")
+        self.assertTrue(args["singleEvents"] and args["orderBy"] == "startTime")
+        self.assertIsNone(self.match("invia una email a mario"))
+
+    def test_results_are_summarised(self):
+        from jarvis_ai.gateway import _describe_tool_result
+        text = _describe_tool_result({"tool": "connector.google_calendar.eventi", "status": "succeeded", "output": {
+            "status": 200, "data": {"items": [{"summary": "Riunione", "start": {"dateTime": "2026-12-01T09:00:00+01:00"}}]}}})
+        self.assertIn("Riunione", text)
 
 
 class NodeCommandTest(unittest.TestCase):

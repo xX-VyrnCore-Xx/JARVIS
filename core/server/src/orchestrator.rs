@@ -2706,6 +2706,26 @@ impl Jarvis {
         Ok(doc)
     }
 
+    /// Ricerche salvate (ADR-0206).
+    pub fn research_list(&self) -> Result<Value, CoreError> {
+        crate::research::list(&self.store).map_err(|e| CoreError::Internal(e.message))
+    }
+
+    pub fn research_get(&self, id: &str) -> Result<Value, CoreError> {
+        crate::research::read(&self.store, &json!({"id": id})).map_err(|e| match e.code {
+            "research.not_found" | "research.invalid" => CoreError::NotFound(e.message),
+            _ => CoreError::Internal(e.message),
+        })
+    }
+
+    pub fn research_delete(&mut self, id: &str) -> Result<Value, CoreError> {
+        if !crate::research::delete(&self.store, id).map_err(|e| CoreError::Internal(e.message))? {
+            return Err(CoreError::NotFound("Nessuna ricerca con questo id".into()));
+        }
+        self.record_owner_action("research.delete")?;
+        self.research_list()
+    }
+
     /// Ricerca globale (ADR-0204): ricordi, chat, automazioni e strumenti in un solo elenco, ognuno con la sezione
     /// dell'app dove aprirlo. Sola lettura, solo dati già visibili al proprietario; al massimo 5 voci per gruppo.
     pub fn global_search(&self, query: &str) -> Result<Value, CoreError> {
@@ -6550,6 +6570,20 @@ impl Jarvis {
                 return Err(CoreError::BadRequest(e));
             }
         };
+        let missing = crate::oauth::missing_scopes(&manifest, &tokens);
+        if !missing.is_empty() {
+            self.audit(json!({"correlation_id": uuid::Uuid::new_v4().to_string(), "actor": {"kind": "owner", "id": "owner"},
+                              "node": "core-local", "action": "connector.oauth.exchange", "resource": format!("jarvis://connector/{id}"),
+                              "outcome": "failed", "error_code": "connector.oauth_scopes_missing", "effect": "not_applied"}))?;
+            let names: Vec<&str> = missing
+                .iter()
+                .map(|m| m.rsplit('/').next().unwrap_or(m))
+                .collect();
+            return Err(CoreError::BadRequest(format!(
+                "Accesso incompleto: mancano i permessi {}. Rifai l'accesso lasciando spuntate tutte le caselle.",
+                names.join(", ")
+            )));
+        }
         self.save_oauth_tokens(&id, &tokens)?;
         self.store
             .connector_set_authorized(&id, Some(&now()))

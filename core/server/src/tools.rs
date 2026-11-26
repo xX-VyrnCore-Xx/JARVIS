@@ -220,6 +220,9 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
         "weather.forecast" => {
             crate::toolbox::weather(ctx.web, s("place"), args["days"].as_u64().unwrap_or(3))
         }
+        "research.save" => crate::research::save(ctx.store, args),
+        "research.list" => crate::research::list(ctx.store),
+        "research.read" => crate::research::read(ctx.store, args),
         "notes.add" => crate::toolbox::notes_add(ctx.store, args),
         "notes.list" => crate::toolbox::notes_list(ctx.store, args),
         "notes.search" => crate::toolbox::notes_search(ctx.store, args),

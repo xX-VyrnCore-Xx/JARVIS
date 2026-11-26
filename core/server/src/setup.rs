@@ -15,6 +15,8 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 
+/// Elenco bloccato dei pacchetti vocali con gli hash SHA-256, incorporato (ADR-0207).
+const VOICE_REQUIREMENTS: &str = include_str!("../../../ai/requirements-voice.txt");
 pub const STT_MODELS: [&str; 4] = ["tiny", "base", "small", "medium"];
 /// Solo voci maschili (ADR-0123).
 pub const TTS_VOICES: [&str; 2] = ["it_IT-riccardo-x_low", "en_US-ryan-medium"];
@@ -344,6 +346,21 @@ impl Setup {
         }
     }
 
+    /// File dei pacchetti della voce con gli hash (`--require-hashes`). Se il pacchetto installato non lo contiene
+    /// accanto al runtime AI (gli installer copiavano solo `jarvis_ai`), si usa la copia incorporata nel Core, la
+    /// stessa del repository al momento della compilazione, scritta nella cartella dati (ADR-0207).
+    fn requirements_file(&self) -> Result<PathBuf, String> {
+        let beside = self.ai_dir.join("requirements-voice.txt");
+        if beside.is_file() {
+            return Ok(beside);
+        }
+        let own = self.data_dir.join("requirements-voice.txt");
+        std::fs::create_dir_all(&self.data_dir).map_err(|e| e.to_string())?;
+        std::fs::write(&own, VOICE_REQUIREMENTS)
+            .map_err(|e| format!("impossibile preparare l'elenco dei pacchetti vocali: {e}"))?;
+        Ok(own)
+    }
+
     fn real_step(&self, id: &str, plan: &Plan) -> Result<String, String> {
         let pkgs = self.packages_dir();
         let models = self.models_dir();
@@ -351,7 +368,7 @@ impl Setup {
         let models_s = models.to_string_lossy().into_owned();
         match id {
             "voice.packages" => {
-                let req = self.ai_dir.join("requirements-voice.txt");
+                let req = self.requirements_file()?;
                 std::fs::create_dir_all(&pkgs).map_err(|e| e.to_string())?;
                 self.python(
                     &["-m", "pip", "install", "--require-hashes", "--progress-bar", "off", "--upgrade", "--target",
@@ -401,5 +418,31 @@ mod tests {
         assert!(Plan::from_json(&json!({"ollama_model": "qwen3:4b"})).is_err());
         assert!(Plan::from_json(&json!({"embed_model": "nomic-embed-text"})).is_err());
         assert!(Plan::from_json(&json!({"voice": false})).is_err());
+    }
+
+    #[test]
+    fn the_voice_packages_list_is_found_beside_the_runtime_or_written_from_the_embedded_copy() {
+        let base = std::env::current_dir().unwrap().join(format!(
+            "target/jarvis-setup-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        let (ai, data) = (base.join("ai"), base.join("data"));
+        std::fs::create_dir_all(&ai).unwrap();
+        let setup = Setup::new(&data, "python3", &ai);
+        // Installazione senza il file accanto al runtime AI: si usa la copia incorporata, con gli hash.
+        let written = setup.requirements_file().unwrap();
+        assert_eq!(written, data.join("requirements-voice.txt"));
+        let text = std::fs::read_to_string(&written).unwrap();
+        assert!(
+            text.contains("--hash=sha256:"),
+            "la copia incorporata deve avere gli hash"
+        );
+        // Se il file c'è accanto al runtime, ha la precedenza.
+        std::fs::write(ai.join("requirements-voice.txt"), "# locale\n").unwrap();
+        assert_eq!(
+            setup.requirements_file().unwrap(),
+            ai.join("requirements-voice.txt")
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

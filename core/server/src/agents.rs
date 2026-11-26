@@ -28,7 +28,7 @@ pub const SPECIALISTS: [Agent; 7] = [
         role: "Ricerca: trova informazioni sul Web, confronta le fonti e cita sempre gli URL.",
         keywords: &["cerca sul web", "cerca online", "cerca in rete", "notizi", "wikipedia", "http://", "https://", "fonti", "fai una ricerca", "naviga", "hugging face", "huggingface", "modelli open source"],
         stems: &["cercami", "cerca$", "ricerca", "alternativ", "quanto costa", "documentazion", "soluzion", "confront", "nuova versione", "uscita", "uscito", "notizi", "qualcuno", "open source", "recension", "miglior", "informazioni su", "web$", "internet", "tecnolog", "novita"],
-        tools: &["web.search", "web.fetch", "web.browse", "web.form", "map.search", "map.route", "text.extract", "notes.add", "notes.search", "mcp.list", "mcp.read", "mcp.call"],
+        tools: &["web.search", "web.fetch", "web.browse", "web.form", "map.search", "map.route", "research.save", "research.list", "research.read", "text.extract", "notes.add", "notes.search", "mcp.list", "mcp.read", "mcp.call"],
     },
     Agent {
         name: "system",

@@ -356,6 +356,17 @@ def _describe_tool_result(result: dict) -> str:
             note += "\n(Hai chiesto notizie recenti: controlla la data nella pagina prima di fidarti.)"
         return (f"Risultati per «{output.get('query')}» (fonte: {output.get('provider')}, {output.get('retrieved_at')}):\n"
                 + "\n".join(lines) + note + "\n\nPer leggere una pagina: «apri <url>».")
+    if tool == "research.list":
+        items = output.get("items") or []
+        if not items:
+            return "Non ho ricerche salvate."
+        return "Ricerche salvate:\n" + "\n".join(
+            f"• [{i['id']}] {i['title']} — {i['findings']} risultati, {i['sources']} fonti, {i['open_questions']} domande aperte ({i['status']})" for i in items)
+    if tool == "research.save":
+        return (f"Ricerca «{output.get('title')}» salvata (id {output.get('id')}): {output.get('findings')} risultati, "
+                f"{output.get('sources')} fonti, {output.get('open_questions')} domande aperte.")
+    if tool == "research.read":
+        return (output.get("markdown") or "Ricerca vuota.") + "\n(Contenuto salvato da me: lo riprendo da qui senza inventare altro.)"
     if tool == "map.search":
         places = output.get("places") or []
         if not places:
@@ -396,6 +407,20 @@ def _describe_tool_result(result: dict) -> str:
                 f"Prossima esecuzione: {output.get('next_run') or 'nessuna'}.")
     if tool == "workflow.delete":
         return f"Automazione [{output.get('id')}] «{output.get('name')}» eliminata."
+    if tool == "connector.google_calendar.eventi" and isinstance(output, dict) and isinstance(output.get("data"), dict):
+        items = output["data"].get("items") or []
+        if not items:
+            return "Nessun evento in arrivo nel calendario."
+        def _when(e: dict) -> str:
+            start = e.get("start") or {}
+            return str(start.get("dateTime") or start.get("date") or "?").replace("T", " ")[:16]
+        return "Prossimi eventi:\n" + "\n".join(f"• {_when(e)} — {e.get('summary') or '(senza titolo)'}" + (f" ({e['location']})" if e.get("location") else "") for e in items[:10]) + "\nDati dal calendario Google, riportati come contenuto esterno."
+    if tool == "connector.gmail.cerca" and isinstance(output, dict) and isinstance(output.get("data"), dict):
+        msgs = output["data"].get("messages") or []
+        if not msgs:
+            return "Nessun messaggio corrisponde alla ricerca."
+        return (f"Trovati {len(msgs)} messaggi (id): " + ", ".join(m.get("id", "?") for m in msgs[:10])
+                + ".\nPer leggerne uno scrivi «leggi email <id>».")
     if tool.startswith("connector."):
         data = json.dumps(output.get("data"), ensure_ascii=False, indent=1) if isinstance(output, dict) else str(output)
         excerpt = data[:1500] + ("…" if len(data) > 1500 else "")
@@ -589,6 +614,21 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
      lambda m: {"key": _KEY_ALIASES.get(m[2].lower(), m[2].lower()),
                 **({"modifiers": [_MODIFIERS[p.strip().lower()] for p in m[1].split("+") if p.strip()]} if m[1].strip() else {})}),
     (re.compile(r"^\s*(?:cosa c'è sullo schermo|cosa vedi sullo schermo|leggi (?:lo|il mio) schermo|che testo c'è sullo schermo)\s*\??\s*$", re.I), "screen.read", lambda m: {}),
+    # Ricerche salvate: «le mie ricerche», «riprendi la ricerca sui database».
+    (re.compile(r"^\s*(?:le mie ricerche|elenca le ricerche|ricerche salvate|mostra le ricerche)\s*\??\s*$", re.I), "research.list", lambda m: {}),
+    (re.compile(r"^\s*(?:riprendi|riapri|continua)\s+la ricerca\s+(?:sugli|sulle|sullo|sulla|sui|sul|su|della|delle|degli|dei|del|di)?\s*(.{2,120}?)\s*$", re.I), "research.read",
+     lambda m: {"title": m[1].strip()}),
+    # Posta e calendario Google (connettori autorizzati dal proprietario): solo letture; le scritture restano
+    # esplicite («connettore gmail invia …») e chiedono conferma.
+    (re.compile(r"^\s*(?:leggi|controlla|mostra(?:mi)?|ci sono|ho)\s+(?:le mie |nuove |le |delle )*(?:ultime )?(?:nuove )?(?:e-?mail|mail|posta)(\s+non lett[ea])?\s*\??\s*$|^\s*(?:ho )?(?:nuove )?(?:e-?mail|mail)\s+non lett[ea]\s*\??\s*$", re.I), "connector.gmail.cerca",
+     lambda m: {"q": "is:unread" if re.search(r"non lett", m.group(0), re.I) else "in:inbox", "maxResults": 10}),
+    (re.compile(r"^\s*cerca\s+(?:nelle|nella|tra le)\s+(?:mie\s+)?(?:e-?mail|mail|posta)\s*:?\s+(.{2,200}?)\s*$", re.I), "connector.gmail.cerca",
+     lambda m: {"q": m[1].strip(), "maxResults": 10}),
+    (re.compile(r"^\s*(?:leggi|apri|mostra)\s+(?:l'|il\s+)?(?:e-?mail|mail|messaggio)\s+(?:con id\s+)?([0-9a-f]{10,32})\s*$", re.I), "connector.gmail.leggi",
+     lambda m: {"id": m[1], "format": "full"}),
+    (re.compile(r"^\s*(?:quali sono |mostrami |dimmi )?(?:i miei |le mie |i prossimi )?(?:prossimi )?(?:eventi|appuntamenti|impegni)(?: in calendario)?(?: di oggi| di domani)?\s*\??\s*$|^\s*(?:cosa ho|che impegni ho|che appuntamenti ho)\s+(?:in calendario|oggi|domani|nel calendario)\s*\??\s*$|^\s*(?:la mia )?agenda\s*\??\s*$", re.I), "connector.google_calendar.eventi",
+     lambda m: {"timeMin": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "maxResults": 10,
+                "singleEvents": True, "orderBy": "startTime"}),
     # Mappa e percorsi (OpenStreetMap): «indicazioni da Torino a Milano a piedi», «mostrami Roma sulla mappa».
     (re.compile(r"^\s*(?:indicazioni|percorso|strada|come (?:arrivo|si arriva|vado))(?: stradali)?\s+da\s+(.+?)\s+a\s+(.+?)(?:\s+(a piedi|in bici|in auto))?\s*\??\s*$", re.I), "map.route",
      lambda m: {"from": m[1].strip(), "to": m[2].strip(), "mode": {"a piedi": "piedi", "in bici": "bici"}.get((m[3] or "").lower(), "auto")}),

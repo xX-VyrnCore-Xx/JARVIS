@@ -86,6 +86,7 @@ impl Store {
              CREATE TABLE IF NOT EXISTS devices (device_id TEXT PRIMARY KEY, token_sha256 TEXT NOT NULL UNIQUE,
                  doc TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS notify_channels (channel_id TEXT PRIMARY KEY, doc TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS research (id TEXT PRIMARY KEY, updated_at TEXT NOT NULL, doc TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS cloud_feedback (task_id TEXT PRIMARY KEY, provider TEXT NOT NULL,
                  model TEXT NOT NULL, rating TEXT, created_at TEXT NOT NULL, rated_at TEXT);
              CREATE INDEX IF NOT EXISTS cloud_feedback_by_model ON cloud_feedback (provider, model, rated_at);
@@ -581,6 +582,52 @@ impl Store {
             params![doc["channel_id"].as_str(), doc.to_string()],
         )?;
         Ok(())
+    }
+
+    // ------------------------------------------------------------------ sessioni di ricerca (ADR-0206)
+
+    pub fn research_put(&self, doc: &Value) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT INTO research (id, updated_at, doc) VALUES (?1, ?2, ?3)
+             ON CONFLICT(id) DO UPDATE SET updated_at = excluded.updated_at, doc = excluded.doc",
+            params![
+                doc["id"].as_str(),
+                doc["updated_at"].as_str(),
+                doc.to_string()
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn research_get(&self, id: &str) -> StoreResult<Option<Value>> {
+        let raw: Option<String> = self
+            .conn
+            .query_row("SELECT doc FROM research WHERE id = ?1", [id], |r| r.get(0))
+            .optional()?;
+        Ok(raw.and_then(|d| serde_json::from_str(&d).ok()))
+    }
+
+    pub fn research_list(&self) -> StoreResult<Vec<Value>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT doc FROM research ORDER BY updated_at DESC LIMIT 100")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        Ok(rows
+            .filter_map(Result::ok)
+            .filter_map(|d| serde_json::from_str(&d).ok())
+            .collect())
+    }
+
+    pub fn research_delete(&self, id: &str) -> StoreResult<bool> {
+        Ok(self
+            .conn
+            .execute("DELETE FROM research WHERE id = ?1", [id])?
+            > 0)
+    }
+
+    pub fn research_count(&self) -> StoreResult<i64> {
+        self.conn
+            .query_row("SELECT COUNT(*) FROM research", [], |r| r.get(0))
     }
 
     pub fn channels(&self) -> StoreResult<Vec<Value>> {

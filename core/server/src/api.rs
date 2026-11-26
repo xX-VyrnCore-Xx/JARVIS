@@ -660,6 +660,11 @@ pub fn router(state: Shared) -> Router {
         .route("/api/mcp/servers/health", post(mcp_server_health))
         .route("/api/mcp/servers/policy", post(mcp_server_policy))
         .route("/api/mcp/presets", get(mcp_presets))
+        .route("/api/research", get(research_list))
+        .route(
+            "/api/research/{id}",
+            get(research_get).delete(research_delete),
+        )
         .route("/api/search", get(global_search))
         .route("/api/map/search", post(map_search))
         .route("/api/map/route", post(map_route))
@@ -3314,6 +3319,19 @@ async fn mcp_server_test(State(state): State<Shared>, Json(body): Json<Value>) -
 }
 
 /// Regole di osservazione dei file (ADR-0158), solo proprietario.
+/// Ricerche salvate (ADR-0206): elenco, lettura con rapporto in Markdown ed eliminazione, solo dal proprietario.
+async fn research_list(State(state): State<Shared>) -> Response {
+    reply(with_core(&state, |j| j.research_list()).await)
+}
+
+async fn research_get(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    reply(with_core(&state, move |j| j.research_get(&id)).await)
+}
+
+async fn research_delete(State(state): State<Shared>, Path(id): Path<String>) -> Response {
+    reply(with_core(&state, move |j| j.research_delete(&id)).await)
+}
+
 /// Ricerca globale su ricordi, chat, automazioni e strumenti (parametro `q`).
 async fn global_search(
     State(state): State<Shared>,
