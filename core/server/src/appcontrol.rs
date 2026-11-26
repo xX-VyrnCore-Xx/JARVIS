@@ -32,6 +32,7 @@ pub fn is_control_tool(tool: &str) -> bool {
             | "app.focus"
             | "app.type"
             | "app.key"
+            | "app.click"
             | "app.windows"
             | "screen.read"
             | "screen.status"
@@ -363,6 +364,7 @@ pub enum Action {
     Windows,
     Type(String),
     Key { key: String, modifiers: Vec<String> },
+    Click { x: u32, y: u32, clicks: u8 },
 }
 
 /// Comando per Spotify, l'unico servizio musicale collegato (ADR-0195).
@@ -479,9 +481,36 @@ pub fn parse(tool: &str, args: &Value) -> Result<Action, ToolError> {
             }
             Ok(Action::Key { key, modifiers })
         }
+        "app.click" => {
+            // Coordinate dello schermo in punti (origine in alto a sinistra), come le vede screen.read.
+            let coord = |k: &str| {
+                args[k]
+                    .as_u64()
+                    .filter(|v| *v <= MAX_COORD)
+                    .map(|v| v as u32)
+                    .ok_or_else(|| {
+                        err(
+                            "app.invalid",
+                            format!("Coordinata {k} non valida: un intero da 0 a {MAX_COORD}"),
+                        )
+                    })
+            };
+            let clicks = match args["clicks"].as_u64().unwrap_or(1) {
+                n @ (1 | 2) => n as u8,
+                _ => return Err(err("app.invalid", "I clic possono essere 1 o 2")),
+            };
+            Ok(Action::Click {
+                x: coord("x")?,
+                y: coord("y")?,
+                clicks,
+            })
+        }
         _ => Err(err("app.invalid", "Strumento sconosciuto")),
     }
 }
+
+/// Limite delle coordinate: oltre non esiste uno schermo (rifiuta valori assurdi o ostili).
+const MAX_COORD: u64 = 16_384;
 
 /// Programma, argomenti e variabili d'ambiente da eseguire.
 #[derive(Debug, PartialEq, Eq)]
@@ -625,6 +654,20 @@ pub fn plan(os: &str, action: &Action) -> Result<Plan, ToolError> {
             };
             Ok(osascript(&["on run argv", &line, "end run"], &[key]))
         }
+        ("macos", Action::Click { x, y, clicks }) => {
+            // Un clic sinistro alle coordinate; il doppio clic ripete il clic. Serve il permesso Accessibilità.
+            let line = format!("tell application \"System Events\" to click at {{{x}, {y}}}");
+            let lines: Vec<&str> = if *clicks == 2 { vec![&line, &line] } else { vec![&line] };
+            Ok(osascript(&lines, &[]))
+        }
+        ("windows", Action::Click { x, y, clicks }) => Ok(powershell(
+            "Add-Type -Namespace J -Name M -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool SetCursorPos(int x, int y); [DllImport(\"user32.dll\")] public static extern void mouse_event(uint f, uint x, uint y, uint d, int e);'; [J.M]::SetCursorPos([int]$env:JARVIS_X, [int]$env:JARVIS_Y) | Out-Null; 1..[int]$env:JARVIS_CLICKS | ForEach-Object { [J.M]::mouse_event(2,0,0,0,0); [J.M]::mouse_event(4,0,0,0,0); Start-Sleep -Milliseconds 60 }",
+            vec![
+                ("JARVIS_X".into(), x.to_string()),
+                ("JARVIS_Y".into(), y.to_string()),
+                ("JARVIS_CLICKS".into(), clicks.to_string()),
+            ],
+        )),
         ("windows", Action::Open(app)) => {
             let known = known_app(app);
             let target = known.map_or(app.as_str(), |k| k.windows);
@@ -784,6 +827,7 @@ pub fn execute(tool: &str, args: &Value) -> Result<Value, ToolError> {
         Action::Focus(app) => json!({"focused": app}),
         Action::Type(text) => json!({"typed_chars": text.chars().count()}),
         Action::Key { key, modifiers } => json!({"key": key, "modifiers": modifiers}),
+        Action::Click { x, y, clicks } => json!({"clicked": {"x": x, "y": y, "clicks": clicks}}),
         Action::Windows => json!({"windows": parse_windows(os, &out)}),
     })
 }
@@ -1085,5 +1129,46 @@ mod tests {
         assert_eq!(parsed["playing"], true);
         assert_eq!(parse_spotify("closed||")["state"], "closed");
         assert_eq!(parse_spotify("boom|x|y")["state"], "unknown");
+    }
+
+    #[test]
+    fn mouse_clicks_are_validated_and_planned_without_shell_interpolation() {
+        let ok = parse("app.click", &json!({"x": 400, "y": 300})).unwrap();
+        assert_eq!(
+            ok,
+            Action::Click {
+                x: 400,
+                y: 300,
+                clicks: 1
+            }
+        );
+        assert_eq!(
+            parse("app.click", &json!({"x": 10, "y": 20, "clicks": 2})).unwrap(),
+            Action::Click {
+                x: 10,
+                y: 20,
+                clicks: 2
+            }
+        );
+        for bad in [
+            json!({"x": 400}),
+            json!({"x": -1, "y": 3}),
+            json!({"x": "1; rm -rf /", "y": 3}),
+            json!({"x": 99999, "y": 3}),
+            json!({"x": 1, "y": 3, "clicks": 3}),
+        ] {
+            assert!(parse("app.click", &bad).is_err(), "{bad}");
+        }
+        let mac = plan("macos", &ok).unwrap();
+        assert!(mac.args.iter().any(|a| a.contains("click at {400, 300}")));
+        let win = plan("windows", &ok).unwrap();
+        assert!(win
+            .env
+            .contains(&("JARVIS_X".to_string(), "400".to_string())));
+        assert!(
+            !win.args.iter().any(|a| a.contains("400")),
+            "i valori viaggiano solo nell'ambiente"
+        );
+        assert!(is_control_tool("app.click"));
     }
 }

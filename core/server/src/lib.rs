@@ -48,6 +48,7 @@ pub mod openapi;
 pub mod orchestrator;
 pub mod passkeys;
 pub mod perf;
+pub mod permission_history;
 pub mod permissions;
 pub mod persona;
 pub mod planner;

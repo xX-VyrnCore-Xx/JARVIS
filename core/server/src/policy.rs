@@ -211,6 +211,12 @@ fn expected_effect(tool: &str, args: &Value) -> String {
             "Scrivere con la tastiera, nell’app in primo piano: «{}».",
             args["text"].as_str().unwrap_or("?").chars().take(120).collect::<String>()
         ),
+        "app.click" => format!(
+            "Muovere il mouse alle coordinate ({}, {}) dello schermo e fare {} clic sinistro.",
+            args["x"].as_u64().unwrap_or(0),
+            args["y"].as_u64().unwrap_or(0),
+            args["clicks"].as_u64().unwrap_or(1)
+        ),
         "app.key" => format!(
             "Premere {}{} nell’app in primo piano.",
             args["modifiers"]

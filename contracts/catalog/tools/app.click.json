@@ -1,0 +1,57 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "app.click",
+  "version": "1.0.0",
+  "summary": "Muove il mouse alle coordinate dello schermo e fa clic (uno o due), dopo la conferma del proprietario",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "x",
+      "y"
+    ],
+    "properties": {
+      "x": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 16384
+      },
+      "y": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 16384
+      },
+      "clicks": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 2
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "prerequisites": [
+    "macOS o Windows; su macOS serve il permesso Accessibilità. Le coordinate sono in punti, origine in alto a sinistra"
+  ],
+  "effects": "write_local",
+  "risk": "high",
+  "permissions": [
+    "core.desktop:execute"
+  ],
+  "errors": [
+    "app.invalid",
+    "app.unavailable",
+    "app.timeout",
+    "app.not_found",
+    "app.permission",
+    "app.failed"
+  ],
+  "timeout_ms": 15000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "required"
+}
