@@ -1,0 +1,36 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "app.elements",
+  "version": "1.0.0",
+  "summary": "Elenca pulsanti, campi e collegamenti della finestra in primo piano con il centro in coordinate dello schermo (nomi e posizioni, campi password esclusi), dopo la conferma del proprietario",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "prerequisites": [
+    "macOS o Windows; su macOS serve il permesso Accessibilità"
+  ],
+  "effects": "read",
+  "risk": "high",
+  "permissions": [
+    "core.desktop:read"
+  ],
+  "errors": [
+    "app.invalid",
+    "app.unavailable",
+    "app.timeout",
+    "app.permission",
+    "app.failed"
+  ],
+  "timeout_ms": 40000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "required"
+}

@@ -2893,6 +2893,10 @@ async fn privacy_overview_and_resource_profiles_work_through_the_api() {
     assert_eq!(status, StatusCode::OK, "{privacy}");
     assert!(privacy["stored_locally"]["data_dir_entries"].is_array());
     assert_eq!(privacy["background"]["resource_profile"], "balanced");
+    assert!(
+        privacy["permission_history"]["items"].is_array(),
+        "la cronologia dei permessi è nel riepilogo"
+    );
     assert!(privacy["cloud"]["providers_with_key"]
         .as_array()
         .unwrap()

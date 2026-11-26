@@ -33,6 +33,7 @@ pub fn is_control_tool(tool: &str) -> bool {
             | "app.type"
             | "app.key"
             | "app.click"
+            | "app.elements"
             | "app.windows"
             | "screen.read"
             | "screen.status"
@@ -365,6 +366,7 @@ pub enum Action {
     Type(String),
     Key { key: String, modifiers: Vec<String> },
     Click { x: u32, y: u32, clicks: u8 },
+    Elements,
 }
 
 /// Comando per Spotify, l'unico servizio musicale collegato (ADR-0195).
@@ -445,6 +447,7 @@ pub fn parse(tool: &str, args: &Value) -> Result<Action, ToolError> {
         "app.open" => Ok(Action::Open(name()?)),
         "app.focus" => Ok(Action::Focus(name()?)),
         "app.windows" => Ok(Action::Windows),
+        "app.elements" => Ok(Action::Elements),
         "app.type" => {
             let text = args["text"].as_str().unwrap_or_default();
             if text.is_empty() || text.chars().count() > MAX_TEXT || text.contains('\0') {
@@ -637,6 +640,8 @@ pub fn plan(os: &str, action: &Action) -> Result<Plan, ToolError> {
             &["tell application \"System Events\" to get name of (processes where background only is false)"],
             &[],
         )),
+        ("macos", Action::Elements) => Ok(osascript(MAC_ELEMENTS_SCRIPT, &[])),
+        ("windows", Action::Elements) => Ok(powershell(WINDOWS_ELEMENTS_SCRIPT, vec![])),
         ("macos", Action::Type(text)) => Ok(osascript(
             &["on run argv", "tell application \"System Events\" to keystroke (item 1 of argv)", "end run"],
             &[text],
@@ -829,6 +834,11 @@ pub fn execute(tool: &str, args: &Value) -> Result<Value, ToolError> {
         Action::Key { key, modifiers } => json!({"key": key, "modifiers": modifiers}),
         Action::Click { x, y, clicks } => json!({"clicked": {"x": x, "y": y, "clicks": clicks}}),
         Action::Windows => json!({"windows": parse_windows(os, &out)}),
+        Action::Elements => {
+            let elements = parse_elements(&out);
+            json!({"elements": elements, "count": elements.len(),
+                   "note": "Pulsanti, campi e collegamenti della finestra in primo piano, con il centro in coordinate dello schermo da usare con app.click. Nomi e posizioni soltanto: nessun contenuto digitato, campi password esclusi."})
+        }
     })
 }
 
@@ -854,6 +864,83 @@ pub fn parse_spotify(out: &str) -> Value {
     };
     json!({"provider": "spotify", "state": state, "playing": state == "playing",
         "title": title.chars().take(200).collect::<String>(), "artist": artist.chars().take(200).collect::<String>()})
+}
+
+/// Elementi dell'interfaccia della finestra in primo piano (ADR-0216). macOS: Accessibilità via System Events
+/// (limite di 400 elementi); sola lettura di ruolo, nome, posizione e dimensione.
+const MAC_ELEMENTS_SCRIPT: &[&str] = &[
+    "tell application \"System Events\"",
+    "set p to first application process whose frontmost is true",
+    "set out to \"\"",
+    "try",
+    "set els to entire contents of front window of p",
+    "set n to count of els",
+    "if n > 400 then set n to 400",
+    "repeat with i from 1 to n",
+    "set e to item i of els",
+    "try",
+    "set r to role of e",
+    "if r is in {\"AXButton\", \"AXCheckBox\", \"AXRadioButton\", \"AXPopUpButton\", \"AXMenuButton\", \"AXLink\", \"AXTextField\", \"AXTextArea\", \"AXMenuItem\", \"AXTab\", \"AXSecureTextField\"} then",
+    "set nm to \"\"",
+    "try",
+    "set nm to (name of e) as text",
+    "end try",
+    "set ps to position of e",
+    "set sz to size of e",
+    "set out to out & r & \"|\" & nm & \"|\" & (item 1 of ps) & \"|\" & (item 2 of ps) & \"|\" & (item 1 of sz) & \"|\" & (item 2 of sz) & linefeed",
+    "end if",
+    "end try",
+    "end repeat",
+    "end try",
+    "return out",
+    "end tell",
+];
+
+/// Windows: UI Automation sulla finestra in primo piano (limite di 400 elementi, campi password esclusi).
+const WINDOWS_ELEMENTS_SCRIPT: &str = "Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes; Add-Type -Namespace J -Name W -MemberDefinition '[DllImport(\"user32.dll\")] public static extern System.IntPtr GetForegroundWindow();'; $root = [System.Windows.Automation.AutomationElement]::FromHandle([J.W]::GetForegroundWindow()); $all = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition); $ok = 'Button','CheckBox','RadioButton','Edit','MenuItem','Hyperlink','TabItem','ComboBox'; $n = 0; foreach ($e in $all) { if ($n -ge 400) { break }; $n++; try { $t = $e.Current.ControlType.ProgrammaticName -replace 'ControlType\\.',''; if (($ok -contains $t) -and -not $e.Current.IsPassword) { $r = $e.Current.BoundingRectangle; if (-not $r.IsEmpty) { $t + '|' + ($e.Current.Name -replace '\\|',' ') + '|' + [int]$r.X + '|' + [int]$r.Y + '|' + [int]$r.Width + '|' + [int]$r.Height } } } catch {} }";
+
+/// Righe `ruolo|nome|x|y|larghezza|altezza` → elementi con il centro da cliccare. Scarta i campi password, gli
+/// elementi senza dimensione o fuori scala e quelli senza nome che non siano campi di testo; massimo 80.
+pub fn parse_elements(out: &str) -> Vec<Value> {
+    out.lines()
+        .filter_map(|line| {
+            let mut parts = line.trim().split('|');
+            let role = parts.next()?.trim();
+            let name = parts.next()?.trim();
+            let num = |p: Option<&str>| p.and_then(|v| v.trim().parse::<f64>().ok());
+            let (x, y, w, h) = (
+                num(parts.next())?,
+                num(parts.next())?,
+                num(parts.next())?,
+                num(parts.next())?,
+            );
+            let lowered = role.to_ascii_lowercase();
+            let is_text =
+                lowered.contains("textfield") || lowered.contains("textarea") || lowered == "edit";
+            if lowered.contains("secure") || lowered.contains("password") {
+                return None;
+            }
+            if w < 1.0
+                || h < 1.0
+                || x < 0.0
+                || y < 0.0
+                || x > MAX_COORD as f64
+                || y > MAX_COORD as f64
+            {
+                return None;
+            }
+            if name.is_empty() && !is_text {
+                return None;
+            }
+            Some(json!({
+                "role": role.trim_start_matches("AX"),
+                "name": name.chars().take(80).collect::<String>(),
+                "x": x as i64, "y": y as i64, "width": w as i64, "height": h as i64,
+                "center": {"x": (x + w / 2.0) as i64, "y": (y + h / 2.0) as i64},
+            }))
+        })
+        .take(80)
+        .collect()
 }
 
 /// Finestre/applicazioni aperte dall'output del sistema.
@@ -1170,5 +1257,30 @@ mod tests {
             "i valori viaggiano solo nell'ambiente"
         );
         assert!(is_control_tool("app.click"));
+    }
+
+    #[test]
+    fn interface_elements_are_parsed_without_passwords_and_with_click_centres() {
+        let out = "AXButton|Invia|100|200|80|30\nAXSecureTextField|Password|10|10|200|20\nAXTextField||5|50|300|24\nAXButton||1|1|10|10\nAXButton|Nascosto|-5|5|10|10\nAXLink|Aiuto|50|60|0|0\nrumore senza barre\n";
+        let elements = parse_elements(out);
+        let names: Vec<&str> = elements
+            .iter()
+            .map(|e| e["role"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, vec!["Button", "TextField"], "{elements:?}");
+        assert_eq!(elements[0]["center"], json!({"x": 140, "y": 215}));
+        assert_eq!(elements[0]["name"], "Invia");
+        // Il piano usa l'accessibilità su macOS e UI Automation su Windows, senza valori interpolati.
+        assert!(plan("macos", &parse("app.elements", &json!({})).unwrap())
+            .unwrap()
+            .args
+            .iter()
+            .any(|a| a.contains("entire contents")));
+        assert!(plan("windows", &Action::Elements)
+            .unwrap()
+            .args
+            .iter()
+            .any(|a| a.contains("IsPassword")));
+        assert!(is_control_tool("app.elements"));
     }
 }

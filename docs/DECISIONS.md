@@ -2480,6 +2480,29 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Limiti:** se un processo non si chiude, su macOS dopo 60 s si procede comunque (la sostituzione del pacchetto è sicura anche con l'app aperta) e l'app può restare quella precedente; la notifica lo segnala al riavvio successivo. Nessuna vista dedicata dell'esito nelle app: compare nelle notifiche.
 - **Evidenza:** test su script (attesa, riavvio, ripristino, percorsi non sicuri, nessun segnaposto) e sull'esito letto una sola volta; prova del script macOS con strumenti simulati.
 
+### ADR-0214 — Tailscale: lettura dello stato resa affidabile
+
+- **Data:** 2026-11-26. **Stato:** implementata; provata con falsi programmi Tailscale (output grande, avvisi su stderr, demone sbagliato poi giusto), **non** con una tailnet reale.
+- **Contesto:** il collegamento «non andava» anche con Tailscale attivo e connesso (ADR-0141, 0192, 0198). Rileggendo `tailscale.rs` si sono trovati difetti che fanno risultare «non connesso» un client in realtà connesso.
+- **Difetti e correzioni:** (1) stdout e stderr si leggevano solo a processo finito: con molti dispositivi `status --json` supera il buffer della pipe, il processo si bloccava fino ai 15 s e il JSON restava troncato → lettura in parallelo e `--peers=false` (con ripiego se il client non conosce l'opzione); (2) stdout e stderr erano concatenati, quindi un avviso come «client version != server version» rendeva il JSON non valido → flussi separati e JSON estratto con tolleranza; (3) il primo programma trovato vinceva anche se non raggiungeva il demone (riga di comando di Homebrew accanto all'app) → si prova il candidato successivo, e su macOS l'app è il primo; (4) la finestra della console compariva su Windows → `hide_console`; (5) se non c'è uno stato leggibile il messaggio riporta il motivo reale del programma invece di «non connesso».
+- **Resta aperto:** cause fuori dal Core (MagicDNS o HTTPS disattivati nella console, DNS che non risolve su un altro dispositivo): la diagnosi (`/api/tailscale/diagnose`) indica il primo passo che fallisce e cosa fare.
+- **Evidenza:** test su output da 400 KB senza blocco, candidati con demone irraggiungibile, JSON con avvisi e riconoscimento dell'errore.
+
+### ADR-0215 — Viste grafiche: cronologia dei permessi, Ricerche salvate e Privacy su Windows
+
+- **Data:** 2026-11-26. **Stato:** implementata; **verificata solo dalla CI** (Swift su macOS, egui su Windows: qui non si compilano).
+- **Decisione:** `/api/privacy/overview` include `permission_history` (ultime 10 voci, ADR-0210). macOS: card «Cronologia dei permessi» nella sezione Privacy e nuova sezione «Ricerche» (elenco, apertura del rapporto Markdown, eliminazione con `DELETE /api/research/{id}`). Windows (egui): nuove pagine «Privacy» (con la stessa cronologia) e «Ricerche» (elenco generico). Nessuna nuova rotta.
+- **Non incluso:** stati dell'avatar per ricerca, esecuzione e collaborazione: il Core è occupato mentre lavora e non espone un canale di attività in corso, quindi servirebbe un canale di eventi dedicato; resta aperto. Visione dello schermo oltre l'OCR e albero di accessibilità (rilevazione degli elementi per `app.click`) restano aperti.
+- **Evidenza:** test API sulla presenza della cronologia nel riepilogo; formattazione `cargo fmt --check` dell'app; compilazione in CI.
+
+### ADR-0216 — Elementi dell'interfaccia: `app.elements`
+
+- **Data:** 2026-11-26. **Stato:** implementata nel piano, nel parsing e nella validazione; **non provata su macOS e Windows reali**.
+- **Contesto:** `app.click` (ADR-0212) richiede coordinate; senza sapere dove sono i controlli l'agente doveva indovinare.
+- **Decisione:** strumento di controllo `app.elements` (sola lettura, rischio alto, conferma richiesta, come `screen.read`): macOS con Accessibilità (System Events, `entire contents`, 400 elementi al massimo), Windows con UI Automation sulla finestra in primo piano. Restituisce ruolo, nome, posizione, dimensione e **centro** da usare con `app.click`; massimo 80 elementi; **campi password esclusi** (`AXSecureTextField`, `IsPassword`), elementi senza dimensione o fuori scala e senza nome scartati. Nessun valore digitato viene letto.
+- **Limiti:** `entire contents` può essere lento in finestre complesse (timeout 40 s); su Windows le coordinate sono quelle del processo (scala dello schermo) e vanno verificate su schermi ad alta densità; nessuna scoperta di menu di sistema o altre finestre.
+- **Evidenza:** test su parsing (password escluse, centri, rumore), piano per i due sistemi e classificazione come strumento di controllo; regola del gateway («quali pulsanti ci sono nella finestra»).
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

@@ -15,9 +15,14 @@ const TIMEOUT: Duration = Duration::from_secs(15);
 
 /// Percorsi in cui il programma di Tailscale si trova di solito (oltre al PATH).
 fn candidates() -> Vec<String> {
-    let mut list = vec!["tailscale".to_string()];
+    let mut list: Vec<String> = Vec::new();
+    // Su macOS l'app è la copia canonica: la riga di comando di Homebrew (nel PATH) può parlare con un altro
+    // demone, non collegato allo stesso account, e dare uno stato diverso da quello che vede l'utente.
     if cfg!(target_os = "macos") {
         list.push("/Applications/Tailscale.app/Contents/MacOS/Tailscale".into());
+    }
+    list.push("tailscale".to_string());
+    if cfg!(target_os = "macos") {
         list.push("/usr/local/bin/tailscale".into());
         list.push("/opt/homebrew/bin/tailscale".into());
     }
@@ -116,26 +121,80 @@ pub fn serving_port(raw: &str, port: u16) -> bool {
     raw.contains(&format!("127.0.0.1:{port}")) || raw.contains(&format!("localhost:{port}"))
 }
 
-/// Esegue Tailscale con argomenti fissi. `Ok(None)` se il programma non è installato.
-fn run(args: &[&str]) -> Result<Option<(bool, String)>, String> {
-    for program in candidates() {
-        let spawned = Command::new(&program)
+/// Esito di un comando Tailscale, con i due flussi separati: gli avvisi (per esempio «client version != server
+/// version») arrivano su stderr e non devono rovinare il JSON di stdout.
+#[derive(Debug)]
+pub struct Out {
+    pub ok: bool,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+impl Out {
+    /// Testo complessivo per i messaggi e per `serve status`.
+    pub fn text(&self) -> String {
+        format!("{}\n{}", self.stdout, self.stderr)
+            .trim()
+            .to_string()
+    }
+}
+
+/// Il programma c'è ma non riesce a parlare con il demone: è un'altra copia (per esempio la riga di comando di
+/// Homebrew accanto all'app di macOS), quindi conviene provare il candidato successivo.
+pub fn daemon_unreachable(text: &str) -> bool {
+    let t = text.to_ascii_lowercase();
+    [
+        "failed to connect to local",
+        "doesn't appear to be running",
+        "does not appear to be running",
+        "is tailscale running",
+        "tailscaled is not running",
+        "connect: no such file or directory",
+        "the tailscale ipn service",
+    ]
+    .iter()
+    .any(|marker| t.contains(marker))
+}
+
+/// Legge un flusso fino alla fine **in parallelo** con l'attesa del processo: `status --json` di una tailnet con
+/// molti dispositivi supera il buffer della pipe e, se nessuno legge, il processo si blocca fino al limite di tempo.
+fn drain(pipe: Option<impl Read + Send + 'static>) -> std::thread::JoinHandle<String> {
+    std::thread::spawn(move || {
+        let mut text = String::new();
+        if let Some(pipe) = pipe {
+            let mut limited = pipe.take(8 * 1024 * 1024);
+            let mut raw = Vec::new();
+            let _ = limited.read_to_end(&mut raw);
+            text = String::from_utf8_lossy(&raw).into_owned();
+        }
+        text
+    })
+}
+
+/// Esegue Tailscale con argomenti fissi provando i candidati in ordine. `Ok(None)` se nessuno è installato.
+fn run_with(programs: &[String], args: &[&str]) -> Result<Option<Out>, String> {
+    let mut last: Option<Out> = None;
+    for program in programs {
+        let mut command = Command::new(program);
+        command
             .args(args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn();
-        let mut child = match spawned {
+            .stderr(Stdio::piped());
+        crate::hide_console(&mut command);
+        let mut child = match command.spawn() {
             Ok(child) => child,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
             Err(error) => return Err(error.to_string()),
         };
+        let stdout = drain(child.stdout.take());
+        let stderr = drain(child.stderr.take());
         let started = Instant::now();
-        let success = loop {
+        let ok = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break status.success(),
                 Ok(None) if started.elapsed() < TIMEOUT => {
-                    std::thread::sleep(Duration::from_millis(50))
+                    std::thread::sleep(Duration::from_millis(25))
                 }
                 Ok(None) => {
                     let _ = child.kill();
@@ -145,22 +204,56 @@ fn run(args: &[&str]) -> Result<Option<(bool, String)>, String> {
                 Err(error) => return Err(error.to_string()),
             }
         };
-        let mut text = String::new();
-        if let Some(mut out) = child.stdout.take() {
-            let _ = out.read_to_string(&mut text);
+        let out = Out {
+            ok,
+            stdout: stdout.join().unwrap_or_default(),
+            stderr: stderr.join().unwrap_or_default(),
+        };
+        if out.ok || !daemon_unreachable(&out.text()) {
+            return Ok(Some(out));
         }
-        if let Some(mut err) = child.stderr.take() {
-            let _ = err.read_to_string(&mut text);
-        }
-        return Ok(Some((success, text)));
+        last = Some(out);
     }
-    Ok(None)
+    Ok(last)
+}
+
+fn run(args: &[&str]) -> Result<Option<Out>, String> {
+    run_with(&candidates(), args)
+}
+
+/// Il JSON di `status`, ignorando avvisi prima o dopo: da stdout, altrimenti dal primo `{` all'ultimo `}`.
+pub fn json_part(out: &Out) -> String {
+    let direct = out.stdout.trim();
+    if direct.starts_with('{') && serde_json::from_str::<Value>(direct).is_ok() {
+        return direct.to_string();
+    }
+    let all = out.text();
+    match (all.find('{'), all.rfind('}')) {
+        (Some(a), Some(b)) if b > a => all[a..=b].to_string(),
+        _ => all,
+    }
+}
+
+/// `status --json` senza l'elenco degli altri dispositivi (non serve e può essere enorme); se il client è
+/// così vecchio da non conoscere l'opzione, ripiega sulla forma completa.
+fn status_out() -> Result<Option<Out>, String> {
+    match run(&["status", "--json", "--peers=false"])? {
+        Some(out)
+            if !out.ok && {
+                let t = out.text().to_ascii_lowercase();
+                t.contains("flag provided but not defined") || t.contains("unknown flag")
+            } =>
+        {
+            run(&["status", "--json"])
+        }
+        other => Ok(other),
+    }
 }
 
 /// Stato del collegamento: installato, connesso, nome della macchina, indirizzo HTTPS e se il Core è pubblicato.
 pub fn status(port: u16) -> Value {
-    let status = match run(&["status", "--json"]) {
-        Ok(Some((_, text))) => text,
+    let status = match status_out() {
+        Ok(Some(out)) => out,
         Ok(None) => {
             return json!({
                 "installed": false, "state": "", "host": null, "url": null, "serving": false,
@@ -174,13 +267,26 @@ pub fn status(port: u16) -> Value {
             })
         }
     };
-    let (state, host) = parse_status(&status);
-    let details = parse_details(&status);
+    let raw = json_part(&status);
+    let (state, host) = parse_status(&raw);
+    let details = parse_details(&raw);
     let connected = state == "Running";
     let serving = connected
-        && matches!(run(&["serve", "status"]), Ok(Some((_, text))) if serving_port(&text, port));
+        && matches!(run(&["serve", "status"]), Ok(Some(out)) if serving_port(&out.text(), port));
     let resolves = host.as_deref().filter(|_| connected).map(resolves_here);
-    let message = advice(connected, host.as_deref(), serving, &details, resolves);
+    let mut message = advice(connected, host.as_deref(), serving, &details, resolves);
+    if state.is_empty() {
+        // Nessuno stato leggibile: il motivo vero è nell'output del programma (demone fermo, accesso, permessi).
+        let first = status.text();
+        let first = first
+            .lines()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or("nessuna risposta");
+        message = format!(
+            "Tailscale è installato ma non risponde: «{}». Apri l'app Tailscale, accedi e attendi che risulti connessa.",
+            first.chars().take(200).collect::<String>()
+        );
+    }
     json!({
         "installed": true,
         "state": state,
@@ -218,8 +324,8 @@ pub fn verdict(failed: Option<&str>, serve_text: &str) -> String {
 /// Diagnosi del collegamento dal punto di vista di questo computer: DNS, porta 443, certificato HTTPS e risposta di
 /// JARVIS (`/api/connectivity`, senza credenziali). Ogni passo ha un tempo massimo; si ferma al primo che fallisce.
 pub fn diagnose(port: u16) -> Value {
-    let status = match run(&["status", "--json"]) {
-        Ok(Some((_, text))) => text,
+    let status = match status_out() {
+        Ok(Some(out)) => json_part(&out),
         Ok(None) => {
             return json!({"ok": false, "steps": [], "verdict": "Tailscale non è installato su questo computer."})
         }
@@ -245,7 +351,7 @@ pub fn diagnose(port: u16) -> Value {
     let serve_text = run(&["serve", "status"])
         .ok()
         .flatten()
-        .map(|(_, text)| text)
+        .map(|out| out.text())
         .unwrap_or_default();
     steps.push(step(
         "serve",
@@ -350,8 +456,9 @@ pub fn publish(port: u16) -> Result<String, String> {
     let port = port.to_string();
     match run(&["serve", "--bg", &port])? {
         None => Err("Tailscale non è installato su questo computer.".into()),
-        Some((true, text)) => Ok(text.trim().to_string()),
-        Some((false, text)) => {
+        Some(out) if out.ok => Ok(out.text()),
+        Some(out) => {
+            let text = out.text();
             let detail = text.trim();
             Err(if detail.is_empty() {
                 "Tailscale non ha completato la pubblicazione: controlla di essere connesso e di aver abilitato HTTPS nella console.".into()
@@ -435,5 +542,95 @@ mod tests {
         assert!(verdict(Some("http"), "").contains("non è JARVIS"));
         let item = step("dns", false, "x".repeat(500));
         assert_eq!(item["detail"].as_str().unwrap().chars().count(), 240);
+    }
+
+    #[cfg(unix)]
+    fn fake(dir: &std::path::Path, name: &str, body: &str) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join(name);
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path.to_string_lossy().into_owned()
+    }
+
+    #[cfg(unix)]
+    fn scratch() -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("jarvis-ts-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_large_status_does_not_block_the_client() {
+        let d = scratch();
+        // 400 KB su stdout: oltre il buffer della pipe, il vecchio codice restava bloccato fino al limite di tempo.
+        let big = fake(
+            &d,
+            "big",
+            "head -c 400000 /dev/zero | tr '\\0' 'a'; echo; exit 0",
+        );
+        let started = Instant::now();
+        let out = run_with(&[big], &["status", "--json"]).unwrap().unwrap();
+        assert!(out.ok && out.stdout.len() > 399_000);
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            started.elapsed()
+        );
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_cli_that_cannot_reach_the_daemon_is_skipped_for_the_next_candidate() {
+        let d = scratch();
+        let wrong = fake(
+            &d,
+            "brew",
+            r#"echo "failed to connect to local tailscaled; it doesn't appear to be running" >&2; exit 1"#,
+        );
+        let right = fake(
+            &d,
+            "app",
+            r#"echo '{"BackendState":"Running","Self":{"DNSName":"casa.tail1.ts.net."}}'; echo 'Warning: client version 1.2 != server 1.3' >&2"#,
+        );
+        let missing = d.join("assente").to_string_lossy().into_owned();
+        let out = run_with(&[missing.clone(), wrong.clone(), right], &["status"])
+            .unwrap()
+            .unwrap();
+        assert!(out.ok, "{out:?}");
+        // L'avviso su stderr non rovina il JSON.
+        let (state, host) = parse_status(&json_part(&out));
+        assert_eq!(
+            (state.as_str(), host.as_deref()),
+            ("Running", Some("casa.tail1.ts.net"))
+        );
+        // Se nessuno raggiunge il demone, resta l'ultimo esito con il motivo.
+        let none = run_with(&[wrong], &["status"]).unwrap().unwrap();
+        assert!(!none.ok && daemon_unreachable(&none.text()));
+        // Nessun programma installato.
+        assert!(run_with(&[missing], &["status"]).unwrap().is_none());
+        let _ = std::fs::remove_dir_all(d);
+    }
+
+    #[test]
+    fn json_is_extracted_around_warnings_and_unreachable_daemons_are_recognised() {
+        let out = Out {
+            ok: true,
+            stdout: "Warning: x\n{\"BackendState\":\"Running\"}\ncoda".into(),
+            stderr: String::new(),
+        };
+        assert_eq!(parse_status(&json_part(&out)).0, "Running");
+        let plain = Out {
+            ok: false,
+            stdout: String::new(),
+            stderr: "Tailscale is stopped.".into(),
+        };
+        assert_eq!(parse_status(&json_part(&plain)).0, "");
+        assert!(daemon_unreachable(
+            "failed to connect to local Tailscale service"
+        ));
+        assert!(!daemon_unreachable("Logged out."));
     }
 }

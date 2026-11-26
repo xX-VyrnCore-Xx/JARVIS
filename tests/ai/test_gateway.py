@@ -81,6 +81,7 @@ class OfflineBackend(unittest.TestCase):
             "premi cmd+shift+s": ("app.key", {"key": "s", "modifiers": ["command", "shift"]}),
             "premi invio": ("app.key", {"key": "return"}),
             "clicca a 400, 300": ("app.click", {"x": 400, "y": 300}),
+            "quali pulsanti ci sono nella finestra": ("app.elements", {}),
             "doppio clic alle coordinate 10 20": ("app.click", {"x": 10, "y": 20, "clicks": 2}),
             "quali finestre sono aperte": ("app.windows", {}),
             "cvss CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H": ("security.cvss", {"vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}),

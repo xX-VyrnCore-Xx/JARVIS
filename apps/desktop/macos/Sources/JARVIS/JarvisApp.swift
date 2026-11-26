@@ -42,10 +42,11 @@ private enum Section: String, Identifiable {
     case system = "Sistema", models = "Modelli AI", updates = "Aggiornamenti", notifications = "Notifiche"
     case missions = "Missioni", profile = "Profilo", plans = "Piani", tools = "Strumenti"
     case agents = "Agenti", plugins = "Pacchetti", users = "Utenti", voice = "Voce", map = "Mappa", privacy = "Privacy"
+    case research = "Ricerche"
 
     static let navigation: [(title: String, entries: [Section])] = [
         ("Assistente", [.dashboard, .chat, .tasks, .models, .voice, .map, .notifications, .profile]),
-        ("Organizzazione", [.missions, .plans, .workflows, .workspace, .memory, .skills, .agents]),
+        ("Organizzazione", [.missions, .plans, .workflows, .workspace, .memory, .research, .skills, .agents]),
         ("Collegamenti", [.devices, .tools, .plugins, .connectors]),
         ("Amministrazione", [.confirmations, .users, .security, .privacy, .audit, .system, .updates])
     ]
@@ -79,6 +80,7 @@ private enum Section: String, Identifiable {
         case .voice: "waveform.circle"
         case .map: "map"
         case .privacy: "hand.raised.square"
+        case .research: "magnifyingglass.circle"
         }
     }
     var endpoint: String {
@@ -108,6 +110,7 @@ private enum Section: String, Identifiable {
         case .voice: "/api/setup"
         case .map: "/api/health"
         case .privacy: "/api/privacy/overview"
+        case .research: "/api/research"
         }
     }
 }
@@ -191,6 +194,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var mapSummary = ""
     @State private var mapSteps: [String] = []
     @State private var mapLink: URL?
+    /// Rapporto Markdown della ricerca salvata aperta nella sezione «Ricerche» (ADR-0206).
+    @State private var researchText: String?
     @State private var mapBusy = false
     @State private var mapCamera: MapCameraPosition = .region(MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 42.5, longitude: 12.5),
@@ -1824,6 +1829,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         case .voice: voiceInstaller
         case .map: mapView
         case .privacy: privacyPanel
+        case .research: researchPanel
         case .devices:
             deviceConnection
         case .models:
@@ -2713,6 +2719,70 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     Button("Permessi e autonomia") { select(.security) }
                     Button("Connettori") { select(.connectors) }
                     Button("Audit") { select(.audit) }
+                }
+            }
+            card("Cronologia dei permessi", icon: "clock.arrow.circlepath") {
+                let history = (payload["permission_history"] as? [String: Any])?["items"] as? [[String: Any]] ?? []
+                if history.isEmpty {
+                    Text("Nessuna modifica registrata.").font(.callout).foregroundStyle(.secondary)
+                }
+                ForEach(Array(history.prefix(10).enumerated()), id: \.offset) { _, entry in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(entry["at"] as? String ?? "?") · \(entry["kind"] as? String ?? "?")")
+                            .font(.caption.weight(.semibold))
+                        ForEach(Array((entry["changes"] as? [[String: Any]] ?? []).prefix(6).enumerated()), id: \.offset) { _, change in
+                            Text("\(change["field"] as? String ?? "?"): \(String(describing: change["from"] ?? "—")) → \(String(describing: change["to"] ?? "—"))")
+                                .font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: Ricerche salvate (ADR-0206)
+
+    private func openResearch(_ id: String) {
+        guard !id.isEmpty else { return }
+        error = nil
+        Task {
+            do {
+                let result = try await core.request("/api/research/\(id)")
+                researchText = result["markdown"] as? String ?? "Ricerca vuota."
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+
+    /// Ricerche salvate dal proprietario: elenco, lettura del rapporto ed eliminazione. Si creano dalla chat.
+    private var researchPanel: some View {
+        let items = payload["items"] as? [[String: Any]] ?? []
+        return VStack(alignment: .leading, spacing: 14) {
+            card("Ricerche salvate", icon: "magnifyingglass.circle") {
+                Text("Si creano dalla chat («salva questa ricerca come …»). Qui puoi rileggerle o eliminarle.")
+                    .font(.callout).foregroundStyle(.secondary)
+                if items.isEmpty {
+                    Text("Nessuna ricerca salvata.").foregroundStyle(.secondary)
+                }
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    let id = item["id"] as? String ?? ""
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item["title"] as? String ?? "Ricerca").font(.headline)
+                        Text("\(item["findings"] as? Int ?? 0) risultati · \(item["sources"] as? Int ?? 0) fonti · \(item["open_questions"] as? Int ?? 0) domande aperte · \(item["status"] as? String ?? "")")
+                            .font(.caption).foregroundStyle(.secondary)
+                        HStack {
+                            Button("Apri") { openResearch(id) }
+                            Button("Elimina", role: .destructive) {
+                                researchText = nil
+                                mutate("/api/research/\(id)", method: "DELETE", body: [:])
+                            }
+                        }
+                    }
+                }
+            }
+            if let text = researchText {
+                card("Rapporto", icon: "doc.text") {
+                    Text(text).font(.callout).textSelection(.enabled)
+                    Button("Chiudi") { researchText = nil }
                 }
             }
         }
