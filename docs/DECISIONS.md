@@ -2471,6 +2471,15 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Limiti:** solo clic sinistro, nessun trascinamento né scorrimento; le coordinate sono in punti dello schermo (come le vede `screen.read`); su schermi con scala diversa possono servire verifiche. Nessuna scoperta automatica degli elementi (accessibilità ad albero) ancora.
 - **Evidenza:** test su validazione (valori ostili e fuori scala), piano macOS/Windows e assenza di interpolazione.
 
+### ADR-0213 — Aggiornamento in app: attesa della chiusura, riavvio garantito ed esito leggibile
+
+- **Data:** 2026-11-26. **Stato:** implementata; lo script macOS è provato con strumenti simulati (successo, immagine illeggibile, ripristino), **non** su macOS e Windows reali con una release vera.
+- **Sintomo:** gli aggiornamenti in app non andavano a buon fine e l'app si chiudeva senza riaprirsi.
+- **Cause nello script (ADR-0109):** (1) attesa a tempo fisso di 3 secondi invece della chiusura dei processi: su macOS `open` riattivava l'app ancora in chiusura, su Windows l'installatore trovava file bloccati (Core, worker Python); (2) ogni errore (`hdiutil` che non apre l'immagine, copia o spostamento falliti) terminava lo script **senza riaprire l'app**; (3) nessun registro: impossibile capire perché.
+- **Decisione:** macOS attende per PID il Core e l'app (fino a 60 s), sostituisce con ripristino della versione precedente se lo spostamento fallisce e **riapre sempre** l'app; Windows attende (fino a 40 s) e poi chiude i processi che girano dalla cartella dell'app, installa con `/S /D=<cartella>`, e riavvia sempre. Entrambi scrivono `updates/apply.log` e `updates/apply-result.txt` (`ok` o `failed: motivo`); al riavvio il Core legge l'esito una volta e, se è fallito, notifica «Aggiornamento non riuscito» con il motivo. Lo script parte staccato anche da un eventuale job di Windows (`CREATE_BREAKAWAY_FROM_JOB`, con ripiego).
+- **Limiti:** se un processo non si chiude, su macOS dopo 60 s si procede comunque (la sostituzione del pacchetto è sicura anche con l'app aperta) e l'app può restare quella precedente; la notifica lo segnala al riavvio successivo. Nessuna vista dedicata dell'esito nelle app: compare nelle notifiche.
+- **Evidenza:** test su script (attesa, riavvio, ripristino, percorsi non sicuri, nessun segnaposto) e sull'esito letto una sola volta; prova del script macOS con strumenti simulati.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

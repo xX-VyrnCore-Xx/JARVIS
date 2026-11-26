@@ -358,24 +358,122 @@ pub fn app_location(exe: &Path) -> Option<PathBuf> {
         })
 }
 
-/// Script che attende la chiusura dell'app, installa e riavvia.
-pub fn install_script(os: &str, installer: &Path, app: &Path) -> Result<String, String> {
+/// Dati che lo script di aggiornamento usa per diagnosticare e attendere la chiusura dell'app.
+pub struct ScriptCtx<'a> {
+    /// Registro dell'aggiornamento (`apply.log`): cosa è successo, passo per passo.
+    pub log: &'a Path,
+    /// Esito (`apply-result.txt`): `ok` oppure `failed: <motivo>`; il Core lo legge al riavvio.
+    pub result: &'a Path,
+    /// Processi da attendere prima di sostituire l'app (il Core e l'app che lo ha avviato).
+    pub pids: Vec<u32>,
+}
+
+const MAC_SCRIPT: &str = r#"#!/bin/sh
+LOG="@LOG@"
+RESULT="@RESULT@"
+log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG"; }
+fail() { log "ERRORE: $*"; echo "failed: $*" > "$RESULT"; }
+log "attendo la chiusura di JARVIS"
+n=0
+for pid in @PIDS@; do
+  while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 60 ]; do sleep 1; n=$((n + 1)); done
+done
+sleep 1
+mnt=$(mktemp -d /tmp/jarvis-update.XXXXXX)
+if [ -z "$mnt" ]; then
+  fail "cartella temporanea non creabile"
+elif hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "@INSTALLER@" >> "$LOG" 2>&1; then
+  if [ -d "$mnt/JARVIS.app" ] && rm -rf "@APP@.new" && ditto "$mnt/JARVIS.app" "@APP@.new" >> "$LOG" 2>&1; then
+    xattr -dr com.apple.quarantine "@APP@.new" 2>/dev/null
+    rm -rf "@APP@.old"
+    if mv "@APP@" "@APP@.old" >> "$LOG" 2>&1; then
+      if mv "@APP@.new" "@APP@" >> "$LOG" 2>&1; then
+        rm -rf "@APP@.old"; echo ok > "$RESULT"; log "nuova versione installata"
+      else
+        mv "@APP@.old" "@APP@"; rm -rf "@APP@.new"; fail "sostituzione non riuscita: ripristinata la versione precedente"
+      fi
+    else
+      rm -rf "@APP@.new"; fail "non posso sostituire @APP@: controlla i permessi della cartella"
+    fi
+  else
+    rm -rf "@APP@.new"; fail "copia della nuova versione non riuscita (JARVIS.app assente nell'immagine o spazio insufficiente)"
+  fi
+  hdiutil detach "$mnt" -force >> "$LOG" 2>&1
+else
+  fail "impossibile aprire l'immagine disco dell'aggiornamento"
+fi
+rmdir "$mnt" 2>/dev/null
+log "riavvio JARVIS"
+open "@APP@" >> "$LOG" 2>&1 || log "ERRORE: riavvio non riuscito: apri JARVIS dal Launchpad"
+"#;
+
+const WINDOWS_SCRIPT: &str = "@echo off\r\n\
+set \"LOG=@LOG@\"\r\n\
+set \"RESULT=@RESULT@\"\r\n\
+echo %date% %time% attendo la chiusura di JARVIS >> \"%LOG%\"\r\n\
+powershell -NoProfile -NonInteractive -Command \"$d='@APP@\\'; for($i=0;$i -lt 40;$i++){ $p=@(Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($d,[StringComparison]::OrdinalIgnoreCase) }); if($p.Count -eq 0){break}; Start-Sleep 1 }; Get-Process | Where-Object { $_.Path -and $_.Path.StartsWith($d,[StringComparison]::OrdinalIgnoreCase) } | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep 1\"\r\n\
+echo %date% %time% avvio l'installazione >> \"%LOG%\"\r\n\
+start \"\" /wait \"@INSTALLER@\" /S /D=@APP@\r\n\
+set \"CODE=%errorlevel%\"\r\n\
+echo %date% %time% installatore terminato con codice %CODE% >> \"%LOG%\"\r\n\
+if \"%CODE%\"==\"0\" goto okres\r\n\
+echo failed: l'installatore ha restituito il codice %CODE% > \"%RESULT%\"\r\n\
+goto relaunch\r\n\
+:okres\r\n\
+echo ok > \"%RESULT%\"\r\n\
+:relaunch\r\n\
+echo %date% %time% riavvio JARVIS >> \"%LOG%\"\r\n\
+if exist \"@APP@\\jarvis-desktop.exe\" start \"\" \"@APP@\\jarvis-desktop.exe\"\r\n\
+if not exist \"@APP@\\jarvis-desktop.exe\" echo failed: jarvis-desktop.exe non trovato dopo l'installazione > \"%RESULT%\"\r\n";
+
+/// Script che attende la chiusura dell'app, installa e **riavvia sempre** l'app (anche se l'installazione
+/// fallisce, riapre la versione precedente), scrivendo un registro e un esito leggibili (ADR-0213).
+pub fn install_script(
+    os: &str,
+    installer: &Path,
+    app: &Path,
+    ctx: &ScriptCtx,
+) -> Result<String, String> {
     let installer = safe_path(installer)?;
     let app = safe_path(app)?;
-    match os {
-        "windows" => Ok(format!(
-            "@echo off\r\nping -n 4 127.0.0.1 >nul\r\nstart \"\" /wait \"{installer}\" /S\r\nif exist \"{app}\\jarvis-desktop.exe\" start \"\" \"{app}\\jarvis-desktop.exe\"\r\n"
-        )),
-        "macos" => Ok(format!(
-            "#!/bin/sh\nsleep 3\nmnt=$(mktemp -d /tmp/jarvis-update.XXXXXX) || exit 1\n\
-             hdiutil attach -nobrowse -readonly -mountpoint \"$mnt\" \"{installer}\" >/dev/null || exit 1\n\
-             if [ -d \"$mnt/JARVIS.app\" ] && rm -rf \"{app}.new\" && ditto \"$mnt/JARVIS.app\" \"{app}.new\"; then\n\
-             rm -rf \"{app}.old\"; mv \"{app}\" \"{app}.old\" && mv \"{app}.new\" \"{app}\" && rm -rf \"{app}.old\"\n\
-             else rm -rf \"{app}.new\"; fi\n\
-             hdiutil detach \"$mnt\" -force >/dev/null 2>&1; rmdir \"$mnt\" 2>/dev/null\n\
-             open \"{app}\"\n"
-        )),
-        _ => Err("aggiornamento interno non disponibile su questo sistema".into()),
+    let log = safe_path(ctx.log)?;
+    let result = safe_path(ctx.result)?;
+    let pids = ctx
+        .pids
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(" ");
+    let template = match os {
+        "windows" => WINDOWS_SCRIPT,
+        "macos" => MAC_SCRIPT,
+        _ => return Err("aggiornamento interno non disponibile su questo sistema".into()),
+    };
+    Ok(template
+        .replace("@LOG@", &log)
+        .replace("@RESULT@", &result)
+        .replace("@PIDS@", &pids)
+        .replace("@INSTALLER@", &installer)
+        .replace("@APP@", app.trim_end_matches(['/', '\\'])))
+}
+
+/// Esito dell'ultima installazione, letto una sola volta al riavvio: `None` se non c'è stato un tentativo.
+/// `Ok(())` installata, `Err(motivo)` non riuscita.
+pub fn take_install_result(data_dir: &Path) -> Option<Result<(), String>> {
+    let path = updates_dir(data_dir).join("apply-result.txt");
+    let text = std::fs::read_to_string(&path).ok()?;
+    let _ = std::fs::remove_file(&path);
+    let text = text.trim();
+    if text == "ok" {
+        Some(Ok(()))
+    } else {
+        Some(Err(text
+            .strip_prefix("failed:")
+            .unwrap_or(text)
+            .trim()
+            .chars()
+            .take(300)
+            .collect()))
     }
 }
 
@@ -386,38 +484,61 @@ pub fn apply(data_dir: &Path) -> Result<Value, String> {
     let app = app_location(&exe)
         .ok_or("installazione non riconosciuta: aggiorna scaricando la release")?;
     let os = std::env::consts::OS;
-    let script = install_script(os, &installer, &app)?;
     let dir = updates_dir(data_dir);
+    let log = dir.join("apply.log");
+    let result = dir.join("apply-result.txt");
+    let _ = std::fs::remove_file(&result);
+    let _ = std::fs::write(&log, format!("Aggiornamento a {version}\n"));
+    let mut pids = vec![std::process::id()];
+    #[cfg(unix)]
+    pids.push(std::os::unix::process::parent_id());
+    let script = install_script(
+        os,
+        &installer,
+        &app,
+        &ScriptCtx {
+            log: &log,
+            result: &result,
+            pids,
+        },
+    )?;
     let path = dir.join(if os == "windows" {
         "apply.cmd"
     } else {
         "apply.sh"
     });
     std::fs::write(&path, script).map_err(|_| "script di aggiornamento non scrivibile")?;
-    let mut cmd = if os == "windows" {
-        let mut c = std::process::Command::new("cmd.exe");
-        c.args(["/C", "call"]).arg(&path);
-        c
-    } else {
-        let mut c = std::process::Command::new("/bin/sh");
-        c.arg(&path);
-        c
+    let build = |_extra: u32| {
+        let mut cmd = if os == "windows" {
+            let mut c = std::process::Command::new("cmd.exe");
+            c.args(["/C", "call"]).arg(&path);
+            c
+        } else {
+            let mut c = std::process::Command::new("/bin/sh");
+            c.arg(&path);
+            c
+        };
+        cmd.stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW (+ CREATE_BREAKAWAY_FROM_JOB
+            // al primo tentativo: se l'app è in un job che chiude i figli, lo script deve sopravvivere).
+            cmd.creation_flags(0x0000_0008 | 0x0000_0200 | 0x0800_0000 | _extra);
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0);
+        }
+        cmd
     };
-    cmd.stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
-        cmd.creation_flags(0x0000_0008 | 0x0000_0200 | 0x0800_0000);
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        cmd.process_group(0);
-    }
-    cmd.spawn()
+    // Se il job non ammette il distacco il primo tentativo fallisce: si ripete senza.
+    build(0x0100_0000)
+        .spawn()
+        .or_else(|_| build(0).spawn())
         .map_err(|_| "avvio dell'installazione non riuscito")?;
     Ok(json!({"installing": true, "version": version, "restart": true}))
 }
@@ -507,28 +628,94 @@ mod tests {
 
     #[test]
     fn scripts_wait_install_and_restart_and_refuse_unsafe_paths() {
+        let ctx = |log: &'static str, result: &'static str| ScriptCtx {
+            log: Path::new(log),
+            result: Path::new(result),
+            pids: vec![111, 222],
+        };
         let win = install_script(
             "windows",
             Path::new("C:/u/up/JARVIS_1_x64-setup.exe"),
             Path::new("C:/u/JARVIS"),
+            &ctx("C:/u/up/apply.log", "C:/u/up/apply-result.txt"),
         )
         .unwrap();
-        assert!(win.contains("/wait") && win.contains("/S") && win.contains("jarvis-desktop.exe"));
+        assert!(win.contains("/wait") && win.contains("/S /D=C:/u/JARVIS"));
+        assert!(
+            win.contains("Stop-Process") && win.contains("StartsWith($d"),
+            "attende e chiude i processi dell'app"
+        );
+        assert!(
+            win.contains("jarvis-desktop.exe") && win.contains(":relaunch"),
+            "riavvia sempre"
+        );
+        assert!(win.contains("apply.log") && win.contains("apply-result.txt"));
+        assert!(
+            !["@LOG@", "@RESULT@", "@PIDS@", "@INSTALLER@", "@APP@"]
+                .iter()
+                .any(|k| win.contains(k)),
+            "segnaposto rimasto: {win}"
+        );
+
         let mac = install_script(
             "macos",
             Path::new("/d/JARVIS.dmg"),
-            Path::new("/Applications/JARVIS.app"),
+            Path::new("/Applications/JARVIS.app/"),
+            &ctx("/d/apply.log", "/d/apply-result.txt"),
         )
         .unwrap();
         assert!(mac.contains("hdiutil attach") && mac.contains("ditto") && mac.contains("open "));
-        assert!(install_script("windows", Path::new("C:/a&b/x.exe"), Path::new("C:/u")).is_err());
-        assert!(install_script(
-            "macos",
-            Path::new("/a$b/x.dmg"),
-            Path::new("/Applications/JARVIS.app")
+        assert!(
+            mac.contains("for pid in 111 222") && mac.contains("kill -0"),
+            "attende i processi per PID"
+        );
+        assert!(
+            mac.contains("ripristinata la versione precedente"),
+            "ripristina se la sostituzione fallisce"
+        );
+        assert!(
+            mac.contains("log \"riavvio JARVIS\"")
+                && mac.contains("open \"/Applications/JARVIS.app\"")
+        );
+        assert!(
+            !mac.contains("/Applications/JARVIS.app/\""),
+            "barra finale rimossa"
+        );
+        assert!(
+            !["@LOG@", "@RESULT@", "@PIDS@", "@INSTALLER@", "@APP@"]
+                .iter()
+                .any(|k| mac.contains(k)),
+            "segnaposto rimasto: {mac}"
+        );
+
+        let bad = |os: &str, installer: &'static str, app: &'static str| {
+            install_script(os, Path::new(installer), Path::new(app), &ctx("/l", "/r"))
+        };
+        assert!(bad("windows", "C:/a&b/x.exe", "C:/u").is_err());
+        assert!(bad("macos", "/a$b/x.dmg", "/Applications/JARVIS.app").is_err());
+        assert!(bad("linux", "/x", "/y").is_err());
+    }
+
+    #[test]
+    fn the_install_result_is_read_once() {
+        let dir =
+            std::env::temp_dir().join(format!("jarvis-res-{}", uuid::Uuid::new_v4().simple()));
+        let up = updates_dir(&dir);
+        std::fs::create_dir_all(&up).unwrap();
+        assert!(take_install_result(&dir).is_none());
+        std::fs::write(
+            up.join("apply-result.txt"),
+            "failed: non posso sostituire l'app\n",
         )
-        .is_err());
-        assert!(install_script("linux", Path::new("/x"), Path::new("/y")).is_err());
+        .unwrap();
+        assert_eq!(
+            take_install_result(&dir),
+            Some(Err("non posso sostituire l'app".to_string()))
+        );
+        assert!(take_install_result(&dir).is_none(), "letto una sola volta");
+        std::fs::write(up.join("apply-result.txt"), "ok\n").unwrap();
+        assert_eq!(take_install_result(&dir), Some(Ok(())));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
