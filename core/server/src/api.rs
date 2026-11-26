@@ -77,6 +77,19 @@ fn remote_throttled(state: &AppState) -> bool {
 }
 
 /// Confronto a tempo costante del token del proprietario.
+/// Valore di «Authorization: Bearer …»: lo schema non distingue maiuscole (RFC 9110). Il token resta esatto:
+/// quello del proprietario si confronta byte per byte (`the_owner_token_must_match_exactly`).
+fn bearer_value(header: &str) -> Option<&str> {
+    let (scheme, rest) = header.split_once(' ')?;
+    scheme.eq_ignore_ascii_case("bearer").then_some(rest)
+}
+
+/// Token di un dispositivo come arriva dall'intestazione: gli spazi (o un a capo) aggiunti da alcuni client si
+/// tolgono e l'esadecimale si porta in minuscolo, come lo produce il Core, prima del controllo.
+fn device_token_value(raw: &str) -> String {
+    raw.trim().to_ascii_lowercase()
+}
+
 fn same_token(given: Option<&str>, expected: &str) -> bool {
     given.is_some_and(|given| {
         let (a, b) = (given.as_bytes(), expected.as_bytes());
@@ -327,8 +340,8 @@ async fn guard(State(state): State<Shared>, mut req: Request, next: Next) -> Res
                 .headers()
                 .get("x-jarvis-device")
                 .and_then(|t| t.to_str().ok())
-                .unwrap_or_default()
-                .to_string();
+                .map(device_token_value)
+                .unwrap_or_default();
             // I token dei dispositivi sono 64 caratteri esadecimali: il resto si scarta senza interrogare il Core.
             if token.len() != 64 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
                 note_remote_failure(&state);
@@ -395,7 +408,7 @@ async fn guard(State(state): State<Shared>, mut req: Request, next: Next) -> Res
                 req.headers()
                     .get(header::AUTHORIZATION)
                     .and_then(|t| t.to_str().ok())
-                    .and_then(|t| t.strip_prefix("Bearer "))
+                    .and_then(bearer_value)
             });
         if !same_token(token, &state.token) {
             return error(
@@ -3000,7 +3013,8 @@ async fn push_subscription_register(
     device: Option<axum::Extension<DeviceCtx>>,
     Json(body): Json<Value>,
 ) -> Response {
-    let Some(token) = body["token"].as_str().map(str::to_string) else {
+    // Gli spazi o l'a capo in coda al token (frequenti quando lo si copia) non lo rendono un token diverso.
+    let Some(token) = body["token"].as_str().map(|t| t.trim().to_string()) else {
         return CoreError::BadRequest("campo token mancante".into()).into_response();
     };
     if !crate::push::validate_registration_token(&token) {
@@ -4170,10 +4184,11 @@ fn node_id(
 ) -> Option<String> {
     let token = headers
         .get("x-jarvis-device")
-        .and_then(|t| t.to_str().ok())?;
+        .and_then(|t| t.to_str().ok())
+        .map(device_token_value)?;
     state
         .nodes
-        .authenticate_peer(token, peer.and_then(|p| p.0.as_deref()))
+        .authenticate_peer(&token, peer.and_then(|p| p.0.as_deref()))
 }
 
 /// Router della porta TLS dei nodi (ADR-0041): solo le rotte dell'hub, autenticate da certificato e token.
@@ -4298,8 +4313,8 @@ async fn device_me(State(state): State<Shared>, headers: axum::http::HeaderMap) 
     let token = headers
         .get("x-jarvis-device")
         .and_then(|t| t.to_str().ok())
-        .unwrap_or_default()
-        .to_string();
+        .map(device_token_value)
+        .unwrap_or_default();
     reply(
         with_core(&state, move |j| {
             j.device_for_token(&token)?.ok_or_else(|| {
@@ -4562,4 +4577,24 @@ pub fn state_with_remote(
         job_handles: Mutex::new(std::collections::HashMap::new()),
         auth_failures: Mutex::new(std::collections::HashMap::new()),
     })
+}
+
+#[cfg(test)]
+mod token_header_tests {
+    use super::*;
+
+    #[test]
+    fn bearer_scheme_and_device_tokens_are_read_leniently() {
+        assert_eq!(bearer_value("Bearer abc"), Some("abc"));
+        assert_eq!(bearer_value("bearer abc"), Some("abc"));
+        assert_eq!(bearer_value("BEARER abc"), Some("abc"));
+        assert_eq!(
+            bearer_value("Bearer abc "),
+            Some("abc "),
+            "il token resta esatto"
+        );
+        assert_eq!(bearer_value("Basic abc"), None);
+        assert_eq!(bearer_value("abc"), None);
+        assert_eq!(device_token_value(" AB12cd\n"), "ab12cd");
+    }
 }

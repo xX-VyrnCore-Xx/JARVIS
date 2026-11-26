@@ -288,6 +288,7 @@ impl PushSubscriptions {
         token: &str,
         platform: Platform,
     ) -> Result<(), String> {
+        let token = token.trim();
         if !validate_registration_token(token) {
             return Err("token FCM non valido".into());
         }
@@ -301,11 +302,13 @@ impl PushSubscriptions {
             )
             .optional()
             .map_err(|_| "registrazione push non disponibile")?;
+        // Un token FCM resta legato al dispositivo che lo ha registrato (nemmeno il proprietario lo sottrae). Lo
+        // stesso telefono riassociato deve prima far revocare il vecchio dispositivo: il messaggio lo dice.
         if current
             .as_deref()
             .is_some_and(|current| current != owner_id)
         {
-            return Err("registrazione push già associata a un altro principal".into());
+            return Err("token già registrato da un altro dispositivo: revoca il vecchio dispositivo in Dispositivi e riprova".into());
         }
 
         secrets.put(&format!("push:{hash}"), token)?;
@@ -753,6 +756,33 @@ fn access_token(account: &ServiceAccount) -> Result<String, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn whitespace_is_ignored_and_a_token_stays_bound_to_its_device_with_a_clear_message() {
+        let dir = scratch("bound");
+        let push = PushSubscriptions::open(&dir.join("jarvis.sqlite3")).unwrap();
+        let secrets = crate::secrets::SecretStore::open_with(&dir, None).unwrap();
+        let token = "fcm:token_dello_stesso_telefono_0001";
+        push.register(&secrets, "device-old", token, Platform::Android)
+            .unwrap();
+        // Lo stesso token con spazi o a capo è lo stesso token, non uno nuovo né uno non valido.
+        push.register(
+            &secrets,
+            "device-old",
+            &format!("  {token}\n"),
+            Platform::Android,
+        )
+        .unwrap();
+        assert_eq!(push.status()["registered"], 1, "nessun duplicato");
+        let error = push
+            .register(&secrets, "device-new", token, Platform::Android)
+            .unwrap_err();
+        assert!(error.contains("revoca il vecchio dispositivo"), "{error}");
+        assert!(push
+            .register(&secrets, "device-new", "troppo corto", Platform::Android)
+            .is_err());
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     #[test]
     fn registration_tokens_are_limited_to_fcm_token_characters_and_size() {
