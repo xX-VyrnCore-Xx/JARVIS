@@ -2,7 +2,7 @@
 //! segnali lessicali pesati. I nomi sono quelli di `agents::SPECIALISTS`: `system`, `monitoring` (sicurezza),
 //! `research`, `coding`, `business`, `memory`, `automation`.
 //!
-//! Regole di fondo, ricavate dal dataset di instradamento (`tests/data/routing_dataset.tsv`):
+//! Regole di fondo, ricavate dal dataset di instradamento (`tests/datasets/routing_dataset.tsv`):
 //! - il **soggetto** della richiesta (la libreria, il server, il cliente) pesa più del verbo («cerca», «controlla»);
 //! - una **cadenza o una condizione** («ogni giorno», «avvisami», «quando finisce») rende principale
 //!   l'automazione;

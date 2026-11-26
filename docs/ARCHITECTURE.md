@@ -78,7 +78,7 @@ flowchart TB
     subgraph Delivery["Consegna (.github, scripts, tests)"]
         CI["contracts.yml<br/>fmt, clippy, test, e2e, avvio reale"]
         REL["release.yml, release-after-ci.yml<br/>installer macOS e Windows, APK"]
-        TST["tests/<br/>contracts, ai, e2e, data (dataset)"]
+        TST["tests/<br/>contracts, ai, e2e, datasets"]
     end
 
     EXT["Servizi esterni<br/>NVIDIA NIM, server MCP, Gmail, Calendar, GitHub, Hugging Face (lettura MCP, scrittura Hub solo privata), Tailscale"]

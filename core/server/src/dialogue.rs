@@ -517,7 +517,7 @@ mod tests {
 
     fn dataset() -> Vec<(String, String)> {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tests/data/colloquial_dataset.tsv");
+            .join("../../tests/datasets/colloquial_dataset.tsv");
         std::fs::read_to_string(path)
             .unwrap()
             .lines()

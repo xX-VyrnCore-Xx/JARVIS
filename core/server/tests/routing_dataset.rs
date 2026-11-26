@@ -1,4 +1,4 @@
-//! Dataset di instradamento (tests/data/routing_dataset.tsv): per ogni richiesta l'agente principale atteso e quelli
+//! Dataset di instradamento (tests/datasets/routing_dataset.tsv): per ogni richiesta l'agente principale atteso e quelli
 //! di supporto. Misura quanto `agents::rank` li rispetta; il test fallisce sotto la soglia fissata.
 
 use jarvis_core::dispatch;
@@ -18,7 +18,7 @@ fn name_of(italian: &str) -> Option<&'static str> {
 
 fn rows() -> Vec<(String, &'static str, Vec<&'static str>)> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/data/routing_dataset.tsv");
+        .join("../../tests/datasets/routing_dataset.tsv");
     std::fs::read_to_string(path)
         .expect("dataset")
         .lines()
@@ -77,7 +77,7 @@ fn routing_report() {
 #[test]
 fn complex_requests_report() {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tests/data/complex_requests.tsv");
+        .join("../../tests/datasets/complex_requests.tsv");
     let rows: Vec<(String, Vec<&'static str>)> = std::fs::read_to_string(path)
         .expect("dataset")
         .lines()

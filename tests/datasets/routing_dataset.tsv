@@ -1,0 +1,41 @@
+# richiesta | agente principale | agenti di supporto (separati da virgola, "nessuno" se assenti)
+Controlla perché il Mac è diventato lento | sistema | sicurezza
+Dimmi cosa sta consumando tutta la RAM | sistema | nessuno
+Cerca un modo per velocizzare questo algoritmo | codice | ricerca web
+Verifica se il mio progetto contiene credenziali esposte | sicurezza | codice
+Trova nuovi clienti a cui proporre siti web | azienda | ricerca web
+Organizzami una strategia commerciale per questa settimana | azienda | memoria
+Ricostruisci tutte le decisioni prese sul progetto | memoria | codice
+Controlla se è uscita una nuova versione di Ollama | ricerca web | nessuno
+Ogni giorno verifica che il server sia operativo | automazioni | sistema
+Dimmi perché Docker non parte | sistema | codice
+Cerca una libreria che possa sostituire questa | codice | ricerca web
+Controlla se questa libreria è affidabile | sicurezza | ricerca web
+Analizza il sito di questa azienda e trova opportunità commerciali | azienda | ricerca web
+Recupera il preventivo che avevamo preparato | memoria | azienda
+Spiegami cosa fa questo processo | sistema | ricerca web
+Configura un ambiente di sviluppo isolato | codice | sistema, sicurezza
+Controlla se il mio server ha servizi esposti inutilmente | sicurezza | sistema
+Avvisami quando il repository viene aggiornato | automazioni | codice
+Trovami una soluzione gratuita per questo problema | ricerca web | codice
+Fammi un'analisi dei costi di questo progetto | azienda | codice
+Riprendi l'attività che avevamo lasciato ieri | memoria | agente associato all'attività
+Controlla se tutti i backup sono riusciti | sistema | sicurezza
+Verifica che questa modifica non introduca vulnerabilità | sicurezza | codice
+Crea un report sullo stato dell'infrastruttura | sistema | sicurezza
+Analizza le richieste dei clienti che ho ricevuto | azienda | memoria
+Trova informazioni aggiornate e salva quelle importanti | ricerca web | memoria
+Quando finisce il download analizza il file | automazioni | sicurezza
+Verifica se questa API è ancora supportata | ricerca web | codice
+Controlla se possiamo automatizzare questa procedura | automazioni | sistema
+Dimmi quali sono le priorità dei miei progetti | memoria | azienda
+Verifica la qualità del codice prima della release | codice | sicurezza
+Controlla perché la rete non funziona | sistema | sicurezza
+Trovami dei concorrenti di questa azienda | azienda | ricerca web
+Ricordami perché avevamo scartato quella tecnologia | memoria | codice
+Controlla il server ogni cinque minuti e segnalami le anomalie | automazioni | sistema
+Verifica che le dipendenze siano aggiornate e sicure | sicurezza | codice, ricerca web
+Organizza tutto quello che riguarda questo cliente | azienda | memoria, sistema
+Analizza il consumo delle risorse durante l'esecuzione | sistema | codice
+Valuta se questa idea è tecnicamente fattibile | codice | ricerca web
+Dimmi se questo progetto potrebbe essere redditizio | azienda | ricerca web

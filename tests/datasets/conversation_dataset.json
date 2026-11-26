@@ -1,0 +1,361 @@
+[
+ {
+  "id": 1,
+  "turns": [
+   [
+    "user",
+    "Aprimi il progetto JARVIS."
+   ],
+   [
+    "jarvis",
+    "Ho individuato il repository. Vuoi aprirlo nell'ambiente di sviluppo?"
+   ],
+   [
+    "user",
+    "Sì, e fallo partire."
+   ]
+  ],
+  "expected_behavior": "comprendere che «fallo» si riferisce al progetto JARVIS e utilizzare la procedura di avvio appropriata",
+  "expect": {
+   "followup": "confirm"
+  }
+ },
+ {
+  "id": 2,
+  "turns": [
+   [
+    "user",
+    "Controlla il server."
+   ],
+   [
+    "jarvis",
+    "Il server è raggiungibile, ma un servizio risulta arrestato."
+   ],
+   [
+    "user",
+    "Quale?"
+   ]
+  ],
+  "expected_behavior": "indicare il servizio rilevato senza perdere il contesto",
+  "expect": {
+   "followup": "which"
+  }
+ },
+ {
+  "id": 3,
+  "turns": [
+   [
+    "user",
+    "Analizza questo repository."
+   ],
+   [
+    "jarvis",
+    "Ho individuato tre problemi."
+   ],
+   [
+    "user",
+    "Sistema solo il secondo."
+   ]
+  ],
+  "expected_behavior": "intervenire esclusivamente sul secondo problema precedentemente identificato",
+  "expect": {
+   "constraints": [
+    "select:2"
+   ]
+  }
+ },
+ {
+  "id": 4,
+  "turns": [
+   [
+    "user",
+    "Cerca dei potenziali clienti."
+   ],
+   [
+    "jarvis",
+    "Ho individuato alcune attività."
+   ],
+   [
+    "user",
+    "Tieni soltanto quelli che hanno un sito vecchio."
+   ]
+  ],
+  "expected_behavior": "filtrare i risultati precedenti utilizzando il nuovo criterio",
+  "expect": {
+   "constraints": [
+    "filter"
+   ]
+  }
+ },
+ {
+  "id": 5,
+  "turns": [
+   [
+    "user",
+    "Prepara una build."
+   ],
+   [
+    "jarvis",
+    "La build non è riuscita a causa di una dipendenza."
+   ],
+   [
+    "user",
+    "Sistemala e riprova."
+   ]
+  ],
+  "expected_behavior": "correggere la dipendenza in modo compatibile e ripetere la build",
+  "expect": {
+   "followup": "fix_and_retry"
+  }
+ },
+ {
+  "id": 6,
+  "turns": [
+   [
+    "user",
+    "Organizzami i file."
+   ],
+   [
+    "jarvis",
+    "Posso raggrupparli per tipologia."
+   ],
+   [
+    "user",
+    "No, per progetto."
+   ]
+  ],
+  "expected_behavior": "aggiornare il criterio di organizzazione",
+  "expect": {
+   "constraints": [
+    "replace:progetto"
+   ]
+  }
+ },
+ {
+  "id": 7,
+  "turns": [
+   [
+    "user",
+    "Controlla la CPU."
+   ],
+   [
+    "jarvis",
+    "L'utilizzo è elevato."
+   ],
+   [
+    "user",
+    "E la RAM?"
+   ]
+  ],
+  "expected_behavior": "controllare la RAM dello stesso dispositivo",
+  "expect": {
+   "followup": "other_subject"
+  }
+ },
+ {
+  "id": 8,
+  "turns": [
+   [
+    "user",
+    "Cerca un'alternativa a questa libreria."
+   ],
+   [
+    "jarvis",
+    "Ho individuato tre alternative."
+   ],
+   [
+    "user",
+    "Qual è quella più leggera?"
+   ]
+  ],
+  "expected_behavior": "confrontare le alternative già individuate",
+  "expect": {
+   "followup": "compare"
+  }
+ },
+ {
+  "id": 9,
+  "turns": [
+   [
+    "user",
+    "Modifica il backend."
+   ],
+   [
+    "jarvis",
+    "Ho preparato un piano di modifica."
+   ],
+   [
+    "user",
+    "Aspetta, il database non lo devi toccare."
+   ]
+  ],
+  "expected_behavior": "aggiornare il piano ed escludere qualsiasi modifica al database",
+  "expect": {
+   "constraints": [
+    "exclude:database"
+   ],
+   "blocks": [
+    {
+     "tool": "fs.write",
+     "args": {
+      "path": "data/app.sqlite"
+     },
+     "blocked": true
+    },
+    {
+     "tool": "fs.write",
+     "args": {
+      "path": "src/main.rs"
+     },
+     "blocked": false
+    }
+   ]
+  }
+ },
+ {
+  "id": 10,
+  "turns": [
+   [
+    "user",
+    "Continua lo sviluppo."
+   ],
+   [
+    "jarvis",
+    "Sto procedendo con il modulo di memoria."
+   ],
+   [
+    "user",
+    "Quanto manca?"
+   ]
+  ],
+  "expected_behavior": "fornire lo stato effettivo delle attività residue, senza inventare percentuali",
+  "expect": {
+   "act": "status"
+  }
+ },
+ {
+  "id": 11,
+  "turns": [
+   [
+    "user",
+    "Fammi una ricerca approfondita."
+   ],
+   [
+    "jarvis",
+    "Su quale argomento?"
+   ],
+   [
+    "user",
+    "Quello di cui parlavamo ieri."
+   ]
+  ],
+  "expected_behavior": "recuperare il riferimento dalla memoria; chiedere una precisazione soltanto se ambiguo",
+  "expect": {
+   "followup": "memory_reference"
+  }
+ },
+ {
+  "id": 12,
+  "turns": [
+   [
+    "user",
+    "Prepara una release."
+   ],
+   [
+    "jarvis",
+    "La build e i test sono completati."
+   ],
+   [
+    "user",
+    "Non pubblicarla ancora."
+   ]
+  ],
+  "expected_behavior": "conservare gli artefatti localmente e bloccare la pubblicazione",
+  "expect": {
+   "constraints": [
+    "hold_publish"
+   ],
+   "blocks": [
+    {
+     "tool": "connector.github.rilascio_crea",
+     "args": {},
+     "blocked": true
+    },
+    {
+     "tool": "fs.write",
+     "args": {
+      "path": "dist/app.zip"
+     },
+     "blocked": false
+    }
+   ]
+  }
+ },
+ {
+  "id": 13,
+  "turns": [
+   [
+    "user",
+    "Controlla tutti i servizi."
+   ],
+   [
+    "jarvis",
+    "Due servizi non rispondono."
+   ],
+   [
+    "user",
+    "Riavvia solo quello non critico."
+   ]
+  ],
+  "expected_behavior": "identificare il servizio non critico e verificare le autorizzazioni",
+  "expect": {
+   "constraints": [
+    "scope:non_critical"
+   ]
+  }
+ },
+ {
+  "id": 14,
+  "turns": [
+   [
+    "user",
+    "Cerca un modello AI più potente."
+   ],
+   [
+    "jarvis",
+    "Ho individuato alcune alternative."
+   ],
+   [
+    "user",
+    "Però senza pagare."
+   ]
+  ],
+  "expected_behavior": "mantenere l'obiettivo iniziale e aggiungere il vincolo economico",
+  "expect": {
+   "constraints": [
+    "free_only"
+   ]
+  }
+ },
+ {
+  "id": 15,
+  "turns": [
+   [
+    "user",
+    "Fai come l'altra volta."
+   ],
+   [
+    "jarvis",
+    "Ho trovato la procedura utilizzata in precedenza."
+   ],
+   [
+    "user",
+    "Esatto, ma stavolta sul server."
+   ]
+  ],
+  "expected_behavior": "adattare la procedura al nuovo ambiente e verificarne la compatibilità",
+  "expect": {
+   "followup": "adapt_environment"
+  }
+ }
+]

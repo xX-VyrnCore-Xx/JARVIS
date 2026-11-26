@@ -27,10 +27,10 @@ pub const BUILTIN: [(&str, &str); 4] = [
     ("jarvis-conversations", "conversations"),
 ];
 
-const ROUTING: &str = include_str!("../../../tests/data/routing_dataset.tsv");
-const ACTS: &str = include_str!("../../../tests/data/colloquial_dataset.tsv");
-const COMPLEX: &str = include_str!("../../../tests/data/complex_requests.tsv");
-const CONVERSATIONS: &str = include_str!("../../../tests/data/conversation_dataset.json");
+const ROUTING: &str = include_str!("../../../tests/datasets/routing_dataset.tsv");
+const ACTS: &str = include_str!("../../../tests/datasets/colloquial_dataset.tsv");
+const COMPLEX: &str = include_str!("../../../tests/datasets/complex_requests.tsv");
+const CONVERSATIONS: &str = include_str!("../../../tests/datasets/conversation_dataset.json");
 
 const MAX_CANDIDATES: usize = 500;
 const MAX_TEXT: usize = 600;

@@ -1,0 +1,51 @@
+# frase | atto di conversazione atteso
+Oh JARVIS, ci sei? | presence
+Ehi, mi senti? | presence
+Sei ancora attivo? | presence
+Che si dice? | opening
+Allora, da dove iniziamo? | opening
+Che abbiamo da fare oggi? | opening
+Dai, mettiamoci al lavoro. | opening
+Fammi un attimo il punto della situazione. | status
+Aspetta che non ho capito. | clarify
+Rispondimi senza girarci troppo intorno. | brevity
+Spiegamelo come si deve. | clarify
+Non farmi un papiro. | brevity
+Vai più nel dettaglio. | detail
+Sì, ma concretamente? | concretize
+E quindi che facciamo? | next_step
+Vabbè, lascia perdere. | drop
+No, aspetta, facciamo diversamente. | redirect
+Mi sa che abbiamo fatto una cazzata. | problem
+Che cavolo è successo? | problem
+Perché non va una mazza? | problem
+Ma prima funzionava. | problem
+Non dovrebbe fare così. | problem
+C'è qualcosa che non torna. | problem
+Secondo me abbiamo sbagliato qualcosa. | problem
+Non mi convince per niente. | problem
+Miglioralo un po'. | refine_improve
+Fallo come si deve. | refine_improve
+Rendilo più professionale. | refine_professional
+È troppo complicato, semplificalo. | refine_simplify
+Fallo più veloce. | refine_faster
+Non voglio perdere tempo. | urgency
+Fai direttamente tu. | delegate
+Pensaci tu, mi fido. | delegate
+Valuta tutte le possibilità. | alternatives
+Non accontentarti della prima soluzione. | alternatives
+Trova un modo migliore. | alternatives
+Cerca di capire cosa intendo. | understand
+Fai quello che ritieni più opportuno. | delegate
+Non inventarti le cose. | grounding
+Se non lo sai, dimmelo. | grounding
+Controlla prima di rispondermi. | grounding
+Fammi vedere cosa hai combinato. | status
+A che punto siamo? | status
+Hai finito oppure no? | status
+Quanto manca ancora? | status
+Perché ci stai mettendo così tanto? | status
+C'è qualcosa che ti blocca? | status
+Vediamo di risolverla. | proceed
+Dai che dobbiamo finire. | urgency
+Perfetto, ora andiamo avanti. | proceed

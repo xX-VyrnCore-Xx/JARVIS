@@ -496,7 +496,7 @@ mod tests {
 
     fn conversations() -> Vec<Value> {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../tests/data/conversation_dataset.json");
+            .join("../../tests/datasets/conversation_dataset.json");
         serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
     }
 

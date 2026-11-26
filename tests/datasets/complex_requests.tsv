@@ -1,0 +1,16 @@
+# richiesta | agenti richiesti | risultato atteso
+Analizza il repository, trova gli errori, correggili e prepara una build. | codice, sistema, sicurezza | modifiche verificate, test eseguiti e build generata
+Trovami un cliente, analizza la sua attività e prepara una proposta commerciale. | ricerca web, azienda | cliente reale, necessità documentate e proposta personalizzata
+Controlla il server e dimmi se possiamo migliorare le prestazioni. | sistema, sicurezza, ricerca web | diagnostica basata su metriche effettive e interventi consigliati
+Recupera il progetto di ieri e continua lo sviluppo. | memoria, codice, sistema | contesto ripristinato e attività ripresa senza sovrascrivere modifiche esistenti
+Cerca una nuova tecnologia, confrontala con quella attuale e valuta se conviene migrare. | ricerca web, codice | analisi comparativa, rischi, benefici e strategia di migrazione
+Prepara il server per ospitare questa applicazione. | sistema, codice, sicurezza | requisiti verificati, configurazione pianificata e ambiente validato
+Scopri perché la build fallisce soltanto sul server. | codice, sistema | confronto tra ambienti e identificazione della causa effettiva
+Controlla se possiamo ridurre i costi senza perdere funzionalità. | azienda, sistema, codice | analisi economica e tecnica con alternative verificabili
+Analizza tutti i miei progetti e dimmi quale conviene terminare per primo. | memoria, codice, azienda | priorità motivate considerando avanzamento, complessità e valore
+Individua le operazioni che ripeto frequentemente e proponi automazioni. | memoria, automazioni, sistema | procedure candidate con frequenza, benefici e rischi
+Controlla se questo programma è sicuro prima di installarlo. | ricerca web, sicurezza, sistema | verifica della provenienza e valutazione del rischio prima dell'installazione
+Organizza il lavoro di domani considerando tutti gli impegni. | memoria, automazioni, azienda | pianificazione basata sulle informazioni realmente disponibili
+Analizza questa idea, progettala e dimmi cosa serve per realizzarla. | codice, ricerca web, azienda | requisiti, architettura, fattibilità, costi e piano operativo
+Il server è offline, scopri perché e ripristinalo se puoi. | sistema, sicurezza, automazioni | diagnostica e ripristino entro le autorizzazioni con verifica finale
+Verifica tutte le modifiche apportate oggi al progetto. | codice, memoria, sicurezza | riepilogo delle modifiche, test e criticità residue
