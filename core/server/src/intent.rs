@@ -60,6 +60,10 @@ pub struct Recent {
     pub failures: Vec<Item>,
     /// Applicazione o progetto in primo piano, se l'ambiente li espone (altrimenti `None`: non si inventa).
     pub active: Option<String>,
+    /// Messaggi recenti dell'utente, dal più vecchio (ADR-0218): da qui si leggono i vincoli attivi della chat.
+    pub user_history: Vec<String>,
+    /// Ultima risposta di JARVIS: serve a capire «quale?», «sì, e fallo partire», «qual è la più leggera?».
+    pub last_reply: Option<String>,
 }
 
 /// Oltre questa età (minuti) un riferimento non è presentato come attuale.
@@ -84,6 +88,8 @@ fn fold(text: &str) -> String {
 }
 
 fn starts_with_any(text: &str, prefixes: &[&str]) -> bool {
+    // Il punto finale («lascia perdere.») non cambia la frase.
+    let text = text.trim_end_matches(['.', ':']);
     prefixes
         .iter()
         .any(|p| text == *p || text.starts_with(&format!("{p} ")))
@@ -97,10 +103,24 @@ fn contains_any(text: &str, needles: &[&str]) -> bool {
 
 /// Tipo di enunciato e fiducia nella classificazione.
 pub fn classify(message: &str) -> (Kind, f32) {
-    let text = fold(message);
+    let mut text = fold(message);
+    // Intercalari che non cambiano l'intenzione («vabbè, lascia perdere»).
+    for filler in ["vabbe ", "va be ", "beh ", "mah ", "uffa "] {
+        if let Some(rest) = text.strip_prefix(filler) {
+            text = rest.to_string();
+            break;
+        }
+    }
     let words = text.split_whitespace().count();
     if text.is_empty() {
         return (Kind::Chitchat, 0.2);
+    }
+    // «Aspetta che non ho capito» chiede una spiegazione: non è uno stop; uno sfogo o un dubbio sul lavoro fatto
+    // («ma prima funzionava», «non mi convince») è un'osservazione da diagnosticare, non un'istruzione.
+    match crate::dialogue::act(message) {
+        Some(crate::dialogue::Act::Clarify) => return (Kind::Instruction, 0.8),
+        Some(crate::dialogue::Act::Problem) => return (Kind::Observation, 0.8),
+        _ => {}
     }
     if starts_with_any(
         &text,
@@ -561,9 +581,28 @@ pub fn analyze(message: &str, recent: &Recent) -> Value {
         Kind::Correction => Some("correggere la richiesta o la risposta precedente"),
         _ => None,
     };
+    let team = crate::dispatch::team(message);
+    let act = crate::dialogue::act(message);
+    // Vincoli e seguiti (ADR-0218): il messaggio corrente può essere già nella cronologia, non va contato due volte.
+    let mut earlier: Vec<String> = recent.user_history.clone();
+    if earlier.last().is_some_and(|m| m.trim() == message.trim()) {
+        earlier.pop();
+    }
+    let follow = crate::followup::analysis(
+        message,
+        &earlier,
+        earlier.last().map(String::as_str),
+        recent.last_reply.as_deref(),
+    );
     json!({
         "kind": kind.id(),
+        "act": act.map(crate::dialogue::Act::id),
+        "followup": follow["followup"],
+        "constraints": follow["constraints"],
+        "followup_hints": follow["hints"],
         "confidence": (confidence * 100.0).round() / 100.0,
+        "team": team.as_ref().map(|t| json!({"primary": t.primary, "support": t.support})),
+        "playbook": crate::dispatch::playbook(message).map(|p| json!({"id": p.id, "agents": p.agents, "expected": p.expected})),
         "domains": domains.iter().map(|(n, s)| json!({"agent": n, "score": s})).collect::<Vec<_>>(),
         "multi_intent": parts.len() > 1,
         "parts": parts,
@@ -622,6 +661,94 @@ pub fn hint(analysis: &Value) -> Option<String> {
         } else {
             lines.push(format!(
                 "«{phrase}» non è identificabile dal contesto: chiedi a cosa si riferisce, indicando le opzioni note."
+            ));
+        }
+    }
+    if let Some(act) = analysis["act"].as_str().and_then(|id| {
+        [
+            crate::dialogue::Act::Clarify,
+            crate::dialogue::Act::Brevity,
+            crate::dialogue::Act::Detail,
+            crate::dialogue::Act::Concretize,
+            crate::dialogue::Act::NextStep,
+            crate::dialogue::Act::Drop,
+            crate::dialogue::Act::Redirect,
+            crate::dialogue::Act::Problem,
+            crate::dialogue::Act::Refine(crate::dialogue::Refine::Improve),
+            crate::dialogue::Act::Refine(crate::dialogue::Refine::Professional),
+            crate::dialogue::Act::Refine(crate::dialogue::Refine::Simplify),
+            crate::dialogue::Act::Refine(crate::dialogue::Refine::Faster),
+            crate::dialogue::Act::Urgency,
+            crate::dialogue::Act::Delegate,
+            crate::dialogue::Act::Alternatives,
+            crate::dialogue::Act::Understand,
+            crate::dialogue::Act::Grounding,
+            crate::dialogue::Act::Proceed,
+        ]
+        .into_iter()
+        .find(|a| a.id() == id)
+    }) {
+        lines.push(crate::dialogue::directive(act).to_string());
+    }
+    for line in analysis["followup_hints"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+    {
+        lines.push(line.to_string());
+    }
+    let similar: Vec<String> = analysis["similar"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| {
+            Some(format!(
+                "«{}» → principale {}{}",
+                e["text"].as_str()?,
+                e["primary"].as_str()?,
+                match e["support"].as_array().filter(|s| !s.is_empty()) {
+                    Some(s) => format!(
+                        ", supporto {}",
+                        s.iter()
+                            .filter_map(Value::as_str)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    None => String::new(),
+                }
+            ))
+        })
+        .collect();
+    if !similar.is_empty() {
+        lines.push(format!(
+            "Richieste simili già classificate dal proprietario: {}.",
+            similar.join("; ")
+        ));
+    }
+    if let Some(book) = analysis["playbook"].as_object() {
+        let agents: Vec<&str> = book["agents"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .collect();
+        lines.push(format!(
+            "Richiesta composita: fai collaborare {} (il primo guida) e punta a questo risultato: {}. Separa i fatti verificati dalle ipotesi, esegui solo ciò che permessi e conferme consentono e chiudi dicendo cosa è stato verificato e cosa no.",
+            agents.join(", "),
+            book["expected"].as_str().unwrap_or_default()
+        ));
+    } else if let (Some(primary), Some(support)) = (
+        analysis["team"]["primary"].as_str(),
+        analysis["team"]["support"].as_array(),
+    ) {
+        let support: Vec<&str> = support.iter().filter_map(Value::as_str).collect();
+        if !support.is_empty()
+            && matches!(analysis["kind"].as_str(), Some("instruction" | "question"))
+        {
+            lines.push(format!(
+                "Ambito principale: {primary}; supporto: {}. Parti dall'ambito principale e usa gli altri solo per le verifiche pertinenti, riportando le evidenze di ciascuno.",
+                support.join(", ")
             ));
         }
     }

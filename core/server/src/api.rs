@@ -769,6 +769,13 @@ pub fn router(state: Shared) -> Router {
             get(permissions_get).patch(permissions_patch),
         )
         .route("/api/permissions/history", get(permissions_history))
+        .route("/api/datasets", get(datasets_list))
+        .route("/api/datasets/{name}", get(dataset_item))
+        .route("/api/datasets/{name}/evaluate", get(dataset_evaluate))
+        .route("/api/datasets/{name}/candidates", post(dataset_candidate))
+        .route("/api/datasets/{name}/review", post(dataset_review))
+        .route("/api/datasets/{name}/import", post(dataset_import))
+        .route("/api/datasets/{name}/push", post(dataset_push))
         .route("/api/persona", get(persona_get).patch(persona_patch))
         .route("/api/profile", get(profile_get).patch(profile_patch))
         .route("/api/missions", get(missions_list).post(mission_create))
@@ -2120,6 +2127,131 @@ async fn permissions_get(
         );
     }
     reply(Ok(with_core(&state, |j| j.permissions()).await))
+}
+
+/// Le rotte dei dataset sono del proprietario: i dispositivi associati non le usano (ADR-0221).
+fn dataset_owner_only(device: &Option<axum::Extension<DeviceCtx>>) -> Option<Response> {
+    device.as_ref().map(|_| {
+        error(
+            StatusCode::FORBIDDEN,
+            "owner_only",
+            "operazione disponibile solo dal computer del proprietario",
+        )
+    })
+}
+
+async fn datasets_list(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+) -> Response {
+    if let Some(denied) = dataset_owner_only(&device) {
+        return denied;
+    }
+    reply(Ok(with_core(&state, |j| j.datasets_list()).await))
+}
+
+async fn dataset_item(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Some(denied) = dataset_owner_only(&device) {
+        return denied;
+    }
+    reply(with_core(&state, move |j| j.dataset_get(&name, 50)).await)
+}
+
+async fn dataset_evaluate(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Path(name): Path<String>,
+) -> Response {
+    if let Some(denied) = dataset_owner_only(&device) {
+        return denied;
+    }
+    reply(with_core(&state, move |j| j.dataset_evaluate(&name)).await)
+}
+
+async fn dataset_candidate(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Path(name): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    if let Some(denied) = dataset_owner_only(&device) {
+        return denied;
+    }
+    reply(with_core(&state, move |j| j.dataset_candidate(&name, &body)).await)
+}
+
+async fn dataset_review(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Path(name): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    if let Some(denied) = dataset_owner_only(&device) {
+        return denied;
+    }
+    let ids: Vec<String> = body["ids"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
+    let accept = body["accept"].as_bool().unwrap_or(false);
+    reply(with_core(&state, move |j| j.dataset_review(&name, &ids, accept)).await)
+}
+
+async fn dataset_import(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Path(name): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    if let Some(denied) = dataset_owner_only(&device) {
+        return denied;
+    }
+    let text = body["text"]
+        .as_str()
+        .unwrap_or_default()
+        .chars()
+        .take(2_000_000)
+        .collect::<String>();
+    reply(with_core(&state, move |j| j.dataset_import(&name, &text)).await)
+}
+
+/// Carica un dataset su Hugging Face: sempre in un repository privato, solo con `confirm: true` esplicito del
+/// proprietario; la rete gira fuori dal blocco del Core.
+async fn dataset_push(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Path(name): Path<String>,
+    Json(body): Json<Value>,
+) -> Response {
+    if let Some(denied) = dataset_owner_only(&device) {
+        return denied;
+    }
+    if body["confirm"] != true {
+        return CoreError::BadRequest(
+            "Conferma richiesta: il caricamento su Hugging Face parte solo con la tua conferma esplicita".into(),
+        )
+        .into_response();
+    }
+    let repo = body["repo_id"].as_str().unwrap_or_default().to_string();
+    let (n, r) = (name.clone(), repo.clone());
+    let prepared = with_core(&state, move |j| j.dataset_push_prepare(&n, &r)).await;
+    let (token, files, web) = match prepared {
+        Ok(p) => p,
+        Err(e) => return e.into_response(),
+    };
+    let (r, label) = (repo.clone(), format!("JARVIS {name}"));
+    let outcome = tokio::task::spawn_blocking(move || {
+        crate::datasets::push_private(&web, "https://huggingface.co", &token, &r, &label, &files)
+    })
+    .await
+    .unwrap_or_else(|_| Err("richiesta interrotta".to_string()));
+    reply(with_core(&state, move |j| j.dataset_push_done(&name, &repo, &outcome)).await)
 }
 
 /// Cronologia delle modifiche ai permessi (ADR-0210): solo dal computer del Core.

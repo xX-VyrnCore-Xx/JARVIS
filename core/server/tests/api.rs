@@ -2987,3 +2987,187 @@ async fn global_search_finds_memories_tools_and_refuses_empty_queries() {
     let (status, _) = e.api("GET", "/api/search?q=a", None).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn conversational_acts_get_real_answers_and_never_stop_or_grant_anything() {
+    let e = env();
+    // Presenza e stato: risposta del Core con i dati reali, senza percentuali.
+    let hello = e.chat("Oh JARVIS, ci sei?").await;
+    assert!(
+        hello["reply"].as_str().unwrap().contains("Ci sono"),
+        "{hello}"
+    );
+    let status = e.chat("A che punto siamo?").await;
+    let text = status["reply"].as_str().unwrap();
+    assert!(
+        text.contains("non c'è nulla da finire") || text.contains("passi"),
+        "{text}"
+    );
+    assert!(!text.contains('%'), "{text}");
+    // «Aspetta che non ho capito» non è uno stop: l'analisi lo legge come richiesta di spiegazione.
+    let (status_code, analysis) = e
+        .api(
+            "POST",
+            "/api/intent/analyze",
+            Some(json!({"message": "Aspetta che non ho capito."})),
+        )
+        .await;
+    assert_eq!(status_code, StatusCode::OK, "{analysis}");
+    assert_eq!(analysis["act"], "clarify");
+    assert_eq!(analysis["kind"], "instruction");
+    assert_eq!(analysis["grants_permission"], false);
+    // «Pensaci tu, mi fido» è una delega, non un'autorizzazione.
+    let (_, delegate) = e
+        .api(
+            "POST",
+            "/api/intent/analyze",
+            Some(json!({"message": "Pensaci tu, mi fido."})),
+        )
+        .await;
+    assert_eq!(delegate["act"], "delegate");
+    assert_eq!(delegate["grants_permission"], false);
+    // «Vabbè, lascia perdere» annulla.
+    let (_, drop) = e
+        .api(
+            "POST",
+            "/api/intent/analyze",
+            Some(json!({"message": "Vabbè, lascia perdere."})),
+        )
+        .await;
+    assert_eq!(drop["kind"], "cancellation");
+    // La squadra di agenti accompagna l'analisi.
+    let (_, team) = e
+        .api(
+            "POST",
+            "/api/intent/analyze",
+            Some(json!({"message": "Cerca una libreria che possa sostituire questa"})),
+        )
+        .await;
+    assert_eq!(team["team"]["primary"], "coding");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn constraints_and_followups_persist_across_turns() {
+    let e = env();
+    e.chat("Modifica il backend.").await;
+    e.chat("Aspetta, il database non lo devi toccare.").await;
+    let (status, analysis) = e
+        .api(
+            "POST",
+            "/api/intent/analyze",
+            Some(json!({"message": "E la RAM?"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{analysis}");
+    // Il vincolo dato due turni prima è ancora attivo e il seguito è riconosciuto.
+    let constraints: Vec<&str> = analysis["constraints"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|c| c.as_str())
+        .collect();
+    assert!(constraints.contains(&"exclude:database"), "{analysis}");
+    assert_eq!(analysis["followup"], "other_subject");
+    let hint_text = analysis["followup_hints"].to_string();
+    assert!(hint_text.contains("non toccare «database»"), "{hint_text}");
+    // «Ora puoi pubblicarla» non revoca l'esclusione del database, e un blocco di pubblicazione si toglie solo così.
+    e.chat("Non pubblicarla ancora.").await;
+    let (_, held) = e
+        .api(
+            "POST",
+            "/api/intent/analyze",
+            Some(json!({"message": "Come va?"})),
+        )
+        .await;
+    assert!(
+        held["constraints"].to_string().contains("hold_publish"),
+        "{held}"
+    );
+    e.chat("Ok, ora puoi pubblicarla.").await;
+    let (_, freed) = e
+        .api(
+            "POST",
+            "/api/intent/analyze",
+            Some(json!({"message": "Come va?"})),
+        )
+        .await;
+    assert!(
+        !freed["constraints"].to_string().contains("hold_publish"),
+        "{freed}"
+    );
+    assert!(
+        freed["constraints"]
+            .to_string()
+            .contains("exclude:database"),
+        "{freed}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn datasets_are_measured_improved_and_never_leave_without_confirmation() {
+    let e = env();
+    let (status, list) = e.api("GET", "/api/datasets", None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list["items"].as_array().unwrap().len(), 4);
+    assert_eq!(list["private_only"], true);
+    // Misura: gli esempi di base sono rispettati.
+    let (_, report) = e
+        .api("GET", "/api/datasets/jarvis-routing/evaluate", None)
+        .await;
+    assert_eq!(report["correct"], report["total"], "{report}");
+    // Candidato con dato personale: mascherato, e non è nel dataset finché non lo accetta il proprietario.
+    let (status, added) = e
+        .api(
+            "POST",
+            "/api/datasets/jarvis-routing/candidates",
+            Some(json!({"text": "Controlla il server di mario.rossi@example.com", "primary": "sistema", "support": ["sicurezza"]})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{added}");
+    assert!(
+        !added["candidate"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("mario.rossi@example.com"),
+        "{added}"
+    );
+    let id = added["candidate"]["id"].as_str().unwrap().to_string();
+    let (_, before) = e.api("GET", "/api/datasets/jarvis-routing", None).await;
+    assert_eq!(before["total"], 40);
+    let (_, accepted) = e
+        .api(
+            "POST",
+            "/api/datasets/jarvis-routing/review",
+            Some(json!({"ids": [id], "accept": true})),
+        )
+        .await;
+    assert_eq!(accepted["version"], 2, "{accepted}");
+    // Il caricamento su Hugging Face non parte senza conferma esplicita né senza token, e il Core non lo tenta.
+    let (status, no_confirm) = e
+        .api(
+            "POST",
+            "/api/datasets/jarvis-routing/push",
+            Some(json!({"repo_id": "me/jarvis-routing"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{no_confirm}");
+    let (status, no_token) = e
+        .api(
+            "POST",
+            "/api/datasets/jarvis-routing/push",
+            Some(json!({"repo_id": "me/jarvis-routing", "confirm": true})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{no_token}");
+    assert!(no_token.to_string().contains("Hugging Face"), "{no_token}");
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/datasets/jarvis-routing/push",
+            Some(json!({"repo_id": "non valido", "confirm": true})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = e.api("GET", "/api/datasets/sconosciuto", None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

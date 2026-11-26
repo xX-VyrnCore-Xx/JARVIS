@@ -57,6 +57,8 @@ curl -s -X POST http://127.0.0.1:8765/api/mcp/servers \
 
 3. Prova `mcp.list` (server `huggingface`) e poi `mcp.call` con lo strumento voluto: JARVIS chiede la conferma a ogni chiamata.
 
+**Solo lettura.** Il server MCP di Hugging Face espone strumenti di lettura (`hf_fs`, `hub_repo_details`, `hf_whoami`, `hub_repo_search`): non crea repository né carica file. I dataset di JARVIS si **rileggono** da qui (anche i privati dell'utente) e si **scrivono** con il connettore «Hugging Face», sempre in repository privati e con conferma (ADR-0221).
+
 **Riservatezza.** Gli argomenti di `mcp.call` partono verso Hugging Face: non metterci dati personali, ricordi o contenuti di file.
 `hf_whoami` restituisce il tuo profilo Hugging Face (mai il valore del token). Il risultato è un dato, non cambia le regole di JARVIS.
 

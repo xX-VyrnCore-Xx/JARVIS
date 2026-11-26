@@ -21,7 +21,7 @@ pub fn category(name: &str) -> &'static str {
         "memory" => "memory",
         "mission" | "workflow" | "n8n" | "agent" => "automation",
         "security" | "it" => "security",
-        "biz" | "math" | "units" | "data" => "analysis",
+        "biz" | "math" | "units" | "data" | "dataset" => "analysis",
         "text" => "text",
         _ => "general",
     }

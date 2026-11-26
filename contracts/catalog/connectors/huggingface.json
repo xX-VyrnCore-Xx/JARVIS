@@ -1,0 +1,56 @@
+{
+  "contract": "jarvis.connector/1",
+  "id": "huggingface",
+  "name": "Hugging Face",
+  "version": "1.0.0",
+  "description": "Hub di Hugging Face con un token personale: profilo e ricerca dei dataset. Il caricamento dei dataset di JARVIS usa lo stesso token ma è fatto dal Core, sempre in repository privati e con la tua conferma.",
+  "base_url": "https://huggingface.co",
+  "allowed_hosts": [
+    "huggingface.co"
+  ],
+  "auth": {
+    "type": "bearer"
+  },
+  "operations": [
+    {
+      "name": "profilo",
+      "summary": "Account e permessi del token",
+      "method": "GET",
+      "path": "/api/whoami-v2",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {}
+      }
+    },
+    {
+      "name": "cerca_dataset",
+      "summary": "Cerca dataset sul Hub, anche tuoi privati",
+      "method": "GET",
+      "path": "/api/datasets",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {
+          "search": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "author": {
+            "type": "string",
+            "maxLength": 60
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        }
+      }
+    }
+  ]
+}

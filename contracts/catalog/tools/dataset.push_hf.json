@@ -1,0 +1,53 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "dataset.push_hf",
+  "version": "1.0.0",
+  "summary": "Carica un dataset di JARVIS (solo gli esempi accettati, testo mascherato) in un repository Hugging Face SEMPRE PRIVATO: lo crea privato se manca e rifiuta quelli pubblici; richiede il token del connettore Hugging Face e la conferma del proprietario",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "name",
+      "repo_id"
+    ],
+    "properties": {
+      "name": {
+        "type": "string",
+        "enum": [
+          "jarvis-routing",
+          "jarvis-dialogue-acts",
+          "jarvis-complex-requests",
+          "jarvis-conversations"
+        ]
+      },
+      "repo_id": {
+        "type": "string",
+        "minLength": 3,
+        "maxLength": 200,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$"
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "write_external",
+  "risk": "high",
+  "permissions": [
+    "core.datasets:write"
+  ],
+  "errors": [
+    "dataset.invalid",
+    "dataset.not_confirmed",
+    "dataset.not_authorized",
+    "dataset.public_repo",
+    "dataset.hub_error"
+  ],
+  "timeout_ms": 60000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "required"
+}

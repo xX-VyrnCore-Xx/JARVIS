@@ -1,0 +1,42 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "dataset.evaluate",
+  "version": "1.0.0",
+  "summary": "Misura quanto JARVIS rispetta un dataset: accuratezza e prime discordanze",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "name"
+    ],
+    "properties": {
+      "name": {
+        "type": "string",
+        "enum": [
+          "jarvis-routing",
+          "jarvis-dialogue-acts",
+          "jarvis-complex-requests",
+          "jarvis-conversations"
+        ]
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.notes:read"
+  ],
+  "errors": [
+    "dataset.invalid"
+  ],
+  "timeout_ms": 10000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "none"
+}
