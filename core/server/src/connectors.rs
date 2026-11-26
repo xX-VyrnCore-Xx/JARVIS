@@ -163,6 +163,27 @@ pub fn tool_descriptors(manifest: &Value) -> Vec<Value> {
         .collect()
 }
 
+/// Percorso di file in un repository: ogni segmento si codifica, le barre restano (`src/main.rs`). Niente `..`.
+fn encode_file_path(value: &Value) -> Result<String, ToolError> {
+    let raw = value.as_str().unwrap_or_default();
+    let segments: Vec<&str> = raw.split('/').collect();
+    if raw.is_empty()
+        || segments
+            .iter()
+            .any(|s| s.is_empty() || *s == "." || *s == ".." || s.contains('\0'))
+    {
+        return Err(err(
+            "connector.invalid",
+            "percorso del file non valido: usa un percorso relativo senza «..»",
+        ));
+    }
+    Ok(segments
+        .iter()
+        .map(|s| encode_segment(&Value::String((*s).to_string())))
+        .collect::<Vec<_>>()
+        .join("/"))
+}
+
 fn encode_segment(value: &Value) -> String {
     let raw = match value {
         Value::String(s) => s.clone(),
@@ -203,7 +224,12 @@ pub fn call(
         let value = rest
             .remove(&var)
             .ok_or_else(|| err("connector.invalid", format!("manca il parametro {var}")))?;
-        path.replace_range(start..=end, &encode_segment(&value));
+        let encoded = if var == "file_path" {
+            encode_file_path(&value)?
+        } else {
+            encode_segment(&value)
+        };
+        path.replace_range(start..=end, &encoded);
     }
     let base = manifest["base_url"]
         .as_str()
@@ -237,6 +263,21 @@ pub fn call(
                     .into_bytes(),
                 )
             }
+            Some("github_content") => {
+                // Il testo del file si invia in base64 come «content» (limite 1 MiB, deciso dallo schema).
+                use base64::Engine;
+                let text = rest
+                    .remove("text")
+                    .and_then(|t| t.as_str().map(str::to_string))
+                    .ok_or_else(|| err("connector.invalid", "manca il testo del file"))?;
+                rest.insert(
+                    "content".into(),
+                    Value::String(
+                        base64::engine::general_purpose::STANDARD.encode(text.as_bytes()),
+                    ),
+                );
+                Some(serde_json::to_vec(&Value::Object(rest)).unwrap_or_default())
+            }
             _ => Some(serde_json::to_vec(&Value::Object(rest)).unwrap_or_default()),
         }
     };
@@ -244,6 +285,11 @@ pub fn call(
         "Accept".to_string(),
         "application/json, text/plain;q=0.8".to_string(),
     )];
+    if url.host_str() == Some("api.github.com") {
+        // Intestazioni consigliate da GitHub: formato della risposta e versione dell'API.
+        headers[0].1 = "application/vnd.github+json".to_string();
+        headers.push(("X-GitHub-Api-Version".into(), "2022-11-28".into()));
+    }
     match (manifest["auth"]["type"].as_str(), secret) {
         (Some("bearer" | "oauth2"), Some(s)) => {
             headers.push(("Authorization".into(), format!("Bearer {s}")))
@@ -434,6 +480,124 @@ mod tests {
         assert!(validate_manifest(&m, &web)
             .unwrap_err()
             .contains("percorso"));
+    }
+
+    #[test]
+    fn github_operations_are_valid_and_every_write_asks_for_confirmation() {
+        let raw = include_str!("../../../contracts/catalog/connectors/github.json");
+        let manifest: Value = serde_json::from_str(raw).unwrap();
+        let m = validate_manifest(&manifest, &WebConfig::default()).unwrap();
+        let tools = tool_descriptors(&m);
+        assert!(tools.len() >= 24, "{}", tools.len());
+        let mut writes = 0;
+        for t in &tools {
+            assert!(validate(Contract::ToolDescriptor, t).is_valid(), "{t}");
+            if t["effects"] == "write_external" {
+                writes += 1;
+                assert_eq!(t["confirmation"], "required", "{}", t["name"]);
+            }
+        }
+        assert!(writes >= 15);
+        let risk = |name: &str| {
+            tools
+                .iter()
+                .find(|t| t["name"] == format!("connector.github.{name}"))
+                .map(|t| t["risk"].as_str().unwrap().to_string())
+                .unwrap()
+        };
+        for dangerous in ["crea_repo", "modifica_repo", "unisci_pr", "elimina_file"] {
+            assert_eq!(risk(dangerous), "critical", "{dangerous}");
+        }
+        for absent in ["elimina_repo", "segreti", "collaboratori"] {
+            assert!(
+                !tools
+                    .iter()
+                    .any(|t| t["name"].as_str().unwrap().ends_with(absent)),
+                "{absent}"
+            );
+        }
+        // Un nuovo repository non diventa pubblico per distrazione: «private» è obbligatorio.
+        let create = m["operations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o["name"] == "crea_repo")
+            .unwrap();
+        assert!(create["input_schema"]["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r == "private"));
+    }
+
+    #[test]
+    fn file_paths_keep_their_slashes_and_refuse_escapes_and_content_is_base64() {
+        assert_eq!(
+            encode_file_path(&json!(".github/workflows/ci yml.yml")).unwrap(),
+            ".github/workflows/ci%20yml.yml"
+        );
+        for bad in ["", "../x", "a/../b", "/assoluto", "a//b", "./x"] {
+            assert!(encode_file_path(&json!(bad)).is_err(), "{bad}");
+        }
+        // Percorso e corpo di una scrittura su un server locale.
+        use std::io::{BufRead, BufReader, Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new((String::new(), String::new())));
+        let log = seen.clone();
+        let server = std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let mut length = 0;
+            loop {
+                let mut h = String::new();
+                reader.read_line(&mut h).unwrap();
+                if h.len() <= 2 {
+                    break;
+                }
+                if let Some((k, v)) = h.trim().split_once(':') {
+                    if k.eq_ignore_ascii_case("content-length") {
+                        length = v.trim().parse().unwrap();
+                    }
+                }
+            }
+            let mut body = vec![0; length];
+            reader.read_exact(&mut body).unwrap();
+            *log.lock().unwrap() = (line, String::from_utf8(body).unwrap());
+            let mut s = stream;
+            let _ = write!(s, "HTTP/1.1 201 Created\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}");
+        });
+        let manifest = json!({"contract": "jarvis.connector/1", "id": "gh", "name": "Gh", "version": "1.0.0", "description": "x",
+            "base_url": format!("http://127.0.0.1:{port}"), "allowed_hosts": ["127.0.0.1"], "auth": {"type": "bearer"},
+            "operations": [{"name": "scrivi", "summary": "s", "method": "PUT", "path": "/repos/{owner}/{repo}/contents/{file_path}",
+                "effects": "write_external", "body_encoding": "github_content",
+                "input_schema": {"type": "object", "additionalProperties": false, "required": ["owner", "repo", "file_path", "text"],
+                    "properties": {"owner": {"type": "string"}, "repo": {"type": "string"}, "file_path": {"type": "string"},
+                        "text": {"type": "string"}, "message": {"type": "string"}}}}]});
+        let web = WebConfig {
+            allow_private: true,
+            ..WebConfig::default()
+        };
+        let out = call(
+            &manifest,
+            "scrivi",
+            &json!({"owner": "o", "repo": "r", "file_path": "docs/a b.md", "text": "ciao", "message": "m"}),
+            Some("token-sintetico"),
+            &web,
+        );
+        server.join().unwrap();
+        assert!(out.is_ok(), "{out:?}");
+        let (line, body) = seen.lock().unwrap().clone();
+        assert!(
+            line.starts_with("PUT /repos/o/r/contents/docs/a%20b.md "),
+            "{line}"
+        );
+        let body: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(body["content"], "Y2lhbw==");
+        assert!(body.get("text").is_none());
+        assert_eq!(body["message"], "m");
     }
 
     #[test]

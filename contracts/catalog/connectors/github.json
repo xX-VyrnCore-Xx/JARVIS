@@ -2,8 +2,8 @@
   "contract": "jarvis.connector/1",
   "id": "github",
   "name": "GitHub",
-  "version": "1.0.0",
-  "description": "Repository, issue e notifiche GitHub con un token personale (fine-grained consigliato).",
+  "version": "1.1.0",
+  "description": "Repository, file, issue, pull request e GitHub Actions con un token personale (fine-grained). Ogni scrittura chiede la tua conferma; non può eliminare repository né toccare segreti o impostazioni di amministrazione.",
   "base_url": "https://api.github.com",
   "allowed_hosts": [
     "api.github.com"
@@ -124,6 +124,771 @@
           "body": {
             "type": "string",
             "maxLength": 20000
+          }
+        }
+      },
+      "risk": "high"
+    },
+    {
+      "name": "info_repo",
+      "summary": "Dati di un repository (ramo predefinito, visibilità, permessi)",
+      "method": "GET",
+      "path": "/repos/{owner}/{repo}",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "repo"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "repo": {
+            "type": "string",
+            "maxLength": 100
+          }
+        }
+      }
+    },
+    {
+      "name": "rami",
+      "summary": "Rami di un repository",
+      "method": "GET",
+      "path": "/repos/{owner}/{repo}/branches",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "repo"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "repo": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "per_page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      }
+    },
+    {
+      "name": "radice",
+      "summary": "Elenco dei file nella radice di un repository",
+      "method": "GET",
+      "path": "/repos/{owner}/{repo}/contents",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "repo"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "repo": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "ref": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      }
+    },
+    {
+      "name": "contenuto",
+      "summary": "Legge un file o elenca una cartella di un repository",
+      "method": "GET",
+      "path": "/repos/{owner}/{repo}/contents/{file_path}",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "repo",
+          "file_path"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "repo": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "file_path": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "ref": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      }
+    },
+    {
+      "name": "workflow",
+      "summary": "Workflow di GitHub Actions di un repository",
+      "method": "GET",
+      "path": "/repos/{owner}/{repo}/actions/workflows",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "repo"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "repo": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "per_page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      }
+    },
+    {
+      "name": "esecuzioni",
+      "summary": "Ultime esecuzioni di GitHub Actions (esito, ramo, commit)",
+      "method": "GET",
+      "path": "/repos/{owner}/{repo}/actions/runs",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "repo"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "repo": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "in_progress",
+              "completed",
+              "success",
+              "failure",
+              "cancelled"
+            ]
+          },
+          "branch": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "per_page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      }
+    },
+    {
+      "name": "pull_request",
+      "summary": "Pull request di un repository",
+      "method": "GET",
+      "path": "/repos/{owner}/{repo}/pulls",
+      "effects": "read",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "repo"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "repo": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "state": {
+            "enum": [
+              "open",
+              "closed",
+              "all"
+            ]
+          },
+          "per_page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      }
+    },
+    {
+      "name": "commenta",
+      "summary": "Aggiunge un commento a una issue o pull request",
+      "method": "POST",
+      "path": "/repos/{owner}/{repo}/issues/{number}/comments",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "repo",
+          "number",
+          "body"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "repo": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 20000
+          }
+        }
+      },
+      "risk": "high"
+    },
+    {
+      "name": "imposta_issue",
+      "summary": "Chiude o riapre una issue, ne cambia titolo o testo",
+      "method": "PATCH",
+      "path": "/repos/{owner}/{repo}/issues/{number}",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "repo",
+          "number"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "repo": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "state": {
+            "enum": [
+              "open",
+              "closed"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 20000
+          }
+        }
+      },
+      "risk": "high"
+    },
+    {
+      "name": "crea_repo",
+      "summary": "Crea un repository nel tuo account (privato o pubblico: va indicato)",
+      "method": "POST",
+      "path": "/user/repos",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "private"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 350
+          },
+          "private": {
+            "type": "boolean"
+          },
+          "auto_init": {
+            "type": "boolean"
+          }
+        }
+      },
+      "risk": "critical"
+    },
+    {
+      "name": "modifica_repo",
+      "summary": "Cambia descrizione, visibilità, archiviazione o ramo predefinito di un repository",
+      "method": "PATCH",
+      "path": "/repos/{owner}/{repo}",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "repo"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "repo": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 350
+          },
+          "private": {
+            "type": "boolean"
+          },
+          "archived": {
+            "type": "boolean"
+          },
+          "default_branch": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      },
+      "risk": "critical"
+    },
+    {
+      "name": "scrivi_file",
+      "summary": "Crea o aggiorna un file in un repository con un commit (per aggiornare serve lo sha attuale)",
+      "method": "PUT",
+      "path": "/repos/{owner}/{repo}/contents/{file_path}",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "repo",
+          "file_path",
+          "message",
+          "text"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "repo": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "file_path": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "text": {
+            "type": "string",
+            "maxLength": 1000000
+          },
+          "branch": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "sha": {
+            "type": "string",
+            "maxLength": 64
+          }
+        }
+      },
+      "risk": "high",
+      "body_encoding": "github_content"
+    },
+    {
+      "name": "elimina_file",
+      "summary": "Elimina un file da un repository con un commit",
+      "method": "DELETE",
+      "path": "/repos/{owner}/{repo}/contents/{file_path}",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "repo",
+          "file_path",
+          "message",
+          "sha"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "repo": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "file_path": {
+            "type": "string",
+            "maxLength": 300
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          },
+          "sha": {
+            "type": "string",
+            "maxLength": 64
+          },
+          "branch": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      },
+      "risk": "critical"
+    },
+    {
+      "name": "crea_ramo",
+      "summary": "Crea un ramo a partire da un commit",
+      "method": "POST",
+      "path": "/repos/{owner}/{repo}/git/refs",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "repo",
+          "ref",
+          "sha"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "repo": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "ref": {
+            "type": "string",
+            "maxLength": 250
+          },
+          "sha": {
+            "type": "string",
+            "maxLength": 64
+          }
+        }
+      },
+      "risk": "high"
+    },
+    {
+      "name": "crea_pr",
+      "summary": "Apre una pull request",
+      "method": "POST",
+      "path": "/repos/{owner}/{repo}/pulls",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "repo",
+          "title",
+          "head",
+          "base"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "repo": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "head": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "base": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "body": {
+            "type": "string",
+            "maxLength": 20000
+          },
+          "draft": {
+            "type": "boolean"
+          }
+        }
+      },
+      "risk": "high"
+    },
+    {
+      "name": "unisci_pr",
+      "summary": "Unisce una pull request nel ramo di destinazione",
+      "method": "PUT",
+      "path": "/repos/{owner}/{repo}/pulls/{number}/merge",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "repo",
+          "number"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "repo": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "number": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "merge_method": {
+            "enum": [
+              "merge",
+              "squash",
+              "rebase"
+            ]
+          }
+        }
+      },
+      "risk": "critical"
+    },
+    {
+      "name": "avvia_workflow",
+      "summary": "Avvia a mano un workflow di GitHub Actions su un ramo",
+      "method": "POST",
+      "path": "/repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "repo",
+          "workflow_id",
+          "ref"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "repo": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "workflow_id": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "ref": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "inputs": {
+            "type": "object"
+          }
+        }
+      },
+      "risk": "high"
+    },
+    {
+      "name": "riesegui_run",
+      "summary": "Rilancia un'esecuzione di GitHub Actions",
+      "method": "POST",
+      "path": "/repos/{owner}/{repo}/actions/runs/{run_id}/rerun",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "repo",
+          "run_id"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "repo": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "run_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "risk": "high"
+    },
+    {
+      "name": "annulla_run",
+      "summary": "Annulla un'esecuzione di GitHub Actions in corso",
+      "method": "POST",
+      "path": "/repos/{owner}/{repo}/actions/runs/{run_id}/cancel",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "repo",
+          "run_id"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "repo": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "run_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "risk": "high"
+    },
+    {
+      "name": "abilita_workflow",
+      "summary": "Riattiva un workflow di GitHub Actions disattivato",
+      "method": "PUT",
+      "path": "/repos/{owner}/{repo}/actions/workflows/{workflow_id}/enable",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "repo",
+          "workflow_id"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "repo": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "workflow_id": {
+            "type": "string",
+            "maxLength": 100
+          }
+        }
+      },
+      "risk": "high"
+    },
+    {
+      "name": "disabilita_workflow",
+      "summary": "Disattiva un workflow di GitHub Actions",
+      "method": "PUT",
+      "path": "/repos/{owner}/{repo}/actions/workflows/{workflow_id}/disable",
+      "effects": "write_external",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "owner",
+          "repo",
+          "workflow_id"
+        ],
+        "properties": {
+          "owner": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "repo": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "workflow_id": {
+            "type": "string",
+            "maxLength": 100
           }
         }
       },

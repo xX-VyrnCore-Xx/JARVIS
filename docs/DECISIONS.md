@@ -2397,6 +2397,15 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** strumenti di sola lettura `map.search` (luoghi, coordinate, collegamento) e `map.route` (distanza, durata, passi in italiano e tracciato; a piedi, in bici, in auto) con OpenStreetMap Nominatim e OSRM del progetto FOSSGIS, senza chiavi né costi, richieste distanziate di 1,1 s e identificativo dell'app generico. Rotte `/api/map/search` e `/api/map/route`; sezione «Mappa» in macOS con MapKit (segnaposto e percorso). Frasi come «indicazioni da Torino a Milano a piedi» o «mostrami Firenze sulla mappa» sono riconosciute. Fuori dal computer vanno solo i nomi dei luoghi.
 - **Limiti:** JARVIS non conosce la posizione dell'utente (nessun GPS) e il percorso non tiene conto del traffico; i servizi pubblici hanno limiti d'uso equi. L'app Windows non ha ancora la vista grafica (restano chat e collegamento a OpenStreetMap).
 
+### ADR-0203 — Connettore GitHub esteso: repository, file, pull request e Actions
+
+- **Data:** 2026-11-26. **Stato:** implementata (non provata contro GitHub reale).
+- **Contesto:** il proprietario vuole che JARVIS crei repository e workflow, li gestisca e li modifichi. Il connettore aveva solo 4 operazioni (elenco repository, issue, notifiche, crea issue).
+- **Decisione:** il manifest GitHub passa a 25 operazioni: lettura (info repository, rami, file e cartelle, workflow, esecuzioni, pull request) e scrittura (commenti, chiusura issue, **crea repository**, modifica repository, **scrivi o aggiorna file** con un commit — anche in `.github/workflows` —, elimina file, crea ramo, **apri e unisci pull request**, **avvia, rilancia, annulla, attiva e disattiva i workflow**). Ogni scrittura richiede la conferma del proprietario; crea/modifica repository, unione di pull request ed eliminazione di file sono «critiche». `private` è obbligatorio alla creazione, così nessun repository diventa pubblico per distrazione. Non ci sono eliminazione di repository, segreti, collaboratori o amministrazione di organizzazioni.
+- **Framework:** lo schema dei connettori ammette ora `PUT`, `PATCH` e `DELETE`, fino a 40 operazioni e la codifica `github_content` (testo → base64 in `content`); il parametro `file_path` mantiene le barre e rifiuta `..`; per `api.github.com` si inviano le intestazioni raccomandate (`application/vnd.github+json`, versione API).
+- **Permessi del token:** tabella completa in `docs/SECURITY_AND_PRIVACY.md`. Un connettore già installato resta alla versione precedente finché non lo si reinstalla.
+- **Evidenza:** test del manifest (conferma su ogni scrittura, rischio critico, assenza di operazioni distruttive di repository), dei percorsi di file e della codifica del corpo con un server locale.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.
