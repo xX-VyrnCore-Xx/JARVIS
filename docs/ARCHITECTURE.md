@@ -17,60 +17,80 @@ flowchart LR
 
 ### Mappa del repository
 
-Il diagramma segue i moduli realmente presenti nel codice (`core/server/src`, `ai/jarvis_ai`, `apps`, `contracts`); le frecce indicano chi chiama chi. Si può usare anche come ingresso per strumenti di visualizzazione dei repository.
+Il diagramma segue i moduli realmente presenti nel codice (`core/server/src`, `ai/jarvis_ai`, `apps`, `contracts`, `.github`): le frecce indicano chi chiama chi e **ogni modulo del Core compare almeno una volta**. Un test (`tests/contracts/test_architecture_diagram.py`) lo verifica a ogni modifica, così il diagramma non resta indietro rispetto al codice. Si può usare anche come ingresso per strumenti di visualizzazione dei repository.
 
 ```mermaid
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Inter, Segoe UI, sans-serif", "fontSize": "14px", "lineColor": "#64748b"}}}%%
 flowchart TB
     subgraph Client["Client (apps/)"]
-        MAC["macOS SwiftUI: Plancia, chat, avatar"]
-        EGUI["Desktop egui: macOS e Windows"]
-        AND["Android"]
+        direction LR
+        MAC["macOS SwiftUI<br/>Plancia, chat, avatar, Voce, Mappa, Privacy, Ricerche"]
+        EGUI["Desktop egui<br/>macOS e Windows"]
+        AND["Android<br/>Kotlin, FCM"]
         WEB["Web"]
     end
 
     subgraph Core["Core Rust (core/server/src)"]
-        API["api.rs: HTTP, WebSocket, SSE"]
-        SEC["Sicurezza: accounts, passkeys, permissions, policy, guard, audit, privacy"]
-        ORCH["orchestrator.rs: task, passi, deleghe"]
+        direction TB
+        API["api, openapi, tls, config, dashboard<br/>HTTP, WebSocket, SSE"]
+
+        subgraph Trust["Identità e protezione"]
+            SEC["accounts, passkeys, secrets, chat_crypto, permissions, permission_history,<br/>policy, guard, audit, privacy, rollback"]
+        end
+
+        ORCH["orchestrator<br/>task, passi, deleghe, piani, missioni"]
+
         subgraph Brain["Cognizione"]
-            INT["intent, agents, skills"]
-            PLAN["planner, plans, missions, proactive"]
-            MEM["memory, memcog, world, reflect, handoff"]
+            INT["intent, dialogue, followup, dispatch<br/>atti di conversazione, vincoli, squadra di agenti"]
+            AGT["agents, expert, skills, prompts, promptfix, collab"]
+            PLAN["planner, plans, missions, proactive, improvements, reflect"]
+            MEM["memory, memcog, world, handoff, persona, profile, research"]
         end
+
         subgraph Tools["Strumenti"]
-            TSYS["tools, toolsys, toolbox, catalog"]
-            OPS["appcontrol, screen, docs, devtools, assets, workspaces"]
-            NET["web, browser, net, connectors, oauth, mcp_client"]
+            TSYS["tools, toolsys, toolbox, catalog, datatools, executive"]
+            OPS["appcontrol, screen, desktop, docs, devtools, codemap, assets, workspaces, speech"]
+            NET["web, browser, net, maps, connectors, connector_catalog, oauth, mcp, mcp_client, plugins, channels"]
         end
+
         subgraph Run["Esecuzione e risorse"]
-            SB["sandbox, container_runtime"]
-            SUP["supervisor, perf, watch, automation, n8n"]
-            NODE["nodes, node_agent, tailscale, push"]
+            SB["sandbox, container_runtime, n8n"]
+            SUP["supervisor, perf, watch, automation, setup, backup"]
+            NODE["nodes, node_agent, tailscale, push, updates, selfupdate"]
         end
-        CLOUD["cloud.rs: NVIDIA NIM, Ollama, continuazione e retry"]
-        STORE[("store.rs: SQLite, file dati, backup")]
-        OBS["observability, sysstats, dashboard"]
+
+        CLOUD["cloud<br/>NVIDIA NIM, continuazione e retry"]
+        STORE[("store<br/>SQLite, file dati, indici")]
+        OBS["observability, sysstats"]
     end
 
     subgraph AI["Runtime AI Python (ai/jarvis_ai)"]
-        GW["gateway.py: routing e tool calling"]
-        VOICE["voice.py, visemes.py: STT, TTS, wake word"]
-        WK["worker.py: envelope JSON Lines"]
+        GW["gateway.py<br/>routing e tool calling"]
+        VOICE["voice.py, visemes.py<br/>STT, TTS, wake word"]
+        WK["worker.py, contracts.py<br/>envelope JSON Lines"]
     end
 
     subgraph Contracts["contracts/"]
-        CAT["catalog/tools: contratti degli strumenti"]
-        SCH["schemi envelope e API"]
+        CAT["catalog/tools e connectors<br/>contratti"]
+        SCH["v1/*.schema.json<br/>envelope e API"]
     end
 
-    EXT["Servizi esterni: provider cloud, server MCP, Gmail e Calendar, Hugging Face"]
+    subgraph Delivery["Consegna (.github, scripts, tests)"]
+        CI["contracts.yml<br/>fmt, clippy, test, e2e, avvio reale"]
+        REL["release.yml, release-after-ci.yml<br/>installer macOS e Windows, APK"]
+        TST["tests/<br/>contracts, ai, e2e, data (dataset)"]
+    end
+
+    EXT["Servizi esterni<br/>NVIDIA NIM, server MCP, Gmail, Calendar, GitHub, Hugging Face, Tailscale"]
 
     MAC --> API
     EGUI --> API
     AND --> API
     WEB --> API
     API --> SEC --> ORCH
-    ORCH --> INT --> PLAN
+    ORCH --> INT --> AGT
+    INT --> PLAN
+    ORCH --> PLAN
     ORCH --> MEM
     ORCH --> TSYS --> OPS
     TSYS --> NET
@@ -80,6 +100,7 @@ flowchart TB
     ORCH --> CLOUD
     NET --> EXT
     CLOUD --> EXT
+    NODE --> EXT
     SUP --> ORCH
     NODE --> API
     ORCH --> STORE
@@ -87,6 +108,71 @@ flowchart TB
     ORCH --> OBS
     CAT -. valida .-> TSYS
     SCH -. valida .-> WK
+    TST -. verifica .-> Core
+    CI --> TST
+    CI --> REL
+    REL -. pubblica .-> NODE
+
+    classDef client fill:#e0f2fe,stroke:#0284c7,color:#0c4a6e
+    classDef core fill:#ede9fe,stroke:#7c3aed,color:#3b0764
+    classDef trust fill:#fee2e2,stroke:#dc2626,color:#7f1d1d
+    classDef brain fill:#fef3c7,stroke:#d97706,color:#78350f
+    classDef tools fill:#dcfce7,stroke:#16a34a,color:#14532d
+    classDef run fill:#f1f5f9,stroke:#475569,color:#0f172a
+    classDef data fill:#fce7f3,stroke:#db2777,color:#831843
+    classDef ai fill:#cffafe,stroke:#0891b2,color:#164e63
+    classDef ext fill:#ffffff,stroke:#94a3b8,color:#334155,stroke-dasharray: 4 3
+    class MAC,EGUI,AND,WEB client
+    class API,ORCH core
+    class SEC trust
+    class INT,AGT,PLAN,MEM brain
+    class TSYS,OPS,NET tools
+    class SB,SUP,NODE,OBS run
+    class STORE,CLOUD data
+    class GW,VOICE,WK ai
+    class EXT ext
+```
+
+#### Da una frase a un risultato (cognizione)
+
+Come una frase del proprietario diventa lavoro, senza mai concedere permessi per il solo fatto di averla capita:
+
+```mermaid
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Inter, Segoe UI, sans-serif", "fontSize": "14px"}}}%%
+flowchart LR
+    U["Frase<br/>«a che punto siamo?»<br/>«sistema solo il secondo»"] --> I["intent<br/>tipo, entità, riferimenti"]
+    I --> D["dialogue<br/>atto di conversazione"]
+    I --> F["followup<br/>seguito e vincoli"]
+    I --> S["dispatch<br/>agente principale e supporto,<br/>archetipo composito"]
+    D -- presenza, stato, apertura --> R["Risposta del Core<br/>solo dati reali"]
+    D -- stile e metodo --> H["Indicazioni al modello"]
+    F -- indicazioni --> H
+    S -- squadra --> H
+    F -- "vincoli (non toccare, non pubblicare)" --> B["Blocco del Core<br/>a ogni chiamata di strumento"]
+    H --> M["Modello e agenti"]
+    M --> P["policy, conferme, audit"]
+    B --> P
+    P --> T["Strumenti"]
+    classDef gate fill:#fee2e2,stroke:#dc2626,color:#7f1d1d
+    classDef mind fill:#fef3c7,stroke:#d97706,color:#78350f
+    class B,P gate
+    class I,D,F,S mind
+```
+
+#### Consegna e aggiornamento
+
+```mermaid
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Inter, Segoe UI, sans-serif", "fontSize": "14px"}}}%%
+flowchart LR
+    PR["Pull request"] --> CI["CI<br/>fmt, clippy, test, contratti,<br/>e2e, audit dipendenze"]
+    CI --> RUN["Avvio reale<br/>Linux, macOS, Windows"]
+    CI --> APP["App desktop<br/>Swift e egui"]
+    RUN --> MAIN["main"]
+    APP --> MAIN
+    MAIN --> REL["Release<br/>installer, APK, SHA256SUMS"]
+    REL --> UPD["updates e selfupdate<br/>controllo, download verificato"]
+    UPD --> SCRIPT["Script di installazione<br/>attesa, sostituzione, riavvio sempre,<br/>apply.log"]
+    SCRIPT --> NEW["Nuova versione<br/>esito letto al riavvio"]
 ```
 
 ### Ciclo di una richiesta

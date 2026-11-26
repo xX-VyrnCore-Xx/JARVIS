@@ -52,6 +52,40 @@ private enum Section: String, Identifiable {
     ]
 
     var id: Self { self }
+
+    /// Una riga che dice a cosa serve la pagina: sta sotto il titolo e non cambia nessun comportamento.
+    var subtitle: String {
+        switch self {
+        case .dashboard: "Stato di JARVIS, attività, cose che richiedono attenzione"
+        case .chat: "Parla con JARVIS: scrivi o detta, vedi le risposte in tempo reale"
+        case .tasks: "Cosa sta facendo e cosa ha fatto, con l'esito di ogni passo"
+        case .confirmations: "Operazioni che aspettano il tuo permesso prima di partire"
+        case .workflows: "Operazioni pianificate e automazioni, anche con n8n"
+        case .memory: "Cosa JARVIS ricorda: cerca, correggi o dimentica"
+        case .workspace: "Cartelle di lavoro, profili e app da aprire insieme"
+        case .connectors: "Servizi collegati: posta, calendario, GitHub, server MCP"
+        case .devices: "Dispositivi associati e collegamento con Tailscale"
+        case .skills: "Competenze e istruzioni che JARVIS applica quando servono"
+        case .security: "Postura di sicurezza, cifratura e arresto di emergenza"
+        case .audit: "Registro firmato di tutto ciò che è stato deciso ed eseguito"
+        case .system: "Backup, risorse del computer e installazioni"
+        case .models: "Modelli AI, chiavi e provider cloud"
+        case .updates: "Versione installata, controllo e installazione degli aggiornamenti"
+        case .notifications: "Avvisi del Core, dei connettori e delle automazioni"
+        case .missions: "Obiettivi lunghi che JARVIS porta avanti per te"
+        case .profile: "Le tue preferenze e come JARVIS ti conosce"
+        case .plans: "Piani a passi con dipendenze, prove a secco e conferme"
+        case .tools: "Strumenti disponibili, rischio e regole del proprietario"
+        case .agents: "Specializzazioni, pause e limiti di lavoro"
+        case .plugins: "Pacchetti che aggiungono strumenti e competenze"
+        case .users: "Account, ruoli e inviti"
+        case .voice: "Riconoscimento e sintesi vocale installati in locale"
+        case .map: "Luoghi e percorsi su OpenStreetMap"
+        case .privacy: "Cosa viene conservato, cosa può uscire e chi ha il permesso"
+        case .research: "Ricerche salvate: risultati, fonti e domande aperte"
+        }
+    }
+
     var icon: String {
         switch self {
         case .dashboard: "square.grid.2x2"
@@ -671,9 +705,14 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     private var content: some View {
         VStack(spacing: 0) {
-            HStack {
-                Label(section.rawValue, systemImage: section.icon).font(.title2.weight(.semibold))
-                Spacer()
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Label(section.rawValue, systemImage: section.icon).font(.title2.weight(.semibold))
+                        .symbolRenderingMode(.hierarchical)
+                    Text(section.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                .layoutPriority(1)
+                Spacer(minLength: 8)
                 Button {
                     speakReplies.toggle()
                     let value = speakReplies
@@ -714,7 +753,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                         switch section {
                         case .dashboard: dashboard
                         case .chat: chat
-                        default: tools
+                        // Sulle finestre molto larghe le schede non si allungano oltre una misura leggibile.
+                        default: tools.frame(maxWidth: 1080, alignment: .leading)
                         }
                         if section == .chat { Color.clear.frame(height: 1).id("latest-message") }
                     }
@@ -747,11 +787,16 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     private func card<Content: View>(_ title: String, icon: String, @ViewBuilder body: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             Label(title, systemImage: icon).font(.headline).foregroundStyle(.cyan)
+                .symbolRenderingMode(.hierarchical)
             body()
         }
-        .padding(15).frame(maxWidth: .infinity, alignment: .leading)
-        .background(panel, in: RoundedRectangle(cornerRadius: 14))
-        .overlay { RoundedRectangle(cornerRadius: 14).strokeBorder(.cyan.opacity(0.16)) }
+        .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(LinearGradient(colors: [panel, panel.opacity(0.92)], startPoint: .top, endPoint: .bottom))
+                .shadow(color: .black.opacity(0.22), radius: 7, y: 3)
+        }
+        .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.cyan.opacity(0.16)) }
     }
 
     /// Scheda «Protezione» (ADR-0149): punteggio, cifratura a riposo e controlli da sistemare.

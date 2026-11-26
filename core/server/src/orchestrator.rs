@@ -809,6 +809,90 @@ impl Jarvis {
         Ok(json!({"messages": messages, "memory": memory, "skills": skills}))
     }
 
+    /// Vincoli dell'utente ancora attivi nella chat che vietano questa chiamata (ADR-0218).
+    fn conversation_blocks(&self, tool: &str, arguments: &Value) -> Option<String> {
+        let messages = self.store.messages_recent(12).ok()?;
+        let users: Vec<String> = messages
+            .iter()
+            .filter(|m| m["role"] == "user")
+            .filter_map(|m| m["content"].as_str().map(str::to_string))
+            .collect();
+        let constraints = crate::followup::active_constraints(&users);
+        if constraints.is_empty() {
+            return None;
+        }
+        let effects = self
+            .catalog
+            .get(tool)
+            .and_then(|t| t.descriptor["effects"].as_str().map(str::to_string))
+            .unwrap_or_else(|| "write_local".into());
+        crate::followup::blocks(&constraints, tool, &effects, arguments)
+    }
+
+    /// Risposta deterministica agli atti di conversazione che il Core sa soddisfare da solo (ADR-0217).
+    fn dialogue_reply(&mut self, message: &str) -> Result<Option<String>, CoreError> {
+        let Some(act) = crate::dialogue::act(message).filter(|a| a.answered_by_core()) else {
+            return Ok(None);
+        };
+        let tasks = self.store.tasks_recent(8).map_err(internal)?;
+        let running_tasks: Vec<String> = tasks
+            .iter()
+            .filter(|t| matches!(t["state"].as_str(), Some("running" | "planned")))
+            .filter_map(|t| t["objective"].as_str())
+            .map(|o| o.chars().take(80).collect())
+            .collect();
+        let last_failure = tasks
+            .iter()
+            .find(|t| t["state"] == "failed")
+            .and_then(|t| t["objective"].as_str())
+            .map(|o| o.chars().take(80).collect());
+        let plans = self
+            .store
+            .plans_recent(10)
+            .map_err(internal)?
+            .into_iter()
+            .filter(|p| {
+                matches!(
+                    p["status"].as_str(),
+                    Some("running" | "paused" | "waiting" | "pending")
+                )
+            })
+            .map(|p| {
+                let steps = p["steps"].as_array().cloned().unwrap_or_default();
+                let done = steps
+                    .iter()
+                    .filter(|s| {
+                        matches!(s["status"].as_str(), Some("succeeded" | "done" | "skipped"))
+                    })
+                    .count();
+                let next = steps
+                    .iter()
+                    .find(|s| s["status"] == "pending")
+                    .and_then(|s| s["tool"].as_str().or_else(|| s["title"].as_str()))
+                    .map(str::to_string);
+                crate::dialogue::PlanLine {
+                    goal: p["goal"]
+                        .as_str()
+                        .unwrap_or("senza titolo")
+                        .chars()
+                        .take(60)
+                        .collect(),
+                    status: p["status"].as_str().unwrap_or_default().to_string(),
+                    done,
+                    total: steps.len(),
+                    next,
+                }
+            })
+            .collect();
+        let snapshot = crate::dialogue::Snapshot {
+            running_tasks,
+            plans,
+            confirmations: self.pending.len(),
+            last_failure,
+        };
+        Ok(crate::dialogue::reply(act, &snapshot))
+    }
+
     /// Piani da far proseguire dopo una ripresa da chat; li prende l'API e li affida al pianificatore.
     pub fn take_plan_runners(&mut self) -> Vec<String> {
         std::mem::take(&mut self.plan_runners)
@@ -907,6 +991,15 @@ impl Jarvis {
                 .len()
                 .checked_sub(2)
                 .and_then(|i| users[i]["content"].as_str().map(str::to_string)),
+            user_history: users
+                .iter()
+                .filter_map(|m| m["content"].as_str().map(str::to_string))
+                .collect(),
+            last_reply: messages
+                .iter()
+                .rev()
+                .find(|m| m["role"] == "assistant")
+                .and_then(|m| m["content"].as_str().map(str::to_string)),
             ..Recent::default()
         };
         for m in messages.iter().rev() {
@@ -1437,6 +1530,14 @@ impl Jarvis {
                 text.into(),
             );
         }
+        // Presenza, apertura e stato («ci sei?», «a che punto siamo?», «quanto manca?», ADR-0217): risposta del Core
+        // con i dati reali (attività, passi dei piani, conferme), senza chiamare il modello e senza inventare tempi.
+        if let Some(text) = self.dialogue_reply(message)? {
+            task.transition("planned", "Atto di conversazione");
+            task.transition("running", "Stato letto dal Core");
+            task.transition("succeeded", "Risposta con dati reali");
+            return self.finish(task, Outcome::default(), text);
+        }
         // Controllo dei piani da chat (ADR-0173, ADR-0176): «aspetta, fermati» sospende, «annulla» e «lascia stare»
         // annullano, «riprendi» riprende (anche «senza modificare…») e «prima fammi vedere» mostra la prova a secco.
         // Fermare non allarga nulla; riprendere riavvia solo ciò che il proprietario aveva già approvato.
@@ -1560,6 +1661,16 @@ impl Jarvis {
                     .push(json!({"kind": "scope", "tool": tool, "allowed": false}));
                 self.obs.count("agent.out_of_scope");
                 let output = json!({"code": "policy.not_delegated", "message": policy::explain("policy.not_delegated")});
+                history.push(step_record(&tool, &arguments, &digest, "denied", output));
+                result = self.next_step(&task, &inputs, &history, true, &mut out);
+                continue;
+            }
+            // Vincoli dell'utente nella chat (ADR-0218): «non toccare X», «non pubblicare ancora». Controllo del Core a
+            // ogni chiamata, indipendente da cosa propone il modello.
+            if let Some(reason) = self.conversation_blocks(&tool, &arguments) {
+                out.steps
+                    .push(json!({"kind": "constraint", "tool": tool, "allowed": false}));
+                let output = json!({"code": "policy.conversation_constraint", "message": reason});
                 history.push(step_record(&tool, &arguments, &digest, "denied", output));
                 result = self.next_step(&task, &inputs, &history, true, &mut out);
                 continue;
