@@ -199,6 +199,13 @@ def _describe_tool_result(result: dict) -> str:
     if tool == "app.key":
         mods = "+".join(output.get("modifiers") or [])
         return f"Ho premuto {mods + '+' if mods else ''}{output.get('key')}."
+    if tool == "app.elements":
+        items = output.get("elements") or []
+        if not items:
+            return "Non vedo elementi cliccabili nella finestra in primo piano."
+        lines = [f"• {e.get('role')} «{e.get('name') or '(senza nome)'}» — centro ({e['center']['x']}, {e['center']['y']})" for e in items[:25]]
+        more = f"\n… e altri {len(items) - 25} elementi." if len(items) > 25 else ""
+        return "Elementi della finestra in primo piano:\n" + "\n".join(lines) + more + "\nPer cliccarne uno dimmi «clicca a x, y» con il centro indicato."
     if tool == "app.click":
         c = output.get("clicked") or {}
         return f"Ho fatto {'doppio clic' if c.get('clicks') == 2 else 'clic'} alle coordinate ({c.get('x')}, {c.get('y')})."
@@ -618,6 +625,7 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
                 **({"modifiers": [_MODIFIERS[p.strip().lower()] for p in m[1].split("+") if p.strip()]} if m[1].strip() else {})}),
     (re.compile(r"^\s*(doppio clic|doppio click|clicca|fai clic|fai click)\s+(?:a|alle coordinate|in)?\s*\(?(\d{1,5})\s*[, ]\s*(\d{1,5})\)?\s*$", re.I), "app.click",
      lambda m: {"x": int(m[2]), "y": int(m[3]), **({"clicks": 2} if m[1].lower().startswith("doppio") else {})}),
+    (re.compile(r"^\s*(?:quali (?:pulsanti|bottoni|elementi|controlli) (?:ci sono|vedi)(?: nella finestra| sullo schermo)?|elenca (?:i )?(?:pulsanti|bottoni|elementi)(?: della finestra)?)\s*\??\s*$", re.I), "app.elements", lambda m: {}),
     (re.compile(r"^\s*(?:cosa c'è sullo schermo|cosa vedi sullo schermo|leggi (?:lo|il mio) schermo|che testo c'è sullo schermo)\s*\??\s*$", re.I), "screen.read", lambda m: {}),
     # Ricerche salvate: «le mie ricerche», «riprendi la ricerca sui database».
     (re.compile(r"^\s*(?:le mie ricerche|elenca le ricerche|ricerche salvate|mostra le ricerche)\s*\??\s*$", re.I), "research.list", lambda m: {}),

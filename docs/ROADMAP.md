@@ -274,6 +274,8 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Ricerche salvate (2026-11-26, ADR-0206).** `research.save/list/read` e `/api/research`: risultati per tipo, fonti con attendibilità, domande aperte, ripresa per titolo.
 
+**Viste grafiche (2026-11-26, ADR-0215).** Cronologia dei permessi nel riepilogo Privacy, sezione «Ricerche» su macOS e pagine «Privacy» e «Ricerche» su Windows; verificate solo in CI. `app.elements` (ADR-0216) elenca i controlli della finestra con il centro da cliccare; non provato su macOS/Windows reali. Restano: stati dell'avatar per ricerca/esecuzione/collaborazione (serve un canale di attività) e visione dello schermo oltre l'OCR.
+
 **Tailscale (2026-11-26, ADR-0214).** Lettura dello stato resa affidabile (output grande, avvisi su stderr, demone sbagliato, console su Windows); provata con falsi programmi, non con una tailnet reale.
 
 **Aggiornamento in app (2026-11-26, ADR-0213).** Script di installazione che attende la chiusura, riapre sempre l'app, ripristina in caso di errore e lascia registro ed esito (notifica al riavvio); provato con strumenti simulati, non su macOS/Windows reali.

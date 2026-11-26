@@ -3930,6 +3930,7 @@ impl Jarvis {
             "mcp_servers": self.mcp_servers()["items"].as_array().map_or(0, Vec::len),
             "background": {"file_watches": self.watches()["items"].as_array().map_or(0, Vec::len),
                 "resource_profile": crate::perf::current(&self.cfg.data_dir).id()},
+            "permission_history": self.permission_history(10, None),
         }))
     }
 

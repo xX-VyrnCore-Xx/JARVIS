@@ -491,6 +491,7 @@ const TRANSIENT_TOOLS: &[&str] = &[
     "app.focus",
     "app.key",
     "app.click",
+    "app.elements",
     "app.type",
     "screen.status",
     "media.spotify",

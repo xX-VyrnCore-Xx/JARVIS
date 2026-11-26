@@ -25,7 +25,7 @@ const NEGATIVE: egui::Color32 = egui::Color32::from_rgb(255, 125, 135);
 mod users_ui;
 use users_ui::UserState;
 
-const NAV: [(&str, &str, bool); 22] = [
+const NAV: [(&str, &str, bool); 24] = [
     ("dashboard", "Plancia", true),
     ("chat", "Chat", false),
     ("profile", "Profilo", true),
@@ -36,6 +36,7 @@ const NAV: [(&str, &str, bool); 22] = [
     ("plans", "Piani", true),
     ("workspace", "Workspace", true),
     ("memory", "Memoria", true),
+    ("research", "Ricerche", true),
     ("skills", "Competenze", true),
     ("agents", "Agenti", true),
     ("tools", "Strumenti", true),
@@ -44,6 +45,7 @@ const NAV: [(&str, &str, bool); 22] = [
     ("devices", "Dispositivi", true),
     ("security", "Sicurezza", true),
     ("permissions", "Permessi", true),
+    ("privacy", "Privacy", true),
     ("users", "Utenti", true),
     ("audit", "Audit", true),
     ("system", "Sistema", true),
@@ -83,11 +85,10 @@ fn scroll_fade(ui: &egui::Ui, view: egui::Rect, fill: egui::Color32, top: bool) 
 fn nav_group(id: &str) -> &'static str {
     match id {
         "dashboard" | "chat" | "profile" | "tasks" | "models" => "Assistente",
-        "missions" | "plans" | "automations" | "workspace" | "memory" | "skills" | "agents" => {
-            "Organizzazione"
-        }
+        "missions" | "plans" | "automations" | "workspace" | "memory" | "research" | "skills"
+        | "agents" => "Organizzazione",
         "connectors" | "tools" | "plugins" | "devices" => "Connessioni",
-        "security" | "permissions" | "users" | "audit" => "Protezione",
+        "security" | "permissions" | "privacy" | "users" | "audit" => "Protezione",
         _ => "Sistema",
     }
 }
@@ -190,6 +191,23 @@ fn draw_nav_icon(painter: &egui::Painter, center: egui::Pos2, id: &str, color: e
             painter.circle_stroke(p(-3.0, 0.0), 4.5, stroke);
             painter.circle_stroke(p(3.0, 0.0), 4.5, stroke);
             painter.line_segment([p(0.0, -4.0), p(0.0, 4.0)], stroke);
+        }
+        "research" => {
+            painter.circle_stroke(p(-2.0, -2.0), 5.0, stroke);
+            painter.line_segment([p(1.6, 1.6), p(7.0, 7.0)], stroke);
+        }
+        "privacy" => {
+            painter.add(egui::Shape::closed_line(
+                vec![
+                    p(0.0, -8.0),
+                    p(6.5, -5.5),
+                    p(6.0, 2.0),
+                    p(0.0, 8.0),
+                    p(-6.0, 2.0),
+                    p(-6.5, -5.5),
+                ],
+                stroke,
+            ));
         }
         "skills" => {
             painter.add(egui::Shape::closed_line(
@@ -2645,7 +2663,9 @@ impl JarvisApp {
             "users" => self.show_users(ui, ctx),
             "plugins" => self.show_plugins(ui, ctx),
             "permissions" => self.show_permissions(ui, ctx),
-            "tasks" | "automations" | "skills" | "workspace" | "devices" | "security" | "audit" => {
+            "privacy" => self.show_privacy(ui, ctx),
+            "tasks" | "research" | "automations" | "skills" | "workspace" | "devices"
+            | "security" | "audit" => {
                 ui.horizontal(|ui| {
                     ui.heading(title(&self.current));
                     if ui.button("Aggiorna").clicked() {
@@ -2694,6 +2714,140 @@ impl JarvisApp {
             }
             _ => {}
         }
+    }
+
+    /// Centro privacy (ADR-0187, ADR-0210): cosa JARVIS conserva, cosa può uscire verso il cloud, cosa è
+    /// autorizzato e la cronologia delle ultime modifiche ai permessi. Legge `/api/privacy/overview`.
+    fn show_privacy(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        ui.horizontal(|ui| {
+            ui.heading("Privacy");
+            if ui.button("Aggiorna").clicked() {
+                self.data = None;
+                self.refresh(ctx);
+            }
+            if self.loading {
+                ui.add(egui::Spinner::new());
+            }
+        });
+        if let Some(error) = &self.error {
+            ui.colored_label(NEGATIVE, error);
+        }
+        let Some(data) = self.data.clone() else {
+            return;
+        };
+        let card = |ui: &mut egui::Ui, title: &str, body: &mut dyn FnMut(&mut egui::Ui)| {
+            egui::Frame::new()
+                .fill(SURFACE)
+                .corner_radius(10)
+                .inner_margin(10)
+                .show(ui, |ui| {
+                    ui.set_min_width(ui.available_width());
+                    ui.label(egui::RichText::new(title).strong());
+                    body(ui);
+                });
+            ui.add_space(6.0);
+        };
+        let stored = &data["stored_locally"];
+        card(ui, "Dati conservati sul computer", &mut |ui| {
+            ui.label(format!(
+                "Memoria: {} ricordi. {}",
+                stored["memory"]["total"].as_u64().unwrap_or(0),
+                stored["note"].as_str().unwrap_or("")
+            ));
+            for entry in stored["data_dir_entries"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .take(8)
+            {
+                ui.small(format!(
+                    "{} · {} KB",
+                    entry["name"].as_str().unwrap_or("?"),
+                    entry["bytes"].as_u64().unwrap_or(0) / 1024
+                ));
+            }
+        });
+        card(ui, "Cosa può uscire verso il cloud", &mut |ui| {
+            ui.label(data["cloud"]["note"].as_str().unwrap_or(""));
+            let providers = data["cloud"]["providers_with_key"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
+            if providers.is_empty() {
+                ui.colored_label(
+                    POSITIVE,
+                    "Nessun provider cloud ha una chiave: nulla parte dal computer.",
+                );
+            }
+            for provider in providers {
+                ui.label(format!(
+                    "{}: chiave configurata",
+                    provider["id"].as_str().unwrap_or("provider")
+                ));
+            }
+        });
+        card(ui, "Cosa è autorizzato", &mut |ui| {
+            ui.label(format!(
+                "Strumenti disponibili: {}. Autonomia: livello {}; lavori in background {}.",
+                data["tools"]["count"].as_u64().unwrap_or(0),
+                data["autonomy"]["default"].as_u64().unwrap_or(0),
+                if data["autonomy"]["background_allowed"].as_bool() == Some(true) {
+                    "consentiti"
+                } else {
+                    "non consentiti"
+                }
+            ));
+            if let Some(effects) = data["tools"]["by_effects"].as_object() {
+                for (effect, count) in effects {
+                    ui.small(format!("{effect}: {}", count.as_u64().unwrap_or(0)));
+                }
+            }
+            ui.small(format!(
+                "Connettori: {} · Server MCP: {} · Osservazioni di file: {}",
+                data["connectors"].as_u64().unwrap_or(0),
+                data["mcp_servers"].as_u64().unwrap_or(0),
+                data["background"]["file_watches"].as_u64().unwrap_or(0)
+            ));
+        });
+        let history = data["permission_history"]["items"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        card(ui, "Cronologia dei permessi", &mut |ui| {
+            if history.is_empty() {
+                ui.small("Nessuna modifica registrata.");
+            }
+            for entry in history.iter().take(10) {
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} · {}",
+                        entry["at"].as_str().unwrap_or("?"),
+                        entry["kind"].as_str().unwrap_or("?")
+                    ))
+                    .small()
+                    .strong(),
+                );
+                for change in entry["changes"].as_array().into_iter().flatten().take(6) {
+                    ui.small(format!(
+                        "{}: {} → {}",
+                        change["field"].as_str().unwrap_or("?"),
+                        change["from"],
+                        change["to"]
+                    ));
+                }
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("Permessi e autonomia").clicked() {
+                self.go(ctx, "permissions");
+            }
+            if ui.button("Memoria").clicked() {
+                self.go(ctx, "memory");
+            }
+            if ui.button("Audit").clicked() {
+                self.go(ctx, "audit");
+            }
+        });
     }
 
     /// Gestione degli strumenti (ADR-0151): registro con categoria, rischio, salute e regola del proprietario.
@@ -6624,6 +6778,8 @@ fn endpoint(page: &str) -> &'static str {
         "tasks" => "/api/tasks?limit=50",
         "automations" => "/api/workflows",
         "memory" => "/api/memory",
+        "research" => "/api/research",
+        "privacy" => "/api/privacy/overview",
         "skills" => "/api/skills",
         "missions" => "/api/missions",
         "permissions" => "/api/permissions",

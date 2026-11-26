@@ -21,6 +21,7 @@ const SOURCES: &[&str] = &[
     tool_file!("app.focus"),
     tool_file!("app.key"),
     tool_file!("app.click"),
+    tool_file!("app.elements"),
     tool_file!("app.open"),
     tool_file!("media.spotify"),
     tool_file!("app.type"),
