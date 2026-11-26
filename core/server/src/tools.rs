@@ -405,6 +405,18 @@ pub fn execute(name: &str, args: &Value, ctx: &Context) -> Result<Value, ToolErr
                 args["limit"].as_u64().unwrap_or(5) as usize,
             )
         }
+        "map.search" => {
+            if !ctx.web.enabled {
+                return Err(ToolError::new("web.disabled", "accesso al Web disattivato"));
+            }
+            crate::maps::search(ctx.web, args)
+        }
+        "map.route" => {
+            if !ctx.web.enabled {
+                return Err(ToolError::new("web.disabled", "accesso al Web disattivato"));
+            }
+            crate::maps::route(ctx.web, args)
+        }
         "web.fetch" => {
             if !ctx.web.enabled {
                 return Err(ToolError::new("web.disabled", "accesso al Web disattivato"));

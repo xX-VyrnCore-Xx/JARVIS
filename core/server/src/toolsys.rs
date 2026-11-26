@@ -45,6 +45,7 @@ pub fn platforms(name: &str) -> Vec<&'static str> {
 pub fn offline(name: &str) -> bool {
     !(name.starts_with("web.")
         || name.starts_with("weather.")
+        || name.starts_with("map.")
         || name.starts_with("connector.")
         || name == "n8n.create")
 }

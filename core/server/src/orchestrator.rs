@@ -2554,6 +2554,10 @@ impl Jarvis {
             .filter(|s| s["kind"] == "tool_call")
             .filter_map(|s| s["tool"].as_str())
             .collect();
+        // «Che ore sono», un calcolo o il meteo non sono ricordi (ADR-0199).
+        if !crate::memcog::episode_is_worth_keeping(full_objective, &tools) {
+            return;
+        }
         let text = if tools.is_empty() {
             format!("Richiesta «{objective}»: risposta diretta, esito {state}")
         } else {
@@ -2846,6 +2850,24 @@ impl Jarvis {
     }
 
     /// Cancellazione diretta richiesta dal proprietario dall'interfaccia (RF-08).
+    /// Elimina gli episodi automatici che non servono (ora, calcoli, saluti): anteprima o applicazione con audit.
+    pub fn memory_clean_noise(&mut self, apply: bool) -> Result<Value, CoreError> {
+        let out = crate::memcog::clean_noise_episodes(&self.store, apply).map_err(internal)?;
+        if apply {
+            self.record_owner_action("memory.clean")?;
+        }
+        let mut out = out;
+        out["message"] = json!(if apply {
+            format!("Eliminati {} ricordi automatici inutili.", out["removed"])
+        } else {
+            format!(
+                "Trovati {} ricordi automatici inutili da eliminare.",
+                out["found"]
+            )
+        });
+        Ok(out)
+    }
+
     pub fn forget(&mut self, id: &str) -> Result<(), CoreError> {
         if !self.store.memory_delete(id).map_err(internal)? {
             return Err(CoreError::NotFound(format!(
@@ -3814,6 +3836,11 @@ impl Jarvis {
             "background": {"file_watches": self.watches()["items"].as_array().map_or(0, Vec::len),
                 "resource_profile": crate::perf::current(&self.cfg.data_dir).id()},
         }))
+    }
+
+    /// Configurazione del Web da usare fuori dal blocco del Core (ricerche di mappe e percorsi: richieste lente).
+    pub fn web_config(&self) -> crate::web::WebConfig {
+        self.cfg.web.clone()
     }
 
     /// Limiti di lavoro del profilo di risorse attivo (ADR-0186).

@@ -116,7 +116,10 @@ async fn memory_kinds_search_graph_and_episodes() {
     env.chat("ricorda che la riunione di progetto è il martedì")
         .await;
     env.chat("preferisco risposte brevi").await;
+    // «Che ore sono» non è un ricordo (ADR-0199): nessun episodio. Un'attività vera (una nota) sì.
     env.chat("che ore sono").await;
+    assert!(env.items("?kind=episodic").await.is_empty());
+    env.chat("annota: comprare il latte").await;
 
     let semantic = env.items("?kind=semantic").await;
     assert_eq!(semantic.len(), 2, "{semantic:?}");
@@ -127,7 +130,7 @@ async fn memory_kinds_search_graph_and_episodes() {
     // Episodio per l'attività conclusa, legato al task e con scadenza; nessun episodio per la memoria.
     let episodic = env.items("?kind=episodic").await;
     assert_eq!(episodic.len(), 1, "{episodic:?}");
-    assert!(episodic[0]["text"].as_str().unwrap().contains("time.now"));
+    assert!(episodic[0]["text"].as_str().unwrap().contains("notes.add"));
     assert!(episodic[0]["source"]["task_id"].is_string());
     assert!(episodic[0]["expires_at"].is_string());
 

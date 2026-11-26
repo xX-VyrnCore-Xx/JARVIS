@@ -52,6 +52,8 @@ const SOURCES: &[&str] = &[
     tool_file!("git.status"),
     tool_file!("it.subnet"),
     tool_file!("log.analyze"),
+    tool_file!("map.search"),
+    tool_file!("map.route"),
     tool_file!("math.calc"),
     tool_file!("mcp.call"),
     tool_file!("mcp.list"),

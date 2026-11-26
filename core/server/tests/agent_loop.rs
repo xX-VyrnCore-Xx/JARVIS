@@ -151,7 +151,7 @@ async fn loop_stops_after_four_tools() {
 
 #[tokio::test]
 async fn specialist_gets_only_its_tools_and_cannot_leave_its_scope() {
-    // Richiesta di ricerca: l'agente `research` riceve solo Web, estrazione di testo, note, ora e ricerca nella memoria (ADR-0038, ADR-0171).
+    // Richiesta di ricerca: l'agente `research` riceve solo Web, mappe (ADR-0202), estrazione di testo, note, ora e ricerca nella memoria (ADR-0038, ADR-0171).
     let (url, seen) = fake_worker(vec![("shell.run", json!({"command": "ls"}))], false);
     let out = chat(url, 18774, "cerca sul web le novità di Rust").await;
     let first = seen.lock().unwrap()[0].clone();
@@ -165,6 +165,8 @@ async fn specialist_gets_only_its_tools_and_cannot_leave_its_scope() {
     assert_eq!(
         offered,
         [
+            "map.route",
+            "map.search",
             "mcp.call",
             "mcp.list",
             "mcp.read",

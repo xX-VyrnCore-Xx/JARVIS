@@ -607,6 +607,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/memory/duplicates", get(memory_duplicates))
         .route("/api/memory/reindex", post(memory_reindex))
         .route("/api/memory/{id}/pin", post(memory_pin))
+        .route("/api/memory/cleanup", post(memory_cleanup))
         .route("/api/memory/{id}", delete(forget).patch(memory_correct))
         .route("/api/audit", get(audit))
         .route("/api/workspace", get(workspace))
@@ -659,6 +660,8 @@ pub fn router(state: Shared) -> Router {
         .route("/api/mcp/servers/health", post(mcp_server_health))
         .route("/api/mcp/servers/policy", post(mcp_server_policy))
         .route("/api/mcp/presets", get(mcp_presets))
+        .route("/api/map/search", post(map_search))
+        .route("/api/map/route", post(map_route))
         .route(
             "/api/media/spotify",
             get(spotify_status).post(spotify_command),
@@ -679,6 +682,10 @@ pub fn router(state: Shared) -> Router {
         .route(
             "/api/workspaces/profiles/plan",
             post(workspace_profile_plan),
+        )
+        .route(
+            "/api/workspaces/profiles/activate",
+            post(workspace_profile_activate),
         )
         .route("/api/watches", get(watches_list).post(watch_add))
         .route("/api/watches/remove", post(watch_remove))
@@ -2595,6 +2602,12 @@ async fn system_stats() -> Response {
     }
 }
 
+/// Elimina i ricordi automatici inutili (ora, calcoli, saluti). `apply: false` mostra solo l'anteprima.
+async fn memory_cleanup(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let apply = body["apply"].as_bool().unwrap_or(false);
+    reply(with_core(&state, move |j| j.memory_clean_noise(apply)).await)
+}
+
 async fn memory_stats(State(state): State<Shared>) -> Response {
     match with_core(&state, |j| j.memory_stats()).await {
         Ok(v) => Json(v).into_response(),
@@ -3282,6 +3295,31 @@ async fn mcp_server_test(State(state): State<Shared>, Json(body): Json<Value>) -
 }
 
 /// Regole di osservazione dei file (ADR-0158), solo proprietario.
+/// Mappa (ADR-0202): ricerca di luoghi e percorsi con OpenStreetMap, dal proprietario. Le richieste lente girano
+/// fuori dal blocco del Core.
+async fn map_search(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let web = with_core(&state, |j| j.web_config()).await;
+    map_response(tokio::task::spawn_blocking(move || crate::maps::search(&web, &body)).await)
+}
+
+async fn map_route(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
+    let web = with_core(&state, |j| j.web_config()).await;
+    map_response(tokio::task::spawn_blocking(move || crate::maps::route(&web, &body)).await)
+}
+
+fn map_response(
+    outcome: Result<Result<Value, crate::tools::ToolError>, tokio::task::JoinError>,
+) -> Response {
+    match outcome {
+        Ok(Ok(value)) => Json(value).into_response(),
+        Ok(Err(e)) if e.code.starts_with("map.") && e.code != "map.invalid_response" => {
+            CoreError::BadRequest(e.message).into_response()
+        }
+        Ok(Err(e)) => CoreError::Unavailable(e.message).into_response(),
+        Err(_) => CoreError::Internal("richiesta interrotta".into()).into_response(),
+    }
+}
+
 /// Brano in ascolto su Spotify, l'unico servizio musicale collegato (ADR-0195). Sola lettura, non avvia Spotify.
 async fn spotify_status() -> Response {
     spotify_call(json!({"command": "status"})).await
@@ -3349,6 +3387,50 @@ async fn workspace_profile_remove(
         with_core(&state, move |j| j.workspace_profile_remove(&key)).await,
         "workspace.profile.remove",
     )
+}
+
+/// Attiva un profilo: apre le applicazioni elencate. Lo chiede il proprietario con un tocco esplicito sul profilo
+/// che ha scritto lui (è la sua conferma); ogni apertura è un'azione di sistema, l'esito è per app e nell'audit.
+async fn workspace_profile_activate(
+    State(state): State<Shared>,
+    Json(body): Json<Value>,
+) -> Response {
+    let key = body["id"].as_str().unwrap_or_default().to_string();
+    let plan = match with_core(&state, {
+        let key = key.clone();
+        move |j| j.workspace_profile_plan(&key)
+    })
+    .await
+    {
+        Ok(plan) => plan,
+        Err(e) => return e.into_response(),
+    };
+    let apps: Vec<String> = plan["steps"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|s| s["tool"] == "app.open")
+        .filter_map(|s| s["args"]["app"].as_str().map(str::to_string))
+        .collect();
+    let results = tokio::task::spawn_blocking(move || {
+        apps.iter()
+            .map(
+                |app| match crate::appcontrol::execute("app.open", &json!({"app": app})) {
+                    Ok(_) => json!({"app": app, "opened": true}),
+                    Err(e) => json!({"app": app, "opened": false, "error": e.message}),
+                },
+            )
+            .collect::<Vec<Value>>()
+    })
+    .await
+    .unwrap_or_default();
+    let _ = with_core(&state, |j| j.record_owner_action("workspace.activate")).await;
+    let opened = results.iter().filter(|r| r["opened"] == true).count();
+    Json(json!({
+        "profile": plan["profile"], "results": results,
+        "message": format!("Profilo «{}»: aperte {} app su {}.", plan["profile"]["name"].as_str().unwrap_or(""), opened, results.len()),
+    }))
+    .into_response()
 }
 
 async fn workspace_profile_plan(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
@@ -4200,8 +4282,10 @@ async fn pair_device(State(state): State<Shared>, Json(body): Json<Value>) -> Re
     )
 }
 
-fn simulated_voice_setup() -> bool {
-    std::env::var("JARVIS_SETUP_FAKE").as_deref() == Ok("1")
+/// L'installazione della voce è disponibile salvo `JARVIS_VOICE_SETUP=off` (ADR-0200). I passi veri scaricano pacchetti
+/// e modelli solo dopo la richiesta esplicita del proprietario; con `JARVIS_SETUP_FAKE=1` sono simulati.
+fn voice_setup_available() -> bool {
+    std::env::var("JARVIS_VOICE_SETUP").as_deref() != Ok("off")
 }
 
 async fn setup_status(State(state): State<Shared>) -> Json<Value> {
@@ -4209,14 +4293,16 @@ async fn setup_status(State(state): State<Shared>) -> Json<Value> {
     let mut status = tokio::task::spawn_blocking(move || setup.status())
         .await
         .unwrap_or_else(|_| json!({}));
-    status["available"] = json!(simulated_voice_setup());
+    status["available"] = json!(voice_setup_available());
     Json(status)
 }
 
 async fn setup_start(State(state): State<Shared>, Json(body): Json<Value>) -> Response {
-    if !simulated_voice_setup() {
-        return CoreError::Unavailable("La voce richiede un provider audio cloud.".into())
-            .into_response();
+    if !voice_setup_available() {
+        return CoreError::Unavailable(
+            "L'installazione della voce è disattivata su questo Core.".into(),
+        )
+        .into_response();
     }
     let plan = match crate::setup::Plan::from_json(&body) {
         Ok(p) => p,

@@ -32,6 +32,7 @@ pub mod guard;
 pub mod handoff;
 pub mod improvements;
 pub mod intent;
+pub mod maps;
 pub mod mcp;
 pub mod mcp_client;
 pub mod memcog;

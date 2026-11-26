@@ -266,6 +266,12 @@ function check(condition, message) {
   check(wsDel.status === 200, "profilo di workspace rimosso");
   const priv = await request("/api/privacy/overview", { token: ownerToken });
   check(priv.status === 200 && Array.isArray(priv.json?.stored_locally?.data_dir_entries) && priv.json?.cloud && !JSON.stringify(priv.json).includes(ownerToken), "centro privacy: inventario senza segreti");
+  const memClean = await request("/api/memory/cleanup", { method: "POST", token: ownerToken, body: { apply: false } });
+  check(memClean.status === 200 && memClean.json?.applied === false && typeof memClean.json?.found === "number", "pulizia dei ricordi inutili: anteprima");
+  const mapBad = await request("/api/map/search", { method: "POST", token: ownerToken, body: {} });
+  check(mapBad.status === 400, "mappa: luogo mancante rifiutato");
+  const wsMissing = await request("/api/workspaces/profiles/activate", { method: "POST", token: ownerToken, body: { id: "inesistente" } });
+  check(wsMissing.status === 404, "attivazione di un profilo inesistente rifiutata");
   const perfGet = await request("/api/performance", { token: ownerToken });
   check(perfGet.status === 200 && perfGet.json?.active === "balanced" && perfGet.json?.profiles?.length === 4, "profili di risorse: predefinito bilanciato");
   const perfBad = await request("/api/performance", { method: "POST", token: ownerToken, body: { profile: "turbo" } });

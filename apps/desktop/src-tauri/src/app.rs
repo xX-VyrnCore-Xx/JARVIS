@@ -323,6 +323,11 @@ enum Event {
     Spotify(Result<Value, String>),
     /// Stato di n8n in Docker (ADR-0197).
     N8n(Result<Value, String>),
+    /// Server MCP autorizzati e, dopo la lettura, gli strumenti di uno di essi (ADR-0199).
+    Mcp(Result<Value, String>),
+    /// Profili di lavoro (ADR-0185).
+    WsProfiles(Result<Value, String>),
+    McpTools(String, Result<Value, String>),
     /// Esito dell'avvio dell'aggiornamento interno (ADR-0109): se riuscito l'app si chiude.
     UpdateInstalling(Result<Value, String>),
     /// Personalità corrente di JARVIS (ADR-0120).
@@ -465,6 +470,7 @@ pub struct JarvisApp {
     cloud_provider: String,
     cloud_api_key: String,
     cloud_action_busy: bool,
+    pending_memory_clean: bool,
     spotify: Option<Result<Value, String>>,
     spotify_busy: bool,
     spotify_asked: Option<std::time::Instant>,
@@ -474,6 +480,18 @@ pub struct JarvisApp {
     n8n_name: String,
     n8n_minutes: u64,
     n8n_kind_audit: bool,
+    mcp: Option<Value>,
+    mcp_tools: HashMap<String, Vec<Value>>,
+    mcp_token: String,
+    mcp_busy: bool,
+    mcp_asked: bool,
+    ws_profiles: Option<Value>,
+    ws_busy: bool,
+    ws_asked: bool,
+    ws_name: String,
+    ws_description: String,
+    ws_apps: String,
+    ws_dirs: String,
     cloud_action_error: Option<String>,
     cloud_action_notice: Option<String>,
     cloud_remove_confirm: bool,
@@ -644,6 +662,7 @@ impl JarvisApp {
             cloud_provider: "nvidia_nim".into(),
             cloud_api_key: String::new(),
             cloud_action_busy: false,
+            pending_memory_clean: false,
             spotify: None,
             spotify_busy: false,
             spotify_asked: None,
@@ -653,6 +672,18 @@ impl JarvisApp {
             n8n_name: String::new(),
             n8n_minutes: 15,
             n8n_kind_audit: false,
+            mcp: None,
+            mcp_tools: HashMap::new(),
+            mcp_token: String::new(),
+            mcp_busy: false,
+            mcp_asked: false,
+            ws_profiles: None,
+            ws_busy: false,
+            ws_asked: false,
+            ws_name: String::new(),
+            ws_description: String::new(),
+            ws_apps: String::new(),
+            ws_dirs: String::new(),
             cloud_action_error: None,
             cloud_action_notice: None,
             cloud_remove_confirm: false,
@@ -991,6 +1022,33 @@ impl JarvisApp {
                             self.cloud_action_notice = None;
                             self.cloud_action_error = Some(error);
                         }
+                    }
+                    ctx.request_repaint();
+                }
+                Event::WsProfiles(result) => {
+                    self.ws_busy = false;
+                    match result {
+                        Ok(value) => self.ws_profiles = Some(value),
+                        Err(error) => self.error = Some(error),
+                    }
+                    ctx.request_repaint();
+                }
+                Event::Mcp(result) => {
+                    self.mcp_busy = false;
+                    match result {
+                        Ok(value) => self.mcp = Some(value),
+                        Err(error) => self.error = Some(error),
+                    }
+                    ctx.request_repaint();
+                }
+                Event::McpTools(name, result) => {
+                    self.mcp_busy = false;
+                    match result {
+                        Ok(value) => {
+                            let tools = value["tools"].as_array().cloned().unwrap_or_default();
+                            self.mcp_tools.insert(name, tools);
+                        }
+                        Err(error) => self.error = Some(error),
                     }
                     ctx.request_repaint();
                 }
@@ -1530,6 +1588,244 @@ impl JarvisApp {
             let _ = tx.send(Event::PairingCreated(result));
         });
         ctx.request_repaint();
+    }
+
+    /// Chiamata sui profili di lavoro (`body` assente = sola lettura dell'elenco); rilegge l'elenco.
+    fn ws_call(&mut self, ctx: &egui::Context, path: &str, body: Option<Value>) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        if self.ws_busy {
+            return;
+        }
+        self.ws_busy = true;
+        let tx = self.tx.clone();
+        let path = path.to_string();
+        std::thread::spawn(move || {
+            if let Some(body) = &body {
+                match client.post(&path, Some(body)) {
+                    Ok(done) if path.ends_with("/activate") => {
+                        let _ = tx.send(Event::ActionDone(Ok(done)));
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        let _ = tx.send(Event::WsProfiles(Err(error)));
+                        return;
+                    }
+                }
+            }
+            let _ = tx.send(Event::WsProfiles(client.get("/api/workspaces/profiles")));
+        });
+        ctx.request_repaint();
+    }
+
+    /// Profili di lavoro scritti a mano: nome, app da aprire e cartelle della workspace.
+    fn show_workspace_profiles(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if !self.ws_asked {
+            self.ws_asked = true;
+            self.ws_call(ctx, "", None);
+        }
+        let profiles = self
+            .ws_profiles
+            .as_ref()
+            .and_then(|v| v["items"].as_array())
+            .cloned()
+            .unwrap_or_default();
+        let list = |text: &str| -> Vec<String> {
+            text.split([',', '\n'])
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect()
+        };
+        egui::Frame::new()
+            .fill(SURFACE)
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(29, 49, 65)))
+            .corner_radius(16)
+            .inner_margin(14)
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.heading("Profili di lavoro");
+                ui.label(
+                    egui::RichText::new("Crea a mano un ambiente: nome, app da aprire e cartelle della workspace. «Attiva» apre solo le app elencate.")
+                        .small()
+                        .weak(),
+                );
+                for profile in &profiles {
+                    let name = profile["name"].as_str().unwrap_or("Profilo").to_string();
+                    let id = profile["id"].as_str().unwrap_or(&name).to_string();
+                    let join = |key: &str| {
+                        profile[key]
+                            .as_array()
+                            .map(|a| a.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(", "))
+                            .unwrap_or_default()
+                    };
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.strong(&name);
+                        ui.label(egui::RichText::new(format!("{} · {}", join("apps"), join("dirs"))).small().weak());
+                        if ui.add_enabled(!self.ws_busy, egui::Button::new("Attiva")).clicked() {
+                            self.ws_call(ctx, "/api/workspaces/profiles/activate", Some(json!({"id": id.clone()})));
+                        }
+                        if ui.button("Modifica").clicked() {
+                            self.ws_name = name.clone();
+                            self.ws_description = profile["description"].as_str().unwrap_or("").to_string();
+                            self.ws_apps = join("apps");
+                            self.ws_dirs = join("dirs");
+                        }
+                        if ui.add_enabled(!self.ws_busy, egui::Button::new("Elimina")).clicked() {
+                            self.ws_call(ctx, "/api/workspaces/profiles/remove", Some(json!({"id": id.clone()})));
+                        }
+                    });
+                }
+                ui.separator();
+                ui.add(egui::TextEdit::singleline(&mut self.ws_name).hint_text("Nome del profilo").desired_width(300.0));
+                ui.add(egui::TextEdit::singleline(&mut self.ws_description).hint_text("Descrizione (facoltativa)").desired_width(300.0));
+                ui.add(egui::TextEdit::singleline(&mut self.ws_apps).hint_text("App, separate da virgola").desired_width(300.0));
+                ui.add(egui::TextEdit::singleline(&mut self.ws_dirs).hint_text("Cartelle, separate da virgola").desired_width(300.0));
+                if ui
+                    .add_enabled(!self.ws_name.trim().is_empty() && !self.ws_busy, egui::Button::new("Salva profilo"))
+                    .clicked()
+                {
+                    let body = json!({"name": self.ws_name.trim(), "description": self.ws_description.trim(),
+                        "apps": list(&self.ws_apps), "dirs": list(&self.ws_dirs)});
+                    self.ws_name.clear();
+                    self.ws_description.clear();
+                    self.ws_apps.clear();
+                    self.ws_dirs.clear();
+                    self.ws_call(ctx, "/api/workspaces/profiles", Some(body));
+                }
+            });
+        ui.add_space(10.0);
+    }
+
+    /// Esegue una chiamata ai server MCP e rilegge l'elenco (`path`, `body`); se `read` è un nome, ne legge poi gli strumenti.
+    fn mcp_call(
+        &mut self,
+        ctx: &egui::Context,
+        path: &str,
+        body: Option<Value>,
+        read: Option<String>,
+    ) {
+        let Some(client) = self.client.clone() else {
+            return;
+        };
+        if self.mcp_busy {
+            return;
+        }
+        self.mcp_busy = true;
+        let tx = self.tx.clone();
+        let path = path.to_string();
+        std::thread::spawn(move || {
+            let result = if path.is_empty() || (path == "/api/mcp/servers" && body.is_none()) {
+                client.get(&path)
+            } else {
+                client
+                    .post(&path, body.as_ref())
+                    .and_then(|_| client.get("/api/mcp/servers"))
+            };
+            let _ = tx.send(Event::Mcp(result));
+            if let Some(name) = read {
+                let tools = client.post("/api/mcp/servers/test", Some(&json!({"name": name})));
+                let _ = tx.send(Event::McpTools(name, tools));
+            }
+        });
+        ctx.request_repaint();
+    }
+
+    /// Server MCP (Hugging Face con un gesto): gli strumenti di sola lettura possono girare senza conferma se
+    /// approvati qui; gli altri chiedono sempre la conferma del proprietario.
+    fn show_mcp(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
+        if !self.mcp_asked {
+            self.mcp_asked = true;
+            self.mcp_call(ctx, "/api/mcp/servers", None, None);
+        }
+        let servers = self
+            .mcp
+            .as_ref()
+            .and_then(|v| v["items"].as_array())
+            .cloned()
+            .unwrap_or_default();
+        let has_hf = servers.iter().any(|s| s["preset"] == "huggingface");
+        egui::Frame::new()
+            .fill(SURFACE)
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(29, 49, 65)))
+            .corner_radius(16)
+            .inner_margin(14)
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.heading("Server MCP e Hugging Face");
+                ui.label(
+                    egui::RichText::new("JARVIS può usare gli strumenti di un server MCP. Quelli di sola lettura possono girare senza conferma se li approvi; gli altri la chiedono sempre.")
+                        .small()
+                        .weak(),
+                );
+                if !has_hf {
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.mcp_token)
+                                .password(true)
+                                .hint_text("Token di sola lettura (facoltativo)")
+                                .desired_width(260.0),
+                        );
+                        if ui
+                            .add_enabled(!self.mcp_busy, egui::Button::new("Collega Hugging Face"))
+                            .clicked()
+                        {
+                            let mut body = json!({"preset": "huggingface", "auto_suggested": true});
+                            let token = std::mem::take(&mut self.mcp_token);
+                            if !token.trim().is_empty() {
+                                body["token"] = json!(token.trim());
+                            }
+                            self.mcp_call(ctx, "/api/mcp/servers", Some(body), Some("huggingface".into()));
+                        }
+                    });
+                }
+                for server in &servers {
+                    let name = server["name"].as_str().unwrap_or("server").to_string();
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        ui.strong(&name);
+                        ui.label(egui::RichText::new(server["url"].as_str().unwrap_or("")).small().weak());
+                        if ui.add_enabled(!self.mcp_busy, egui::Button::new("Leggi strumenti")).clicked() {
+                            let n = name.clone();
+                            self.mcp_call(ctx, "", None, Some(n));
+                        }
+                        if ui.add_enabled(!self.mcp_busy, egui::Button::new("Rimuovi")).clicked() {
+                            self.mcp_tools.remove(&name);
+                            self.mcp_call(ctx, "/api/mcp/servers/remove", Some(json!({"name": name.clone()})), None);
+                        }
+                    });
+                    let auto: Vec<String> = server["auto"]
+                        .as_array()
+                        .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+                        .unwrap_or_default();
+                    for tool in self.mcp_tools.get(&name).cloned().unwrap_or_default() {
+                        let tool_name = tool["name"].as_str().unwrap_or("?").to_string();
+                        ui.horizontal(|ui| {
+                            ui.monospace(&tool_name);
+                            if tool["read_only"] == true {
+                                let mut on = auto.contains(&tool_name);
+                                if ui.checkbox(&mut on, "Senza conferma").changed() {
+                                    let mut next: Vec<String> = auto.iter().filter(|t| **t != tool_name).cloned().collect();
+                                    if on {
+                                        next.push(tool_name.clone());
+                                    }
+                                    next.sort();
+                                    self.mcp_call(
+                                        ctx,
+                                        "/api/mcp/servers/policy",
+                                        Some(json!({"name": name.clone(), "auto": next})),
+                                        None,
+                                    );
+                                }
+                            } else {
+                                ui.colored_label(CAUTION, "chiede conferma");
+                            }
+                        });
+                    }
+                }
+            });
+        ui.add_space(10.0);
     }
 
     /// Legge lo stato di n8n o gli invia un'azione (`method` `GET`, `POST` o `DELETE`).
@@ -2316,6 +2612,9 @@ impl JarvisApp {
                 }
                 if self.current == "automations" {
                     self.show_n8n(ui, ctx);
+                }
+                if self.current == "workspace" {
+                    self.show_workspace_profiles(ui, ctx);
                 }
                 let items = self
                     .data
@@ -4277,10 +4576,34 @@ impl JarvisApp {
             {
                 show_all_clicked = true;
             }
+            if ui
+                .add_enabled(!self.loading, egui::Button::new("Pulisci ricordi inutili"))
+                .on_hover_text("Elimina gli episodi automatici senza valore (ora, calcoli, saluti); gli altri ricordi non si toccano")
+                .clicked()
+            {
+                self.pending_memory_clean = true;
+            }
             if self.loading {
                 ui.add(egui::Spinner::new());
             }
         });
+        if self.pending_memory_clean {
+            egui::Window::new("Pulire i ricordi inutili?")
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.label("Verranno eliminati gli episodi automatici senza valore (per esempio «che ore sono»). I ricordi fissati e quelli che hai scritto tu restano.");
+                    ui.horizontal(|ui| {
+                        if ui.button("Annulla").clicked() {
+                            self.pending_memory_clean = false;
+                        }
+                        if ui.button("Elimina").clicked() {
+                            self.pending_memory_clean = false;
+                            self.act(ctx, "/api/memory/cleanup".into(), Some(json!({"apply": true})));
+                        }
+                    });
+                });
+        }
         if show_all_clicked {
             self.memory_search.clear();
         }
@@ -4328,7 +4651,7 @@ impl JarvisApp {
             return;
         };
         if data["available"] == false {
-            ui.label("La voce richiede un provider audio cloud.");
+            ui.label("L'installazione della voce è disattivata su questo Core.");
             return;
         }
         let running = data["running"] == true;
@@ -4460,6 +4783,7 @@ impl JarvisApp {
 
     fn show_connectors(&mut self, ui: &mut egui::Ui, ctx: &egui::Context) {
         ui.heading("Connettori");
+        self.show_mcp(ui, ctx);
         if let Some(error) = &self.error {
             ui.colored_label(egui::Color32::LIGHT_RED, error);
         }

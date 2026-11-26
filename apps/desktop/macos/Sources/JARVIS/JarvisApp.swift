@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import MapKit
 import UniformTypeIdentifiers
 
 @MainActor final class AppLifecycle: NSObject, NSApplicationDelegate {
@@ -27,16 +28,23 @@ import UniformTypeIdentifiers
     }
 }
 
+/// Un luogo trovato sulla mappa.
+private struct MapSpot: Identifiable {
+    let id = UUID()
+    let name: String
+    let coordinate: CLLocationCoordinate2D
+}
+
 private enum Section: String, Identifiable {
     case dashboard = "Plancia", chat = "Chat", tasks = "Attività", confirmations = "Conferme"
     case workflows = "Automazioni", memory = "Memoria", workspace = "Workspace", connectors = "Connettori"
     case devices = "Dispositivi", skills = "Competenze", security = "Sicurezza", audit = "Audit"
     case system = "Sistema", models = "Modelli AI", updates = "Aggiornamenti", notifications = "Notifiche"
     case missions = "Missioni", profile = "Profilo", plans = "Piani", tools = "Strumenti"
-    case agents = "Agenti", plugins = "Pacchetti", users = "Utenti"
+    case agents = "Agenti", plugins = "Pacchetti", users = "Utenti", voice = "Voce", map = "Mappa"
 
     static let navigation: [(title: String, entries: [Section])] = [
-        ("Assistente", [.dashboard, .chat, .tasks, .models, .notifications, .profile]),
+        ("Assistente", [.dashboard, .chat, .tasks, .models, .voice, .map, .notifications, .profile]),
         ("Organizzazione", [.missions, .plans, .workflows, .workspace, .memory, .skills, .agents]),
         ("Collegamenti", [.devices, .tools, .plugins, .connectors]),
         ("Amministrazione", [.confirmations, .users, .security, .audit, .system, .updates])
@@ -68,6 +76,8 @@ private enum Section: String, Identifiable {
         case .agents: "person.3"
         case .plugins: "shippingbox"
         case .users: "person.2"
+        case .voice: "waveform.circle"
+        case .map: "map"
         }
     }
     var endpoint: String {
@@ -94,6 +104,8 @@ private enum Section: String, Identifiable {
         case .agents: "/api/agents/supervisor"
         case .plugins: "/api/plugins"
         case .users: "/api/users"
+        case .voice: "/api/setup"
+        case .map: "/api/health"
         }
     }
 }
@@ -165,6 +177,33 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var apiKey = ""
     @State private var pending: Record?
     @State private var memoryEdit: Record?
+    @State private var mapQuery = ""
+    @State private var mapFrom = ""
+    @State private var mapTo = ""
+    @State private var mapMode = "auto"
+    @State private var mapSpots: [MapSpot] = []
+    @State private var mapPath: [CLLocationCoordinate2D] = []
+    @State private var mapSummary = ""
+    @State private var mapSteps: [String] = []
+    @State private var mapLink: URL?
+    @State private var mapBusy = false
+    @State private var mapCamera: MapCameraPosition = .region(MKCoordinateRegion(
+        center: CLLocationCoordinate2D(latitude: 42.5, longitude: 12.5),
+        span: MKCoordinateSpan(latitudeDelta: 10, longitudeDelta: 10)))
+    @State private var voiceStatus: [String: Any] = [:]
+    @State private var voiceStt = "small"
+    @State private var voiceTts = "it_IT-riccardo-x_low"
+    @State private var voiceConfirm = false
+    @State private var wsProfiles: [[String: Any]] = []
+    @State private var wsName = ""
+    @State private var wsApps = ""
+    @State private var wsDirs = ""
+    @State private var wsDescription = ""
+    @State private var mcpServers: [[String: Any]] = []
+    @State private var mcpTools: [String: [[String: Any]]] = [:]
+    @State private var mcpToken = ""
+    @State private var memoryDelete: Record?
+    @State private var memoryCleanup: [String: Any]?
     @State private var memoryText = ""
     @State private var error: String?
     @State private var info: String?
@@ -268,6 +307,30 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             }.padding(24).frame(width: 430)
         }
         .sheet(item: $connectorAction) { item in connectorSheet(item) }
+        .alert("Eliminare questo ricordo?", isPresented: Binding(get: { memoryDelete != nil }, set: { if !$0 { memoryDelete = nil } }),
+               presenting: memoryDelete) { item in
+            Button("Elimina", role: .destructive) {
+                mutate("/api/memory/\(urlSegment(item.id))", method: "DELETE", body: [:])
+                memoryDelete = nil
+            }
+            Button("Annulla", role: .cancel) { memoryDelete = nil }
+        } message: { item in
+            Text(String((item["text"] ?? "").prefix(300)) + "\n\nL'eliminazione è definitiva e viene registrata nell'audit.")
+        }
+        .alert("Pulire i ricordi inutili?", isPresented: Binding(get: { memoryCleanup != nil }, set: { if !$0 { memoryCleanup = nil } }),
+               presenting: memoryCleanup) { found in
+            if (found["found"] as? Int ?? 0) > 0 {
+                Button("Elimina", role: .destructive) {
+                    memoryCleanup = nil
+                    mutate("/api/memory/cleanup", body: ["apply": true])
+                }
+            }
+            Button("Annulla", role: .cancel) { memoryCleanup = nil }
+        } message: { found in
+            let count = found["found"] as? Int ?? 0
+            let examples = (found["examples"] as? [String] ?? []).prefix(4).map { "• " + String($0.prefix(90)) }.joined(separator: "\n")
+            Text(count == 0 ? "Non ci sono ricordi automatici inutili." : "Trovati \(count) episodi senza valore:\n\(examples)")
+        }
         .sheet(isPresented: $paletteOpen) { commandPalette }
         .background {
             // Tavolozza dei comandi (⌘K): attiva solo con il Core pronto e l'interfaccia sbloccata.
@@ -283,6 +346,15 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         let query = paletteQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return all }
         return all.filter { $0.rawValue.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+    }
+
+    private func previewMemoryCleanup() {
+        error = nil
+        Task {
+            do {
+                memoryCleanup = try await core.request("/api/memory/cleanup", method: "POST", body: ["apply": false], timeout: 30)
+            } catch { self.error = error.localizedDescription }
+        }
     }
 
     private func openFromPalette(_ entry: Section) {
@@ -1674,6 +1746,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 TextField("Cerca nei ricordi", text: $memoryQuery).onSubmit { refresh += 1 }
                 Button("Cerca") { refresh += 1 }
                 Button("Reindicizza") { mutate("/api/memory/reindex", body: [:]) }
+                Button("Pulisci ricordi inutili", systemImage: "wand.and.sparkles") { previewMemoryCleanup() }
+                    .help("Trova gli episodi automatici senza valore (ora, calcoli, saluti) e li elimina dopo la tua conferma")
                 Button("Aggiungi ricordo") {
                     select(.chat)
                     message = "ricorda che "
@@ -1690,8 +1764,13 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         case .plugins: pluginInstaller
         case .users: userAdmin
         case .profile: profileEditor
-        case .connectors: connectorSetup
+        case .connectors:
+            mcpCard
+            connectorSetup
         case .workflows: n8nCard
+        case .workspace: workspaceProfilesCard
+        case .voice: voiceInstaller
+        case .map: mapView
         case .devices:
             deviceConnection
         case .models:
@@ -1937,12 +2016,20 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             Button("Esamina") { pending = item }.buttonStyle(.borderedProminent)
         case .memory:
             HStack {
-                Button("Modifica") { memoryText = item["text"] ?? ""; memoryEdit = item }
                 let pinned = item.data["pinned"] as? Bool ?? false
-                Button(pinned ? "Libera" : "Fissa", systemImage: pinned ? "pin.slash" : "pin") {
-                    mutate("/api/memory/\(urlSegment(item.id))/pin", body: ["pinned": !pinned])
+                Menu {
+                    Button("Modifica", systemImage: "pencil") { memoryText = item["text"] ?? ""; memoryEdit = item }
+                    Button(pinned ? "Libera" : "Fissa", systemImage: pinned ? "pin.slash" : "pin") {
+                        mutate("/api/memory/\(urlSegment(item.id))/pin", body: ["pinned": !pinned])
+                    }
+                    Divider()
+                    Button("Elimina…", systemImage: "trash", role: .destructive) { memoryDelete = item }
+                } label: {
+                    Label("Azioni", systemImage: "ellipsis.circle")
                 }
-                Button("Chiedi di dimenticare") { select(.chat); message = "dimentica \(item.id)" }
+                .menuStyle(.borderlessButton).fixedSize()
+                Button("Elimina", systemImage: "trash", role: .destructive) { memoryDelete = item }
+                    .help("Elimina questo ricordo")
             }
         case .tasks:
             Button("Riprendi in chat") { select(.chat); message = item.title }
@@ -2510,6 +2597,404 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 self.error = error.localizedDescription
             }
         }
+    }
+
+    // MARK: Mappa (ADR-0202)
+
+    private func coordinate(_ value: Any?) -> CLLocationCoordinate2D? {
+        guard let pair = value as? [Any], pair.count == 2,
+              let lat = (pair[0] as? NSNumber)?.doubleValue, let lon = (pair[1] as? NSNumber)?.doubleValue else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+
+    private func fit(_ points: [CLLocationCoordinate2D]) {
+        guard let first = points.first else { return }
+        var (minLat, maxLat, minLon, maxLon) = (first.latitude, first.latitude, first.longitude, first.longitude)
+        for p in points {
+            minLat = min(minLat, p.latitude); maxLat = max(maxLat, p.latitude)
+            minLon = min(minLon, p.longitude); maxLon = max(maxLon, p.longitude)
+        }
+        let region = MKCoordinateRegion(
+            center: CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2, longitude: (minLon + maxLon) / 2),
+            span: MKCoordinateSpan(latitudeDelta: max((maxLat - minLat) * 1.4, 0.02), longitudeDelta: max((maxLon - minLon) * 1.4, 0.02)))
+        mapCamera = .region(region)
+    }
+
+    private func searchMap() {
+        let query = mapQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty, !mapBusy else { return }
+        mapBusy = true
+        error = nil
+        Task {
+            defer { mapBusy = false }
+            do {
+                let result = try await core.request("/api/map/search", method: "POST", body: ["query": query, "limit": 5], timeout: 40)
+                let places = result["places"] as? [[String: Any]] ?? []
+                mapSpots = places.compactMap { p in
+                    guard let lat = (p["lat"] as? NSNumber)?.doubleValue, let lon = (p["lon"] as? NSNumber)?.doubleValue else { return nil }
+                    return MapSpot(name: p["name"] as? String ?? query, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon))
+                }
+                mapPath = []
+                mapSteps = []
+                mapSummary = places.isEmpty ? "Nessun luogo trovato per «\(query)»."
+                    : (places.first?["display_name"] as? String ?? query)
+                mapLink = (places.first?["map_url"] as? String).flatMap(URL.init(string:))
+                fit(mapSpots.map(\.coordinate))
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+
+    private func routeMap() {
+        let from = mapFrom.trimmingCharacters(in: .whitespacesAndNewlines)
+        let to = mapTo.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !from.isEmpty, !to.isEmpty, !mapBusy else { return }
+        mapBusy = true
+        error = nil
+        Task {
+            defer { mapBusy = false }
+            do {
+                let result = try await core.request("/api/map/route", method: "POST",
+                                                    body: ["from": from, "to": to, "mode": mapMode], timeout: 60)
+                func spot(_ key: String) -> MapSpot? {
+                    guard let p = result[key] as? [String: Any],
+                          let lat = (p["lat"] as? NSNumber)?.doubleValue, let lon = (p["lon"] as? NSNumber)?.doubleValue else { return nil }
+                    return MapSpot(name: p["name"] as? String ?? key, coordinate: CLLocationCoordinate2D(latitude: lat, longitude: lon))
+                }
+                mapSpots = [spot("from"), spot("to")].compactMap { $0 }
+                mapPath = (result["path"] as? [Any] ?? []).compactMap { coordinate($0) }
+                mapSteps = (result["steps"] as? [[String: Any]] ?? []).compactMap { $0["instruction"] as? String }
+                mapSummary = result["summary"] as? String ?? ""
+                mapLink = (result["map_url"] as? String).flatMap(URL.init(string:))
+                fit(mapPath.isEmpty ? mapSpots.map(\.coordinate) : mapPath)
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+
+    /// Mappa di OpenStreetMap con ricerca di luoghi e percorsi. Fuori dal Mac vanno solo i nomi cercati: JARVIS non
+    /// conosce la tua posizione. Le stesse funzioni sono disponibili in chat («indicazioni da Torino a Milano»).
+    private var mapView: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            card("Mappa", icon: "map") {
+                Text("Cerca un luogo o calcola un percorso con dati OpenStreetMap. Nella chat puoi chiedere anche «indicazioni da Torino a Milano a piedi» o «mostrami Firenze sulla mappa».")
+                    .font(.callout).foregroundStyle(.secondary)
+                HStack {
+                    TextField("Cerca un luogo (per esempio Colosseo, Roma)", text: $mapQuery)
+                        .textFieldStyle(.roundedBorder).onSubmit { searchMap() }
+                    Button("Cerca", systemImage: "magnifyingglass") { searchMap() }.disabled(mapBusy)
+                }
+                Map(position: $mapCamera) {
+                    ForEach(mapSpots) { spot in Marker(spot.name, coordinate: spot.coordinate) }
+                    if mapPath.count > 1 { MapPolyline(coordinates: mapPath).stroke(Color.cyan, lineWidth: 5) }
+                }
+                .frame(height: 340)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                if !mapSummary.isEmpty { Text(mapSummary).font(.callout) }
+                if let link = mapLink { Link("Apri su OpenStreetMap", destination: link).font(.caption) }
+            }
+            card("Percorso", icon: "arrow.triangle.turn.up.right.diamond") {
+                HStack {
+                    TextField("Da", text: $mapFrom).textFieldStyle(.roundedBorder)
+                    TextField("A", text: $mapTo).textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Picker("Come", selection: $mapMode) {
+                        Text("In auto").tag("auto")
+                        Text("A piedi").tag("piedi")
+                        Text("In bici").tag("bici")
+                    }.pickerStyle(.segmented).frame(maxWidth: 280)
+                    Spacer()
+                    if mapBusy { ProgressView().controlSize(.small) }
+                    Button("Calcola percorso", systemImage: "location.north.line") { routeMap() }
+                        .disabled(mapBusy || mapFrom.isEmpty || mapTo.isEmpty)
+                }
+                ForEach(Array(mapSteps.enumerated()), id: \.offset) { index, step in
+                    Text("\(index + 1). \(step)").font(.callout)
+                }
+                if !mapSteps.isEmpty {
+                    Text("Percorso indicativo, senza traffico in tempo reale.").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    // MARK: Installazione della voce (ADR-0200)
+
+    private func loadVoiceStatus() async {
+        if let result = try? await core.request("/api/setup", timeout: 15) { voiceStatus = result }
+    }
+
+    private func startVoiceInstall() {
+        error = nil
+        info = nil
+        Task {
+            do {
+                _ = try await core.request("/api/setup/start", method: "POST",
+                                           body: ["stt_model": voiceStt, "tts_voice": voiceTts], timeout: 30)
+                info = "Installazione della voce avviata."
+                await loadVoiceStatus()
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+
+    /// Sezione dedicata alla voce: la voce di sistema del Mac non richiede nulla; il motore locale del Core
+    /// (riconoscimento e sintesi offline, parola di attivazione) si installa da qui, con dimensioni e avanzamento.
+    private var voiceInstaller: some View {
+        let running = voiceStatus["running"] as? Bool ?? false
+        let sizes = voiceStatus["sizes_mb"] as? [String: Any] ?? [:]
+        let sttSizes = sizes["stt"] as? [String: Any] ?? [:]
+        let choices = voiceStatus["choices"] as? [String: Any] ?? [:]
+        let sttChoices = choices["stt_models"] as? [String] ?? ["tiny", "base", "small", "medium"]
+        let ttsChoices = choices["tts_voices"] as? [String] ?? ["it_IT-riccardo-x_low", "en_US-ryan-medium"]
+        let packages = sizes["voice_packages"] as? Int ?? 0
+        let stt = sttSizes[voiceStt] as? Int ?? 0
+        let tts = sizes["tts"] as? Int ?? 0
+        let steps = voiceStatus["steps"] as? [[String: Any]] ?? []
+        let installed = (voiceStatus["detected"] as? [String: Any])?["voice_packages"] as? Bool == true
+        let available = voiceStatus["available"] as? Bool ?? true
+        return VStack(alignment: .leading, spacing: 14) {
+            card("Voce di sistema del Mac", icon: "speaker.wave.2") {
+                Text("Lettura delle risposte e ascolto di «Hey Jarvis» usano le voci e il riconoscimento vocale di macOS: non c'è nulla da installare. Voci più naturali si scaricano da Impostazioni di sistema → Accessibilità → Contenuto letto → Voce di sistema → Gestisci voci.")
+                    .font(.callout).foregroundStyle(.secondary)
+                Label(wake.engineKind == "system" ? "In uso: riconoscimento del Mac" : "In uso: motore del Core",
+                      systemImage: "checkmark.circle").font(.caption).foregroundStyle(.green)
+            }
+            card("Motore vocale locale del Core", icon: "arrow.down.circle") {
+                Text("Facoltativo: installa sul Mac il riconoscimento vocale (faster-whisper), la voce di sintesi (Piper) e la parola di attivazione, così la voce funziona anche senza i servizi di macOS e senza rete. Serve una connessione per scaricare i file, una sola volta.")
+                    .font(.callout).foregroundStyle(.secondary)
+                if !available {
+                    Label("L'installazione non è abilitata su questo Core.", systemImage: "exclamationmark.triangle")
+                        .font(.callout).foregroundStyle(.orange)
+                }
+                Label(installed ? "Pacchetti vocali già installati" : "Non ancora installato",
+                      systemImage: installed ? "checkmark.seal.fill" : "tray.and.arrow.down")
+                    .foregroundStyle(installed ? Color.green : .secondary)
+                Picker("Riconoscimento (STT)", selection: $voiceStt) {
+                    ForEach(sttChoices, id: \.self) { Text("\($0) · \((sttSizes[$0] as? Int) ?? 0) MB").tag($0) }
+                }
+                Picker("Voce di sintesi (TTS)", selection: $voiceTts) {
+                    ForEach(ttsChoices, id: \.self) { Text($0).tag($0) }
+                }
+                Text("Download stimato: circa \(packages + stt + tts) MB. Resta nella cartella dati di JARVIS.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button(installed ? "Reinstalla o cambia modello" : "Installa la voce", systemImage: "arrow.down.circle.fill") {
+                    voiceConfirm = true
+                }
+                .disabled(running || !available)
+                .buttonStyle(.borderedProminent)
+                ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
+                    let status = step["status"] as? String ?? "pending"
+                    HStack(alignment: .top) {
+                        Image(systemName: status == "done" ? "checkmark.circle.fill" : status == "running" ? "arrow.triangle.2.circlepath"
+                              : status == "failed" ? "xmark.octagon.fill" : "circle.dotted")
+                            .foregroundStyle(status == "done" ? Color.green : status == "failed" ? .red : .cyan)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(step["title"] as? String ?? step["label"] as? String ?? step["id"] as? String ?? "")
+                            if let detail = step["detail"] as? String, !detail.isEmpty {
+                                Text(detail).font(.caption).foregroundStyle(.secondary)
+                            }
+                            if status == "running", let progress = step["progress"] as? Double {
+                                ProgressView(value: min(max(progress / 100, 0), 1))
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .alert("Installare la voce?", isPresented: $voiceConfirm) {
+            Button("Installa") { startVoiceInstall() }
+            Button("Annulla", role: .cancel) {}
+        } message: {
+            Text("Verranno scaricati circa \(packages + stt + tts) MB (pacchetti Python, modello «\(voiceStt)» e voce «\(voiceTts)»). Puoi continuare a usare JARVIS durante il download.")
+        }
+        .task {
+            while !Task.isCancelled && section == .voice {
+                await loadVoiceStatus()
+                try? await Task.sleep(for: .seconds(running ? 2 : 6))
+            }
+        }
+    }
+
+    // MARK: Profili di workspace (ADR-0185)
+
+    private func loadWorkspaceProfiles() async {
+        if let result = try? await core.request("/api/workspaces/profiles", timeout: 20) {
+            wsProfiles = result["items"] as? [[String: Any]] ?? []
+        }
+    }
+
+    private func wsList(_ text: String) -> [String] {
+        text.split(whereSeparator: { $0 == "," || $0 == "\n" })
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private func workspaceCall(_ path: String, body: [String: Any]) {
+        error = nil
+        info = nil
+        Task {
+            do {
+                let result = try await core.request(path, method: "POST", body: body, timeout: 60)
+                info = result["message"] as? String ?? "Fatto."
+                await loadWorkspaceProfiles()
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+
+    /// Profili di lavoro scritti a mano: un nome, le app da aprire e le cartelle della workspace. Attivarli apre
+    /// soltanto le app elencate, con il tuo tocco come conferma; non lancia comandi.
+    private var workspaceProfilesCard: some View {
+        card("Profili di lavoro", icon: "rectangle.3.group") {
+            Text("Crea a mano un ambiente di lavoro: dai un nome, elenca le app da aprire e le cartelle della workspace. «Attiva» apre le app. Nessun comando né indirizzo: solo nomi di app e cartelle.")
+                .font(.callout).foregroundStyle(.secondary)
+            ForEach(Array(wsProfiles.enumerated()), id: \.offset) { _, profile in
+                let name = profile["name"] as? String ?? "Profilo"
+                let apps = profile["apps"] as? [String] ?? []
+                let dirs = profile["dirs"] as? [String] ?? []
+                Divider()
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(name).font(.headline)
+                        if let text = profile["description"] as? String, !text.isEmpty {
+                            Text(text).font(.caption).foregroundStyle(.secondary)
+                        }
+                        if !apps.isEmpty { Label(apps.joined(separator: ", "), systemImage: "app.badge").font(.caption) }
+                        if !dirs.isEmpty { Label(dirs.joined(separator: ", "), systemImage: "folder").font(.caption) }
+                    }
+                    Spacer()
+                    Button("Attiva", systemImage: "play.fill") {
+                        workspaceCall("/api/workspaces/profiles/activate", body: ["id": profile["id"] as? String ?? name])
+                    }.disabled(apps.isEmpty)
+                    Button("Modifica") {
+                        wsName = name
+                        wsDescription = profile["description"] as? String ?? ""
+                        wsApps = apps.joined(separator: ", ")
+                        wsDirs = dirs.joined(separator: ", ")
+                    }
+                    Button("Elimina", role: .destructive) {
+                        workspaceCall("/api/workspaces/profiles/remove", body: ["id": profile["id"] as? String ?? name])
+                    }
+                }
+            }
+            Divider()
+            Text(wsProfiles.contains { ($0["name"] as? String)?.lowercased() == wsName.lowercased() && !wsName.isEmpty } ? "Modifica profilo" : "Nuovo profilo")
+                .font(.subheadline.weight(.semibold))
+            TextField("Nome (per esempio Sviluppo JARVIS)", text: $wsName).textFieldStyle(.roundedBorder)
+            TextField("Descrizione (facoltativa)", text: $wsDescription).textFieldStyle(.roundedBorder)
+            TextField("App da aprire, separate da virgola (per esempio Terminale, Visual Studio Code, Safari)", text: $wsApps)
+                .textFieldStyle(.roundedBorder)
+            TextField("Cartelle della workspace, separate da virgola (per esempio progetti/jarvis)", text: $wsDirs)
+                .textFieldStyle(.roundedBorder)
+            HStack {
+                Button("Salva profilo", systemImage: "square.and.arrow.down") {
+                    let body: [String: Any] = ["name": wsName.trimmingCharacters(in: .whitespacesAndNewlines),
+                                               "description": wsDescription, "apps": wsList(wsApps), "dirs": wsList(wsDirs)]
+                    wsName = ""; wsDescription = ""; wsApps = ""; wsDirs = ""
+                    workspaceCall("/api/workspaces/profiles", body: body)
+                }
+                .disabled(wsName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                Button("Svuota") { wsName = ""; wsDescription = ""; wsApps = ""; wsDirs = "" }
+            }
+        }
+        .task { await loadWorkspaceProfiles() }
+    }
+
+    // MARK: Server MCP e Hugging Face (ADR-0199)
+
+    private func loadMcp() async {
+        if let result = try? await core.request("/api/mcp/servers", timeout: 20) {
+            mcpServers = result["items"] as? [[String: Any]] ?? []
+        }
+    }
+
+    private func mcpCall(_ path: String, body: [String: Any], then: (() async -> Void)? = nil) {
+        error = nil
+        info = nil
+        Task {
+            do {
+                let result = try await core.request(path, method: "POST", body: body, timeout: 60)
+                info = result["message"] as? String ?? "Fatto."
+                await loadMcp()
+                if let then { await then() }
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+
+    private func readMcpTools(_ name: String) async {
+        do {
+            let result = try await core.request("/api/mcp/servers/test", method: "POST", body: ["name": name], timeout: 45)
+            mcpTools[name] = result["tools"] as? [[String: Any]] ?? []
+            info = "Strumenti letti da «\(name)»: \(mcpTools[name]?.count ?? 0)."
+        } catch { self.error = error.localizedDescription }
+    }
+
+    private func setMcpAuto(_ server: [String: Any], tool: String, on: Bool) {
+        guard let name = server["name"] as? String else { return }
+        var auto = Set(server["auto"] as? [String] ?? [])
+        if on { auto.insert(tool) } else { auto.remove(tool) }
+        mcpCall("/api/mcp/servers/policy", body: ["name": name, "auto": Array(auto).sorted()])
+    }
+
+    /// Server MCP autorizzati (Hugging Face con un gesto): l'elenco degli strumenti si legge dal server; quelli
+    /// dichiarati di sola lettura possono girare senza conferma, tutti gli altri chiedono sempre la tua.
+    private var mcpCard: some View {
+        let hasHF = mcpServers.contains { ($0["preset"] as? String) == "huggingface" }
+        return card("Server MCP e Hugging Face", icon: "puzzlepiece.extension") {
+            Text("JARVIS può usare gli strumenti di un server MCP (per esempio cercare modelli e dataset su Hugging Face). Gli strumenti di sola lettura possono girare senza conferma se li approvi qui; tutti gli altri chiedono sempre la tua conferma. Le ricerche partono verso il server: niente dati personali.")
+                .font(.callout).foregroundStyle(.secondary)
+            if !hasHF {
+                Divider()
+                Text("Collega Hugging Face").font(.subheadline.weight(.semibold))
+                SecureField("Token di sola lettura (facoltativo, da hf.co/settings/mcp)", text: $mcpToken)
+                    .textFieldStyle(.roundedBorder)
+                Button("Collega Hugging Face", systemImage: "link") {
+                    var body: [String: Any] = ["preset": "huggingface", "auto_suggested": true]
+                    if !mcpToken.isEmpty { body["token"] = mcpToken }
+                    mcpToken = ""
+                    mcpCall("/api/mcp/servers", body: body) { await readMcpTools("huggingface") }
+                }
+            }
+            ForEach(Array(mcpServers.enumerated()), id: \.offset) { _, server in
+                let name = server["name"] as? String ?? "server"
+                Divider()
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(name).font(.headline)
+                        Text(server["url"] as? String ?? "").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer()
+                    Label(server["has_token"] as? Bool == true ? "Token salvato" : "Senza token",
+                          systemImage: server["has_token"] as? Bool == true ? "key.fill" : "key")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Leggi strumenti") { Task { await readMcpTools(name) } }
+                    Button("Rimuovi", role: .destructive) {
+                        mcpTools[name] = nil
+                        mcpCall("/api/mcp/servers/remove", body: ["name": name])
+                    }
+                }
+                if let tools = mcpTools[name] {
+                    ForEach(Array(tools.enumerated()), id: \.offset) { _, tool in
+                        let toolName = tool["name"] as? String ?? "?"
+                        let readOnly = tool["read_only"] as? Bool == true
+                        let auto = (server["auto"] as? [String] ?? []).contains(toolName)
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(toolName).font(.system(.callout, design: .monospaced))
+                                Text(String((tool["description"] as? String ?? "").prefix(140)))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if readOnly {
+                                Toggle("Senza conferma", isOn: Binding(get: { auto }, set: { setMcpAuto(server, tool: toolName, on: $0) }))
+                                    .toggleStyle(.switch).controlSize(.small)
+                            } else {
+                                Label("Chiede conferma", systemImage: "hand.raised").font(.caption).foregroundStyle(.orange)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        .task { await loadMcp() }
     }
 
     // MARK: n8n con Docker (ADR-0197)

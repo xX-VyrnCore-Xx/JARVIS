@@ -2930,4 +2930,36 @@ async fn privacy_overview_and_resource_profiles_work_through_the_api() {
         .await;
     assert_eq!(status, StatusCode::OK, "{plan}");
     assert_eq!(plan["executes"], false);
+    // L'attivazione senza app non apre nulla; un profilo sconosciuto è 404.
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/workspaces/profiles",
+            Some(json!({"name": "Solo cartelle", "dirs": ["docs"]})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, done) = e
+        .api(
+            "POST",
+            "/api/workspaces/profiles/activate",
+            Some(json!({"id": "solo cartelle"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{done}");
+    assert_eq!(done["results"], json!([]));
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/workspaces/profiles/activate",
+            Some(json!({"id": "inesistente"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // Pulizia dei ricordi inutili: un episodio sulla sola ora viene riconosciuto e tolto, il resto resta.
+    let (status, preview) = e
+        .api("POST", "/api/memory/cleanup", Some(json!({"apply": false})))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    assert_eq!(preview["applied"], false);
 }

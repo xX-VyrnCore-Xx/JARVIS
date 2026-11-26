@@ -1,0 +1,50 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "map.search",
+  "version": "1.0.0",
+  "summary": "Cerca un luogo su OpenStreetMap e restituisce coordinate e collegamento alla mappa. Il nome cercato esce dal computer; la tua posizione no",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "query"
+    ],
+    "properties": {
+      "query": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "limit": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 10
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "web",
+  "prerequisites": [
+    "Accesso Web abilitato (JARVIS_WEB) e dominio consentito dalla policy"
+  ],
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "web.internet:read"
+  ],
+  "errors": [
+    "web.disabled",
+    "web.unreachable",
+    "web.timeout",
+    "map.invalid",
+    "map.invalid_response"
+  ],
+  "timeout_ms": 20000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}
