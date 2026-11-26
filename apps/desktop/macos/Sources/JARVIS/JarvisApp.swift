@@ -42,11 +42,11 @@ private enum Section: String, Identifiable {
     case system = "Sistema", models = "Modelli AI", updates = "Aggiornamenti", notifications = "Notifiche"
     case missions = "Missioni", profile = "Profilo", plans = "Piani", tools = "Strumenti"
     case agents = "Agenti", plugins = "Pacchetti", users = "Utenti", voice = "Voce", map = "Mappa", privacy = "Privacy"
-    case research = "Ricerche"
+    case research = "Ricerche", datasets = "Dataset"
 
     static let navigation: [(title: String, entries: [Section])] = [
         ("Assistente", [.dashboard, .chat, .tasks, .models, .voice, .map, .notifications, .profile]),
-        ("Organizzazione", [.missions, .plans, .workflows, .workspace, .memory, .research, .skills, .agents]),
+        ("Organizzazione", [.missions, .plans, .workflows, .workspace, .memory, .research, .datasets, .skills, .agents]),
         ("Collegamenti", [.devices, .tools, .plugins, .connectors]),
         ("Amministrazione", [.confirmations, .users, .security, .privacy, .audit, .system, .updates])
     ]
@@ -83,6 +83,7 @@ private enum Section: String, Identifiable {
         case .map: "Luoghi e percorsi su OpenStreetMap"
         case .privacy: "Cosa viene conservato, cosa può uscire e chi ha il permesso"
         case .research: "Ricerche salvate: risultati, fonti e domande aperte"
+        case .datasets: "Esempi con cui JARVIS ti capisce meglio: misura, migliora, carica in privato"
         }
     }
 
@@ -115,6 +116,7 @@ private enum Section: String, Identifiable {
         case .map: "map"
         case .privacy: "hand.raised.square"
         case .research: "magnifyingglass.circle"
+        case .datasets: "tablecells"
         }
     }
     var endpoint: String {
@@ -145,6 +147,7 @@ private enum Section: String, Identifiable {
         case .map: "/api/health"
         case .privacy: "/api/privacy/overview"
         case .research: "/api/research"
+        case .datasets: "/api/datasets"
         }
     }
 }
@@ -230,6 +233,10 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var mapLink: URL?
     /// Rapporto Markdown della ricerca salvata aperta nella sezione «Ricerche» (ADR-0206).
     @State private var researchText: String?
+    /// Dataset (ADR-0221): esito dell'ultima misura, repository di destinazione e caricamento in attesa di conferma.
+    @State private var datasetReport: String?
+    @State private var hfRepo = ""
+    @State private var pendingDatasetPush: String?
     @State private var mapBusy = false
     @State private var mapCamera: MapCameraPosition = .region(MKCoordinateRegion(
         center: CLLocationCoordinate2D(latitude: 42.5, longitude: 12.5),
@@ -1875,6 +1882,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         case .map: mapView
         case .privacy: privacyPanel
         case .research: researchPanel
+        case .datasets: datasetsPanel
         case .devices:
             deviceConnection
         case .models:
@@ -2781,6 +2789,89 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                         }
                     }
                 }
+            }
+        }
+    }
+
+    // MARK: Dataset (ADR-0221)
+
+    private func evaluateDataset(_ name: String) {
+        error = nil
+        Task {
+            do {
+                let r = try await core.request("/api/datasets/\(name)/evaluate")
+                let correct = r["correct"] as? Int ?? 0, total = r["total"] as? Int ?? 0
+                var text = "\(name): \(correct) su \(total) corretti (\(r["accuracy_percent"] as? Double ?? 0)%)."
+                if let support = r["support"] as? [String: Any] {
+                    text += " Supporto: \(support["hit"] as? Int ?? 0) su \(support["total"] as? Int ?? 0)."
+                }
+                datasetReport = text + "\n" + (r["note"] as? String ?? "")
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+
+    private func pushDataset(_ name: String) {
+        let repo = hfRepo.trimmingCharacters(in: .whitespacesAndNewlines)
+        error = nil
+        info = nil
+        pendingDatasetPush = nil
+        Task {
+            do {
+                let r = try await core.request("/api/datasets/\(name)/push", method: "POST",
+                                               body: ["repo_id": repo, "confirm": true], timeout: 120)
+                let isPrivate = r["private"] as? Bool == true
+                info = "Caricato in \(r["repo"] as? String ?? repo) (\(isPrivate ? "privato" : "ATTENZIONE: non risulta privato"))."
+                celebrateTick += 1
+                await load(section)
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+
+    /// Dataset di JARVIS: elenco, misura e caricamento su Hugging Face, sempre in un repository privato.
+    private var datasetsPanel: some View {
+        let items = payload["items"] as? [[String: Any]] ?? []
+        return VStack(alignment: .leading, spacing: 14) {
+            card("Dataset di JARVIS", icon: "tablecells") {
+                Text("Esempi con cui JARVIS capisce meglio le tue richieste. Restano sul computer: li carichi su Hugging Face solo tu, in un repository privato.")
+                    .font(.callout).foregroundStyle(.secondary)
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    let name = item["name"] as? String ?? ""
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(name).font(.headline)
+                        Text("versione \(item["version"] as? Int ?? 1) · \(item["examples"] as? Int ?? 0) esempi · \(item["candidates"] as? Int ?? 0) candidati in attesa")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if let pushed = item["pushed"] as? [String: Any], let repo = pushed["repo"] as? String {
+                            Label("Caricato in \(repo)", systemImage: "lock.icloud").font(.caption).foregroundStyle(.green)
+                        }
+                        Button("Misura") { evaluateDataset(name) }
+                    }
+                }
+            }
+            if let report = datasetReport {
+                card("Risultato della misura", icon: "checkmark.seal") {
+                    Text(report).font(.callout).textSelection(.enabled)
+                    Button("Chiudi") { datasetReport = nil }
+                }
+            }
+            card("Carica su Hugging Face (sempre privato)", icon: "icloud.and.arrow.up") {
+                Text("Serve il connettore Hugging Face con un token che possa scrivere sul repository. JARVIS crea il repository privato se manca e rifiuta quelli pubblici. Il server MCP di Hugging Face è in sola lettura: serve a rileggere i dataset, non a scriverli.")
+                    .font(.callout).foregroundStyle(.secondary)
+                TextField("proprietario/nome, per esempio mario/jarvis-routing", text: $hfRepo)
+                    .textFieldStyle(.roundedBorder)
+                if let name = pendingDatasetPush {
+                    Text("Confermi il caricamento di «\(name)» in «\(hfRepo)» (privato)?").font(.callout.weight(.semibold))
+                    HStack {
+                        Button("Conferma e carica") { pushDataset(name) }.buttonStyle(.borderedProminent)
+                        Button("Annulla") { pendingDatasetPush = nil }
+                    }
+                } else {
+                    ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                        let name = item["name"] as? String ?? ""
+                        Button("Carica \(name)") { pendingDatasetPush = name }
+                            .disabled(!hfRepo.contains("/"))
+                    }
+                }
+                Button("Apri il connettore Hugging Face") { select(.connectors) }
             }
         }
     }

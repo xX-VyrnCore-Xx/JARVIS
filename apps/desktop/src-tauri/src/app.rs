@@ -25,7 +25,7 @@ const NEGATIVE: egui::Color32 = egui::Color32::from_rgb(255, 125, 135);
 mod users_ui;
 use users_ui::UserState;
 
-const NAV: [(&str, &str, bool); 24] = [
+const NAV: [(&str, &str, bool); 25] = [
     ("dashboard", "Plancia", true),
     ("chat", "Chat", false),
     ("profile", "Profilo", true),
@@ -37,6 +37,7 @@ const NAV: [(&str, &str, bool); 24] = [
     ("workspace", "Workspace", true),
     ("memory", "Memoria", true),
     ("research", "Ricerche", true),
+    ("datasets", "Dataset", true),
     ("skills", "Competenze", true),
     ("agents", "Agenti", true),
     ("tools", "Strumenti", true),
@@ -2664,8 +2665,8 @@ impl JarvisApp {
             "plugins" => self.show_plugins(ui, ctx),
             "permissions" => self.show_permissions(ui, ctx),
             "privacy" => self.show_privacy(ui, ctx),
-            "tasks" | "research" | "automations" | "skills" | "workspace" | "devices"
-            | "security" | "audit" => {
+            "tasks" | "research" | "datasets" | "automations" | "skills" | "workspace"
+            | "devices" | "security" | "audit" => {
                 ui.horizontal(|ui| {
                     ui.heading(title(&self.current));
                     if ui.button("Aggiorna").clicked() {
@@ -6779,6 +6780,7 @@ fn endpoint(page: &str) -> &'static str {
         "automations" => "/api/workflows",
         "memory" => "/api/memory",
         "research" => "/api/research",
+        "datasets" => "/api/datasets",
         "privacy" => "/api/privacy/overview",
         "skills" => "/api/skills",
         "missions" => "/api/missions",

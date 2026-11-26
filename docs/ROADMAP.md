@@ -274,6 +274,8 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Ricerche salvate (2026-11-26, ADR-0206).** `research.save/list/read` e `/api/research`: risultati per tipo, fonti con attendibilità, domande aperte, ripresa per titolo.
 
+**Dataset su Hugging Face e connettori visibili (2026-11-26, ADR-0220, ADR-0221).** Dataset misurabili e migliorabili con candidati da accettare, caricamento solo in repository privati (l'MCP di Hugging Face è in sola lettura, la scrittura usa l'API del Hub con conferma); gli strumenti dei connettori sono visibili a ogni agente e scelti per pertinenza; non provati con Hugging Face e Google reali.
+
 **Dataset e diagramma (2026-11-26, ADR-0217, ADR-0219).** Atti di conversazione, squadre di agenti, archetipi compositi, vincoli a più turni con blocchi reali, nuovo diagramma dell'architettura con test; verificati sui dataset del proprietario (tarati su di essi) e con frasi nuove.
 
 **Viste grafiche (2026-11-26, ADR-0215).** Cronologia dei permessi nel riepilogo Privacy, sezione «Ricerche» su macOS e pagine «Privacy» e «Ricerche» su Windows; verificate solo in CI. `app.elements` (ADR-0216) elenca i controlli della finestra con il centro da cliccare; non provato su macOS/Windows reali. Restano: stati dell'avatar per ricerca/esecuzione/collaborazione (serve un canale di attività) e visione dello schermo oltre l'OCR.

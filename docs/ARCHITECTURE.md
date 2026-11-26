@@ -44,13 +44,13 @@ flowchart TB
             INT["intent, dialogue, followup, dispatch<br/>atti di conversazione, vincoli, squadra di agenti"]
             AGT["agents, expert, skills, prompts, promptfix, collab"]
             PLAN["planner, plans, missions, proactive, improvements, reflect"]
-            MEM["memory, memcog, world, handoff, persona, profile, research"]
+            MEM["memory, memcog, world, handoff, persona, profile, research, datasets"]
         end
 
         subgraph Tools["Strumenti"]
             TSYS["tools, toolsys, toolbox, catalog, datatools, executive"]
             OPS["appcontrol, screen, desktop, docs, devtools, codemap, assets, workspaces, speech"]
-            NET["web, browser, net, maps, connectors, connector_catalog, oauth, mcp, mcp_client, plugins, channels"]
+            NET["web, browser, net, maps, connectors, connector_catalog, visibility, oauth, mcp, mcp_client, plugins, channels"]
         end
 
         subgraph Run["Esecuzione e risorse"]
@@ -81,7 +81,7 @@ flowchart TB
         TST["tests/<br/>contracts, ai, e2e, data (dataset)"]
     end
 
-    EXT["Servizi esterni<br/>NVIDIA NIM, server MCP, Gmail, Calendar, GitHub, Hugging Face, Tailscale"]
+    EXT["Servizi esterni<br/>NVIDIA NIM, server MCP, Gmail, Calendar, GitHub, Hugging Face (lettura MCP, scrittura Hub solo privata), Tailscale"]
 
     MAC --> API
     EGUI --> API

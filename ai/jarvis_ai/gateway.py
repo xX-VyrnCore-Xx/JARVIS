@@ -199,6 +199,26 @@ def _describe_tool_result(result: dict) -> str:
     if tool == "app.key":
         mods = "+".join(output.get("modifiers") or [])
         return f"Ho premuto {mods + '+' if mods else ''}{output.get('key')}."
+    if tool == "dataset.list":
+        items = output.get("items") or []
+        return "Dataset di JARVIS (solo privati):\n" + "\n".join(
+            f"• {i['name']} v{i['version']}: {i['examples']} esempi, {i['candidates']} candidati in attesa" + (f", caricato su {i['pushed']['repo']}" if i.get("pushed") else "")
+            for i in items)
+    if tool == "dataset.evaluate":
+        text = f"{output.get('name')}: {output.get('correct')}/{output.get('total')} corretti ({output.get('accuracy_percent')}%)."
+        if output.get("support"):
+            text += f" Supporto: {output['support']['hit']}/{output['support']['total']}."
+        misses = output.get("misses") or []
+        if misses:
+            text += "\nDiscordanze: " + "; ".join(f"«{m['text']}»" for m in misses[:3])
+        return text + "\n" + (output.get("note") or "")
+    if tool == "dataset.add_example":
+        if not output.get("added"):
+            return f"Non l'ho aggiunto: {output.get('reason')}."
+        return "Ho aggiunto l'esempio come candidato (testo mascherato). Entra nel dataset solo se lo accetti."
+    if tool == "dataset.push_hf":
+        return (f"Dataset caricato nel repository privato {output.get('repo')} ({len(output.get('files') or [])} file, "
+                f"privato: {'sì' if output.get('private') else 'NO: verifica subito'}). {output.get('url')}")
     if tool == "app.elements":
         items = output.get("elements") or []
         if not items:
@@ -642,6 +662,11 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
     (re.compile(r"^\s*(?:quali sono |mostrami |dimmi )?(?:i miei |le mie |i prossimi )?(?:prossimi )?(?:eventi|appuntamenti|impegni)(?: in calendario)?(?: di oggi| di domani)?\s*\??\s*$|^\s*(?:cosa ho|che impegni ho|che appuntamenti ho)\s+(?:in calendario|oggi|domani|nel calendario)\s*\??\s*$|^\s*(?:la mia )?agenda\s*\??\s*$", re.I), "connector.google_calendar.eventi",
      lambda m: {"timeMin": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), "maxResults": 10,
                 "singleEvents": True, "orderBy": "startTime"}),
+    # Dataset di JARVIS: elenco, misura e caricamento privato su Hugging Face (con conferma).
+    (re.compile(r"^\s*(?:elenca|mostra|quali sono)\s+i\s+(?:miei\s+)?dataset\s*\??\s*$", re.I), "dataset.list", lambda m: {}),
+    (re.compile(r"^\s*(?:misura|valuta|testa)\s+(?:il\s+dataset\s+)?(jarvis-[a-z-]+)\s*$", re.I), "dataset.evaluate", lambda m: {"name": m[1].lower()}),
+    (re.compile(r"^\s*(?:carica|salva|metti)\s+(?:il\s+dataset\s+)?(jarvis-[a-z-]+)\s+su\s+hugging\s*face\s+(?:in|come|nel repository)\s+([A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*)\s*$", re.I), "dataset.push_hf",
+     lambda m: {"name": m[1].lower(), "repo_id": m[2]}),
     # Mappa e percorsi (OpenStreetMap): «indicazioni da Torino a Milano a piedi», «mostrami Roma sulla mappa».
     (re.compile(r"^\s*(?:indicazioni|percorso|strada|come (?:arrivo|si arriva|vado))(?: stradali)?\s+da\s+(.+?)\s+a\s+(.+?)(?:\s+(a piedi|in bici|in auto))?\s*\??\s*$", re.I), "map.route",
      lambda m: {"from": m[1].strip(), "to": m[2].strip(), "mode": {"a piedi": "piedi", "in bici": "bici"}.get((m[3] or "").lower(), "auto")}),

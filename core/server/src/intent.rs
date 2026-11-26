@@ -698,6 +698,34 @@ pub fn hint(analysis: &Value) -> Option<String> {
     {
         lines.push(line.to_string());
     }
+    let similar: Vec<String> = analysis["similar"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|e| {
+            Some(format!(
+                "«{}» → principale {}{}",
+                e["text"].as_str()?,
+                e["primary"].as_str()?,
+                match e["support"].as_array().filter(|s| !s.is_empty()) {
+                    Some(s) => format!(
+                        ", supporto {}",
+                        s.iter()
+                            .filter_map(Value::as_str)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                    None => String::new(),
+                }
+            ))
+        })
+        .collect();
+    if !similar.is_empty() {
+        lines.push(format!(
+            "Richieste simili già classificate dal proprietario: {}.",
+            similar.join("; ")
+        ));
+    }
     if let Some(book) = analysis["playbook"].as_object() {
         let agents: Vec<&str> = book["agents"]
             .as_array()

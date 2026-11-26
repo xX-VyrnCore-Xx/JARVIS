@@ -1,0 +1,29 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "dataset.list",
+  "version": "1.0.0",
+  "summary": "Elenca i dataset di JARVIS (esempi di instradamento, parlato, richieste complesse, conversazioni) con versione, esempi e candidati",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.notes:read"
+  ],
+  "errors": [
+    "dataset.invalid"
+  ],
+  "timeout_ms": 10000,
+  "retry": {
+    "mode": "never",
+    "max_attempts": 1
+  },
+  "confirmation": "none"
+}

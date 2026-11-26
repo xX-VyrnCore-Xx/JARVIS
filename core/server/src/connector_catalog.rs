@@ -23,6 +23,10 @@ const MANIFESTS: &[(&str, &str)] = &[
         include_str!("../../../contracts/catalog/connectors/github.json"),
     ),
     (
+        "huggingface",
+        include_str!("../../../contracts/catalog/connectors/huggingface.json"),
+    ),
+    (
         "todoist",
         include_str!("../../../contracts/catalog/connectors/todoist.json"),
     ),
