@@ -701,6 +701,239 @@ pub fn pdf_extract(workspace: &Path, args: &Value) -> Result<Value, ToolError> {
     pdf_text(&read_file(workspace, path)?, max)
 }
 
+// ------------------------------------------------------------------ DOCX e PPTX (ADR-0193)
+
+/// Testo di un paragrafo Word o PowerPoint nell'ordine del documento: `<w:t>`/`<a:t>` come testo, tabulazioni e
+/// interruzioni di riga come `\t` e `\n`.
+fn paragraph_text(inner: &str, prefix: &str) -> String {
+    let (t_open, t_close) = (format!("<{prefix}:t"), format!("</{prefix}:t>"));
+    let (tab, br) = (format!("<{prefix}:tab"), format!("<{prefix}:br"));
+    let mut out = String::new();
+    let mut pos = 0;
+    while let Some(i) = inner[pos..].find('<') {
+        let at = pos + i;
+        let rest = &inner[at..];
+        let after = rest.as_bytes().get(t_open.len()).copied();
+        if rest.starts_with(&t_open) && matches!(after, Some(b'>' | b' ')) {
+            if let (Some(gt), Some(end)) = (rest.find('>'), rest.find(&t_close)) {
+                if gt < end {
+                    out.push_str(&unescape(&rest[gt + 1..end]));
+                    pos = at + end + t_close.len();
+                    continue;
+                }
+            }
+        } else if rest.starts_with(&tab) && prefix == "w" {
+            out.push('\t');
+        } else if rest.starts_with(&br) {
+            out.push('\n');
+        }
+        pos = at + 1;
+    }
+    out
+}
+
+fn core_property(zip: &[u8], tag: &str) -> Option<String> {
+    let xml = text_entry(zip, "docProps/core.xml")?;
+    let (_, inner) = elements(&xml, tag).into_iter().next()?;
+    let value = unescape(inner).trim().to_string();
+    (!value.is_empty()).then(|| value.chars().take(200).collect())
+}
+
+/// Testo di un file DOCX: paragrafi con i titoli marcati da `#`, indice dei titoli, conteggi. Autore e commenti
+/// non vengono letti (dati personali): solo titolo e data di modifica dalle proprietà.
+pub fn docx_text(zip: &[u8], max_chars: usize) -> Result<Value, ToolError> {
+    let xml = text_entry(zip, "word/document.xml").ok_or_else(|| {
+        err(
+            "doc.invalid",
+            "Non è un file DOCX valido (manca word/document.xml)",
+        )
+    })?;
+    let (mut lines, mut outline, mut words) = (Vec::new(), Vec::new(), 0usize);
+    for (_, inner) in elements(&xml, "w:p") {
+        let text = paragraph_text(inner, "w");
+        let text = text.trim_end();
+        if text.trim().is_empty() {
+            continue;
+        }
+        words += text.split_whitespace().count();
+        let level = elements(inner, "w:pStyle")
+            .into_iter()
+            .filter_map(|(tag, _)| attr(tag, "w:val"))
+            .find_map(|style| {
+                let lower = style.to_lowercase();
+                let rest = lower
+                    .strip_prefix("heading")
+                    .or_else(|| lower.strip_prefix("titolo"))?;
+                Some(rest.trim().parse::<usize>().unwrap_or(1).clamp(1, 6))
+            });
+        match level {
+            Some(level) => {
+                outline.push(json!({"level": level, "title": text.trim()}));
+                lines.push(format!("{} {}", "#".repeat(level), text.trim()));
+            }
+            None => lines.push(text.to_string()),
+        }
+    }
+    let tables = xml.matches("<w:tbl>").count() + xml.matches("<w:tbl ").count();
+    let full = lines.join("\n");
+    let truncated = full.chars().count() > max_chars;
+    Ok(json!({
+        "format": "docx",
+        "title": core_property(zip, "dc:title"),
+        "modified": core_property(zip, "dcterms:modified"),
+        "paragraphs": lines.len(), "words": words, "tables": tables,
+        "outline": outline.into_iter().take(100).collect::<Vec<_>>(),
+        "text": full.chars().take(max_chars).collect::<String>(),
+        "truncated": truncated,
+        "untrusted": true,
+        "note": "Immagini, grafici, commenti e modifiche tracciate non sono letti; il testo delle tabelle compare come paragrafi."
+    }))
+}
+
+/// Testo di un file PPTX: una voce per diapositiva (titolo = primo paragrafo) con le note del relatore.
+pub fn pptx_text(zip: &[u8], max_chars: usize) -> Result<Value, ToolError> {
+    let mut slides = Vec::new();
+    let mut misses = 0;
+    for n in 1..=500usize {
+        let Some(xml) = text_entry(zip, &format!("ppt/slides/slide{n}.xml")) else {
+            misses += 1;
+            if misses >= 20 {
+                break;
+            }
+            continue;
+        };
+        misses = 0;
+        let paragraphs: Vec<String> = elements(&xml, "a:p")
+            .into_iter()
+            .map(|(_, inner)| paragraph_text(inner, "a"))
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+            .collect();
+        let notes: Vec<String> = text_entry(zip, &format!("ppt/notesSlides/notesSlide{n}.xml"))
+            .map(|xml| {
+                elements(&xml, "a:p")
+                    .into_iter()
+                    .map(|(_, inner)| paragraph_text(inner, "a").trim().to_string())
+                    // Il numero di diapositiva nelle note non è contenuto.
+                    .filter(|t| !t.is_empty() && !t.chars().all(|c| c.is_ascii_digit()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        slides.push((n, paragraphs, notes));
+    }
+    if slides.is_empty() {
+        return Err(err(
+            "doc.invalid",
+            "Non è un file PPTX valido (nessuna diapositiva trovata)",
+        ));
+    }
+    let mut blocks = Vec::new();
+    let mut outline = Vec::new();
+    let mut words = 0usize;
+    for (n, paragraphs, notes) in &slides {
+        words += paragraphs
+            .iter()
+            .chain(notes)
+            .map(|t| t.split_whitespace().count())
+            .sum::<usize>();
+        if let Some(title) = paragraphs.first() {
+            outline.push(json!({"slide": n, "title": title.chars().take(120).collect::<String>()}));
+        }
+        let mut block = format!("## Diapositiva {n}\n{}", paragraphs.join("\n"));
+        if !notes.is_empty() {
+            block.push_str(&format!("\n(Note) {}", notes.join(" ")));
+        }
+        blocks.push(block);
+    }
+    let full = blocks.join("\n\n");
+    Ok(json!({
+        "format": "pptx",
+        "title": core_property(zip, "dc:title"),
+        "modified": core_property(zip, "dcterms:modified"),
+        "slides": slides.len(), "words": words,
+        "outline": outline.into_iter().take(100).collect::<Vec<_>>(),
+        "text": full.chars().take(max_chars).collect::<String>(),
+        "truncated": full.chars().count() > max_chars,
+        "untrusted": true,
+        "note": "Immagini, grafici e animazioni non sono letti."
+    }))
+}
+
+fn sha256_of(bytes: &[u8]) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+/// Testo di un documento della workspace per estensione: DOCX, PPTX, PDF (con testo) e file di testo (md, txt, csv,
+/// json, yaml, html, xml…). La provenienza (percorso, formato, SHA-256) accompagna sempre il risultato.
+fn document_value(workspace: &Path, path: &str, max_chars: usize) -> Result<Value, ToolError> {
+    let bytes = read_file(workspace, path)?;
+    let lower = path.to_lowercase();
+    let mut out = if lower.ends_with(".docx") {
+        docx_text(&bytes, max_chars)?
+    } else if lower.ends_with(".pptx") {
+        pptx_text(&bytes, max_chars)?
+    } else if lower.ends_with(".pdf") {
+        let mut v = pdf_text(&bytes, max_chars)?;
+        v["format"] = json!("pdf");
+        v
+    } else if lower.ends_with(".xlsx") {
+        return Err(err(
+            "doc.unsupported",
+            "Per i fogli XLSX usa sheet.read, che restituisce righe e riepilogo",
+        ));
+    } else {
+        let text = String::from_utf8(bytes.clone()).map_err(|_| {
+            err(
+                "doc.unsupported",
+                "Formato non supportato: servono DOCX, PPTX, PDF o un file di testo",
+            )
+        })?;
+        json!({"format": "text", "text": text.chars().take(max_chars).collect::<String>(),
+            "truncated": text.chars().count() > max_chars, "words": text.split_whitespace().count(),
+            "untrusted": true})
+    };
+    out["source"] = json!({"path": path, "bytes": bytes.len(), "sha256": sha256_of(&bytes)});
+    Ok(out)
+}
+
+pub fn doc_read(workspace: &Path, args: &Value) -> Result<Value, ToolError> {
+    let path = args["path"]
+        .as_str()
+        .filter(|p| !p.is_empty())
+        .ok_or_else(|| err("doc.invalid", "Indica «path» del documento"))?;
+    let max = args["max_chars"]
+        .as_u64()
+        .unwrap_or(20_000)
+        .clamp(1_000, 100_000) as usize;
+    document_value(workspace, path, max)
+}
+
+/// Confronta due documenti (anche di formato diverso) riga per riga sul testo estratto. Il confronto lavora sui
+/// primi 12 000 caratteri di ciascuno: oltre, il risultato lo dichiara.
+pub fn doc_compare(workspace: &Path, args: &Value) -> Result<Value, ToolError> {
+    const CAP: usize = 12_000;
+    let name = |key: &str| {
+        args[key].as_str().filter(|p| !p.is_empty()).ok_or_else(|| {
+            err(
+                "doc.invalid",
+                format!("Indica «{key}»: il percorso di un documento"),
+            )
+        })
+    };
+    let (a_path, b_path) = (name("a")?, name("b")?);
+    let a = document_value(workspace, a_path, CAP)?;
+    let b = document_value(workspace, b_path, CAP)?;
+    let mut diff = crate::datatools::diff(&json!({"a": a["text"], "b": b["text"]}))?;
+    diff["sources"] = json!([a["source"], b["source"]]);
+    diff["partial"] = json!(a["truncated"] == true || b["truncated"] == true);
+    diff["identical_files"] = json!(a["source"]["sha256"] == b["source"]["sha256"]);
+    Ok(diff)
+}
+
 // ------------------------------------------------------------------ Appunti
 
 fn run_with_timeout(
@@ -1043,5 +1276,109 @@ mod tests {
             clipboard_write(&json!({"text": long})).unwrap_err().code,
             "clipboard.invalid"
         );
+    }
+
+    const DOCX: &str = r#"<w:document><w:body>
+        <w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Preventivo &amp; offerta</w:t></w:r></w:p>
+        <w:p><w:r><w:t xml:space="preserve">Totale: </w:t></w:r><w:r><w:tab/><w:t>1200 euro</w:t></w:r></w:p>
+        <w:p><w:pPr><w:pStyle w:val="Titolo2"/></w:pPr><w:r><w:t>Condizioni</w:t></w:r></w:p>
+        <w:p><w:r><w:t>Pagamento a 30 giorni.</w:t></w:r></w:p>
+        <w:p><w:r><w:t></w:t></w:r></w:p>
+        <w:tbl><w:tr><w:tc><w:p><w:r><w:t>Cella</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+    </w:body></w:document>"#;
+    const CORE: &str = r#"<cp:coreProperties><dc:title>Offerta 2026</dc:title><dc:creator>Persona Reale</dc:creator>
+        <dcterms:modified>2026-11-20T10:00:00Z</dcterms:modified></cp:coreProperties>"#;
+
+    #[test]
+    fn docx_text_keeps_order_headings_and_counts_but_never_reads_the_author() {
+        let zip = make_zip(&[
+            ("word/document.xml", DOCX.as_bytes(), true),
+            ("docProps/core.xml", CORE.as_bytes(), true),
+        ]);
+        let out = docx_text(&zip, 20_000).unwrap();
+        let text = out["text"].as_str().unwrap();
+        assert!(
+            text.starts_with("# Preventivo & offerta\nTotale: \t1200 euro\n## Condizioni\n"),
+            "{text}"
+        );
+        assert_eq!(out["outline"][1]["level"], 2);
+        assert_eq!(out["tables"], 1);
+        assert_eq!(out["title"], "Offerta 2026");
+        assert!(
+            !out.to_string().contains("Persona Reale"),
+            "l'autore non si legge"
+        );
+        assert_eq!(out["untrusted"], true);
+        let short = docx_text(&zip, 12).unwrap();
+        assert_eq!(short["truncated"], true);
+        assert!(docx_text(&make_zip(&[("x", b"y", false)]), 100).is_err());
+    }
+
+    #[test]
+    fn pptx_text_reads_slides_in_order_with_notes_and_ignores_slide_numbers() {
+        let slide = |t: &str| {
+            format!(
+                r#"<p:sld><a:p><a:r><a:t>{t}</a:t></a:r></a:p><a:p><a:r><a:t>Punto uno</a:t></a:r><a:br/><a:r><a:t>Punto due</a:t></a:r></a:p></p:sld>"#
+            )
+        };
+        let (s1, s2) = (slide("Apertura"), slide("Chiusura"));
+        let notes = r#"<p:notes><a:p><a:r><a:t>Ricordare il budget</a:t></a:r></a:p><a:p><a:r><a:t>2</a:t></a:r></a:p></p:notes>"#;
+        let zip = make_zip(&[
+            ("ppt/slides/slide1.xml", s1.as_bytes(), true),
+            ("ppt/slides/slide2.xml", s2.as_bytes(), true),
+            ("ppt/notesSlides/notesSlide2.xml", notes.as_bytes(), true),
+        ]);
+        let out = pptx_text(&zip, 20_000).unwrap();
+        assert_eq!(out["slides"], 2);
+        assert_eq!(out["outline"][1]["title"], "Chiusura");
+        let text = out["text"].as_str().unwrap();
+        assert!(
+            text.contains("## Diapositiva 1\nApertura\nPunto uno\nPunto due"),
+            "{text}"
+        );
+        assert!(
+            text.contains("(Note) Ricordare il budget")
+                && !text.contains("(Note) Ricordare il budget 2")
+        );
+        assert!(pptx_text(&make_zip(&[("x", b"y", false)]), 100).is_err());
+    }
+
+    #[test]
+    fn doc_read_and_compare_work_across_formats_with_provenance() {
+        let ws = std::env::current_dir().unwrap().join(format!(
+            "target/jarvis-doc-{}",
+            uuid::Uuid::new_v4().simple()
+        ));
+        std::fs::create_dir_all(&ws).unwrap();
+        let docx = make_zip(&[("word/document.xml", DOCX.as_bytes(), true)]);
+        std::fs::write(ws.join("offerta.docx"), &docx).unwrap();
+        std::fs::write(ws.join("offerta.md"), "# Preventivo & offerta\nTotale: \t1200 euro\n## Condizioni\nPagamento a 60 giorni.\nCella\n").unwrap();
+        std::fs::write(ws.join("dati.bin"), [0xff, 0xfe, 0x00, 0x80]).unwrap();
+        let read = doc_read(&ws, &json!({"path": "offerta.docx"})).unwrap();
+        assert_eq!(read["source"]["path"], "offerta.docx");
+        assert_eq!(read["source"]["sha256"].as_str().unwrap().len(), 64);
+        let diff = doc_compare(&ws, &json!({"a": "offerta.docx", "b": "offerta.md"})).unwrap();
+        let removed = diff["removed"].to_string();
+        let added = diff["added"].to_string();
+        assert!(
+            removed.contains("30 giorni") && added.contains("60 giorni"),
+            "{diff}"
+        );
+        assert_eq!(diff["identical_files"], false);
+        assert_eq!(diff["sources"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            doc_read(&ws, &json!({"path": "dati.bin"}))
+                .unwrap_err()
+                .code,
+            "doc.unsupported"
+        );
+        assert_eq!(
+            doc_read(&ws, &json!({"path": "../fuori.docx"}))
+                .unwrap_err()
+                .code,
+            "fs.outside_workspace"
+        );
+        assert_eq!(doc_read(&ws, &json!({})).unwrap_err().code, "doc.invalid");
+        let _ = std::fs::remove_dir_all(&ws);
     }
 }

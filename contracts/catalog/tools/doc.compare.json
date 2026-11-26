@@ -1,0 +1,49 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "doc.compare",
+  "version": "1.0.0",
+  "summary": "Confronta due documenti della workspace (anche di formato diverso) riga per riga sul testo estratto",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "a",
+      "b"
+    ],
+    "properties": {
+      "a": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300
+      },
+      "b": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.workspace:read"
+  ],
+  "errors": [
+    "doc.invalid",
+    "doc.unsupported",
+    "text.invalid",
+    "fs.unavailable",
+    "fs.too_large",
+    "fs.not_file"
+  ],
+  "timeout_ms": 20000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}

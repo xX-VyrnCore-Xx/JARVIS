@@ -1,0 +1,47 @@
+{
+  "contract": "jarvis.tool/1",
+  "name": "doc.read",
+  "version": "1.0.0",
+  "summary": "Legge un documento della workspace (DOCX, PPTX, PDF con testo o file di testo): testo, titoli, conteggi e provenienza con SHA-256",
+  "input_schema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+      "path"
+    ],
+    "properties": {
+      "path": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 300
+      },
+      "max_chars": {
+        "type": "integer",
+        "minimum": 1000,
+        "maximum": 100000
+      }
+    }
+  },
+  "output_schema": {
+    "type": "object"
+  },
+  "scope": "core",
+  "effects": "read",
+  "risk": "low",
+  "permissions": [
+    "core.workspace:read"
+  ],
+  "errors": [
+    "doc.invalid",
+    "doc.unsupported",
+    "fs.unavailable",
+    "fs.too_large",
+    "fs.not_file"
+  ],
+  "timeout_ms": 20000,
+  "retry": {
+    "mode": "safe",
+    "max_attempts": 2
+  },
+  "confirmation": "none"
+}
