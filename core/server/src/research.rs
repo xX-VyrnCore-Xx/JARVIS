@@ -249,10 +249,8 @@ mod tests {
     use super::*;
 
     fn store() -> Store {
-        let dir = std::env::current_dir().unwrap().join(format!(
-            "target/jarvis-research-{}",
-            uuid::Uuid::new_v4().simple()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("jarvis-research-{}", uuid::Uuid::new_v4().simple()));
         std::fs::create_dir_all(&dir).unwrap();
         Store::open(&dir.join("t.sqlite3")).unwrap()
     }
