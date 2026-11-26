@@ -2480,6 +2480,14 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Limiti:** se un processo non si chiude, su macOS dopo 60 s si procede comunque (la sostituzione del pacchetto è sicura anche con l'app aperta) e l'app può restare quella precedente; la notifica lo segnala al riavvio successivo. Nessuna vista dedicata dell'esito nelle app: compare nelle notifiche.
 - **Evidenza:** test su script (attesa, riavvio, ripristino, percorsi non sicuri, nessun segnaposto) e sull'esito letto una sola volta; prova del script macOS con strumenti simulati.
 
+### ADR-0214 — Tailscale: lettura dello stato resa affidabile
+
+- **Data:** 2026-11-26. **Stato:** implementata; provata con falsi programmi Tailscale (output grande, avvisi su stderr, demone sbagliato poi giusto), **non** con una tailnet reale.
+- **Contesto:** il collegamento «non andava» anche con Tailscale attivo e connesso (ADR-0141, 0192, 0198). Rileggendo `tailscale.rs` si sono trovati difetti che fanno risultare «non connesso» un client in realtà connesso.
+- **Difetti e correzioni:** (1) stdout e stderr si leggevano solo a processo finito: con molti dispositivi `status --json` supera il buffer della pipe, il processo si bloccava fino ai 15 s e il JSON restava troncato → lettura in parallelo e `--peers=false` (con ripiego se il client non conosce l'opzione); (2) stdout e stderr erano concatenati, quindi un avviso come «client version != server version» rendeva il JSON non valido → flussi separati e JSON estratto con tolleranza; (3) il primo programma trovato vinceva anche se non raggiungeva il demone (riga di comando di Homebrew accanto all'app) → si prova il candidato successivo, e su macOS l'app è il primo; (4) la finestra della console compariva su Windows → `hide_console`; (5) se non c'è uno stato leggibile il messaggio riporta il motivo reale del programma invece di «non connesso».
+- **Resta aperto:** cause fuori dal Core (MagicDNS o HTTPS disattivati nella console, DNS che non risolve su un altro dispositivo): la diagnosi (`/api/tailscale/diagnose`) indica il primo passo che fallisce e cosa fare.
+- **Evidenza:** test su output da 400 KB senza blocco, candidati con demone irraggiungibile, JSON con avvisi e riconoscimento dell'errore.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.
