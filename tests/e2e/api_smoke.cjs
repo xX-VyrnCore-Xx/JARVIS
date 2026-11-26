@@ -317,6 +317,10 @@ function check(condition, message) {
   check(autonomy.status === 200 && autonomy.json?.default === 4 && autonomy.json?.background_allowed === true, "livelli di autonomia predefiniti");
   const badLevel = await request("/api/autonomy", { method: "PATCH", token: ownerToken, body: { default: 9 } });
   check(badLevel.status === 400, "livello di autonomia fuori scala rifiutato");
+  const lvl = await request("/api/autonomy", { method: "PATCH", token: ownerToken, body: { default: 3 } });
+  const hist = await request("/api/permissions/history?kind=autonomy", { token: ownerToken });
+  check(lvl.status === 200 && hist.status === 200 && hist.json?.items?.[0]?.changes?.some((c) => c.field === "default" && c.to === 3), "cronologia dei permessi: la modifica dell'autonomia è registrata");
+  await request("/api/autonomy", { method: "PATCH", token: ownerToken, body: { default: 4 } });
   const sync = await request("/api/world/sync", { method: "POST", token: ownerToken });
   const world = await request("/api/world", { token: ownerToken });
   check(sync.status === 200 && world.status === 200 && world.json?.items?.some((e) => e.key === "system:local" && e.source === "observed"), "stato del mondo: sistema osservato");

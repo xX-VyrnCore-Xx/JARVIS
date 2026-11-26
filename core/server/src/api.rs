@@ -768,6 +768,7 @@ pub fn router(state: Shared) -> Router {
             "/api/permissions",
             get(permissions_get).patch(permissions_patch),
         )
+        .route("/api/permissions/history", get(permissions_history))
         .route("/api/persona", get(persona_get).patch(persona_patch))
         .route("/api/profile", get(profile_get).patch(profile_patch))
         .route("/api/missions", get(missions_list).post(mission_create))
@@ -2119,6 +2120,30 @@ async fn permissions_get(
         );
     }
     reply(Ok(with_core(&state, |j| j.permissions()).await))
+}
+
+/// Cronologia delle modifiche ai permessi (ADR-0210): solo dal computer del Core.
+async fn permissions_history(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Query(q): Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    if device.is_some() {
+        return error(
+            StatusCode::FORBIDDEN,
+            "owner_only",
+            "operazione disponibile solo dal computer del proprietario",
+        );
+    }
+    let limit = q.get("limit").and_then(|v| v.parse().ok()).unwrap_or(50);
+    let kind = q
+        .get("kind")
+        .filter(|k| matches!(k.as_str(), "permissions" | "autonomy" | "emergency"))
+        .cloned();
+    reply(Ok(with_core(&state, move |j| {
+        j.permission_history(limit, kind.as_deref())
+    })
+    .await))
 }
 
 /// Livelli di autonomia (ADR-0174): lettura e modifica solo dal computer del Core.

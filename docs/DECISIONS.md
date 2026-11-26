@@ -2447,6 +2447,30 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** (1) il download dell'immagine pubblica usa una configurazione Docker privata e scrivibile (`<dati>/docker-config`, `config.json` vuoto) tramite `DOCKER_CONFIG`; (2) tutti i comandi Docker ampliano il `PATH` con le cartelle note di Docker; (3) `explain_pull_error` aggiunge causa e rimedio (gruppo `docker`, credenziali, cartella non scrivibile, limite del registro, rete, spazio).
 - **Evidenza:** test su messaggi d'errore e creazione della configurazione privata.
 
+### ADR-0210 — Cronologia dei permessi
+
+- **Data:** 2026-11-26. **Stato:** implementata.
+- **Contesto:** il registro di audit dice *quando* il proprietario ha cambiato permessi o autonomia, non *cosa*. Mancava una cronologia leggibile (ADR-0187, ADR-0207 la indicavano come limite).
+- **Decisione:** `permission_history` registra, per ogni modifica a permessi, autonomia e arresto di emergenza, le differenze campo per campo (`field`, `from`, `to`), solo se qualcosa cambia; massimo 200 voci, 40 differenze per voce. `GET /api/permissions/history?limit=&kind=` (solo dal computer del proprietario, come i permessi). Contiene solo configurazione, nessun dato personale.
+- **Limiti:** nessun criterio di conservazione configurabile e nessuna vista grafica (restano da fare).
+- **Evidenza:** test su differenze, assenza di voci vuote, limite di 200 e filtro per tipo; e2e sull'API.
+
+### ADR-0211 — Indice persistente e incrementale del codice
+
+- **Data:** 2026-11-26. **Stato:** implementata.
+- **Contesto:** `code.map` (ADR-0189) rileggeva tutti i file a ogni richiesta.
+- **Decisione:** tabella `code_index` nel database locale, per workspace e percorso: dimensione, data di modifica, linguaggio, righe, simboli e importazioni. Un file con dimensione e data invariate si riusa senza rileggerlo; i nuovi o modificati si rileggono; quelli spariti escono dall'indice. L'indice si riscrive solo se cambia qualcosa e mai se la scansione è troncata. `reindex: true` lo ricostruisce. La risposta riporta `index: {reused, rescanned, removed, saved}`.
+- **Sicurezza:** resta sola lettura sulla workspace; l'indice contiene solo nomi derivati dai file, nel database locale.
+- **Limiti:** la data di modifica può non cambiare con strumenti che la ripristinano (usa `reindex`); analisi sempre lessicale.
+- **Evidenza:** test su riuso, file modificato, file rimosso, assenza di riscrittura e risultati identici dall'indice.
+
+### ADR-0212 — Mouse: `app.click`
+
+- **Data:** 2026-11-26. **Stato:** implementata nel piano e nella validazione; **non provata su macOS e Windows reali**.
+- **Decisione:** nuovo strumento di controllo `app.click` (`x`, `y` interi 0–16384, `clicks` 1 o 2), con richiesta esplicita del proprietario e conferma come `app.key`: rischio alto, mai ripetuto, mai in background, descrizione in chiaro della conferma. macOS: `System Events click at` (serve Accessibilità); Windows: `SetCursorPos` e `mouse_event` con i valori solo nell'ambiente del processo, mai nel testo del comando.
+- **Limiti:** solo clic sinistro, nessun trascinamento né scorrimento; le coordinate sono in punti dello schermo (come le vede `screen.read`); su schermi con scala diversa possono servire verifiche. Nessuna scoperta automatica degli elementi (accessibilità ad albero) ancora.
+- **Evidenza:** test su validazione (valori ostili e fuori scala), piano macOS/Windows e assenza di interpolazione.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

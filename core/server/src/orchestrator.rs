@@ -2687,8 +2687,15 @@ impl Jarvis {
     /// Attiva o disattiva l'arresto di emergenza: con l'arresto attivo ogni strumento che modifica o esegue è
     /// negato dalla policy e lo scheduler non avvia nulla. Solo il proprietario, sempre nel registro di audit.
     pub fn emergency_set(&mut self, active: bool) -> Result<Value, CoreError> {
+        let was = crate::permissions::emergency_active(&self.cfg.data_dir);
         let doc = crate::permissions::set_emergency(&self.cfg.data_dir, active)
             .map_err(CoreError::Internal)?;
+        let _ = crate::permission_history::record(
+            &self.cfg.data_dir,
+            "emergency",
+            &json!({"emergency_stop": was}),
+            &json!({"emergency_stop": active}),
+        );
         self.audit(json!({
             "correlation_id": uuid::Uuid::new_v4().to_string(),
             "actor": {"kind": "owner", "id": "owner"}, "node": "core-local",
@@ -4446,6 +4453,11 @@ impl Jarvis {
         doc
     }
 
+    /// Cronologia delle modifiche a permessi, autonomia e arresto di emergenza (ADR-0210).
+    pub fn permission_history(&self, limit: usize, kind: Option<&str>) -> Value {
+        crate::permission_history::recent(&self.cfg.data_dir, limit, kind)
+    }
+
     pub fn persona(&self) -> Value {
         crate::persona::to_json(&crate::persona::load(&self.cfg.data_dir))
     }
@@ -4602,8 +4614,11 @@ impl Jarvis {
             .filter(|d| d.get("revoked_at").is_none())
             .filter_map(|d| d["device_id"].as_str().map(str::to_string))
             .collect();
+        let before = crate::permissions::Autonomy::load(&self.cfg.data_dir).to_json();
         let out = crate::permissions::update_autonomy(&self.cfg.data_dir, patch, &names, &devices)
             .map_err(CoreError::BadRequest)?;
+        let after = crate::permissions::Autonomy::load(&self.cfg.data_dir).to_json();
+        let _ = crate::permission_history::record(&self.cfg.data_dir, "autonomy", &before, &after);
         self.record_owner_action("autonomy.update")?;
         Ok(out)
     }
@@ -4974,7 +4989,11 @@ impl Jarvis {
                 )));
             }
         }
+        let before = crate::permissions::Rules::load(&self.cfg.data_dir).to_json();
         crate::permissions::update(&self.cfg.data_dir, patch).map_err(CoreError::BadRequest)?;
+        let after = crate::permissions::Rules::load(&self.cfg.data_dir).to_json();
+        let _ =
+            crate::permission_history::record(&self.cfg.data_dir, "permissions", &before, &after);
         self.record_owner_action("permissions.update")?;
         Ok(self.permissions())
     }

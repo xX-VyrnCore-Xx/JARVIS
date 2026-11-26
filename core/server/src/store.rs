@@ -87,6 +87,7 @@ impl Store {
                  doc TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS notify_channels (channel_id TEXT PRIMARY KEY, doc TEXT NOT NULL);
              CREATE TABLE IF NOT EXISTS research (id TEXT PRIMARY KEY, updated_at TEXT NOT NULL, doc TEXT NOT NULL);
+             CREATE TABLE IF NOT EXISTS code_index (root TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL, mtime INTEGER NOT NULL, doc TEXT NOT NULL, PRIMARY KEY (root, path));
              CREATE TABLE IF NOT EXISTS cloud_feedback (task_id TEXT PRIMARY KEY, provider TEXT NOT NULL,
                  model TEXT NOT NULL, rating TEXT, created_at TEXT NOT NULL, rated_at TEXT);
              CREATE INDEX IF NOT EXISTS cloud_feedback_by_model ON cloud_feedback (provider, model, rated_at);
@@ -623,6 +624,61 @@ impl Store {
             .conn
             .execute("DELETE FROM research WHERE id = ?1", [id])?
             > 0)
+    }
+
+    // ------------------------------------------------------------------ indice del codice (ADR-0211)
+
+    /// Voci dell'indice di una workspace: percorso → (dimensione, data di modifica in ms, documento).
+    pub fn code_index_load(
+        &self,
+        root: &str,
+    ) -> StoreResult<std::collections::HashMap<String, (i64, i64, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT path, size, mtime, doc FROM code_index WHERE root = ?1")?;
+        let rows = stmt.query_map([root], |r| {
+            Ok((r.get(0)?, (r.get(1)?, r.get(2)?, r.get(3)?)))
+        })?;
+        Ok(rows.filter_map(Result::ok).collect())
+    }
+
+    /// Sostituisce le voci sotto `prefix` (vuoto = tutta la workspace) con quelle appena lette.
+    pub fn code_index_replace(
+        &self,
+        root: &str,
+        prefix: &str,
+        entries: &[(String, i64, i64, String)],
+    ) -> StoreResult<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        if prefix.is_empty() {
+            tx.execute("DELETE FROM code_index WHERE root = ?1", [root])?;
+        } else {
+            let like = format!(
+                "{}/%",
+                prefix
+                    .replace('\\', "\\\\")
+                    .replace('%', "\\%")
+                    .replace('_', "\\_")
+            );
+            tx.execute(
+                "DELETE FROM code_index WHERE root = ?1 AND path LIKE ?2 ESCAPE '\\'",
+                params![root, like],
+            )?;
+        }
+        {
+            let mut ins = tx.prepare(
+                "INSERT OR REPLACE INTO code_index (root, path, size, mtime, doc) VALUES (?1, ?2, ?3, ?4, ?5)",
+            )?;
+            for (path, size, mtime, doc) in entries {
+                ins.execute(params![root, path, size, mtime, doc])?;
+            }
+        }
+        tx.commit()
+    }
+
+    pub fn code_index_clear(&self, root: &str) -> StoreResult<usize> {
+        self.conn
+            .execute("DELETE FROM code_index WHERE root = ?1", [root])
     }
 
     pub fn research_count(&self) -> StoreResult<i64> {

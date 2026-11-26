@@ -199,6 +199,9 @@ def _describe_tool_result(result: dict) -> str:
     if tool == "app.key":
         mods = "+".join(output.get("modifiers") or [])
         return f"Ho premuto {mods + '+' if mods else ''}{output.get('key')}."
+    if tool == "app.click":
+        c = output.get("clicked") or {}
+        return f"Ho fatto {'doppio clic' if c.get('clicks') == 2 else 'clic'} alle coordinate ({c.get('x')}, {c.get('y')})."
     if tool == "app.windows":
         items = output.get("windows") or []
         if not items:
@@ -613,6 +616,8 @@ _RULES: list[tuple[re.Pattern[str], str, Any]] = [
     (re.compile(r"^\s*premi\s+((?:(?:cmd|command|comando|ctrl|control|controllo|alt|opzione|option|shift|maiusc)\s*\+\s*)*)([A-Za-z0-9]|invio|return|tab|esc|escape|spazio|canc|freccia (?:su|gi[uù]|sinistra|destra))\s*$", re.I), "app.key",
      lambda m: {"key": _KEY_ALIASES.get(m[2].lower(), m[2].lower()),
                 **({"modifiers": [_MODIFIERS[p.strip().lower()] for p in m[1].split("+") if p.strip()]} if m[1].strip() else {})}),
+    (re.compile(r"^\s*(doppio clic|doppio click|clicca|fai clic|fai click)\s+(?:a|alle coordinate|in)?\s*\(?(\d{1,5})\s*[, ]\s*(\d{1,5})\)?\s*$", re.I), "app.click",
+     lambda m: {"x": int(m[2]), "y": int(m[3]), **({"clicks": 2} if m[1].lower().startswith("doppio") else {})}),
     (re.compile(r"^\s*(?:cosa c'è sullo schermo|cosa vedi sullo schermo|leggi (?:lo|il mio) schermo|che testo c'è sullo schermo)\s*\??\s*$", re.I), "screen.read", lambda m: {}),
     # Ricerche salvate: «le mie ricerche», «riprendi la ricerca sui database».
     (re.compile(r"^\s*(?:le mie ricerche|elenca le ricerche|ricerche salvate|mostra le ricerche)\s*\??\s*$", re.I), "research.list", lambda m: {}),

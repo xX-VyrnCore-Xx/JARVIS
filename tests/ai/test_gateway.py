@@ -80,6 +80,8 @@ class OfflineBackend(unittest.TestCase):
             "scrivi nell'app: ciao a tutti": ("app.type", {"text": "ciao a tutti"}),
             "premi cmd+shift+s": ("app.key", {"key": "s", "modifiers": ["command", "shift"]}),
             "premi invio": ("app.key", {"key": "return"}),
+            "clicca a 400, 300": ("app.click", {"x": 400, "y": 300}),
+            "doppio clic alle coordinate 10 20": ("app.click", {"x": 10, "y": 20, "clicks": 2}),
             "quali finestre sono aperte": ("app.windows", {}),
             "cvss CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H": ("security.cvss", {"vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}),
             "sottorete 192.168.1.0/24": ("it.subnet", {"cidr": "192.168.1.0/24"}),
