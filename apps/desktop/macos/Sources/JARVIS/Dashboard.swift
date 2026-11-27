@@ -201,7 +201,7 @@ struct ProjectsCard: View {
     var body: some View {
         MockCard(title: "Progetti in corso", icon: "folder.fill") {
             if projects.isEmpty {
-                Text("Nessun piano in corso. Chiedi a JARVIS di organizzare un lavoro in passi.")
+                Text("Nessun piano in corso. Chiedi a Yggdrasil di organizzare un lavoro in passi.")
                     .font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             ForEach(Array(projects.enumerated()), id: \.offset) { index, project in
@@ -529,7 +529,7 @@ struct MediaCard: View {
     var body: some View {
         MockCard(title: "Spotify", icon: "music.note") {
             if !media.enabled {
-                Text("Facoltativo: JARVIS legge il brano in ascolto su Spotify, l'unico servizio musicale collegato. macOS chiederà l'autorizzazione.")
+                Text("Facoltativo: Yggdrasil legge il brano in ascolto su Spotify, l'unico servizio musicale collegato. macOS chiederà l'autorizzazione.")
                     .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 Button("Attiva il controllo media") { media.enable() }
             } else {

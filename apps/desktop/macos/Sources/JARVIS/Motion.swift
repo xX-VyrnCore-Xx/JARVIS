@@ -57,7 +57,7 @@ struct TypingIndicator: View {
                 }
             }
         }
-        .accessibilityLabel("JARVIS sta elaborando")
+        .accessibilityLabel("Yggdrasil sta elaborando")
     }
 }
 

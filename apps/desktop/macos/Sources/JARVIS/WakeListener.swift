@@ -189,7 +189,7 @@ final class WakeListener: ObservableObject {
     private func run() async {
         guard await ensurePermission() else {
             phase = .denied
-            detail = "Consenti il microfono a JARVIS in Impostazioni di Sistema → Privacy e sicurezza."
+            detail = "Consenti il microfono a Yggdrasil in Impostazioni di Sistema → Privacy e sicurezza."
             running = false
             return
         }
@@ -250,7 +250,7 @@ final class WakeListener: ObservableObject {
     /// (con il motivo in `detail`) se non è utilizzabile, e l'ascolto ripiega sul Core.
     private func runSystemRecognizer() async -> Bool {
         guard await ensureSpeechPermission() else {
-            detail = "Consenti il riconoscimento vocale a JARVIS in Impostazioni di Sistema → Privacy e sicurezza → Riconoscimento vocale."
+            detail = "Consenti il riconoscimento vocale a Yggdrasil in Impostazioni di Sistema → Privacy e sicurezza → Riconoscimento vocale."
             return false
         }
         guard let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "it-IT")), recognizer.isAvailable else {

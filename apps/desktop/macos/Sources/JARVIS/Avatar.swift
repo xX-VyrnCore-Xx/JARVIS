@@ -82,13 +82,13 @@ struct Avatar: View {
 /// di scena. Priorità: offline, errore, parla, ascolto, elaborazione, attesa di autorizzazione, inattivo.
 enum AvatarStatus {
     static func label(speaking: Bool, listening: Bool, thinking: Bool, awaiting: Bool, alert: Bool, offline: Bool) -> String {
-        if offline { return "JARVIS non è raggiungibile" }
-        if alert { return "JARVIS segnala un errore o un arresto" }
-        if speaking { return "JARVIS sta parlando" }
-        if listening { return "JARVIS ti sta ascoltando" }
-        if thinking { return "JARVIS sta elaborando" }
-        if awaiting { return "JARVIS attende la tua autorizzazione" }
-        return "Avatar JARVIS"
+        if offline { return "Yggdrasil non è raggiungibile" }
+        if alert { return "Yggdrasil segnala un errore o un arresto" }
+        if speaking { return "Yggdrasil sta parlando" }
+        if listening { return "Yggdrasil ti sta ascoltando" }
+        if thinking { return "Yggdrasil sta elaborando" }
+        if awaiting { return "Yggdrasil attende la tua autorizzazione" }
+        return "Avatar Yggdrasil"
     }
 }
 
@@ -525,6 +525,6 @@ struct PortraitAvatar: View {
         .aspectRatio(1, contentMode: .fit)
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isImage)
-        .accessibilityLabel(speaking ? "JARVIS sta parlando" : "Ritratto di JARVIS")
+        .accessibilityLabel(speaking ? "Yggdrasil sta parlando" : "Ritratto di Yggdrasil")
     }
 }
