@@ -123,6 +123,24 @@ struct HoverLift: ViewModifier {
     }
 }
 
+/// Bordo delle schede (ADR-0227): a riposo sottile, al passaggio del mouse si accende un poco e la scheda si
+/// stacca dallo sfondo. Con «riduci movimento» cambia solo il bordo, senza animazione.
+struct CardHoverGlow: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hovering = false
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(.cyan.opacity(hovering ? 0.34 : 0.16))
+            }
+            .shadow(color: .cyan.opacity(hovering ? 0.10 : 0), radius: hovering ? 12 : 0, y: 2)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: hovering)
+            .onHover { hovering = $0 }
+    }
+}
+
 extension View {
     func staggeredAppear(_ index: Int = 0) -> some View { modifier(StaggeredAppear(index: index)) }
     func hoverLift() -> some View { modifier(HoverLift()) }

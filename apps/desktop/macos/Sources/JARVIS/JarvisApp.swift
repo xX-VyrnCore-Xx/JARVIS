@@ -550,6 +550,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                                         if let badge = sidebarBadge(entry) {
                                             Text(badge > 99 ? "99+" : "\(badge)")
                                                 .font(.caption2.weight(.bold)).monospacedDigit()
+                                                .contentTransition(.numericText())
+                                                .animation(.snappy(duration: 0.25), value: badge)
                                                 .padding(.horizontal, 6).padding(.vertical, 1)
                                                 .background(entry == .confirmations ? Color.orange : Color.cyan, in: Capsule())
                                                 .foregroundStyle(.black)
@@ -567,6 +569,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                                                                                   Color(red: 0.32, green: 0.32, blue: 0.86).opacity(0.85)],
                                                                          startPoint: .leading, endPoint: .trailing))
                                                     .shadow(color: Color.blue.opacity(0.35), radius: 8, y: 2)
+                                                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.16)))
                                                     .matchedGeometryEffect(id: "navigation-highlight", in: navigationNamespace)
                                             } else if hoveredEntry == entry {
                                                 RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.07))
@@ -574,6 +577,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                                         }
                                     }
                                     .contentShape(Rectangle())
+                                    .animation(.easeOut(duration: 0.14), value: hoveredEntry)
                                 }
                                 .buttonStyle(PressableStyle())
                                 .onHover { inside in
@@ -803,7 +807,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 .fill(LinearGradient(colors: [panel, panel.opacity(0.92)], startPoint: .top, endPoint: .bottom))
                 .shadow(color: .black.opacity(0.22), radius: 7, y: 3)
         }
-        .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.cyan.opacity(0.16)) }
+        .modifier(CardHoverGlow())
     }
 
     /// Scheda «Protezione» (ADR-0149): punteggio, cifratura a riposo e controlli da sistemare.
