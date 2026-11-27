@@ -2539,6 +2539,13 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** dal catalogo NIM pubblico (30 modelli) risultano presenti tutti e 5 i modelli usati (lightning-30b, ultra-550b, kimi-k3.1-pro, mistral-large-4, minimax-m3.1-flash). Da questo ambiente: Hugging Face 200, Google OIDC 200, Gmail raggiungibile, Calendar 401 (serve accesso), GitHub 200, Tailscale 302.
 - **Limiti:** «raggiungibile» non significa «autorizzato»: le credenziali si verificano dal singolo connettore. Nessuna chiave NIM reale in questo ambiente: la chat con i modelli non è stata provata.
 
+### ADR-0223 — Riconnessione fluida del flusso in tempo reale (2026-11-27, accettata)
+
+- **Contesto:** macOS e Windows riaprivano il flusso notifiche (SSE, che tiene allineati più dispositivi) con attesa fissa di 3 s (macOS) e 5 s (Windows), sia dopo un calo di rete sia con il Core spento.
+- **Decisione:** attesa crescente 1, 2, 4, 8, 16, 30 s con ±20 % di casualità; un flusso riuscito la azzera. Dopo una breve interruzione i dispositivi si riallineano in circa 1 s; un Core spento non viene interrogato di continuo. Il polling di salute resta la rete di sicurezza.
+- **Verifica:** test unitario `reconnect_delay` (crescita e tetto) per la versione Windows/egui; la versione macOS compila solo in CI. Non provato su dispositivi e reti reali.
+- **Nota:** le transizioni fra sezioni, i movimenti ridotti per l'accessibilità e le animazioni dell'avatar erano già presenti (`Motion.swift`, transizione di sezione): non ho cambiato l'aspetto grafico perché non posso vederlo.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.
