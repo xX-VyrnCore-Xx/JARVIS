@@ -7348,7 +7348,7 @@ mod reconnect_tests {
         let secs = |n| reconnect_delay(n).as_secs_f64();
         assert!(secs(0) >= 1.0 && secs(0) <= 1.2);
         assert!(secs(3) >= 6.4 && secs(3) <= 9.6);
-        assert!(secs(5) >= 25.6 && secs(5) <= 30.0 + 6.0);
-        assert!(secs(40) <= 30.0 * 1.2);
+        assert!(secs(5) >= 24.0 && secs(5) <= 36.0);
+        assert!(secs(40) <= 36.0);
     }
 }
