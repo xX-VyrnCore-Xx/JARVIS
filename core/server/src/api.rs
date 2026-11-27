@@ -737,6 +737,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/nodes/next", get(node_next))
         .route("/api/nodes/result/{id}", post(node_result))
         .route("/api/devices/{id}/revoke", post(revoke_device))
+        .route("/api/connections/check", get(connections_check))
         .route("/api/connectors", get(connectors).post(install_connector))
         .route("/api/proactive", get(proactive_get).patch(proactive_put))
         .route("/api/proactive/briefing", post(proactive_briefing))
@@ -969,6 +970,7 @@ async fn test_cloud_key(State(state): State<Shared>, Json(body): Json<Value>) ->
                 "credentials": "valid",
                 "models_available": models.as_ref().map(Vec::len),
                 "model_listed": models.as_ref().map(|m| m.contains(&completed.model)),
+                "routing": models.as_ref().map(|m| provider.routing_audit(m)),
             }))
             .into_response(),
             Ok(crate::cloud::Answer::Call(_)) => error(
@@ -2138,6 +2140,19 @@ fn dataset_owner_only(device: &Option<axum::Extension<DeviceCtx>>) -> Option<Res
             "operazione disponibile solo dal computer del proprietario",
         )
     })
+}
+
+/// Raggiungibilità dei servizi esterni (ADR-0222): solo il proprietario, nessuna credenziale inviata.
+async fn connections_check(device: Option<axum::Extension<DeviceCtx>>) -> Response {
+    if let Some(denied) = dataset_owner_only(&device) {
+        return denied;
+    }
+    match tokio::task::spawn_blocking(|| crate::connections::check(crate::connections::defaults()))
+        .await
+    {
+        Ok(report) => Json(report).into_response(),
+        Err(_) => CoreError::Internal("Verifica connessioni interrotta.".into()).into_response(),
+    }
 }
 
 async fn datasets_list(

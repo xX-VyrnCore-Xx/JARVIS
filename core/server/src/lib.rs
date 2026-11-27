@@ -19,6 +19,7 @@ mod chat_crypto;
 pub mod cloud;
 pub mod codemap;
 pub mod config;
+pub mod connections;
 pub mod connector_catalog;
 pub mod connectors;
 mod container_runtime;
