@@ -2562,6 +2562,12 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** a ogni cambio di sezione la pagina entra con dissolvenza (opacità 0,2→1) e un breve scorrimento verso l'alto (14 px), in circa 0,22 s con rallentamento finale (`page_entrance`, curva cubica). Chiede il ridisegno solo mentre l'animazione corre: a riposo il consumo non cambia. macOS aveva già una transizione equivalente (`.transition(.opacity + offset)`).
 - **Verifica:** test unitario della curva (inizio, metà, fine, stabilità); compilazione ed effetto reale solo in CI/su Windows, **non verificati visivamente**.
 
+### ADR-0227 — Rifiniture di movimento su macOS (2026-11-27, accettata)
+
+- **Decisione:** (a) voce selezionata della barra laterale con bordo luminoso sottile; (b) passaggio del mouse sulle voci con dissolvenza (0,14 s) invece di scatto; (c) cifre dei badge che scorrono (`.contentTransition(.numericText())`); (d) schede (`card()`) con bordo che si accende e leggero alone al passaggio del mouse (`CardHoverGlow` in `Motion.swift`), senza animazione con «riduci movimento».
+- **Perimetro:** nessun cambio di layout o colori principali: transizione di sezione, aurora, avatar e pressione dei pulsanti c'erano già.
+- **Verifica:** compila solo in CI (job macOS); **aspetto non verificato visivamente**.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.
