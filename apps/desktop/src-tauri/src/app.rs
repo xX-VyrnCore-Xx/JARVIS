@@ -593,6 +593,20 @@ impl JarvisApp {
         style.visuals.extreme_bg_color = egui::Color32::from_rgb(4, 10, 18);
         style.visuals.faint_bg_color = egui::Color32::from_rgb(9, 21, 34);
         style.visuals.hyperlink_color = ACCENT;
+        // Fluidità e profondità (ADR-0224): passaggi di colore un poco più lenti (hover, selezione), barre di
+        // scorrimento sovrapposte al contenuto che si allargano solo al passaggio del mouse (niente colonna fissa che
+        // sposta il testo), ombre morbide per finestre e menu, bordo sottile per staccarli dallo sfondo.
+        style.animation_time = 0.14;
+        style.spacing.scroll = egui::style::ScrollStyle::floating();
+        let soft_shadow = egui::epaint::Shadow {
+            offset: [0, 10],
+            blur: 28,
+            spread: 0,
+            color: egui::Color32::from_black_alpha(110),
+        };
+        style.visuals.window_shadow = soft_shadow;
+        style.visuals.popup_shadow = soft_shadow;
+        style.visuals.window_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(33, 62, 82));
         cc.egui_ctx.set_style_of(egui::Theme::Dark, style);
 
         let (tx, rx) = mpsc::channel();
@@ -1216,8 +1230,10 @@ impl JarvisApp {
         );
         std::thread::spawn(move || {
             let fresh = || stream_current.load(Ordering::SeqCst) == generation;
+            let mut failures: u32 = 0;
             while fresh() {
                 if let Ok(reader) = stream_client.notification_stream() {
+                    failures = 0;
                     stream_live.store(true, Ordering::Relaxed);
                     crate::client::read_events(reader, fresh, |name, _| {
                         if matches!(name, "notification" | "resync")
@@ -1237,7 +1253,8 @@ impl JarvisApp {
                 if tx.send(Event::Ping).is_err() {
                     break;
                 }
-                std::thread::sleep(Duration::from_secs(5));
+                std::thread::sleep(reconnect_delay(failures));
+                failures = failures.saturating_add(1);
             }
         });
         let tx = self.tx.clone();
@@ -7304,5 +7321,34 @@ mod tests {
         assert_eq!(messages.len(), 2);
         assert_eq!(messages[0].role, "user");
         assert_eq!(messages[1].text, "Buongiorno");
+    }
+}
+
+/// Attesa prima di riaprire il flusso in tempo reale: 1, 2, 4… fino a 30 s, con ±20 % di casualità. Il primo
+/// tentativo dopo una connessione riuscita è rapido; un Core spento non viene martellato.
+fn reconnect_delay(failures: u32) -> Duration {
+    let base = (1u64 << failures.min(5)).min(30) as f64;
+    let jitter = 0.8
+        + 0.4
+            * f64::from(
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map_or(0, |d| d.subsec_nanos() % 1000),
+            )
+            / 1000.0;
+    Duration::from_secs_f64((base * jitter).max(1.0))
+}
+
+#[cfg(test)]
+mod reconnect_tests {
+    use super::*;
+
+    #[test]
+    fn delay_grows_then_caps() {
+        let secs = |n| reconnect_delay(n).as_secs_f64();
+        assert!(secs(0) >= 1.0 && secs(0) <= 1.2);
+        assert!(secs(3) >= 6.4 && secs(3) <= 9.6);
+        assert!(secs(5) >= 24.0 && secs(5) <= 36.0);
+        assert!(secs(40) <= 36.0);
     }
 }

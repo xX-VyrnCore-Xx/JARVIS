@@ -139,6 +139,9 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
 
     /// Notifiche in tempo reale dal Core (ADR-0098). Si ferma con l'interfaccia bloccata o il Core chiuso.
     func watchNotifications() async {
+        // Riconnessione con attesa crescente (1, 2, 4… fino a 30 s) e un poco di casualità: dopo un'interruzione il
+        // flusso torna in fretta, ma un Core spento non viene martellato. Un flusso riuscito azzera l'attesa.
+        var failures = 0
         while !Task.isCancelled, phase == .ready, !uiLocked {
             do {
                 guard let url = URL(string: "http://127.0.0.1:8765/api/notifications/stream") else { return }
@@ -150,6 +153,7 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
                     throw CoreFailure(message: "Flusso notifiche non disponibile.")
                 }
                 // `lines` omette le righe vuote: l'evento si riconosce dalla riga «event:».
+                failures = 0
                 for try await line in bytes.lines where line.hasPrefix("event:") {
                     let name = line.dropFirst(6).trimmingCharacters(in: .whitespaces)
                     if name == "notification" || name == "resync" {
@@ -160,8 +164,10 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
                 }
             } catch {
                 // Si riprova: il polling di salute resta la rete di sicurezza.
+                failures += 1
             }
-            try? await Task.sleep(for: .seconds(3))
+            let wait = min(30.0, pow(2.0, Double(min(failures, 5)))) * Double.random(in: 0.8...1.2)
+            try? await Task.sleep(for: .seconds(max(1.0, wait)))
         }
     }
 

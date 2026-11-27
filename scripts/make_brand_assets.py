@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import brand_mark
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -45,53 +46,8 @@ def vgradient(w: int, h: int, top: tuple, bottom: tuple) -> Image.Image:
 
 
 def brand_emblem(size: int) -> Image.Image:
-    scale = 4
-    side = size * scale
-
-    def point(x: float, y: float) -> tuple[int, int]:
-        return round(x * side), round(y * side)
-
-    def cubic(
-        start: tuple[float, float],
-        control1: tuple[float, float],
-        control2: tuple[float, float],
-        end: tuple[float, float],
-    ) -> list[tuple[int, int]]:
-        return [
-            point(
-                (1 - t) ** 3 * start[0]
-                + 3 * (1 - t) ** 2 * t * control1[0]
-                + 3 * (1 - t) * t**2 * control2[0]
-                + t**3 * end[0],
-                (1 - t) ** 3 * start[1]
-                + 3 * (1 - t) ** 2 * t * control1[1]
-                + 3 * (1 - t) * t**2 * control2[1]
-                + t**3 * end[1],
-            )
-            for t in (step / 32 for step in range(1, 33))
-        ]
-
-    path = [
-        point(0.27, 0.23),
-        point(0.73, 0.23),
-        point(0.73, 0.58),
-        *cubic((0.73, 0.58), (0.73, 0.77), (0.60, 0.81), (0.48, 0.81)),
-        *cubic((0.48, 0.81), (0.36, 0.81), (0.27, 0.75), (0.27, 0.62)),
-    ]
-
-    glow = Image.new("RGBA", (side, side), (0, 0, 0, 0))
-    glow_width = round(side * 0.17)
-    ImageDraw.Draw(glow).line(path, fill=CYAN + (130,), width=glow_width, joint="curve")
-    emblem = glow.filter(ImageFilter.GaussianBlur(side * 0.035))
-    mark = Image.new("RGBA", (side, side), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(mark)
-    draw.line(path, fill=CYAN + (255,), width=round(side * 0.095), joint="curve")
-    draw.line(path, fill=(225, 251, 255, 220), width=round(side * 0.022), joint="curve")
-    for x, y in (path[0], path[-1]):
-        radius = round(side * 0.0475)
-        draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=CYAN + (255,))
-    emblem.alpha_composite(mark)
-    return emblem.resize((size, size), Image.Resampling.LANCZOS)
+    """La «J» luminosa su fondo trasparente (ADR-0225): il disegno vive in `brand_mark.py`."""
+    return brand_mark.emblem(size)
 
 
 def android_launcher_emblem(size: int = 432) -> Image.Image:
@@ -125,26 +81,8 @@ def squircle_mask(size: int, box: tuple[int, int, int, int], radius: int) -> Ima
 
 
 def app_icon(size: int = 1024, margin: int = 100, shadow: bool = True) -> Image.Image:
-    """Icona in stile macOS: lastra arrotondata scura con emblema; `margin` segue la griglia di Apple."""
-    k = 2  # sovracampionamento
-    S, M = size * k, margin * k
-    box = (M, M, S - M, S - M)
-    radius = round((S - 2 * M) * 0.225)
-    canvas = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-    if shadow:
-        sh = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-        ImageDraw.Draw(sh).rounded_rectangle((box[0], box[1] + 14 * k, box[2], box[3] + 14 * k), radius=radius, fill=(0, 0, 0, 120))
-        canvas = Image.alpha_composite(canvas, sh.filter(ImageFilter.GaussianBlur(18 * k)))
-    plate = vgradient(S, S, NAVY_TOP, NAVY_BOTTOM).convert("RGBA")
-    em = brand_emblem(round((S - 2 * M) * 0.93))
-    plate.alpha_composite(em, ((S - em.width) // 2, (S - em.height) // 2))
-    mask = squircle_mask(S, box, radius)
-    canvas.paste(plate, (0, 0), mask)
-    # bordo interno sottile
-    edge = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-    ImageDraw.Draw(edge).rounded_rectangle(box, radius=radius, outline=CYAN + (90,), width=3 * k)
-    canvas = Image.alpha_composite(canvas, edge)
-    return canvas.resize((size, size), Image.LANCZOS)
+    """Icona in stile macOS (ADR-0225): lastra con margine sulla griglia di Apple, ombra a richiesta."""
+    return brand_mark.app_icon(size, margin, shadow)
 
 
 def glass_card(img: Image.Image, box: tuple[int, int, int, int]) -> None:

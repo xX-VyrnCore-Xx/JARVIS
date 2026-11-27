@@ -2539,6 +2539,24 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Evidenza:** dal catalogo NIM pubblico (30 modelli) risultano presenti tutti e 5 i modelli usati (lightning-30b, ultra-550b, kimi-k3.1-pro, mistral-large-4, minimax-m3.1-flash). Da questo ambiente: Hugging Face 200, Google OIDC 200, Gmail raggiungibile, Calendar 401 (serve accesso), GitHub 200, Tailscale 302.
 - **Limiti:** «raggiungibile» non significa «autorizzato»: le credenziali si verificano dal singolo connettore. Nessuna chiave NIM reale in questo ambiente: la chat con i modelli non è stata provata.
 
+### ADR-0223 — Riconnessione fluida del flusso in tempo reale (2026-11-27, accettata)
+
+- **Contesto:** macOS e Windows riaprivano il flusso notifiche (SSE, che tiene allineati più dispositivi) con attesa fissa di 3 s (macOS) e 5 s (Windows), sia dopo un calo di rete sia con il Core spento.
+- **Decisione:** attesa crescente 1, 2, 4, 8, 16, 30 s con ±20 % di casualità; un flusso riuscito la azzera. Dopo una breve interruzione i dispositivi si riallineano in circa 1 s; un Core spento non viene interrogato di continuo. Il polling di salute resta la rete di sicurezza.
+- **Verifica:** test unitario `reconnect_delay` (crescita e tetto) per la versione Windows/egui; la versione macOS compila solo in CI. Non provato su dispositivi e reti reali.
+- **Nota:** le transizioni fra sezioni, i movimenti ridotti per l'accessibilità e le animazioni dell'avatar erano già presenti (`Motion.swift`, transizione di sezione): non ho cambiato l'aspetto grafico perché non posso vederlo.
+
+### ADR-0224 — Rifiniture grafiche dell'app Windows/egui (2026-11-27, accettata)
+
+- **Decisione:** transizioni di colore più morbide (`animation_time` 0,14 s), barre di scorrimento sovrapposte al contenuto (`ScrollStyle::floating`) invece di una colonna fissa che sposta il testo, ombre morbide e bordo sottile per finestre e menu.
+- **Perimetro:** solo il tema; nessun cambio di layout, per non introdurre sovrapposizioni che non posso vedere da qui. L'app macOS aveva già transizioni, movimento ridotto e schede con ombra (ADR-0216): invariata.
+- **Verifica:** `cargo fmt --check`; tipi controllati sul sorgente di egui 0.37. La compilazione e l'aspetto reale si provano solo in CI/su Windows: aspetto **non verificato visivamente**.
+
+### ADR-0225 — Nuova icona dell'app (2026-11-27, accettata)
+
+- **Decisione:** la «J» a tubo di neon resta il simbolo, ridisegnata in `scripts/brand_mark.py` e generata da `scripts/make_brand_assets.py` (Pillow, riproducibile): squircle con **margine e ombra** come richiede macOS (prima la tela era piena), gradiente blu notte con alone, tratto continuo con anima chiara centrata e terminali tondi (prima: anima spostata e estremità tagliate), bordo sottile con riflesso. Lo stesso disegno alimenta `icon.png`/`.ico`/`.icns`, i PNG 32/128/256, il badge Android, lo sfondo del DMG e la grafica dell'installer Windows, così tutto è coerente.
+- **Verifica:** letta a 1024 e a 32 px (resta riconoscibile). Non verificata nel Dock, in Esplora file o negli installer reali. Non verificata l'icona adattiva Android su un telefono reale (ritaglio della safe zone).
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.
