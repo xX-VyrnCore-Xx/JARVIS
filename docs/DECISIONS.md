@@ -2557,6 +2557,11 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** la «J» a tubo di neon resta il simbolo, ridisegnata in `scripts/brand_mark.py` e generata da `scripts/make_brand_assets.py` (Pillow, riproducibile): squircle con **margine e ombra** come richiede macOS (prima la tela era piena), gradiente blu notte con alone, tratto continuo con anima chiara centrata e terminali tondi (prima: anima spostata e estremità tagliate), bordo sottile con riflesso. Lo stesso disegno alimenta `icon.png`/`.ico`/`.icns`, i PNG 32/128/256, il badge Android, lo sfondo del DMG e la grafica dell'installer Windows, così tutto è coerente.
 - **Verifica:** letta a 1024 e a 32 px (resta riconoscibile). Non verificata nel Dock, in Esplora file o negli installer reali. Non verificata l'icona adattiva Android su un telefono reale (ritaglio della safe zone).
 
+### ADR-0226 — Ingresso animato delle pagine (Windows/egui) (2026-11-27, accettata)
+
+- **Decisione:** a ogni cambio di sezione la pagina entra con dissolvenza (opacità 0,2→1) e un breve scorrimento verso l'alto (14 px), in circa 0,22 s con rallentamento finale (`page_entrance`, curva cubica). Chiede il ridisegno solo mentre l'animazione corre: a riposo il consumo non cambia. macOS aveva già una transizione equivalente (`.transition(.opacity + offset)`).
+- **Verifica:** test unitario della curva (inizio, metà, fine, stabilità); compilazione ed effetto reale solo in CI/su Windows, **non verificati visivamente**.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

@@ -441,6 +441,8 @@ pub struct JarvisApp {
     /// Colore d'accento della personalità dell'utente connesso (RGB).
     accent: Option<[u8; 3]>,
     nav_last_page: String,
+    /// Pagina mostrata e istante del cambio: serve alla dissolvenza d'ingresso (ADR-0226).
+    page_enter: (String, Instant),
     agent_limits: std::collections::HashMap<String, String>,
     plugin_json: String,
     plan_detail: Option<Value>,
@@ -650,6 +652,7 @@ impl JarvisApp {
             celebrate_at: 0.0,
             accent: None,
             nav_last_page: String::new(),
+            page_enter: (String::new(), Instant::now()),
             agent_limits: std::collections::HashMap::new(),
             plugin_json: String::new(),
             plan_detail: None,
@@ -6363,8 +6366,17 @@ impl eframe::App for JarvisApp {
                     });
                 });
         }
+        if self.page_enter.0 != self.current {
+            self.page_enter = (self.current.clone(), Instant::now());
+        }
+        let entering = page_entrance(self.page_enter.1.elapsed());
+        if entering < 1.0 {
+            ctx.request_repaint();
+        }
         egui::CentralPanel::default().show(ui, |ui| {
-            ui.add_space(12.0);
+            // Ingresso della pagina: dissolvenza e un breve scorrimento verso l'alto (≈0,22 s).
+            ui.set_opacity(0.2 + 0.8 * entering);
+            ui.add_space(12.0 + 14.0 * (1.0 - entering));
             if self.current == "chat" {
                 self.show_chat(ui, &ctx);
             } else {
@@ -7324,6 +7336,12 @@ mod tests {
     }
 }
 
+/// Avanzamento (0→1, con rallentamento finale) dell'ingresso di una pagina dopo `elapsed`.
+fn page_entrance(elapsed: Duration) -> f32 {
+    let t = (elapsed.as_secs_f32() / 0.22).clamp(0.0, 1.0);
+    1.0 - (1.0 - t).powi(3)
+}
+
 /// Attesa prima di riaprire il flusso in tempo reale: 1, 2, 4… fino a 30 s, con ±20 % di casualità. Il primo
 /// tentativo dopo una connessione riuscita è rapido; un Core spento non viene martellato.
 fn reconnect_delay(failures: u32) -> Duration {
@@ -7342,6 +7360,15 @@ fn reconnect_delay(failures: u32) -> Duration {
 #[cfg(test)]
 mod reconnect_tests {
     use super::*;
+
+    #[test]
+    fn page_entrance_runs_from_zero_to_one_and_stays() {
+        assert_eq!(page_entrance(Duration::ZERO), 0.0);
+        let mid = page_entrance(Duration::from_millis(110));
+        assert!(mid > 0.5 && mid < 1.0, "{mid}");
+        assert_eq!(page_entrance(Duration::from_millis(220)), 1.0);
+        assert_eq!(page_entrance(Duration::from_secs(5)), 1.0);
+    }
 
     #[test]
     fn delay_grows_then_caps() {
