@@ -13,7 +13,10 @@ import simd
 struct Realm: Identifiable {
     let id: String
     let name: String
+    /// Titolo breve, come sotto il nome nel quadro dei regni.
     let epithet: String
+    /// Cosa contiene il regno, in una riga.
+    let summary: String
     let icon: String
     let rgb: SIMD3<Double>
     let angle: Float
@@ -25,24 +28,33 @@ struct Realm: Identifiable {
 
     /// I nove regni: tre in alto (la chioma), tre al centro, tre in basso (le radici).
     static let all: [Realm] = [
-        Realm(id: "asgard", name: "Asgard", epithet: "La sala del comando", icon: "crown",
+        Realm(id: "asgard", name: "Asgard", epithet: "Controllo & Comando",
+              summary: "Plancia, chat, attività e conferme: dai gli ordini e approvi", icon: "crown",
               rgb: SIMD3(1.00, 0.80, 0.32), angle: 90, radius: 4.2, height: 10.6),
-        Realm(id: "alfheim", name: "Alfheim", epithet: "Il regno dei collegamenti", icon: "link",
-              rgb: SIMD3(0.62, 0.92, 1.00), angle: 210, radius: 4.2, height: 10.2),
-        Realm(id: "vanaheim", name: "Vanaheim", epithet: "Memoria e crescita", icon: "leaf",
-              rgb: SIMD3(0.30, 0.92, 0.62), angle: 330, radius: 4.2, height: 10.4),
-        Realm(id: "midgard", name: "Midgard", epithet: "Il tuo mondo", icon: "globe.europe.africa",
-              rgb: SIMD3(0.42, 0.78, 0.40), angle: 150, radius: 5.6, height: 6.3),
-        Realm(id: "jotunheim", name: "Jotunheim", epithet: "Le grandi imprese", icon: "snowflake",
-              rgb: SIMD3(0.46, 0.58, 1.00), angle: 270, radius: 5.6, height: 6.1),
-        Realm(id: "muspelheim", name: "Muspelheim", epithet: "Fuoco, ricerca e avvisi", icon: "flame",
+        Realm(id: "alfheim", name: "Alfheim", epithet: "Intelligenza & Conoscenza",
+              summary: "Modelli AI, agenti e dataset", icon: "sparkles",
+              rgb: SIMD3(0.72, 0.60, 1.00), angle: 210, radius: 4.2, height: 10.2),
+        Realm(id: "vanaheim", name: "Vanaheim", epithet: "Creatività & Contenuti",
+              summary: "Voce, mappe, competenze e pacchetti", icon: "leaf",
+              rgb: SIMD3(0.30, 0.92, 0.55), angle: 330, radius: 4.2, height: 10.4),
+        Realm(id: "midgard", name: "Midgard", epithet: "Utente & Progetti",
+              summary: "Il tuo profilo, gli utenti e i workspace", icon: "person.2",
+              rgb: SIMD3(0.45, 0.80, 0.40), angle: 150, radius: 5.6, height: 6.3),
+        Realm(id: "jotunheim", name: "Jotunheim", epithet: "Sviluppo & Costruzione",
+              summary: "Missioni, piani, strumenti e aggiornamenti", icon: "hammer",
+              rgb: SIMD3(0.46, 0.60, 1.00), angle: 270, radius: 5.6, height: 6.1),
+        Realm(id: "muspelheim", name: "Muspelheim", epithet: "Sicurezza & Difesa",
+              summary: "Sicurezza e privacy", icon: "flame",
               rgb: SIMD3(1.00, 0.34, 0.18), angle: 30, radius: 5.6, height: 6.4),
-        Realm(id: "nidavellir", name: "Nidavellir", epithet: "Le fucine dei modelli", icon: "hammer",
-              rgb: SIMD3(0.96, 0.62, 0.26), angle: 90, radius: 4.8, height: 2.5),
-        Realm(id: "svartalfheim", name: "Svartalfheim", epithet: "La forgia delle automazioni", icon: "gearshape.2",
-              rgb: SIMD3(0.72, 0.42, 0.96), angle: 210, radius: 4.8, height: 2.3),
-        Realm(id: "helheim", name: "Helheim", epithet: "Sicurezza e custodia", icon: "shield.lefthalf.filled",
-              rgb: SIMD3(0.56, 0.74, 0.76), angle: 330, radius: 4.8, height: 2.4)
+        Realm(id: "svartalfheim", name: "Svartalfheim", epithet: "Strumenti & Infrastruttura",
+              summary: "Automazioni, connettori, dispositivi e sistema (include Nidavellir)", icon: "gearshape.2",
+              rgb: SIMD3(0.96, 0.60, 0.26), angle: 90, radius: 4.8, height: 2.5),
+        Realm(id: "helheim", name: "Helheim", epithet: "Archiviazione & Memoria",
+              summary: "Memoria e ricerche salvate", icon: "externaldrive",
+              rgb: SIMD3(0.52, 0.72, 0.74), angle: 210, radius: 4.8, height: 2.3),
+        Realm(id: "niflheim", name: "Niflheim", epithet: "Monitoraggio & Analisi",
+              summary: "Registro di audit e notifiche", icon: "chart.xyaxis.line",
+              rgb: SIMD3(0.42, 0.86, 1.00), angle: 330, radius: 4.8, height: 2.4)
     ]
 
     static func named(_ key: String) -> Realm? {
@@ -405,8 +417,8 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
         case "vanaheim": return SCNTorus(ringRadius: 0.44, pipeRadius: 0.17)
         case "jotunheim": return SCNBox(width: 0.8, height: 0.8, length: 0.8, chamferRadius: 0.06)
         case "svartalfheim": return SCNCylinder(radius: 0.34, height: 0.9)
-        case "nidavellir": return SCNBox(width: 1.0, height: 0.5, length: 0.6, chamferRadius: 0.05)
         case "helheim": return SCNTube(innerRadius: 0.2, outerRadius: 0.44, height: 0.9)
+        case "niflheim": return SCNBox(width: 0.55, height: 1.2, length: 0.55, chamferRadius: 0.12)
         default: return SCNCone(topRadius: 0, bottomRadius: 0.5, height: 1.15)
         }
     }
@@ -648,10 +660,12 @@ private struct YggdrasilSceneView: NSViewRepresentable {
 struct YggdrasilHome: View {
     let functions: (String) -> [YggFunction]
     let open: (String) -> Void
+    /// Regno aperto: si può cambiare anche da fuori (il quadro dei regni).
+    @Binding var selected: String?
+    var minHeight: CGFloat = 560
     @StateObject private var stage = YggdrasilStage()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovered: String?
-    @State private var selected: String?
 
     var body: some View {
         ZStack {
@@ -668,15 +682,18 @@ struct YggdrasilHome: View {
                     Spacer()
                     panel(realm)
                 }
-                .padding(.vertical, 70).padding(.trailing, 18)
+                .padding(.vertical, 76).padding(.trailing, 14)
                 .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
-        .frame(height: 700)
+        .frame(minHeight: minHeight)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(.white.opacity(0.10)) }
         .onAppear { stage.reduceMotion = reduceMotion }
         .onChange(of: reduceMotion) { _, value in stage.reduceMotion = value }
+        .onChange(of: selected) { _, value in
+            if let value { stage.fly(to: value) } else { stage.returnToTree() }
+        }
         .animation(reduceMotion ? nil : .smooth(duration: 0.35), value: selected)
     }
 
@@ -686,19 +703,13 @@ struct YggdrasilHome: View {
         stage.setHover(id)
     }
 
-    private func choose(_ id: String) {
-        selected = id
-        stage.fly(to: id)
-    }
+    private func choose(_ id: String) { selected = id }
 
-    private func close() {
-        selected = nil
-        stage.returnToTree()
-    }
+    private func close() { selected = nil }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("YGGDRASIL")
+            Text("YGGDRASILL")
                 .font(.system(size: 30, weight: .heavy, design: .rounded))
                 .tracking(6)
                 .foregroundStyle(LinearGradient(colors: [Color(red: 1, green: 0.86, blue: 0.5), Color(red: 0.5, green: 0.95, blue: 0.7)],
@@ -712,7 +723,7 @@ struct YggdrasilHome: View {
                 }
                 .transition(.opacity)
             } else {
-                Text("L'albero dei nove regni · tocca un regno per entrare")
+                Text("Il cuore di JARVIS · tocca un regno per entrare")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
         }
@@ -782,7 +793,7 @@ struct YggdrasilHome: View {
             }
         }
         .padding(16)
-        .frame(width: 330)
+        .frame(width: 290)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(realm.color.opacity(0.45)) }
         .shadow(color: realm.color.opacity(0.25), radius: 18)

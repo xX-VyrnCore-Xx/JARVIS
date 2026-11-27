@@ -19,7 +19,7 @@ import UniformTypeIdentifiers
     @NSApplicationDelegateAdaptor(AppLifecycle.self) private var lifecycle
 
     var body: some Scene {
-        Window("Yggdrasil", id: "jarvis") {
+        Window("JARVIS", id: "jarvis") {
             RootView(core: lifecycle.core)
                 .frame(minWidth: 580, minHeight: 510)
                 .preferredColorScheme(.dark)
@@ -42,25 +42,25 @@ private enum Section: String, Identifiable {
     case system = "Sistema", models = "Modelli AI", updates = "Aggiornamenti", notifications = "Notifiche"
     case missions = "Missioni", profile = "Profilo", plans = "Piani", tools = "Strumenti"
     case agents = "Agenti", plugins = "Pacchetti", users = "Utenti", voice = "Voce", map = "Mappa", privacy = "Privacy"
-    case research = "Ricerche", datasets = "Dataset", tree = "Yggdrasil"
+    case research = "Ricerche", datasets = "Dataset", tree = "Yggdrasill"
 
-    /// I nove regni (ADR-0232): ogni funzione dell'app vive in uno di essi. «Yggdrasil» è l'albero, la porta d'ingresso.
+    /// I nove regni (ADR-0232): ogni funzione dell'app vive in uno di essi. «Yggdrasill» è l'albero, la porta d'ingresso.
     static let navigation: [(title: String, entries: [Section])] = [
-        ("Yggdrasil", [.tree]),
-        ("Asgard", [.dashboard, .chat, .tasks]),
-        ("Midgard", [.system, .voice, .map, .updates, .workspace]),
-        ("Alfheim", [.connectors, .devices, .plugins]),
-        ("Vanaheim", [.memory, .profile, .skills]),
-        ("Jotunheim", [.agents, .plans, .missions]),
-        ("Svartalfheim", [.workflows, .tools]),
-        ("Nidavellir", [.datasets, .models]),
-        ("Helheim", [.confirmations, .security, .privacy, .audit, .users]),
-        ("Muspelheim", [.research, .notifications])
+        ("Yggdrasill", [.tree]),
+        ("Asgard", [.dashboard, .chat, .tasks, .confirmations]),
+        ("Midgard", [.profile, .users, .workspace]),
+        ("Alfheim", [.models, .agents, .datasets]),
+        ("Vanaheim", [.voice, .map, .skills, .plugins]),
+        ("Jotunheim", [.missions, .plans, .tools, .updates]),
+        ("Svartalfheim", [.workflows, .connectors, .devices, .system]),
+        ("Muspelheim", [.security, .privacy]),
+        ("Helheim", [.memory, .research]),
+        ("Niflheim", [.audit, .notifications])
     ]
 
     /// Il regno a cui appartiene la pagina.
     var realmName: String {
-        Section.navigation.first { $0.entries.contains(self) }?.title ?? "Yggdrasil"
+        Section.navigation.first { $0.entries.contains(self) }?.title ?? "Yggdrasill"
     }
 
     var id: Self { self }
@@ -68,24 +68,24 @@ private enum Section: String, Identifiable {
     /// Una riga che dice a cosa serve la pagina: sta sotto il titolo e non cambia nessun comportamento.
     var subtitle: String {
         switch self {
-        case .dashboard: "Stato di Yggdrasil, attività, cose che richiedono attenzione"
-        case .chat: "Parla con Yggdrasil: scrivi o detta, vedi le risposte in tempo reale"
+        case .dashboard: "Stato di JARVIS, attività, cose che richiedono attenzione"
+        case .chat: "Parla con JARVIS: scrivi o detta, vedi le risposte in tempo reale"
         case .tasks: "Cosa sta facendo e cosa ha fatto, con l'esito di ogni passo"
         case .confirmations: "Operazioni che aspettano il tuo permesso prima di partire"
         case .workflows: "Operazioni pianificate e automazioni, anche con n8n"
-        case .memory: "Cosa Yggdrasil ricorda: cerca, correggi o dimentica"
+        case .memory: "Cosa JARVIS ricorda: cerca, correggi o dimentica"
         case .workspace: "Cartelle di lavoro, profili e app da aprire insieme"
         case .connectors: "Servizi collegati: posta, calendario, GitHub, server MCP"
         case .devices: "Dispositivi associati e collegamento con Tailscale"
-        case .skills: "Competenze e istruzioni che Yggdrasil applica quando servono"
+        case .skills: "Competenze e istruzioni che JARVIS applica quando servono"
         case .security: "Postura di sicurezza, cifratura e arresto di emergenza"
         case .audit: "Registro firmato di tutto ciò che è stato deciso ed eseguito"
         case .system: "Backup, risorse del computer e installazioni"
         case .models: "Modelli AI, chiavi e provider cloud"
         case .updates: "Versione installata, controllo e installazione degli aggiornamenti"
         case .notifications: "Avvisi del Core, dei connettori e delle automazioni"
-        case .missions: "Obiettivi lunghi che Yggdrasil porta avanti per te"
-        case .profile: "Le tue preferenze e come Yggdrasil ti conosce"
+        case .missions: "Obiettivi lunghi che JARVIS porta avanti per te"
+        case .profile: "Le tue preferenze e come JARVIS ti conosce"
         case .plans: "Piani a passi con dipendenze, prove a secco e conferme"
         case .tools: "Strumenti disponibili, rischio e regole del proprietario"
         case .agents: "Specializzazioni, pause e limiti di lavoro"
@@ -95,8 +95,8 @@ private enum Section: String, Identifiable {
         case .map: "Luoghi e percorsi su OpenStreetMap"
         case .privacy: "Cosa viene conservato, cosa può uscire e chi ha il permesso"
         case .research: "Ricerche salvate: risultati, fonti e domande aperte"
-        case .datasets: "Esempi con cui Yggdrasil ti capisce meglio: misura, migliora, carica in privato"
-        case .tree: "L'albero dei nove regni: scegli un regno per entrare"
+        case .datasets: "Esempi con cui JARVIS ti capisce meglio: misura, migliora, carica in privato"
+        case .tree: "Il cuore di JARVIS: i nove regni, lo stato e i comandi"
         }
     }
 
@@ -193,6 +193,9 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var changingInvite = false
 
     @State private var section: Section = .tree
+    /// Regno aperto sull'albero e larghezza disponibile per scegliere il layout della pagina d'ingresso.
+    @State private var realmSelection: String?
+    @State private var homeWidth: CGFloat = 1200
     @State private var n8n: [String: Any] = [:]
     @State private var n8nPullConfirm = false
     @State private var n8nName = ""
@@ -541,8 +544,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 }
                 .frame(width: 34, height: 34)
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("Yggdrasil").font(.system(size: 17, weight: .bold, design: .rounded))
-                    Text("L'albero dei nove regni").font(.caption2).foregroundStyle(.secondary)
+                    Text("JARVIS").font(.system(size: 17, weight: .bold, design: .rounded))
+                    Text("Custode di Yggdrasill").font(.caption2).foregroundStyle(.secondary)
                 }
             }
             .padding(.horizontal, 6).padding(.top, 6)
@@ -674,7 +677,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
                 PulsingDot(color: online ? .green : .orange, size: 6)
-                Text(online ? "Yggdrasil Online" : "Core non raggiungibile").font(.caption.weight(.semibold))
+                Text(online ? "JARVIS Online" : "Core non raggiungibile").font(.caption.weight(.semibold))
             }
             if wakeShouldRun {
                 Label(wakeStatusText, systemImage: wake.phase == .capturing ? "mic.fill" : "mic")
@@ -694,7 +697,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     private var compactNavigation: some View {
         HStack {
-            Text("Yggdrasil").font(.headline).foregroundStyle(.cyan)
+            Text("JARVIS").font(.headline).foregroundStyle(.cyan)
             Spacer()
             Menu {
                 ForEach(Section.navigation.indices, id: \.self) { index in
@@ -719,7 +722,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 Image(systemName: core.uiLocked ? "lock.fill" : "lock.shield")
                     .font(.system(size: 50, weight: .light)).foregroundStyle(.cyan)
             }
-            Text("Yggdrasil").font(.system(size: 36, weight: .bold, design: .rounded))
+            Text("JARVIS").font(.system(size: 36, weight: .bold, design: .rounded))
             Text(core.uiLocked ? "Interfaccia bloccata." : "Accedi con Touch ID o con la password del Mac.")
                 .foregroundStyle(.secondary)
             if let notice = core.notice { Text(notice).foregroundStyle(.orange).multilineTextAlignment(.center) }
@@ -727,10 +730,10 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 ProgressView(core.phase == .starting ? "Avvio del Core" : "Autenticazione macOS")
             } else if core.phase == .ready && core.uiLocked {
                 Text("Il Core continua a lavorare in background.").font(.footnote).foregroundStyle(.secondary)
-                Button("Sblocca Yggdrasil") { Task { await core.unlockInterface() } }
+                Button("Sblocca JARVIS") { Task { await core.unlockInterface() } }
                     .buttonStyle(.borderedProminent).controlSize(.large)
             } else {
-                Button("Sblocca Yggdrasil") { Task { await core.unlock() } }
+                Button("Sblocca JARVIS") { Task { await core.unlock() } }
                     .buttonStyle(.borderedProminent).controlSize(.large)
             }
         }.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -754,7 +757,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 } label: {
                     Image(systemName: speakReplies ? "speaker.wave.2.fill" : "speaker.slash")
                 }
-                .help(speakReplies ? "Yggdrasil legge le risposte: tocca per disattivare" : "Leggi le risposte ad alta voce")
+                .help(speakReplies ? "JARVIS legge le risposte: tocca per disattivare" : "Leggi le risposte ad alta voce")
                 .accessibilityLabel("Lettura delle risposte ad alta voce")
                 Button { select(.memory) } label: { Image(systemName: "magnifyingglass") }
                     .help("Cerca nei ricordi").accessibilityLabel("Cerca nei ricordi")
@@ -1014,7 +1017,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             Text("Ciao,").font(.system(size: 40, weight: .bold, design: .rounded)).foregroundStyle(.white)
             HStack(spacing: 10) {
                 Text("sono").font(.system(size: 40, weight: .bold, design: .rounded)).foregroundStyle(.white)
-                Text("Yggdrasil").font(.system(size: 40, weight: .bold, design: .rounded))
+                Text("JARVIS").font(.system(size: 40, weight: .bold, design: .rounded))
                     .foregroundStyle(LinearGradient(colors: [Color.cyan, Color(red: 0.4, green: 0.55, blue: 1)],
                                                     startPoint: .leading, endPoint: .trailing))
                     .shadow(color: Color.cyan.opacity(0.45), radius: 8)
@@ -1217,7 +1220,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     private var missionsCard: some View {
         card("Missioni in corso", icon: "scope") {
             if missionsPreview.isEmpty {
-                Text("Nessuna missione attiva. Affida a Yggdrasil un compito ricorrente.").font(.callout).foregroundStyle(.secondary)
+                Text("Nessuna missione attiva. Affida a JARVIS un compito ricorrente.").font(.callout).foregroundStyle(.secondary)
             }
             ForEach(missionsPreview.prefix(4)) { mission in
                 let status = mission["status"] ?? "active"
@@ -1255,7 +1258,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         let pending = core.health["pending_confirmations"] as? Int ?? 0
         if pending > 0 {
             items.append(("checkmark.shield", .orange, pending == 1 ? "Un'azione attende la tua conferma" : "\(pending) azioni attendono la tua conferma",
-                          "Yggdrasil non procede senza il tuo consenso.", .confirmations))
+                          "JARVIS non procede senza il tuo consenso.", .confirmations))
         }
         if let audit = core.health["audit"] as? [String: Any], audit["chain_valid"] as? Bool == false {
             items.append(("lock.trianglebadge.exclamationmark", .red, "Il registro di audit non risulta integro",
@@ -1450,7 +1453,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 Label("In background", systemImage: "moon.zzz")
             }
             .toggleStyle(.button)
-            .help("Yggdrasil lavora nel cloud anche se l'app è in secondo piano o chiusa e ti avvisa alla fine.")
+            .help("JARVIS lavora nel cloud anche se l'app è in secondo piano o chiusa e ti avvisa alla fine.")
         }
     }
 
@@ -1488,7 +1491,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                        listening: wake.phase == .capturing, level: wake.level, alert: avatarAlert,
                        awaiting: avatarAwaiting, offline: avatarOffline, celebrate: celebrateTick).frame(width: 76)
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("Yggdrasil").font(.title2.weight(.semibold))
+                    Text("JARVIS").font(.title2.weight(.semibold))
                     if sending {
                         Label("Elaborazione in corso", systemImage: "waveform")
                             .foregroundStyle(.cyan)
@@ -1536,7 +1539,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 if streamingReply.isEmpty {
                     HStack(spacing: 8) {
                         TypingIndicator()
-                        Text("Yggdrasil sta elaborando").font(.caption).foregroundStyle(.secondary)
+                        Text("JARVIS sta elaborando").font(.caption).foregroundStyle(.secondary)
                     }
                     .padding(.horizontal, 14).padding(.vertical, 9)
                     .background(panel, in: Capsule())
@@ -1604,7 +1607,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     .accessibilityHidden(true)
             }
             VStack(alignment: .leading, spacing: 6) {
-                Text(user ? "Tu" : "Yggdrasil").font(.caption.weight(.semibold))
+                Text(user ? "Tu" : "JARVIS").font(.caption.weight(.semibold))
                     .foregroundStyle(user ? iris : .cyan)
                 if user {
                     Text(text).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
@@ -1669,7 +1672,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         }
         .font(.caption)
         .disabled(ratingTask != nil || sending)
-        .help("Yggdrasil conserva la categoria e il riferimento alla risposta per adattare questo modello.")
+        .help("JARVIS conserva la categoria e il riferimento alla risposta per adattare questo modello.")
     }
 
     private func feedbackTitle(_ rating: String?) -> String {
@@ -1709,7 +1712,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     .disabled(sending)
             }.font(.caption)
             HStack(spacing: 10) {
-                TextField("Messaggio a Yggdrasil", text: $message, axis: .vertical)
+                TextField("Messaggio a JARVIS", text: $message, axis: .vertical)
                     .textFieldStyle(.plain).lineLimit(1...5)
                     .focused($composerFocused).onSubmit(send)
                 Button { send() } label: {
@@ -1849,7 +1852,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     /// Voce maschile di sistema (ADR-0123): legge le risposte ad alta voce.
     private var voiceCard: some View {
-        card("Voce di Yggdrasil", icon: "speaker.wave.2") {
+        card("Voce di JARVIS", icon: "speaker.wave.2") {
             Toggle("Leggi le risposte ad alta voce", isOn: $speakReplies)
                 .onChange(of: speakReplies) { _, value in
                     Task { _ = try? await core.request("/api/voice/system", method: "PATCH", body: ["speak_replies": value]) }
@@ -1859,15 +1862,15 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     Task { _ = try? await core.request("/api/voice/system", method: "PATCH", body: ["wake_listening": value]) }
                 }
             Text(wakeListening
-                 ? "Il microfono serve solo a riconoscere «Hey Jarvis»: senza quella parola nulla viene trascritto né salvato. Dopo il comando Yggdrasil torna ad ascoltare soltanto la parola di attivazione."
+                 ? "Il microfono serve solo a riconoscere «Hey Jarvis»: senza quella parola nulla viene trascritto né salvato. Dopo il comando JARVIS torna ad ascoltare soltanto la parola di attivazione."
                  : "Ascolto spento: il microfono non è in uso.")
                 .font(.caption).foregroundStyle(.secondary)
             if wakeListening, wake.phase != .off { Text(wakeStatusText + (wake.detail.isEmpty ? "" : " — " + wake.detail)).font(.caption).foregroundStyle(.cyan) }
             if wakeListening, wake.engineKind == "system", wake.phase != .off {
-                Text("Motore: riconoscimento vocale del Mac, sul dispositivo. Mentre ascolta, il Mac trascrive in memoria ciò che dici e Yggdrasil agisce solo dopo «Hey Jarvis»: nulla viene salvato né inviato. Per far ascoltare soltanto la parola di attivazione serve il motore locale del Core (voice-setup).")
+                Text("Motore: riconoscimento vocale del Mac, sul dispositivo. Mentre ascolta, il Mac trascrive in memoria ciò che dici e JARVIS agisce solo dopo «Hey Jarvis»: nulla viene salvato né inviato. Per far ascoltare soltanto la parola di attivazione serve il motore locale del Core (voice-setup).")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Text("Yggdrasil parla solo con una voce maschile: Luca, le voci incluse in macOS (Eddy, Reed, Rocko) o il modello locale installato.").font(.caption).foregroundStyle(.secondary)
+            Text("JARVIS parla solo con una voce maschile: Luca, le voci incluse in macOS (Eddy, Reed, Rocko) o il modello locale installato.").font(.caption).foregroundStyle(.secondary)
             if !voiceHint.isEmpty { Text(voiceHint).font(.caption).foregroundStyle(.secondary) }
             Button("Fai tacere") {
                 Task { _ = try? await core.request("/api/voice/stop", method: "POST", body: [:]) }
@@ -1881,18 +1884,205 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         }
     }
 
-    /// L'albero dei nove regni (ADR-0232): ogni regno apre l'elenco delle sue funzioni.
-    private var yggdrasilHome: some View {
-        YggdrasilHome(
-            functions: { realmID in
-                guard let group = Section.navigation.first(where: { $0.title.lowercased() == realmID }) else { return [] }
-                return group.entries.map {
-                    YggFunction(id: $0.rawValue, title: $0.rawValue, icon: $0.icon, subtitle: $0.subtitle)
+    // MARK: Yggdrasill (ADR-0232)
+
+    private func realmFunctions(_ realmID: String) -> [YggFunction] {
+        guard let group = Section.navigation.first(where: { $0.title.lowercased() == realmID }) else { return [] }
+        return group.entries.map {
+            YggFunction(id: $0.rawValue, title: $0.rawValue, icon: $0.icon, subtitle: $0.subtitle)
+        }
+    }
+
+    private func openFunction(_ id: String) {
+        if let target = Section(rawValue: id) { select(target) }
+    }
+
+    private func statusRow(_ title: String, _ value: String, _ tint: Color) -> some View {
+        HStack(spacing: 8) {
+            Circle().fill(tint).frame(width: 6, height: 6)
+            Text(title).font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.92))
+            Spacer(minLength: 4)
+            Text(value).font(.system(size: 12, weight: .semibold).monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var jarvisStatusCard: some View {
+        let agents = (dash.summary["agents"] as? [[String: Any]])?.count ?? 0
+        let pending = core.health["pending_confirmations"] as? Int ?? 0
+        let tint = coreIsUp ? Mock.green : Color.red
+        return MockCard(title: "Stato di JARVIS", icon: "sparkles",
+                        trailing: AnyView(HStack(spacing: 5) {
+                            PulsingDot(color: tint, size: 5)
+                            Text(coreIsUp ? "Operativo" : "Non raggiungibile")
+                                .font(.system(size: 10.5, weight: .semibold)).foregroundStyle(tint)
+                        })) {
+            statusRow("Core", coreStatus, tint)
+            statusRow("Intelligenza artificiale", aiStatus.0, aiStatus.1)
+            statusRow("Agenti attivi", "\(agents + 1)", Mock.cyan)
+            statusRow("Conferme in attesa", count("pending_confirmations"), pending > 0 ? Mock.amber : Mock.green)
+        }
+    }
+
+    private var yggdrasillLeft: some View {
+        VStack(spacing: 12) {
+            jarvisStatusCard
+            SystemStatusCard(stats: dash.stats, coreUp: coreIsUp, detail: "Modello: \(activeModel)")
+            TodayCard(items: dash.summary["today"] as? [[String: Any]] ?? []) { startChat("Ricordami di ") }
+        }
+    }
+
+    private var yggdrasillRight: some View {
+        let quick: [(String, String, Section)] = [
+            ("bubble.left.and.text.bubble.right", "Chat", .chat), ("mic", "Voce", .voice),
+            ("checklist", "Attività", .tasks), ("magnifyingglass.circle", "Ricerche", .research),
+            ("checkmark.shield", "Conferme", .confirmations)
+        ]
+        return VStack(spacing: 12) {
+            VStack(spacing: 2) {
+                Text("JARVIS").font(.system(size: 26, weight: .heavy, design: .rounded))
+                    .foregroundStyle(LinearGradient(colors: [Mock.cyan, Color(red: 0.4, green: 0.55, blue: 1)],
+                                                    startPoint: .leading, endPoint: .trailing))
+                Text("Custode di Yggdrasill").font(.caption).foregroundStyle(.secondary)
+            }
+            heroAvatar(size: 250)
+            WaveformView(active: sending || avatarSpeaking, barCount: 26).frame(height: 30)
+            Text("Ciao, sono JARVIS. Yggdrasill è \(coreIsUp ? "attivo e tutti i 9 regni sono operativi" : "in attesa del Core"). \(statusHeadline) Come posso aiutarti oggi?")
+                .font(.callout).foregroundStyle(.white.opacity(0.92))
+                .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(panel.opacity(0.9)))
+                .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Mock.cyan.opacity(0.3)) }
+            commandBar
+            HStack(spacing: 8) {
+                ForEach(Array(quick.enumerated()), id: \.offset) { _, item in
+                    Button { select(item.2) } label: {
+                        VStack(spacing: 5) {
+                            Image(systemName: item.0).font(.system(size: 17)).foregroundStyle(Mock.cyan)
+                            Text(item.1).font(.system(size: 10.5, weight: .medium)).foregroundStyle(.white.opacity(0.9))
+                        }
+                        .frame(maxWidth: .infinity).padding(.vertical, 10)
+                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(panel.opacity(0.85)))
+                        .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Mock.cyan.opacity(0.28)) }
+                    }
+                    .buttonStyle(PressableStyle()).hoverLift()
+                    .accessibilityLabel(item.1)
                 }
-            },
-            open: { id in
-                if let target = Section(rawValue: id) { select(target) }
-            })
+            }
+        }
+    }
+
+    /// Avvisi da mostrare sul regno: conferme in attesa su Asgard, notifiche da leggere su Niflheim.
+    private func realmBadge(_ realm: Realm) -> Int {
+        switch realm.id {
+        case "asgard": return core.health["pending_confirmations"] as? Int ?? 0
+        case "niflheim": return core.health["notifications_unread"] as? Int ?? 0
+        default: return 0
+        }
+    }
+
+    private func realmTile(_ realm: Realm) -> some View {
+        let badge = realmBadge(realm)
+        let active = realmSelection == realm.id
+        return Button { realmSelection = active ? nil : realm.id } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle().fill(RadialGradient(colors: [realm.color.opacity(0.55), realm.color.opacity(0.10)],
+                                                 center: .center, startRadius: 2, endRadius: 28))
+                    Circle().strokeBorder(realm.color.opacity(0.75), lineWidth: 1.2)
+                    Image(systemName: realm.icon).font(.system(size: 17, weight: .semibold)).foregroundStyle(realm.color)
+                }
+                .frame(width: 44, height: 44)
+                .shadow(color: realm.color.opacity(active ? 0.7 : 0.25), radius: active ? 10 : 4)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(realm.name).font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                    Text(realm.summary).font(.system(size: 10.5)).foregroundStyle(.secondary)
+                        .lineLimit(2).multilineTextAlignment(.leading)
+                    HStack(spacing: 5) {
+                        Circle().fill(coreIsUp ? Mock.green : Mock.amber).frame(width: 5, height: 5)
+                        Text(coreIsUp ? "Attivo" : "In attesa").font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(coreIsUp ? Mock.green : Mock.amber)
+                        Text("· \(realmFunctions(realm.id).count) funzioni").font(.system(size: 10)).foregroundStyle(.secondary)
+                        if badge > 0 {
+                            Text("\(badge)").font(.system(size: 9.5, weight: .bold).monospacedDigit())
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(Mock.amber, in: Capsule()).foregroundStyle(.black)
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Color.white.opacity(active ? 0.10 : 0.05)))
+            .overlay { RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(realm.color.opacity(active ? 0.95 : 0.30)) }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableStyle())
+        .accessibilityLabel("\(realm.name), \(realm.epithet). \(realm.summary)")
+    }
+
+    private var realmOverview: some View {
+        MockCard(title: "I 9 Regni — panoramica rapida", icon: "circle.hexagongrid.fill") {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 215), spacing: 10, alignment: .top)], spacing: 10) {
+                ForEach(Realm.all) { realmTile($0) }
+            }
+        }
+    }
+
+    private var yggdrasillBottomRight: some View {
+        VStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                ProjectsCard(projects: dash.summary["projects"] as? [[String: Any]] ?? [])
+                ActiveAgentsCard(items: dash.summary["agents"] as? [[String: Any]] ?? [])
+            }
+            MonitoringCard(history: dash.cpuHistory, monitoring: dash.summary["monitoring"] as? [String: Any] ?? [:])
+        }
+    }
+
+    /// La pagina d'ingresso: stato a sinistra, l'albero al centro, JARVIS a destra e i nove regni sotto.
+    private var yggdrasilHome: some View {
+        let tree = YggdrasilHome(functions: realmFunctions, open: openFunction,
+                                 selected: $realmSelection, minHeight: 620)
+        let wide = homeWidth >= 1150
+        return VStack(spacing: 14) {
+            if wide {
+                HStack(alignment: .top, spacing: 14) {
+                    yggdrasillLeft.frame(width: 285)
+                    tree.frame(maxWidth: .infinity)
+                    yggdrasillRight.frame(width: 315)
+                }
+                HStack(alignment: .top, spacing: 14) {
+                    realmOverview.frame(maxWidth: .infinity)
+                    yggdrasillBottomRight.frame(width: 560)
+                }
+            } else {
+                tree
+                realmOverview
+                HStack(alignment: .top, spacing: 14) {
+                    yggdrasillLeft
+                    yggdrasillRight
+                }
+                yggdrasillBottomRight
+            }
+        }
+        .background {
+            GeometryReader { geometry in
+                Color.clear
+                    .onAppear { homeWidth = geometry.size.width }
+                    .onChange(of: geometry.size.width) { _, width in homeWidth = width }
+            }
+        }
+        .task(id: refresh) {
+            while !Task.isCancelled {
+                await dash.refresh(core)
+                try? await Task.sleep(for: .seconds(20))
+            }
+        }
+        .task {
+            while !Task.isCancelled {
+                await dash.sampleSystem(core)
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
     }
 
     @ViewBuilder private var tools: some View {
@@ -2073,7 +2263,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     private func adaptationProfiles(_ entry: Record?) -> some View {
         card("Adattamento delle risposte", icon: "slider.horizontal.3") {
-            Text("Yggdrasil adatta lo stile usando fino a 12 valutazioni recenti per modello. Al provider arriva solo una breve istruzione di stile.")
+            Text("JARVIS adatta lo stile usando fino a 12 valutazioni recenti per modello. Al provider arriva solo una breve istruzione di stile.")
                 .font(.callout).foregroundStyle(.secondary)
             let profiles = (entry?.data["feedback_profiles"] as? [[String: Any]]) ?? []
             if profiles.isEmpty {
@@ -2222,7 +2412,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             if !revoked {
                 Button("Revoca accesso", role: .destructive) {
                     pending = Record(["id": item.id, "tool": "devices.revoke", "target": item.title,
-                                      "expected_effect": "Il dispositivo perderà l’accesso a Yggdrasil.",
+                                      "expected_effect": "Il dispositivo perderà l’accesso a JARVIS.",
                                       "risk": "high"], index: 0)
                 }
             }
@@ -2400,7 +2590,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         let cloud = settings["cloud"] as? Bool ?? false
         return VStack(spacing: 14) {
             card("Utenti e accesso", icon: "person.2") {
-                Text("Le persone che inviti hanno un account con la loro conversazione, i loro ricordi e la loro personalità. Non hanno strumenti e non vedono i tuoi dati; il testo dei loro messaggi non è visibile da qui. Accedono con l'app Yggdrasil per Windows e macOS (egui) o dal client web, non da questa console.")
+                Text("Le persone che inviti hanno un account con la loro conversazione, i loro ricordi e la loro personalità. Non hanno strumenti e non vedono i tuoi dati; il testo dei loro messaggi non è visibile da qui. Accedono con l'app JARVIS per Windows e macOS (egui) o dal client web, non da questa console.")
                     .font(.callout).foregroundStyle(.secondary)
                 Picker("Chi può registrarsi", selection: Binding(
                     get: { registration },
@@ -2527,7 +2717,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         let active = payload["emergency_stop"] as? Bool ?? false
         return card("Arresto di emergenza", icon: "power") {
             Text(active
-                 ? "Attivo: Yggdrasil non esegue né modifica nulla e le attività autonome sono ferme."
+                 ? "Attivo: JARVIS non esegue né modifica nulla e le attività autonome sono ferme."
                  : "Ferma subito ogni modifica, i lavori in background, le missioni e le automazioni. Si disattiva da qui.")
                 .font(.callout).foregroundStyle(active ? .red : .secondary)
             Button(active ? "Disattiva l'arresto" : "Arresto di emergenza", systemImage: "power") {
@@ -2540,7 +2730,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     private var missionTools: some View {
         VStack(spacing: 14) {
             card("Nuova missione", icon: "scope") {
-                Text("Yggdrasil la porta avanti da solo in background, con strumenti che non chiedono conferma, e ti manda un rapporto a ogni esecuzione.")
+                Text("JARVIS la porta avanti da solo in background, con strumenti che non chiedono conferma, e ti manda un rapporto a ogni esecuzione.")
                     .font(.callout).foregroundStyle(.secondary)
                 if payload["cloud"] as? Bool != true {
                     Label("Nessun modello cloud configurato: userà solo i comandi locali.", systemImage: "exclamationmark.triangle")
@@ -2567,7 +2757,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 }
             }
             card("Iniziative proattive", icon: "sparkles") {
-                Text("Yggdrasil si fa avanti da solo, con regole locali: nulla esce dal Core. Nelle ore di silenzio non invia nulla.")
+                Text("JARVIS si fa avanti da solo, con regole locali: nulla esce dal Core. Nelle ore di silenzio non invia nulla.")
                     .font(.callout).foregroundStyle(.secondary)
                 let settings = payload["proactive"] as? [String: Any] ?? [:]
                 let toggles: [(key: String, label: String)] = [
@@ -2603,7 +2793,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     Button("Collega con Tailscale", systemImage: "point.3.connected.trianglepath.dotted") {
                         mutate("/api/tailscale/connect", body: [:])
                     }.buttonStyle(.borderedProminent)
-                    Text("Con Tailscale installato e connesso basta un tocco: Yggdrasil diventa raggiungibile solo dai tuoi dispositivi (mai pubblico) e l'indirizzo si autorizza da solo.")
+                    Text("Con Tailscale installato e connesso basta un tocco: JARVIS diventa raggiungibile solo dai tuoi dispositivi (mai pubblico) e l'indirizzo si autorizza da solo.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 HStack {
@@ -2733,7 +2923,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 profileChoice("Tono", "tone", labels: ["auto": "Automatico", "formale": "Formale", "cordiale": "Cordiale", "diretto": "Diretto"])
                 profileChoice("Livello tecnico", "level", labels: ["auto": "Automatico", "principiante": "Principiante", "intermedio": "Intermedio", "esperto": "Esperto"])
                 Toggle("Usa il profilo nelle richieste ai modelli cloud", isOn: $profileShare)
-                Text("Nel profilo non vanno email, telefoni o password: Yggdrasil li rifiuta. Se disattivi l'opzione, il profilo resta qui e non esce dal computer.")
+                Text("Nel profilo non vanno email, telefoni o password: JARVIS li rifiuta. Se disattivi l'opzione, il profilo resta qui e non esce dal computer.")
                     .font(.caption).foregroundStyle(.secondary)
                 Button("Salva profilo", systemImage: "checkmark") {
                     var body: [String: Any] = profileDraft.reduce(into: [:]) { $0[$1.key] = $1.value }
@@ -2879,8 +3069,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     private var datasetsPanel: some View {
         let items = payload["items"] as? [[String: Any]] ?? []
         return VStack(alignment: .leading, spacing: 14) {
-            card("Dataset di Yggdrasil", icon: "tablecells") {
-                Text("Esempi con cui Yggdrasil capisce meglio le tue richieste. Restano sul computer: li carichi su Hugging Face solo tu, in un repository privato.")
+            card("Dataset di JARVIS", icon: "tablecells") {
+                Text("Esempi con cui JARVIS capisce meglio le tue richieste. Restano sul computer: li carichi su Hugging Face solo tu, in un repository privato.")
                     .font(.callout).foregroundStyle(.secondary)
                 ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                     let name = item["name"] as? String ?? ""
@@ -2902,7 +3092,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 }
             }
             card("Carica su Hugging Face (sempre privato)", icon: "icloud.and.arrow.up") {
-                Text("Serve il connettore Hugging Face con un token che possa scrivere sul repository. Yggdrasil crea il repository privato se manca e rifiuta quelli pubblici. Il server MCP di Hugging Face è in sola lettura: serve a rileggere i dataset, non a scriverli.")
+                Text("Serve il connettore Hugging Face con un token che possa scrivere sul repository. JARVIS crea il repository privato se manca e rifiuta quelli pubblici. Il server MCP di Hugging Face è in sola lettura: serve a rileggere i dataset, non a scriverli.")
                     .font(.callout).foregroundStyle(.secondary)
                 TextField("proprietario/nome, per esempio mario/jarvis-routing", text: $hfRepo)
                     .textFieldStyle(.roundedBorder)
@@ -3147,7 +3337,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 Picker("Voce di sintesi (TTS)", selection: $voiceTts) {
                     ForEach(ttsChoices, id: \.self) { Text($0).tag($0) }
                 }
-                Text("Download stimato: circa \(packages + stt + tts) MB. Resta nella cartella dati di Yggdrasil.")
+                Text("Download stimato: circa \(packages + stt + tts) MB. Resta nella cartella dati di JARVIS.")
                     .font(.caption).foregroundStyle(.secondary)
                 Button(installed ? "Reinstalla o cambia modello" : "Installa la voce", systemImage: "arrow.down.circle.fill") {
                     voiceConfirm = true
@@ -3177,7 +3367,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             Button("Installa") { startVoiceInstall() }
             Button("Annulla", role: .cancel) {}
         } message: {
-            Text("Verranno scaricati circa \(packages + stt + tts) MB (pacchetti Python, modello «\(voiceStt)» e voce «\(voiceTts)»). Puoi continuare a usare Yggdrasil durante il download.")
+            Text("Verranno scaricati circa \(packages + stt + tts) MB (pacchetti Python, modello «\(voiceStt)» e voce «\(voiceTts)»). Puoi continuare a usare JARVIS durante il download.")
         }
         .task {
             while !Task.isCancelled && section == .voice {
@@ -3251,7 +3441,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             Divider()
             Text(wsProfiles.contains { ($0["name"] as? String)?.lowercased() == wsName.lowercased() && !wsName.isEmpty } ? "Modifica profilo" : "Nuovo profilo")
                 .font(.subheadline.weight(.semibold))
-            TextField("Nome (per esempio Sviluppo Yggdrasil)", text: $wsName).textFieldStyle(.roundedBorder)
+            TextField("Nome (per esempio Sviluppo JARVIS)", text: $wsName).textFieldStyle(.roundedBorder)
             TextField("Descrizione (facoltativa)", text: $wsDescription).textFieldStyle(.roundedBorder)
             TextField("App da aprire, separate da virgola (per esempio Terminale, Visual Studio Code, Safari)", text: $wsApps)
                 .textFieldStyle(.roundedBorder)
@@ -3312,7 +3502,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     private var mcpCard: some View {
         let hasHF = mcpServers.contains { ($0["preset"] as? String) == "huggingface" }
         return card("Server MCP e Hugging Face", icon: "puzzlepiece.extension") {
-            Text("Yggdrasil può usare gli strumenti di un server MCP (per esempio cercare modelli e dataset su Hugging Face). Gli strumenti di sola lettura possono girare senza conferma se li approvi qui; tutti gli altri chiedono sempre la tua conferma. Le ricerche partono verso il server: niente dati personali.")
+            Text("JARVIS può usare gli strumenti di un server MCP (per esempio cercare modelli e dataset su Hugging Face). Gli strumenti di sola lettura possono girare senza conferma se li approvi qui; tutti gli altri chiedono sempre la tua conferma. Le ricerche partono verso il server: niente dati personali.")
                 .font(.callout).foregroundStyle(.secondary)
             if !hasHF {
                 Divider()
@@ -3401,7 +3591,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         let pulling = pull["status"] as? String == "pulling"
         let estimate = n8n["image_estimate_mb"] as? Int ?? 0
         return card("n8n con Docker", icon: "shippingbox") {
-            Text("n8n gira in un container Docker isolato: senza rete, con soli promemoria e controlli pianificati. Yggdrasil lo avvia e lo ferma; non serve configurare nulla a mano.")
+            Text("n8n gira in un container Docker isolato: senza rete, con soli promemoria e controlli pianificati. JARVIS lo avvia e lo ferma; non serve configurare nulla a mano.")
                 .font(.callout).foregroundStyle(.secondary)
             if enabled, !dockerOK {
                 let hint = (n8n["docker"] as? [String: Any])?["hint"] as? String
@@ -3472,7 +3662,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             Button("Scarica e avvia") { n8nCall(body: ["pull": true, "running": true]) }
             Button("Annulla", role: .cancel) {}
         } message: {
-            Text("Docker scaricherà circa \(estimate) MB da docker.n8n.io (una sola volta) e poi avvierà n8n. Puoi continuare a usare Yggdrasil durante il download.")
+            Text("Docker scaricherà circa \(estimate) MB da docker.n8n.io (una sola volta) e poi avvierà n8n. Puoi continuare a usare JARVIS durante il download.")
         }
         .task {
             await loadN8n()
@@ -3759,7 +3949,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                         }
                     }
                 } else if status == "ready" {
-                    Text("Yggdrasil \(version) è scaricato e verificato (SHA-256).")
+                    Text("JARVIS \(version) è scaricato e verificato (SHA-256).")
                     Text("L'app si chiude, installa la nuova versione e si riapre da sola. I dati restano dove sono.")
                         .foregroundStyle(.secondary)
                     Button("Installa e riavvia") {

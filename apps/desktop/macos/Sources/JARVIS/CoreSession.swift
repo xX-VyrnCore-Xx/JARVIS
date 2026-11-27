@@ -70,13 +70,13 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
         let workspace = NSWorkspace.shared.notificationCenter
         for name in [NSWorkspace.willSleepNotification, NSWorkspace.screensDidSleepNotification] {
             observers.append(workspace.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                Task { @MainActor in self?.lockInterface(reason: "Yggdrasil si è bloccato perché il Mac è andato in stop.") }
+                Task { @MainActor in self?.lockInterface(reason: "JARVIS si è bloccato perché il Mac è andato in stop.") }
             })
         }
         observers.append(DistributedNotificationCenter.default().addObserver(
             forName: Notification.Name("com.apple.screenIsLocked"), object: nil, queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.lockInterface(reason: "Yggdrasil si è bloccato insieme allo schermo del Mac.") }
+            Task { @MainActor in self?.lockInterface(reason: "JARVIS si è bloccato insieme allo schermo del Mac.") }
         })
         activityMonitor = NSEvent.addLocalMonitorForEvents(
             matching: [.keyDown, .leftMouseDown, .rightMouseDown, .scrollWheel, .mouseMoved]
@@ -95,7 +95,7 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
 
     private func checkIdle() {
         guard phase == .ready, !uiLocked, Date().timeIntervalSince(lastActivity) > Self.idleLimit else { return }
-        lockInterface(reason: "Yggdrasil si è bloccato per inattività.")
+        lockInterface(reason: "JARVIS si è bloccato per inattività.")
     }
 
     /// Nasconde contenuti e dati in memoria dell'interfaccia. Il Core resta attivo, così missioni, automazioni
@@ -110,7 +110,7 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
 
     func unlockInterface() async {
         guard uiLocked else { return }
-        if await confirmIdentity("Sblocca Yggdrasil per riprendere la sessione.", force: true) {
+        if await confirmIdentity("Sblocca JARVIS per riprendere la sessione.", force: true) {
             uiLocked = false
             notice = nil
             lastActivity = Date()
@@ -193,7 +193,7 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
         }
         do {
             guard try await context.evaluatePolicy(.deviceOwnerAuthentication,
-                localizedReason: "Sblocca Yggdrasil e rendi disponibili i dispositivi associati.") else {
+                localizedReason: "Sblocca JARVIS e rendi disponibili i dispositivi associati.") else {
                 phase = .locked
                 return
             }
@@ -341,7 +341,7 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
             return "Nessuna connessione di rete: controlla la rete o la connessione a Tailscale."
         case .timedOut:
             return tailnet
-                ? "Nessuna risposta da \(host): il computer con Yggdrasil potrebbe essere spento o Tailscale scollegato."
+                ? "Nessuna risposta da \(host): il computer con JARVIS potrebbe essere spento o Tailscale scollegato."
                 : "Nessuna risposta da \(host) entro il tempo previsto."
         case .cannotConnectToHost:
             return "\(host) non accetta connessioni: controlla che il Core sia avviato e pubblicato con «Collega con Tailscale»."
@@ -369,7 +369,7 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
         let probeSession = URLSession(configuration: configuration, delegate: DirectSession(), delegateQueue: nil)
         defer { probeSession.invalidateAndCancel() }
         let (bytes, response) = try await probeSession.bytes(for: request)
-        let unexpected = CoreFailure(message: "L’indirizzo non restituisce lo stato di connessione di Yggdrasil.")
+        let unexpected = CoreFailure(message: "L’indirizzo non restituisce lo stato di connessione di JARVIS.")
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw unexpected }
         var data = Data()
         for try await byte in bytes {
@@ -401,7 +401,7 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
             throw CoreFailure(message: "Indirizzo del Core non valido.")
         }
         if uiLocked {
-            throw CoreFailure(message: "Yggdrasil è bloccato: sblocca l’interfaccia per continuare.")
+            throw CoreFailure(message: "JARVIS è bloccato: sblocca l’interfaccia per continuare.")
         }
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = "POST"
@@ -431,7 +431,7 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
             throw CoreFailure(message: "Indirizzo del Core non valido.")
         }
         if uiLocked {
-            throw CoreFailure(message: "Yggdrasil è bloccato: sblocca l’interfaccia per continuare.")
+            throw CoreFailure(message: "JARVIS è bloccato: sblocca l’interfaccia per continuare.")
         }
         var request = URLRequest(url: url, timeoutInterval: timeout)
         request.httpMethod = "POST"
@@ -476,7 +476,7 @@ private final class DirectSession: NSObject, URLSessionTaskDelegate {
             throw CoreFailure(message: "Indirizzo del Core non valido.")
         }
         if uiLocked {
-            throw CoreFailure(message: "Yggdrasil è bloccato: sblocca l’interfaccia per continuare.")
+            throw CoreFailure(message: "JARVIS è bloccato: sblocca l’interfaccia per continuare.")
         }
         if Self.isSensitive(path, method: method),
            !(await confirmIdentity("Conferma la tua identità per questa operazione.")) {
