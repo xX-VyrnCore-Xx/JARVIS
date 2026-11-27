@@ -50,7 +50,7 @@ flowchart TB
         subgraph Tools["Strumenti"]
             TSYS["tools, toolsys, toolbox, catalog, datatools, executive"]
             OPS["appcontrol, screen, desktop, docs, devtools, codemap, assets, workspaces, speech"]
-            NET["web, browser, net, maps, connectors, connector_catalog, visibility, oauth, mcp, mcp_client, plugins, channels"]
+            NET["web, browser, net, maps, connectors, connections, connector_catalog, visibility, oauth, mcp, mcp_client, plugins, channels"]
         end
 
         subgraph Run["Esecuzione e risorse"]
