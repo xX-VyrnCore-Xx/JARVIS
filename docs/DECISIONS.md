@@ -2568,6 +2568,14 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Perimetro:** nessun cambio di layout o colori principali: transizione di sezione, aurora, avatar e pressione dei pulsanti c'erano già.
 - **Verifica:** compila solo in CI (job macOS); **aspetto non verificato visivamente**.
 
+### ADR-0228 — Revisione generale: sicurezza, competenze, correttore (2026-11-27, accettata)
+
+- **Audit di sicurezza del Core:** nessun `unsafe`; le query con nome di tabella costruito a testo usano solo costanti interne; il TLS dei nodi è fissato per impronta **con** verifica della firma; `cargo audit` non segnala vulnerabilità (5 avvisi «non più mantenuto»: `chrono`, `rustls-pemfile`, `zbus_names`, `zvariant`, `zvariant_derive`, dipendenze transitive già note). **Trovato e corretto:** `GET /api/nodes` confrontava il token con `!=` (non a tempo costante) mentre il resto del Core usa `same_token`; ora usa la stessa funzione.
+- **Competenze:** da 25 a 31. Nuove: `dataset`, `automazioni`, `refactoring`, `mac`, `documentazione`, `progetto-nuovo` (istruzioni con conferma per le azioni rischiose, dataset sempre privati su Hugging Face). Nuovo test-guardia: ogni competenza incorporata usa solo strumenti presenti nel catalogo, ha id unico, parole di attivazione minuscole e istruzioni entro il limite.
+- **Correttore dei prompt (ADR-0135):** aggiunti accento grave al posto dell'acuto («perchè», «finchè»), apostrofo al posto dell'accento («piu'», «gia'»), voci che non vogliono l'accento («fà», «sà», «stà»), abbreviazioni e refusi frequenti («xò», «anke», «qnd», «eccezzione»). Codice, percorsi e URL restano intatti (test).
+- **Pulizia:** nessun file generato tracciato nel repository; nessun avviso di `clippy`.
+- **Non provato:** Hugging Face, Google e NIM reali; modelli TTS/STT su macOS reale (non modificati in questo giro).
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

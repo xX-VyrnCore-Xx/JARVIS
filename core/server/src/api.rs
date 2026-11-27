@@ -4534,7 +4534,10 @@ async fn setup_start(State(state): State<Shared>, Json(body): Json<Value>) -> Re
 
 async fn list_nodes(State(state): State<Shared>, headers: axum::http::HeaderMap) -> Response {
     // Elenco riservato al proprietario: la rotta è esente dal controllo generale, quindi lo si ripete qui.
-    if headers.get("x-jarvis-token").and_then(|t| t.to_str().ok()) != Some(state.token.as_str()) {
+    if !same_token(
+        headers.get("x-jarvis-token").and_then(|t| t.to_str().ok()),
+        &state.token,
+    ) {
         return error(
             StatusCode::UNAUTHORIZED,
             "unauthorized",

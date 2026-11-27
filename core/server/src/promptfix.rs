@@ -87,6 +87,31 @@ const WORDS: &[(&str, &str)] = &[
     ("qual'è", "qual è"),
     ("qual'e", "qual è"),
     ("pò", "po'"),
+    // Accento sbagliato (grave al posto di acuto) e apostrofo al posto dell'accento (ADR-0228).
+    ("perchè", "perché"),
+    ("poichè", "poiché"),
+    ("affinchè", "affinché"),
+    ("benchè", "benché"),
+    ("finchè", "finché"),
+    ("perche'", "perché"),
+    ("cosi'", "così"),
+    ("piu'", "più"),
+    ("puo'", "può"),
+    ("gia'", "già"),
+    ("cio'", "ciò"),
+    // Voci verbali che non vogliono l'accento.
+    ("fà", "fa"),
+    ("sà", "sa"),
+    ("stà", "sta"),
+    // Abbreviazioni da chat e refusi frequenti, senza altro significato.
+    ("xò", "però"),
+    ("xo'", "però"),
+    ("anke", "anche"),
+    ("qnd", "quando"),
+    ("qlcs", "qualcosa"),
+    ("eccezzione", "eccezione"),
+    ("accellerare", "accelerare"),
+    ("assolutamnete", "assolutamente"),
 ];
 
 /// Articoli, preposizioni e congiunzioni: se ripetuti di seguito è quasi sempre un refuso.
@@ -425,6 +450,25 @@ mod tests {
         assert_eq!(fixed("piu' tardi perche'"), "Più tardi perché");
         assert_eq!(fixed("qual'è il problema"), "Qual è il problema");
         assert_eq!(fixed("dammi un po di tempo"), "Dammi un po' di tempo");
+    }
+
+    #[test]
+    fn wrong_accents_and_common_typos_are_fixed_without_touching_code() {
+        assert_eq!(
+            fixed("perchè non parte? finchè non lo sai"),
+            "Perché non parte? Finché non lo sai"
+        );
+        assert_eq!(
+            fixed("lui fà e sà tutto, ma stà zitto"),
+            "Lui fa e sa tutto, ma sta zitto"
+        );
+        assert_eq!(fixed("xò anke qnd serve"), "Però anche quando serve");
+        assert_eq!(fixed("c'è una eccezzione"), "C'è una eccezione");
+        // Codice e percorsi restano intatti.
+        assert_eq!(
+            fixed("esegui `fà --piu` e apri /tmp/qnd.txt"),
+            "Esegui `fà --piu` e apri /tmp/qnd.txt"
+        );
     }
 
     #[test]

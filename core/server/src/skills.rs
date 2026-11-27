@@ -25,7 +25,7 @@ type Builtin = (
 );
 
 /// Competenze incluse, create al primo avvio e modificabili dal proprietario.
-const BUILTIN: [Builtin; 25] = [
+const BUILTIN: [Builtin; 31] = [
     (
         "briefing",
         "Briefing del mattino",
@@ -340,6 +340,54 @@ const BUILTIN: [Builtin; 25] = [
         "Revisione solo difensiva del codice del proprietario. Controlla per categoria: controllo degli accessi (autorizzazione su ogni rotta e oggetto), crittografia (algoritmi moderni, nessun segreto nel codice), injection (query parametrizzate, escaping dell'output, niente esecuzione di input), progettazione insicura (limiti di frequenza, fiducia nei client), configurazione (impostazioni predefinite sicure, intestazioni, CORS), componenti vulnerabili (dipendenze aggiornate e bloccate), autenticazione (hash lento con sale, sessioni scadute, MFA), integrità (firme, aggiornamenti), registri (eventi di sicurezza senza dati sensibili), richieste verso l'esterno (SSRF). Per ogni problema: gravità (scala CVSS con security.cvss se hai il vettore), dove, come verificare, come correggere in codice. Descrivi mitigazioni, non exploit.",
         &["fs.read", "fs.search", "fs.list", "security.cvss"],
     ),
+    (
+        "dataset",
+        "Dataset di addestramento e valutazione",
+        "Misura, migliora e salva in privato i dataset di JARVIS (instradamento, frasi colloquiali, richieste complesse, conversazioni).",
+        &["dataset", "migliora i dataset", "esempi di addestramento", "valuta i dataset", "salva il dataset"],
+        "Parti da dataset.list e misura con dataset.evaluate: riporta le percentuali per dataset e gli esempi che falliscono, senza inventare cifre. Per migliorare, proponi esempi nuovi con dataset.add_example (entrano come candidati: li accetta il proprietario), con frasi sintetiche e mai dati personali, segreti o contenuti di file. Per salvarli su Hugging Face usa dataset.push_hf solo dopo l'esplicita conferma del proprietario: il repository deve essere privato (se è pubblico, il Core rifiuta). Per leggere dataset già presenti su Hugging Face usa il server MCP «huggingface» in sola lettura (mcp.list, poi mcp.call). Dichiara cosa non hai potuto verificare.",
+        &["dataset.list", "dataset.evaluate", "dataset.add_example", "dataset.push_hf", "mcp.list", "mcp.call"],
+    ),
+    (
+        "automazioni",
+        "Automazioni e flussi",
+        "Progetta ed esegue automazioni: flussi del Core, workflow n8n, promemoria e attività ricorrenti.",
+        &["automazione", "automatizza", "flusso di lavoro", "workflow", "n8n", "ogni giorno alle", "ogni settimana"],
+        "Prima chiarisci l'obiettivo in una riga: evento che avvia il flusso, passi, esito atteso e cosa fare in caso di errore. Controlla cosa esiste già (workflow.list) per non duplicare. Per flussi interni usa workflow.create o workflow.update; per n8n usa n8n.create. Scegli passi piccoli e idempotenti, con un limite chiaro (frequenza, numero di tentativi) e nessuna azione irreversibile o esterna senza conferma del proprietario. Prova il flusso una volta con workflow.run quando è sicuro, riporta l'esito reale e indica come spegnerlo. Non inserire segreti nei parametri: usa i connettori autorizzati.",
+        &["workflow.list", "workflow.create", "workflow.update", "workflow.run", "n8n.create", "time.now", "todo.add"],
+    ),
+    (
+        "refactoring",
+        "Refactoring sicuro",
+        "Riorganizza il codice senza cambiare il comportamento: mappa, piccoli passi, verifica a ogni passo.",
+        &["refactoring", "riorganizza il codice", "ripulisci il codice", "semplifica il codice", "rimuovi il codice morto"],
+        "Mappa prima il progetto (code.map) e leggi i file coinvolti. Verifica lo stato di partenza (git.status, test esistenti con sandbox.run o shell.run se disponibili). Procedi a passi piccoli e indipendenti: un solo tipo di cambiamento per volta (rinomina, estrazione, rimozione di codice morto, riduzione di duplicati), senza cambiare interfacce pubbliche né comportamento. Dopo ogni passo riesegui i test e riporta l'esito reale; se un test fallisce, torna indietro invece di forzare. Chiudi con git.diff riassunto per file e i rischi residui. Non fare commit senza richiesta esplicita.",
+        &["code.map", "fs.read", "fs.search", "fs.write", "git.status", "git.diff", "sandbox.run", "shell.run"],
+    ),
+    (
+        "mac",
+        "Controllo del Mac",
+        "Apre app, legge lo schermo e usa tastiera e mouse sul Mac, con conferma per le azioni che cambiano qualcosa.",
+        &["sul mac", "apri l'app", "clicca su", "scrivi nell'app", "cosa c'è sullo schermo", "controlla il mac"],
+        "Prima osserva: screen.status e screen.read per lo schermo, app.windows per le finestre aperte, app.elements per i controlli dell'app in primo piano. Poi agisci con il minimo: app.open o app.focus per portare l'app davanti, app.click su un elemento riconosciuto (preferiscilo alle coordinate), app.type e app.key per testo e scorciatoie. Dopo ogni azione verifica l'effetto con una nuova lettura e riporta solo ciò che hai visto. Le azioni che inviano, eliminano, acquistano o cambiano impostazioni di sistema richiedono la conferma del proprietario: descrivile prima in una riga. Se manca un permesso di macOS (Accessibilità, Registrazione schermo), dillo e indica dove abilitarlo.",
+        &["screen.status", "screen.read", "app.windows", "app.elements", "app.open", "app.focus", "app.click", "app.type", "app.key"],
+    ),
+    (
+        "documentazione",
+        "Documentazione tecnica",
+        "Scrive e aggiorna README, guide e note di rilascio partendo dal codice reale.",
+        &["scrivi la documentazione", "aggiorna il readme", "documenta il progetto", "note di rilascio", "changelog"],
+        "Documenta solo ciò che verifichi nel codice: leggi la struttura (code.map, fs.list), i file principali e i comandi reali (manifest, script, workflow). Struttura: a cosa serve, requisiti, installazione, uso con esempi eseguibili, configurazione, verifica (test) e problemi frequenti. Per le note di rilascio riassumi i cambiamenti da git.log e git.diff, raggruppando per novità, correzioni e rischi. Dichiara le parti che non hai potuto verificare e non inventare comandi, versioni o funzioni.",
+        &["code.map", "fs.list", "fs.read", "fs.write", "git.log", "git.diff", "deps.list"],
+    ),
+    (
+        "progetto-nuovo",
+        "Avvio di un nuovo progetto",
+        "Imposta un progetto da zero: requisiti, struttura, verifiche e primo risultato funzionante.",
+        &["nuovo progetto", "inizia un progetto", "crea un progetto", "imposta il progetto", "parti da zero"],
+        "Riassumi in tre righe obiettivo, utenti e vincoli; se manca un elemento decisivo scegli l'ipotesi più probabile e dichiarala. Proponi una struttura minima (cartelle, comandi di avvio, test, controllo di stile) e creala nella cartella di lavoro con fs.mkdir e fs.write. Consegna per prima una fetta verticale funzionante (un caso d'uso completo con test) e solo dopo allarga. Aggiungi README con i comandi reali, un file di dipendenze bloccate e il test che prova il caso principale; eseguilo con sandbox.run se disponibile e riporta l'esito vero. Inizializza git solo se richiesto.",
+        &["fs.mkdir", "fs.write", "fs.read", "fs.list", "sandbox.prepare", "sandbox.run", "git.status"],
+    ),
 
 ];
 
@@ -505,6 +553,33 @@ pub fn delete(store: &Store, id: &str) -> StoreResult<bool> {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn builtin_skills_are_consistent_with_the_tool_catalog() {
+        let catalog = crate::catalog::Catalog::load().unwrap();
+        let mut seen = std::collections::HashSet::new();
+        for (id, name, description, triggers, instructions, tools) in BUILTIN {
+            assert!(seen.insert(id), "id duplicato: {id}");
+            assert!(!name.is_empty() && !description.is_empty(), "{id}");
+            assert!(!triggers.is_empty(), "{id}: nessuna parola di attivazione");
+            assert!(
+                triggers
+                    .iter()
+                    .all(|t| t.len() >= 3 && *t == t.to_lowercase()),
+                "{id}: parole di attivazione troppo corte o non minuscole"
+            );
+            assert!(
+                instructions.chars().count() <= MAX_INSTRUCTIONS,
+                "{id}: istruzioni troppo lunghe"
+            );
+            for tool in tools {
+                assert!(
+                    catalog.get(tool).is_some(),
+                    "{id}: lo strumento {tool} non esiste nel catalogo"
+                );
+            }
+        }
+    }
 
     #[test]
     fn active_skills_propagate_storage_errors() {
