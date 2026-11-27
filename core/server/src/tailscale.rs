@@ -188,43 +188,50 @@ fn drain(pipe: Option<impl Read + Send + 'static>) -> std::thread::JoinHandle<St
     })
 }
 
+/// Esegue un solo programma con limite di tempo. `Ok(None)` se non esiste.
+fn run_one(program: &str, args: &[&str]) -> Result<Option<Out>, String> {
+    let mut command = Command::new(program);
+    command
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    crate::hide_console(&mut command);
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.to_string()),
+    };
+    let stdout = drain(child.stdout.take());
+    let stderr = drain(child.stderr.take());
+    let started = Instant::now();
+    let ok = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status.success(),
+            Ok(None) if started.elapsed() < TIMEOUT => {
+                std::thread::sleep(Duration::from_millis(25))
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break false;
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    };
+    Ok(Some(Out {
+        ok,
+        stdout: stdout.join().unwrap_or_default(),
+        stderr: stderr.join().unwrap_or_default(),
+    }))
+}
+
 /// Esegue Tailscale con argomenti fissi provando i candidati in ordine. `Ok(None)` se nessuno è installato.
 fn run_with(programs: &[String], args: &[&str]) -> Result<Option<Out>, String> {
     let mut last: Option<Out> = None;
     for program in programs {
-        let mut command = Command::new(program);
-        command
-            .args(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        crate::hide_console(&mut command);
-        let mut child = match command.spawn() {
-            Ok(child) => child,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error.to_string()),
-        };
-        let stdout = drain(child.stdout.take());
-        let stderr = drain(child.stderr.take());
-        let started = Instant::now();
-        let ok = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status.success(),
-                Ok(None) if started.elapsed() < TIMEOUT => {
-                    std::thread::sleep(Duration::from_millis(25))
-                }
-                Ok(None) => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    break false;
-                }
-                Err(error) => return Err(error.to_string()),
-            }
-        };
-        let out = Out {
-            ok,
-            stdout: stdout.join().unwrap_or_default(),
-            stderr: stderr.join().unwrap_or_default(),
+        let Some(out) = run_one(program, args)? else {
+            continue;
         };
         if out.ok || !daemon_unreachable(&out.text()) {
             return Ok(Some(out));
@@ -232,6 +239,89 @@ fn run_with(programs: &[String], args: &[&str]) -> Result<Option<Out>, String> {
         last = Some(out);
     }
     Ok(last)
+}
+
+/// Esegue **tutti** i candidati installati e raccoglie le risposte: copie diverse (app di macOS, Homebrew, servizio
+/// di Windows) possono parlare con demoni diversi, e solo una di esse vede lo stato che l'utente vede (ADR-0233).
+fn run_all(programs: &[String], args: &[&str]) -> Result<Vec<Out>, String> {
+    let mut all = Vec::new();
+    for program in programs {
+        if let Some(out) = run_one(program, args)? {
+            all.push(out);
+        }
+    }
+    Ok(all)
+}
+
+/// Quanto una risposta di `status --json` è informativa: 3 connesso, 2 stato leggibile, 1 solo testo, 0 nulla.
+fn status_rank(out: &Out) -> u8 {
+    let raw = json_part(out);
+    if is_active(&raw) {
+        3
+    } else if !parse_status(&raw).0.is_empty() {
+        2
+    } else if !out.text().trim().is_empty() && !daemon_unreachable(&out.text()) {
+        1
+    } else {
+        0
+    }
+}
+
+/// La risposta migliore fra più copie di Tailscale: a parità vince la prima nell'ordine dei candidati.
+pub fn best_status(outs: Vec<Out>) -> Option<Out> {
+    let mut best: Option<(u8, Out)> = None;
+    for out in outs {
+        let rank = status_rank(&out);
+        if best.as_ref().is_none_or(|(top, _)| rank > *top) {
+            best = Some((rank, out));
+        }
+    }
+    best.map(|(_, out)| out)
+}
+
+/// Tailscale è attivo su questo computer: `Running`, oppure il client si dichiara online con un indirizzo
+/// assegnato (alcune versioni e modalità riportano lo stato in modo diverso). Mai attivo se chiede l'accesso o
+/// è fermo.
+pub fn is_active(raw: &str) -> bool {
+    let doc: Value = serde_json::from_str(raw).unwrap_or(Value::Null);
+    match doc["BackendState"].as_str().unwrap_or("") {
+        "Running" => true,
+        "NeedsLogin" | "NeedsMachineAuth" | "Stopped" => false,
+        _ => {
+            doc["Self"]["Online"].as_bool() == Some(true)
+                && doc["Self"]["TailscaleIPs"]
+                    .as_array()
+                    .is_some_and(|ips| !ips.is_empty())
+        }
+    }
+}
+
+/// Spiegazione dello stato dichiarato dal client, per dire cosa fare davvero.
+pub fn state_message(state: &str) -> String {
+    match state {
+        "NeedsLogin" => "Tailscale chiede di accedere: apri l'app Tailscale e accedi con il tuo account.".into(),
+        "NeedsMachineAuth" => "Questo dispositivo attende l'approvazione nella console di Tailscale (login.tailscale.com/admin/machines).".into(),
+        "Stopped" => "Tailscale è fermo (interruttore spento): attivalo dall'app Tailscale e riprova.".into(),
+        "Starting" => "Tailscale si sta avviando: riprova fra qualche secondo.".into(),
+        "" => "Tailscale non risponde in modo leggibile.".into(),
+        other => format!("Tailscale riporta lo stato «{other}»."),
+    }
+}
+
+/// Indirizzo Tailscale di questo computer secondo la **tabella di instradamento**, senza il programma: si apre un
+/// socket UDP verso l'indirizzo interno di Tailscale (100.100.100.100) senza inviare nulla e si legge quale
+/// indirizzo locale sceglierebbe il sistema. Se è nell'intervallo 100.64.0.0/10, Tailscale è attivo qui.
+pub fn route_ipv4() -> Option<std::net::Ipv4Addr> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("100.100.100.100:53").ok()?;
+    match socket.local_addr().ok()?.ip() {
+        std::net::IpAddr::V4(ip)
+            if ip.octets()[0] == 100 && (64..=127).contains(&ip.octets()[1]) =>
+        {
+            Some(ip)
+        }
+        _ => None,
+    }
 }
 
 fn run(args: &[&str]) -> Result<Option<Out>, String> {
@@ -252,19 +342,19 @@ pub fn json_part(out: &Out) -> String {
 }
 
 /// `status --json` senza l'elenco degli altri dispositivi (non serve e può essere enorme); se il client è
-/// così vecchio da non conoscere l'opzione, ripiega sulla forma completa.
+/// così vecchio da non conoscere l'opzione, ripiega sulla forma completa. Prova tutte le copie di Tailscale e
+/// restituisce la risposta migliore (ADR-0233).
 fn status_out() -> Result<Option<Out>, String> {
-    match run(&["status", "--json", "--peers=false"])? {
-        Some(out)
-            if !out.ok && {
-                let t = out.text().to_ascii_lowercase();
-                t.contains("flag provided but not defined") || t.contains("unknown flag")
-            } =>
-        {
-            run(&["status", "--json"])
-        }
-        other => Ok(other),
+    let programs = candidates();
+    let mut outs = run_all(&programs, &["status", "--json", "--peers=false"])?;
+    let unknown_flag = |out: &Out| {
+        let t = out.text().to_ascii_lowercase();
+        !out.ok && (t.contains("flag provided but not defined") || t.contains("unknown flag"))
+    };
+    if outs.iter().any(unknown_flag) {
+        outs = run_all(&programs, &["status", "--json"])?;
     }
+    Ok(best_status(outs))
 }
 
 /// Stato del collegamento: installato, connesso, nome della macchina, indirizzo HTTPS e se il Core è pubblicato.
@@ -287,7 +377,7 @@ pub fn status(port: u16) -> Value {
     let raw = json_part(&status);
     let (state, host) = parse_status(&raw);
     let details = parse_details(&raw);
-    let connected = state == "Running";
+    let connected = is_active(&raw);
     let serving = connected
         && matches!(run(&["serve", "status"]), Ok(Some(out)) if serving_port(&out.text(), port));
     let resolves = host.as_deref().filter(|_| connected).map(resolves_here);
@@ -304,9 +394,21 @@ pub fn status(port: u16) -> Value {
             first.chars().take(200).collect::<String>()
         );
     }
+    // Il programma non lo vede connesso: si dice lo stato reale e se il sistema ha comunque un indirizzo Tailscale.
+    let route = route_ipv4();
+    if !connected && !state.is_empty() {
+        message = state_message(&state);
+        if let Some(ip) = route {
+            message = format!(
+                "Questo computer ha l'indirizzo Tailscale {ip}, ma il programma riporta «{state}»: {}",
+                state_message(&state)
+            );
+        }
+    }
     json!({
         "installed": true,
         "state": state,
+        "route_ip": route.map(|ip| ip.to_string()),
         "host": host,
         "url": host.as_ref().map(|name| format!("https://{name}")),
         "serving": serving,
@@ -344,8 +446,8 @@ pub fn verdict(failed: Option<&str>, serve_text: &str) -> String {
 /// Diagnosi del collegamento dal punto di vista di questo computer: DNS, porta 443, certificato HTTPS e risposta di
 /// JARVIS (`/api/connectivity`, senza credenziali). Ogni passo ha un tempo massimo; si ferma al primo che fallisce.
 pub fn diagnose(port: u16) -> Value {
-    let status = match status_out() {
-        Ok(Some(out)) => json_part(&out),
+    let out = match status_out() {
+        Ok(Some(out)) => out,
         Ok(None) => {
             return json!({"ok": false, "steps": [], "verdict": "Tailscale non è installato su questo computer."})
         }
@@ -353,16 +455,44 @@ pub fn diagnose(port: u16) -> Value {
             return json!({"ok": false, "steps": [], "verdict": format!("Tailscale non risponde: {error}")})
         }
     };
+    let status = json_part(&out);
     let (state, host) = parse_status(&status);
     let details = parse_details(&status);
+    let active = is_active(&status);
+    let route = route_ipv4();
+    let shown = if state.is_empty() {
+        "non leggibile".to_string()
+    } else {
+        state.clone()
+    };
     let mut steps = vec![step(
         "tailscale",
-        state == "Running",
-        format!("stato {state}"),
+        active,
+        format!(
+            "stato {shown}{}",
+            route
+                .map(|ip| format!(" · indirizzo {ip} su questo computer"))
+                .unwrap_or_default()
+        ),
     )];
-    if state != "Running" {
-        return json!({"ok": false, "steps": steps, "health": details.health,
-            "verdict": "Tailscale non è connesso: apri Tailscale e accedi."});
+    if !active {
+        let first = out
+            .text()
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .map(|line| line.chars().take(160).collect::<String>())
+            .unwrap_or_default();
+        let mut verdict = state_message(&state);
+        if let Some(ip) = route {
+            verdict = format!(
+                "Tailscale è attivo su questo computer (indirizzo {ip}), ma il programma che JARVIS interroga non lo conferma. {verdict} Può essere una copia di Tailscale collegata a un altro servizio: usa quella dell'app (su macOS /Applications/Tailscale.app)."
+            );
+        }
+        if state.is_empty() && !first.is_empty() {
+            verdict = format!("{verdict} Risposta del programma: «{first}».");
+        }
+        return json!({"ok": false, "steps": steps, "health": details.health, "state": state,
+            "route_ip": route.map(|ip| ip.to_string()), "verdict": verdict});
     }
     let Some(host) = host else {
         return json!({"ok": false, "steps": steps, "health": details.health,
@@ -585,6 +715,37 @@ mod tests {
             ok("http", false),
         ];
         assert_eq!(failed_step(&bad).as_deref(), Some("dns"));
+    }
+
+    #[test]
+    fn the_best_copy_of_tailscale_wins_and_activity_is_not_only_running() {
+        let out = |text: &str| Out {
+            ok: true,
+            stdout: text.into(),
+            stderr: String::new(),
+        };
+        let stopped = out(r#"{"BackendState":"Stopped"}"#);
+        let running = out(r#"{"BackendState":"Running","Self":{"DNSName":"a.tail1.ts.net."}}"#);
+        let text = out("Tailscale is stopped.");
+        // Una copia che parla con un altro demone non nasconde quella giusta, in qualsiasi ordine.
+        let best = best_status(vec![stopped, text, running]).unwrap();
+        assert_eq!(parse_status(&json_part(&best)).0, "Running");
+        let only_text = best_status(vec![out("Tailscale is stopped."), out("")]).unwrap();
+        assert_eq!(only_text.text(), "Tailscale is stopped.");
+        assert!(best_status(vec![]).is_none());
+        // Stato insolito ma il client si dichiara online con un indirizzo: attivo. Fermo o con accesso richiesto: no.
+        assert!(is_active(
+            r#"{"BackendState":"NoState","Self":{"Online":true,"TailscaleIPs":["100.64.0.5"]}}"#
+        ));
+        assert!(!is_active(
+            r#"{"BackendState":"Stopped","Self":{"Online":true,"TailscaleIPs":["100.64.0.5"]}}"#
+        ));
+        assert!(!is_active(r#"{"BackendState":"NeedsLogin"}"#));
+        assert!(!is_active("non json"));
+        assert!(is_active(r#"{"BackendState":"Running"}"#));
+        assert!(state_message("Stopped").contains("fermo"));
+        assert!(state_message("NeedsLogin").contains("accedere"));
+        assert!(state_message("").contains("non risponde"));
     }
 
     #[test]

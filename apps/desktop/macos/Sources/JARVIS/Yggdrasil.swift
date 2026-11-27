@@ -103,24 +103,152 @@ private enum Texture {
         }
     }
 
-    /// Corteccia: fondo scuro con venature verticali e qualche bagliore dorato.
-    static func bark() -> NSImage {
-        return NSImage(size: NSSize(width: 256, height: 256), flipped: false) { rect in
-            var generator = SeededRandom(seed: 7)
-            NSColor(red: 0.13, green: 0.085, blue: 0.055, alpha: 1).setFill()
-            rect.fill()
-            for _ in 0..<420 {
-                let x = CGFloat.random(in: 0...256, using: &generator)
-                let width = CGFloat.random(in: 0.6...2.8, using: &generator)
-                let shade = CGFloat.random(in: 0.02...0.16, using: &generator)
-                NSColor(red: shade + 0.04, green: shade * 0.7 + 0.02, blue: shade * 0.45, alpha: 0.75).setFill()
-                NSRect(x: x, y: 0, width: width, height: 256).fill()
+    /// Nastro d'aurora: trasparente ai bordi, verde e viola al centro.
+    static func aurora() -> NSImage {
+        NSImage(size: NSSize(width: 8, height: 256), flipped: false) { rect in
+            let gradient = NSGradient(colors: [
+                NSColor(red: 0.2, green: 0.9, blue: 0.7, alpha: 0),
+                NSColor(red: 0.25, green: 0.95, blue: 0.7, alpha: 0.55),
+                NSColor(red: 0.45, green: 0.75, blue: 1.0, alpha: 0.45),
+                NSColor(red: 0.65, green: 0.45, blue: 1.0, alpha: 0.30),
+                NSColor(red: 0.65, green: 0.45, blue: 1.0, alpha: 0)
+            ], atLocations: [0, 0.22, 0.5, 0.78, 1], colorSpace: .deviceRGB)
+            gradient?.draw(in: rect, angle: 90)
+            return true
+        }
+    }
+
+    /// Foglia: sagoma con nervatura, bianca su trasparente (il colore arriva dai vertici).
+    static func leaf() -> NSImage {
+        NSImage(size: NSSize(width: 64, height: 64), flipped: false) { rect in
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: 32, y: 3))
+            path.curve(to: NSPoint(x: 32, y: 61), controlPoint1: NSPoint(x: 62, y: 22), controlPoint2: NSPoint(x: 56, y: 48))
+            path.curve(to: NSPoint(x: 32, y: 3), controlPoint1: NSPoint(x: 8, y: 48), controlPoint2: NSPoint(x: 2, y: 22))
+            NSGradient(colors: [NSColor.white, NSColor.white.withAlphaComponent(0.55)])?.draw(in: path, angle: 90)
+            NSColor.white.withAlphaComponent(0.25).setStroke()
+            let vein = NSBezierPath()
+            vein.move(to: NSPoint(x: 32, y: 6))
+            vein.line(to: NSPoint(x: 32, y: 58))
+            vein.lineWidth = 1.2
+            vein.stroke()
+            return true
+        }
+    }
+
+    // MARK: Rumore periodico
+
+    private static func hash(_ x: Int, _ y: Int, _ seed: Int) -> Float {
+        var h = UInt32(truncatingIfNeeded: x &* 374761393 &+ y &* 668265263 &+ seed &* 2147483647)
+        h = (h ^ (h >> 13)) &* 1274126177
+        h ^= h >> 16
+        return Float(h & 0xFFFF) / 65535
+    }
+
+    /// Rumore di valore che si ripete ogni `px` × `py` celle: la texture si accosta senza giunture.
+    private static func noise(_ x: Float, _ y: Float, _ px: Int, _ py: Int, _ seed: Int) -> Float {
+        let xi = Int(floor(x)), yi = Int(floor(y))
+        let xf = x - floor(x), yf = y - floor(y)
+        func value(_ a: Int, _ b: Int) -> Float {
+            hash(((a % px) + px) % px, ((b % py) + py) % py, seed)
+        }
+        let u = xf * xf * (3 - 2 * xf), w = yf * yf * (3 - 2 * yf)
+        return value(xi, yi) * (1 - u) * (1 - w) + value(xi + 1, yi) * u * (1 - w)
+            + value(xi, yi + 1) * (1 - u) * w + value(xi + 1, yi + 1) * u * w
+    }
+
+    private static func image(_ bytes: [UInt8], _ side: Int) -> NSImage {
+        let provider = CGDataProvider(data: Data(bytes) as CFData)
+        guard let provider,
+              let cg = CGImage(width: side, height: side, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: side * 4,
+                               space: CGColorSpaceCreateDeviceRGB(),
+                               bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                               provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)
+        else { return NSImage(size: NSSize(width: side, height: side)) }
+        return NSImage(cgImage: cg, size: NSSize(width: side, height: side))
+    }
+
+    /// Corteccia: colore e mappa delle normali (rilievo) dallo stesso campo di altezze, con crepe verticali.
+    static func barkMaps() -> (diffuse: NSImage, normal: NSImage) {
+        let side = 256
+        var height = [Float](repeating: 0, count: side * side)
+        for y in 0..<side {
+            for x in 0..<side {
+                let u = Float(x) / Float(side), v = Float(y) / Float(side)
+                var total: Float = 0, amplitude: Float = 0.55
+                for octave in 0..<4 {
+                    let px = 6 << octave, py = 2 << octave
+                    let n = noise(u * Float(px), v * Float(py), px, py, octave + 3)
+                    total += (1 - abs(2 * n - 1)) * amplitude
+                    amplitude *= 0.5
+                }
+                height[y * side + x] = min(max(total, 0), 1)
             }
-            for _ in 0..<46 {
-                let x = CGFloat.random(in: 0...256, using: &generator)
-                let y = CGFloat.random(in: 0...256, using: &generator)
-                NSColor(red: 0.95, green: 0.68, blue: 0.22, alpha: CGFloat.random(in: 0.25...0.8, using: &generator)).setFill()
-                NSRect(x: x, y: y, width: 1.4, height: CGFloat.random(in: 4...22, using: &generator)).fill()
+        }
+        var color = [UInt8](repeating: 255, count: side * side * 4)
+        var normal = [UInt8](repeating: 255, count: side * side * 4)
+        for y in 0..<side {
+            for x in 0..<side {
+                let h = height[y * side + x]
+                let index = (y * side + x) * 4
+                let warm = 0.55 + 0.45 * h
+                color[index] = UInt8(min(255, 38 + 118 * warm * h + 20))
+                color[index + 1] = UInt8(min(255, 24 + 80 * warm * h + 12))
+                color[index + 2] = UInt8(min(255, 14 + 48 * warm * h + 8))
+                func at(_ dx: Int, _ dy: Int) -> Float {
+                    height[((y + dy + side) % side) * side + (x + dx + side) % side]
+                }
+                let nx = (at(-1, 0) - at(1, 0)) * 3.2
+                let ny = (at(0, -1) - at(0, 1)) * 3.2
+                let length = sqrt(nx * nx + ny * ny + 1)
+                normal[index] = UInt8((nx / length * 0.5 + 0.5) * 255)
+                normal[index + 1] = UInt8((ny / length * 0.5 + 0.5) * 255)
+                normal[index + 2] = UInt8((1 / length * 0.5 + 0.5) * 255)
+            }
+        }
+        return (image(color, side), image(normal, side))
+    }
+
+    /// Rune incise sul tronco: nero con segni luminosi (emissione). Alcune lettere del futhark antico, disegnate a tratti.
+    static func runes() -> NSImage {
+        // Ogni runa è un elenco di segmenti (x1, y1, x2, y2) in un quadrato 0…1.
+        let glyphs: [[(CGFloat, CGFloat, CGFloat, CGFloat)]] = [
+            [(0.5, 0, 0.5, 1), (0.5, 0.65, 0.85, 0.9), (0.5, 0.4, 0.85, 0.65)],
+            [(0.25, 0, 0.25, 1), (0.25, 1, 0.7, 0.75), (0.7, 0.75, 0.7, 0)],
+            [(0.4, 0, 0.4, 1), (0.4, 0.8, 0.78, 0.55), (0.78, 0.55, 0.4, 0.3)],
+            [(0.4, 0, 0.4, 1), (0.4, 1, 0.8, 0.78), (0.4, 0.7, 0.8, 0.48)],
+            [(0.3, 0, 0.3, 1), (0.3, 1, 0.75, 0.82), (0.75, 0.82, 0.3, 0.55), (0.3, 0.55, 0.78, 0)],
+            [(0.7, 0.9, 0.3, 0.5), (0.3, 0.5, 0.7, 0.1)],
+            [(0.25, 0.85, 0.75, 0.15), (0.75, 0.85, 0.25, 0.15)],
+            [(0.3, 0, 0.3, 1), (0.7, 0, 0.7, 1), (0.3, 0.7, 0.7, 0.4)],
+            [(0.5, 0, 0.5, 1)],
+            [(0.5, 0, 0.5, 1), (0.25, 0.7, 0.5, 0.45), (0.75, 0.7, 0.5, 0.45)],
+            [(0.3, 0, 0.3, 1), (0.3, 0.55, 0.75, 1), (0.3, 0.55, 0.75, 0)],
+            [(0.5, 0.05, 0.5, 0.95), (0.5, 0.95, 0.8, 0.7), (0.5, 0.05, 0.2, 0.3)]
+        ]
+        return NSImage(size: NSSize(width: 1024, height: 1024), flipped: false) { rect in
+            NSColor.black.setFill()
+            rect.fill()
+            var generator = SeededRandom(seed: 5)
+            let columns = 6
+            let rows = 11
+            for column in 0..<columns {
+                for row in 0..<rows where Int.random(in: 0...9, using: &generator) < 7 {
+                    let glyph = glyphs[Int.random(in: 0..<glyphs.count, using: &generator)]
+                    let x0 = (CGFloat(column) + 0.5) * rect.width / CGFloat(columns) - 22
+                    let y0 = (CGFloat(row) + 0.25) * rect.height / CGFloat(rows)
+                    for (width, alpha) in [(CGFloat(11), CGFloat(0.22)), (CGFloat(5), CGFloat(0.95))] {
+                        NSColor(red: 0.30, green: 0.85, blue: 1.0, alpha: alpha).setStroke()
+                        let path = NSBezierPath()
+                        path.lineWidth = width
+                        path.lineCapStyle = .round
+                        for segment in glyph {
+                            path.move(to: NSPoint(x: x0 + segment.0 * 44, y: y0 + segment.1 * 62))
+                            path.line(to: NSPoint(x: x0 + segment.2 * 44, y: y0 + segment.3 * 62))
+                        }
+                        path.stroke()
+                    }
+                }
             }
             return true
         }
@@ -141,6 +269,126 @@ struct SeededRandom: RandomNumberGenerator {
     }
 }
 
+// MARK: - Geometrie procedurali
+
+private typealias V3 = SIMD3<Float>
+
+private enum Mesh {
+    /// Superficie continua lungo una curva: sezioni circolari con raggio dipendente dalla posizione e dall'angolo
+    /// (creste, rastremazione, allargamento alla base). Le sezioni seguono la curva senza torcersi.
+    static func tube(spine: [V3], sides: Int, vRepeat: Float, radius: (Float, Float) -> Float) -> SCNGeometry {
+        let count = spine.count
+        var positions: [V3] = []
+        var uvs: [SIMD2<Float>] = []
+        positions.reserveCapacity(count * (sides + 1))
+        var tangents: [V3] = []
+        for index in 0..<count {
+            let before = spine[max(index - 1, 0)], after = spine[min(index + 1, count - 1)]
+            tangents.append(simd_normalize(after - before))
+        }
+        let first = tangents[0]
+        let reference: V3 = abs(first.y) < 0.9 ? V3(0, 1, 0) : V3(1, 0, 0)
+        var frame = simd_normalize(simd_cross(first, reference))
+        for index in 0..<count {
+            let tangent = tangents[index]
+            frame = simd_normalize(frame - simd_dot(frame, tangent) * tangent)
+            let binormal = simd_cross(tangent, frame)
+            let along = Float(index) / Float(max(count - 1, 1))
+            for side in 0...sides {
+                let angle = Float(side) / Float(sides) * 2 * .pi
+                let direction = cos(angle) * frame + sin(angle) * binormal
+                positions.append(spine[index] + direction * radius(along, angle))
+                uvs.append(SIMD2(Float(side) / Float(sides), along * vRepeat))
+            }
+        }
+        var indices: [UInt32] = []
+        let stride = sides + 1
+        for index in 0..<(count - 1) {
+            for side in 0..<sides {
+                let a = UInt32(index * stride + side), b = a + 1
+                let c = UInt32((index + 1) * stride + side), d = c + 1
+                indices += [a, b, c, b, d, c]
+            }
+        }
+        var normals = [V3](repeating: .zero, count: positions.count)
+        for triangle in stride_triangles(indices) {
+            let normal = simd_cross(positions[Int(triangle.1)] - positions[Int(triangle.0)],
+                                    positions[Int(triangle.2)] - positions[Int(triangle.0)])
+            normals[Int(triangle.0)] += normal
+            normals[Int(triangle.1)] += normal
+            normals[Int(triangle.2)] += normal
+        }
+        for index in 0..<count {
+            let seam = normals[index * stride] + normals[index * stride + sides]
+            normals[index * stride] = seam
+            normals[index * stride + sides] = seam
+        }
+        normals = normals.map { simd_length($0) > 0 ? simd_normalize($0) : V3(0, 1, 0) }
+        return geometry(positions: positions, normals: normals, uvs: uvs, indices: indices)
+    }
+
+    private static func stride_triangles(_ indices: [UInt32]) -> [(UInt32, UInt32, UInt32)] {
+        var out: [(UInt32, UInt32, UInt32)] = []
+        out.reserveCapacity(indices.count / 3)
+        var index = 0
+        while index + 2 < indices.count {
+            out.append((indices[index], indices[index + 1], indices[index + 2]))
+            index += 3
+        }
+        return out
+    }
+
+    /// Foglie: molti quadrati orientati a caso, in un'unica geometria (una sola chiamata di disegno).
+    static func leaves(centres: [V3], sizes: [Float], colors: [SIMD4<Float>], generator: inout SeededRandom) -> SCNGeometry {
+        var positions: [V3] = []
+        var normals: [V3] = []
+        var uvs: [SIMD2<Float>] = []
+        var tint: [SIMD4<Float>] = []
+        var indices: [UInt32] = []
+        for (index, centre) in centres.enumerated() {
+            let axis = simd_normalize(V3(Float.random(in: -1...1, using: &generator),
+                                         Float.random(in: -1...1, using: &generator),
+                                         Float.random(in: -1...1, using: &generator)) + V3(0, 0.001, 0))
+            let rotation = simd_quatf(angle: Float.random(in: 0...(2 * .pi), using: &generator), axis: axis)
+            let right = rotation.act(V3(1, 0, 0)) * sizes[index]
+            let up = rotation.act(V3(0, 1, 0)) * sizes[index]
+            let base = UInt32(positions.count)
+            positions += [centre - right - up, centre + right - up, centre + right + up, centre - right + up]
+            let normal = simd_normalize(simd_cross(right, up))
+            normals += [normal, normal, normal, normal]
+            uvs += [SIMD2(0, 0), SIMD2(1, 0), SIMD2(1, 1), SIMD2(0, 1)]
+            tint += [colors[index], colors[index], colors[index], colors[index]]
+            indices += [base, base + 1, base + 2, base, base + 2, base + 3]
+        }
+        let shape = geometry(positions: positions, normals: normals, uvs: uvs, indices: indices)
+        let colorData = Data(bytes: tint, count: tint.count * MemoryLayout<SIMD4<Float>>.stride)
+        let colorSource = SCNGeometrySource(
+            data: colorData, semantic: .color, vectorCount: tint.count, usesFloatComponents: true,
+            componentsPerVector: 4, bytesPerComponent: MemoryLayout<Float>.size, dataOffset: 0,
+            dataStride: MemoryLayout<SIMD4<Float>>.stride)
+        return SCNGeometry(sources: shape.sources + [colorSource], elements: shape.elements)
+    }
+
+    private static func geometry(positions: [V3], normals: [V3], uvs: [SIMD2<Float>], indices: [UInt32]) -> SCNGeometry {
+        let vertexSource = SCNGeometrySource(
+            data: Data(bytes: positions, count: positions.count * MemoryLayout<V3>.stride), semantic: .vertex,
+            vectorCount: positions.count, usesFloatComponents: true, componentsPerVector: 3,
+            bytesPerComponent: MemoryLayout<Float>.size, dataOffset: 0, dataStride: MemoryLayout<V3>.stride)
+        let normalSource = SCNGeometrySource(
+            data: Data(bytes: normals, count: normals.count * MemoryLayout<V3>.stride), semantic: .normal,
+            vectorCount: normals.count, usesFloatComponents: true, componentsPerVector: 3,
+            bytesPerComponent: MemoryLayout<Float>.size, dataOffset: 0, dataStride: MemoryLayout<V3>.stride)
+        let uvSource = SCNGeometrySource(
+            data: Data(bytes: uvs, count: uvs.count * MemoryLayout<SIMD2<Float>>.stride), semantic: .texcoord,
+            vectorCount: uvs.count, usesFloatComponents: true, componentsPerVector: 2,
+            bytesPerComponent: MemoryLayout<Float>.size, dataOffset: 0, dataStride: MemoryLayout<SIMD2<Float>>.stride)
+        let element = SCNGeometryElement(
+            data: Data(bytes: indices, count: indices.count * MemoryLayout<UInt32>.size),
+            primitiveType: .triangles, primitiveCount: indices.count / 3, bytesPerIndex: MemoryLayout<UInt32>.size)
+        return SCNGeometry(sources: [vertexSource, normalSource, uvSource], elements: [element])
+    }
+}
+
 // MARK: - Scena
 
 /// La scena 3D: costruisce l'albero, gestisce orbita della camera, passaggio del mouse e volo verso un regno.
@@ -152,7 +400,7 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
     private var orbiting = true
     private var orbitAngle: Double = 0.9
     private var lastTime: TimeInterval = 0
-    private let orbitRadius: Float = 25
+    private let orbitRadius: Float = 26
     private let orbitHeight: Float = 7.5
     private let treeFocus = SIMD3<Float>(0, 6.4, 0)
     /// Con «riduci movimento» l'orbita resta ferma e i voli sono quasi immediati.
@@ -162,7 +410,9 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
         super.init()
         buildEnvironment()
         buildTree()
+        buildFoliage()
         Realm.all.forEach { buildRealm($0) }
+        buildHalos()
         buildCamera()
     }
 
@@ -171,23 +421,27 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
     private func buildEnvironment() {
         scene.background.contents = Texture.sky()
         scene.fogColor = NSColor(red: 0.02, green: 0.05, blue: 0.07, alpha: 1)
-        scene.fogStartDistance = 28
-        scene.fogEndDistance = 95
+        scene.fogStartDistance = 30
+        scene.fogEndDistance = 100
         scene.fogDensityExponent = 1.2
 
         let ambient = SCNNode()
         ambient.light = SCNLight()
         ambient.light?.type = .ambient
-        ambient.light?.color = NSColor(red: 0.20, green: 0.26, blue: 0.34, alpha: 1)
-        ambient.light?.intensity = 420
+        ambient.light?.color = NSColor(red: 0.20, green: 0.26, blue: 0.36, alpha: 1)
+        ambient.light?.intensity = 520
         scene.rootNode.addChildNode(ambient)
 
         let moon = SCNNode()
         moon.light = SCNLight()
         moon.light?.type = .directional
         moon.light?.color = NSColor(red: 0.62, green: 0.74, blue: 1.0, alpha: 1)
-        moon.light?.intensity = 700
-        moon.eulerAngles = SCNVector3(-0.8, 0.6, 0)
+        moon.light?.intensity = 900
+        moon.light?.castsShadow = true
+        moon.light?.shadowMode = .deferred
+        moon.light?.shadowRadius = 8
+        moon.light?.shadowColor = NSColor(white: 0, alpha: 0.55)
+        moon.eulerAngles = SCNVector3(-0.9, 0.7, 0)
         scene.rootNode.addChildNode(moon)
 
         let crown = SCNNode()
@@ -195,23 +449,34 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
         crown.light = SCNLight()
         crown.light?.type = .omni
         crown.light?.color = NSColor(red: 1.0, green: 0.82, blue: 0.5, alpha: 1)
-        crown.light?.intensity = 900
+        crown.light?.intensity = 1100
         crown.light?.attenuationStartDistance = 2
-        crown.light?.attenuationEndDistance = 24
+        crown.light?.attenuationEndDistance = 26
         scene.rootNode.addChildNode(crown)
 
+        let roots = SCNNode()
+        roots.simdPosition = SIMD3(0, 0.5, 0)
+        roots.light = SCNLight()
+        roots.light?.type = .omni
+        roots.light?.color = NSColor(red: 0.30, green: 0.80, blue: 1.0, alpha: 1)
+        roots.light?.intensity = 700
+        roots.light?.attenuationStartDistance = 1
+        roots.light?.attenuationEndDistance = 14
+        scene.rootNode.addChildNode(roots)
+
         scene.rootNode.addChildNode(stars())
-        scene.rootNode.addChildNode(well())
+        scene.rootNode.addChildNode(water())
         scene.rootNode.addChildNode(mist())
+        scene.rootNode.addChildNode(auroras())
     }
 
     private func stars() -> SCNNode {
         var generator = SeededRandom(seed: 99)
         var vertices: [SIMD3<Float>] = []
-        for _ in 0..<1100 {
+        for _ in 0..<1400 {
             let theta = Float.random(in: 0...(2 * .pi), using: &generator)
-            let phi = acos(Float.random(in: -0.15...1, using: &generator))
-            let r: Float = 80
+            let phi = acos(Float.random(in: -0.1...1, using: &generator))
+            let r: Float = 85
             vertices.append(SIMD3(r * sin(phi) * cos(theta), r * cos(phi) + 10, r * sin(phi) * sin(theta)))
         }
         let data = Data(bytes: vertices, count: vertices.count * MemoryLayout<SIMD3<Float>>.stride)
@@ -225,7 +490,7 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
             primitiveType: .point, primitiveCount: indices.count, bytesPerIndex: MemoryLayout<UInt32>.size)
         element.pointSize = 1.2
         element.minimumPointScreenSpaceRadius = 0.6
-        element.maximumPointScreenSpaceRadius = 1.8
+        element.maximumPointScreenSpaceRadius = 1.9
         let geometry = SCNGeometry(sources: [source], elements: [element])
         let material = SCNMaterial()
         material.lightingModel = .constant
@@ -234,19 +499,24 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
         return SCNNode(geometry: geometry)
     }
 
-    /// Mímisbrunnr: la sorgente ai piedi dell'albero.
-    private func well() -> SCNNode {
+    /// Mímisbrunnr: acqua scura che riflette l'albero, con anelli luminosi.
+    private func water() -> SCNNode {
         let node = SCNNode()
-        let disc = SCNCylinder(radius: 6.2, height: 0.05)
-        let water = SCNMaterial()
-        water.lightingModel = .constant
-        water.diffuse.contents = NSColor(red: 0.03, green: 0.10, blue: 0.16, alpha: 1)
-        water.emission.contents = NSColor(red: 0.04, green: 0.20, blue: 0.32, alpha: 1)
-        disc.materials = [water]
-        let floor = SCNNode(geometry: disc)
-        floor.simdPosition = SIMD3(0, -0.9, 0)
-        node.addChildNode(floor)
-        for (index, radius) in [3.2, 4.6, 6.0].enumerated() {
+        let floor = SCNFloor()
+        floor.reflectivity = 0.34
+        floor.reflectionFalloffStart = 0
+        floor.reflectionFalloffEnd = 10
+        floor.reflectionResolutionScaleFactor = 0.6
+        let surface = SCNMaterial()
+        surface.lightingModel = .blinn
+        surface.diffuse.contents = NSColor(red: 0.015, green: 0.055, blue: 0.095, alpha: 1)
+        surface.specular.contents = NSColor.white
+        surface.shininess = 0.9
+        floor.materials = [surface]
+        let floorNode = SCNNode(geometry: floor)
+        floorNode.simdPosition = SIMD3(0, -0.9, 0)
+        node.addChildNode(floorNode)
+        for (index, radius) in [3.4, 5.0, 6.8, 9.0].enumerated() {
             let ring = SCNTorus(ringRadius: CGFloat(radius), pipeRadius: 0.025)
             let glow = SCNMaterial()
             glow.lightingModel = .constant
@@ -255,14 +525,14 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
             ring.materials = [glow]
             let ringNode = SCNNode(geometry: ring)
             ringNode.simdPosition = SIMD3(0, -0.86, 0)
-            ringNode.opacity = 0.55 - CGFloat(index) * 0.14
+            ringNode.opacity = 0.6 - CGFloat(index) * 0.12
             node.addChildNode(ringNode)
         }
         return node
     }
 
     private func mist() -> SCNNode {
-        let plane = SCNPlane(width: 70, height: 70)
+        let plane = SCNPlane(width: 80, height: 80)
         let material = SCNMaterial()
         material.lightingModel = .constant
         material.diffuse.contents = Texture.softDot(128)
@@ -273,117 +543,228 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
         plane.materials = [material]
         let node = SCNNode(geometry: plane)
         node.eulerAngles = SCNVector3(-Double.pi / 2, 0, 0)
-        node.simdPosition = SIMD3(0, -0.7, 0)
-        node.opacity = 0.55
+        node.simdPosition = SIMD3(0, -0.6, 0)
+        node.opacity = 0.5
         return node
     }
 
-    // MARK: Albero
-
-    private func segment(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ r1: Float, _ r2: Float, _ material: SCNMaterial) -> SCNNode {
-        let direction = b - a
-        let length = simd_length(direction)
-        let cone = SCNCone(topRadius: CGFloat(r2), bottomRadius: CGFloat(r1), height: CGFloat(max(length, 0.001)))
-        cone.radialSegmentCount = 14
-        cone.materials = [material]
-        let node = SCNNode(geometry: cone)
-        node.simdPosition = (a + b) / 2
-        node.simdOrientation = simd_quatf(from: SIMD3<Float>(0, 1, 0), to: simd_normalize(direction))
-        return node
-    }
-
-    private func bezier(_ p0: SIMD3<Float>, _ p1: SIMD3<Float>, _ p2: SIMD3<Float>, _ p3: SIMD3<Float>, _ t: Float) -> SIMD3<Float> {
-        let u = 1 - t
-        return (u * u * u) * p0 + (3 * u * u * t) * p1 + (3 * u * t * t) * p2 + (t * t * t) * p3
-    }
-
-    /// Tubo rastremato lungo una curva di Bézier, con giunture sferiche.
-    private func tube(_ p0: SIMD3<Float>, _ p1: SIMD3<Float>, _ p2: SIMD3<Float>, _ p3: SIMD3<Float>,
-                      from startRadius: Float, to endRadius: Float, steps: Int, material: SCNMaterial) -> SCNNode {
+    /// Tre nastri d'aurora dietro l'albero, che ondeggiano piano.
+    private func auroras() -> SCNNode {
         let group = SCNNode()
-        var previous = p0
-        for step in 1...steps {
-            let t = Float(step) / Float(steps)
-            let point = bezier(p0, p1, p2, p3, t)
-            let r1 = startRadius + (endRadius - startRadius) * Float(step - 1) / Float(steps)
-            let r2 = startRadius + (endRadius - startRadius) * t
-            group.addChildNode(segment(previous, point, r1, r2, material))
-            let joint = SCNSphere(radius: CGFloat(r2))
-            joint.segmentCount = 12
-            joint.materials = [material]
-            let jointNode = SCNNode(geometry: joint)
-            jointNode.simdPosition = point
-            group.addChildNode(jointNode)
-            previous = point
+        let material = SCNMaterial()
+        material.lightingModel = .constant
+        material.diffuse.contents = Texture.aurora()
+        material.blendMode = .add
+        material.isDoubleSided = true
+        material.writesToDepthBuffer = false
+        for index in 0..<3 {
+            let plane = SCNPlane(width: 90, height: 26)
+            plane.materials = [material]
+            let node = SCNNode(geometry: plane)
+            let angle = Float(index) * 2.1 + 0.4
+            node.simdPosition = SIMD3(58 * cos(angle), 30 + Float(index) * 3, 58 * sin(angle))
+            node.eulerAngles = SCNVector3(0.35, -Double(angle) + .pi / 2, 0)
+            node.opacity = 0.55
+            node.runAction(.repeatForever(.sequence([
+                .fadeOpacity(to: 0.25, duration: 7 + Double(index) * 2),
+                .fadeOpacity(to: 0.6, duration: 7 + Double(index) * 2)
+            ])))
+            group.addChildNode(node)
         }
         return group
     }
 
+    // MARK: Albero
+
+    private func bezier(_ p0: V3, _ p1: V3, _ p2: V3, _ p3: V3, _ t: Float) -> V3 {
+        let u = 1 - t
+        return (u * u * u) * p0 + (3 * u * u * t) * p1 + (3 * u * t * t) * p2 + (t * t * t) * p3
+    }
+
     private func barkMaterial() -> SCNMaterial {
+        let maps = Texture.barkMaps()
         let material = SCNMaterial()
         material.lightingModel = .physicallyBased
-        material.diffuse.contents = Texture.bark()
-        material.diffuse.wrapS = .repeat
-        material.diffuse.wrapT = .repeat
-        material.diffuse.contentsTransform = SCNMatrix4MakeScale(2, 4, 1)
-        material.roughness.contents = 0.92
-        material.metalness.contents = 0.05
-        material.emission.contents = NSColor(red: 0.20, green: 0.11, blue: 0.03, alpha: 1)
+        material.diffuse.contents = maps.diffuse
+        material.normal.contents = maps.normal
+        material.normal.intensity = 1.4
+        for property in [material.diffuse, material.normal] {
+            property.wrapS = .repeat
+            property.wrapT = .repeat
+        }
+        material.roughness.contents = 0.9
+        material.metalness.contents = 0.04
+        material.isDoubleSided = true
         return material
     }
 
     private func buildTree() {
         let bark = barkMaterial()
+        // Il tronco porta le rune incise, che brillano.
+        let trunkBark = bark.copy() as? SCNMaterial ?? bark
+        trunkBark.emission.contents = Texture.runes()
+        trunkBark.emission.wrapS = .repeat
+        trunkBark.emission.wrapT = .repeat
+        trunkBark.emission.intensity = 1.6
         let tree = SCNNode()
         tree.name = "yggdrasil"
 
-        // Tronco: curva lieve, più sottile verso la chioma.
-        let trunk = tube(SIMD3(0, -0.8, 0), SIMD3(0.5, 4, -0.3), SIMD3(-0.45, 8.5, 0.3), SIMD3(0, 13.2, 0),
-                         from: 1.55, to: 0.5, steps: 22, material: bark)
-        tree.addChildNode(trunk)
+        // Tronco: una colonna con creste che si attorcigliano e un grande allargamento alla base.
+        var spine: [V3] = []
+        for index in 0...48 {
+            let t = Float(index) / 48
+            let y = -0.9 + t * 14.4
+            spine.append(V3(0.45 * sin(t * 5.2), y, 0.40 * cos(t * 4.1)))
+        }
+        let trunk = Mesh.tube(spine: spine, sides: 56, vRepeat: 5) { t, angle in
+            let flare: Float = 1.35 * exp(-t * 11)
+            let taper: Float = 1.35 - 0.95 * t
+            let wave1: Float = 0.16 * sin(5 * angle + 7 * t)
+            let wave2: Float = 0.08 * sin(9 * angle - 11 * t)
+            let damping: Float = 1 - 0.5 * t
+            return max(0.3, taper + flare + (wave1 + wave2) * damping)
+        }
+        trunk.materials = [trunkBark]
+        tree.addChildNode(SCNNode(geometry: trunk))
+
+        // Tre fusti secondari che si avvolgono attorno al principale e vi si fondono.
+        for strand in 0..<3 {
+            let phase = Float(strand) * 2 * .pi / 3
+            var helix: [V3] = []
+            for index in 0...44 {
+                let t = Float(index) / 44
+                let around = 1.55 * (1 - 0.72 * t) + 0.15
+                let turn = phase + t * 2 * .pi * 1.35
+                helix.append(V3(around * cos(turn), -0.7 + t * 8.2, around * sin(turn)))
+            }
+            let rope = Mesh.tube(spine: helix, sides: 20, vRepeat: 3) { t, angle in
+                let base: Float = 0.62 * (1 - 0.6 * t) + 0.12
+                let bump: Float = 1 + 0.1 * sin(6 * angle + 5 * t)
+                return base * bump
+            }
+            rope.materials = [bark]
+            tree.addChildNode(SCNNode(geometry: rope))
+        }
 
         // Radici che affondano nella sorgente.
         var generator = SeededRandom(seed: 21)
-        for index in 0..<8 {
-            let angle = Float(index) * (2 * .pi / 8) + Float.random(in: -0.2...0.2, using: &generator)
-            let reach = Float.random(in: 4.2...6.2, using: &generator)
-            let end = SIMD3(reach * cos(angle), -0.85, reach * sin(angle))
-            let mid1 = SIMD3(0.8 * cos(angle), -0.1, 0.8 * sin(angle))
-            let mid2 = SIMD3(reach * 0.65 * cos(angle), -0.9, reach * 0.65 * sin(angle))
-            tree.addChildNode(tube(SIMD3(0, 0.6, 0), mid1, mid2, end, from: 0.85, to: 0.07, steps: 9, material: bark))
+        for index in 0..<9 {
+            let angle = Float(index) * (2 * .pi / 9) + Float.random(in: -0.2...0.2, using: &generator)
+            let reach = Float.random(in: 4.4...7.0, using: &generator)
+            let end = V3(reach * cos(angle), -0.95, reach * sin(angle))
+            let c1 = V3(1.0 * cos(angle), 0.4, 1.0 * sin(angle))
+            let c2 = V3(reach * 0.62 * cos(angle), -1.0, reach * 0.62 * sin(angle))
+            var path: [V3] = []
+            for step in 0...20 { path.append(bezier(V3(0, 0.9, 0), c1, c2, end, Float(step) / 20)) }
+            let root = Mesh.tube(spine: path, sides: 14, vRepeat: 2) { t, angle in
+                let base: Float = 0.95 * (1 - t) + 0.07
+                let bump: Float = 1 + 0.12 * sin(4 * angle + 9 * t)
+                return base * bump
+            }
+            root.materials = [bark]
+            tree.addChildNode(SCNNode(geometry: root))
         }
 
-        // Un ramo per ogni regno.
+        // Un ramo per ogni regno, con rametti.
         for realm in Realm.all {
             let target = realm.position
             let angle = realm.angle * .pi / 180
-            let start = SIMD3<Float>(0, max(realm.height - 2.6, 1.6), 0)
-            let c1 = SIMD3<Float>(realm.radius * 0.30 * cos(angle), start.y + 0.9, realm.radius * 0.30 * sin(angle))
-            let c2 = SIMD3<Float>(realm.radius * 0.74 * cos(angle), target.y - 0.5, realm.radius * 0.74 * sin(angle))
-            tree.addChildNode(tube(start, c1, c2, target - SIMD3(0, 0.55, 0),
-                                   from: 0.36, to: 0.06, steps: 14, material: bark))
-            // Qualche rametto secondario, per un aspetto meno geometrico.
-            for twig in 0..<3 {
-                let t = Float(twig + 2) / 6
-                let origin = bezier(start, c1, c2, target, t)
-                let spread = Float.random(in: -1.2...1.2, using: &generator)
-                let end = origin + SIMD3(1.4 * cos(angle + spread), Float.random(in: 0.5...1.5, using: &generator), 1.4 * sin(angle + spread))
-                tree.addChildNode(tube(origin, origin + (end - origin) * 0.4 + SIMD3(0, 0.4, 0), origin + (end - origin) * 0.8, end,
-                                       from: 0.07, to: 0.015, steps: 4, material: bark))
+            let start = V3(0, max(realm.height - 2.8, 1.8), 0)
+            let c1 = V3(realm.radius * 0.30 * cos(angle), start.y + 1.0, realm.radius * 0.30 * sin(angle))
+            let c2 = V3(realm.radius * 0.74 * cos(angle), target.y - 0.4, realm.radius * 0.74 * sin(angle))
+            let end = target - V3(0, 0.85, 0)
+            var path: [V3] = []
+            for step in 0...22 { path.append(bezier(start, c1, c2, end, Float(step) / 22)) }
+            let branch = Mesh.tube(spine: path, sides: 14, vRepeat: 2) { t, angle in
+                let base: Float = 0.40 * (1 - t) + 0.07
+                let bump: Float = 1 + 0.1 * sin(5 * angle + 7 * t)
+                return base * bump
+            }
+            branch.materials = [bark]
+            tree.addChildNode(SCNNode(geometry: branch))
+            for twig in 0..<4 {
+                let t = Float(twig + 2) / 7
+                let origin = bezier(start, c1, c2, end, t)
+                let spread = Float.random(in: -1.4...1.4, using: &generator)
+                let tip = origin + V3(1.5 * cos(angle + spread), Float.random(in: 0.4...1.6, using: &generator), 1.5 * sin(angle + spread))
+                let reach: V3 = tip - origin
+                let control1: V3 = origin + reach * 0.35 + V3(0, 0.4, 0)
+                let control2: V3 = origin + reach * 0.75
+                var small: [V3] = []
+                for step in 0...8 { small.append(bezier(origin, control1, control2, tip, Float(step) / 8)) }
+                let twigMesh = Mesh.tube(spine: small, sides: 8, vRepeat: 1) { t, _ in
+                    let radius: Float = 0.075 * (1 - t) + 0.015
+                    return radius
+                }
+                twigMesh.materials = [bark]
+                tree.addChildNode(SCNNode(geometry: twigMesh))
             }
         }
         scene.rootNode.addChildNode(tree)
 
-        // Chioma: foglie luminose che scendono piano; lucciole attorno al tronco.
+        // Particelle: foglie che scendono piano e lucciole attorno al tronco.
         let canopy = SCNNode()
         canopy.simdPosition = SIMD3(0, 10.5, 0)
-        canopy.addParticleSystem(drifting(color: NSColor(red: 1.0, green: 0.82, blue: 0.40, alpha: 0.9), radius: 7.5, rate: 70, size: 0.13))
-        canopy.addParticleSystem(drifting(color: NSColor(red: 0.45, green: 0.95, blue: 0.60, alpha: 0.8), radius: 6.5, rate: 40, size: 0.10))
+        canopy.addParticleSystem(drifting(color: NSColor(red: 1.0, green: 0.82, blue: 0.40, alpha: 0.9), radius: 7.5, rate: 60, size: 0.13))
+        canopy.addParticleSystem(drifting(color: NSColor(red: 0.45, green: 0.95, blue: 0.60, alpha: 0.8), radius: 6.5, rate: 34, size: 0.10))
         scene.rootNode.addChildNode(canopy)
         let fireflies = SCNNode()
         fireflies.simdPosition = SIMD3(0, 4, 0)
-        fireflies.addParticleSystem(drifting(color: NSColor(red: 0.62, green: 0.95, blue: 1.0, alpha: 0.9), radius: 8, rate: 26, size: 0.08))
+        fireflies.addParticleSystem(drifting(color: NSColor(red: 0.62, green: 0.95, blue: 1.0, alpha: 0.9), radius: 9, rate: 30, size: 0.08))
         scene.rootNode.addChildNode(fireflies)
+    }
+
+    /// Chioma: migliaia di foglie luminose in una sola geometria, più fitte attorno ai regni.
+    private func buildFoliage() {
+        var generator = SeededRandom(seed: 314)
+        var centres: [V3] = []
+        var sizes: [Float] = []
+        var colors: [SIMD4<Float>] = []
+        func add(_ point: V3, _ size: Float, _ tint: SIMD3<Float>) {
+            centres.append(point)
+            sizes.append(size)
+            colors.append(SIMD4(tint * Float.random(in: 0.55...1.0, using: &generator), 1))
+        }
+        let gold = SIMD3<Float>(0.55, 0.42, 0.12), green = SIMD3<Float>(0.14, 0.45, 0.22), teal = SIMD3<Float>(0.12, 0.40, 0.42)
+        // Nuvola della chioma.
+        for _ in 0..<1700 {
+            let direction = simd_normalize(V3(Float.random(in: -1...1, using: &generator),
+                                              Float.random(in: -0.4...1, using: &generator),
+                                              Float.random(in: -1...1, using: &generator)) + V3(0, 0.001, 0))
+            let radius = pow(Float.random(in: 0.25...1, using: &generator), 0.6)
+            let point = V3(0, 11.8, 0) + V3(direction.x * 6.6, direction.y * 3.4, direction.z * 6.6) * radius
+            add(point, Float.random(in: 0.16...0.34, using: &generator), [gold, green, teal][Int.random(in: 0..<3, using: &generator)])
+        }
+        // Foglie lungo il ramo di ogni regno, sul lato del tronco.
+        for realm in Realm.all {
+            let position = realm.position
+            let angle = realm.angle * .pi / 180
+            let inward = V3(-cos(angle), 0, -sin(angle))
+            let tint = SIMD3<Float>(Float(realm.rgb.x), Float(realm.rgb.y), Float(realm.rgb.z)) * 0.5
+            for _ in 0..<150 {
+                let spread = V3(Float.random(in: -1...1, using: &generator), Float.random(in: -0.6...1, using: &generator),
+                                Float.random(in: -1...1, using: &generator))
+                let point = position + inward * Float.random(in: 1.6...3.4, using: &generator) + spread * 1.4 + V3(0, 0.3, 0)
+                add(point, Float.random(in: 0.13...0.26, using: &generator), Float.random(in: 0...1, using: &generator) < 0.5 ? tint : green)
+            }
+        }
+        let geometry = Mesh.leaves(centres: centres, sizes: sizes, colors: colors, generator: &generator)
+        let material = SCNMaterial()
+        material.lightingModel = .constant
+        material.diffuse.contents = Texture.leaf()
+        material.transparent.contents = Texture.leaf()
+        material.blendMode = .add
+        material.isDoubleSided = true
+        material.writesToDepthBuffer = false
+        geometry.materials = [material]
+        let node = SCNNode(geometry: geometry)
+        node.name = "foliage"
+        scene.rootNode.addChildNode(node)
+        // La chioma ondeggia appena.
+        node.runAction(.repeatForever(.sequence([
+            .rotateBy(x: 0, y: 0.05, z: 0, duration: 9),
+            .rotateBy(x: 0, y: -0.05, z: 0, duration: 9)
+        ])))
     }
 
     private func drifting(color: NSColor, radius: CGFloat, rate: CGFloat, size: CGFloat) -> SCNParticleSystem {
@@ -406,21 +787,130 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
         return system
     }
 
+    /// Grandi anelli di luce attorno all'albero, che girano lentamente.
+    private func buildHalos() {
+        for (index, spec) in [(8.6, 0.05, 0.12), (10.4, 0.035, -0.30)].enumerated() {
+            let ring = SCNTorus(ringRadius: CGFloat(spec.0), pipeRadius: CGFloat(spec.1))
+            let material = SCNMaterial()
+            material.lightingModel = .constant
+            material.diffuse.contents = NSColor(red: 0.30, green: 0.80, blue: 1.0, alpha: 1)
+            material.emission.contents = NSColor(red: 0.30, green: 0.80, blue: 1.0, alpha: 1)
+            material.emission.intensity = 1.3
+            ring.materials = [material]
+            let node = SCNNode(geometry: ring)
+            node.simdPosition = SIMD3(0, 6.4, 0)
+            node.eulerAngles = SCNVector3(spec.2 + 0.1, 0, 0.08)
+            node.opacity = 0.55
+            let turn: CGFloat = index == 0 ? CGFloat.pi * 2 : -CGFloat.pi * 2
+            node.runAction(.repeatForever(.rotateBy(x: 0, y: turn, z: 0, duration: 90)))
+            scene.rootNode.addChildNode(node)
+        }
+    }
+
     // MARK: Regni
 
-    /// Forma distintiva al centro di ogni regno.
-    private func emblem(_ id: String) -> SCNGeometry {
+    private func part(_ geometry: SCNGeometry, _ color: NSColor, glow: CGFloat = 0.4,
+                      at position: V3 = .zero, euler: V3 = .zero) -> SCNNode {
+        let material = SCNMaterial()
+        material.lightingModel = .physicallyBased
+        material.diffuse.contents = color
+        material.metalness.contents = 0.15
+        material.roughness.contents = 0.55
+        material.emission.contents = color
+        material.emission.intensity = glow
+        geometry.materials = [material]
+        let node = SCNNode(geometry: geometry)
+        node.simdPosition = position
+        node.simdEulerAngles = euler
+        return node
+    }
+
+    /// Paesaggio in miniatura di ogni regno, dentro la cupola: la base della scena è y = 0,04.
+    private func miniature(_ id: String, color: NSColor) -> SCNNode {
+        let group = SCNNode()
+        let ground: Float = 0.04
         switch id {
-        case "asgard": return SCNPyramid(width: 0.9, height: 1.3, length: 0.9)
-        case "midgard": return SCNSphere(radius: 0.46)
-        case "alfheim": return SCNCapsule(capRadius: 0.26, height: 1.15)
-        case "vanaheim": return SCNTorus(ringRadius: 0.44, pipeRadius: 0.17)
-        case "jotunheim": return SCNBox(width: 0.8, height: 0.8, length: 0.8, chamferRadius: 0.06)
-        case "svartalfheim": return SCNCylinder(radius: 0.34, height: 0.9)
-        case "helheim": return SCNTube(innerRadius: 0.2, outerRadius: 0.44, height: 0.9)
-        case "niflheim": return SCNBox(width: 0.55, height: 1.2, length: 0.55, chamferRadius: 0.12)
-        default: return SCNCone(topRadius: 0, bottomRadius: 0.5, height: 1.15)
+        case "asgard":
+            let gold = NSColor(red: 1.0, green: 0.80, blue: 0.32, alpha: 1)
+            group.addChildNode(part(SCNCone(topRadius: 0, bottomRadius: 0.26, height: 1.5), gold, glow: 0.7, at: V3(0, ground + 0.75, 0)))
+            for index in 0..<5 {
+                let angle = Float(index) * 2 * .pi / 5
+                group.addChildNode(part(SCNCone(topRadius: 0, bottomRadius: 0.14, height: 0.8), gold, glow: 0.6,
+                                        at: V3(0.58 * cos(angle), ground + 0.4, 0.58 * sin(angle))))
+            }
+        case "alfheim":
+            for index in 0..<7 {
+                let angle = Float(index) * 2 * .pi / 7
+                let height = 0.5 + 0.12 * Float(index % 4)
+                group.addChildNode(part(SCNBox(width: 0.17, height: CGFloat(height), length: 0.17, chamferRadius: 0.04), color, glow: 1.0,
+                                        at: V3(0.45 * cos(angle), ground + height / 2, 0.45 * sin(angle)),
+                                        euler: V3(0.18 * cos(angle), 0, 0.18 * sin(angle))))
+            }
+            group.addChildNode(part(SCNBox(width: 0.24, height: 1.3, length: 0.24, chamferRadius: 0.05), color, glow: 1.1,
+                                    at: V3(0, ground + 0.65, 0)))
+        case "vanaheim":
+            let leaf = NSColor(red: 0.30, green: 0.88, blue: 0.50, alpha: 1)
+            group.addChildNode(part(SCNCylinder(radius: 0.09, height: 0.7), NSColor(red: 0.45, green: 0.30, blue: 0.16, alpha: 1), glow: 0.1,
+                                    at: V3(0, ground + 0.35, 0)))
+            for (offset, radius) in [(V3(0, 0.95, 0), 0.42), (V3(0.28, 0.75, 0.1), 0.3), (V3(-0.25, 0.8, -0.12), 0.3)] {
+                group.addChildNode(part(SCNSphere(radius: CGFloat(radius)), leaf, glow: 0.55, at: offset))
+            }
+        case "midgard":
+            let grass = NSColor(red: 0.40, green: 0.80, blue: 0.38, alpha: 1)
+            let hill = part(SCNSphere(radius: 0.9), grass, glow: 0.25, at: V3(0, ground - 0.05, 0))
+            hill.simdScale = V3(1, 0.3, 1)
+            group.addChildNode(hill)
+            group.addChildNode(part(SCNBox(width: 0.4, height: 0.3, length: 0.34, chamferRadius: 0.02), NSColor(red: 0.85, green: 0.7, blue: 0.5, alpha: 1), glow: 0.2,
+                                    at: V3(0.1, ground + 0.35, 0)))
+            group.addChildNode(part(SCNPyramid(width: 0.52, height: 0.3, length: 0.46), NSColor(red: 0.7, green: 0.25, blue: 0.2, alpha: 1), glow: 0.3,
+                                    at: V3(0.1, ground + 0.5, 0)))
+            group.addChildNode(part(SCNSphere(radius: 0.2), grass, glow: 0.5, at: V3(-0.45, ground + 0.4, 0.1)))
+        case "jotunheim":
+            let rock = NSColor(red: 0.42, green: 0.55, blue: 0.95, alpha: 1)
+            for (x, height, radius) in [(-0.3, 1.4, 0.5), (0.3, 1.0, 0.4), (0.0, 0.7, 0.35)] {
+                group.addChildNode(part(SCNCone(topRadius: 0, bottomRadius: CGFloat(radius), height: CGFloat(height)), rock, glow: 0.35,
+                                        at: V3(Float(x), ground + Float(height) / 2, Float(x) * 0.4)))
+                group.addChildNode(part(SCNCone(topRadius: 0, bottomRadius: CGFloat(radius) * 0.45, height: CGFloat(height) * 0.35), NSColor.white, glow: 0.6,
+                                        at: V3(Float(x), ground + Float(height) * 0.83, Float(x) * 0.4)))
+            }
+        case "muspelheim":
+            let lava = NSColor(red: 1.0, green: 0.34, blue: 0.10, alpha: 1)
+            group.addChildNode(part(SCNCone(topRadius: 0.2, bottomRadius: 0.75, height: 1.0), NSColor(red: 0.20, green: 0.10, blue: 0.08, alpha: 1), glow: 0.1,
+                                    at: V3(0, ground + 0.5, 0)))
+            group.addChildNode(part(SCNSphere(radius: 0.22), lava, glow: 1.6, at: V3(0, ground + 1.0, 0)))
+            for index in 0..<4 {
+                let angle = Float(index) * .pi / 2 + 0.4
+                group.addChildNode(part(SCNBox(width: 0.05, height: 0.5, length: 0.05, chamferRadius: 0), lava, glow: 1.2,
+                                        at: V3(0.3 * cos(angle), ground + 0.55, 0.3 * sin(angle)), euler: V3(0.5 * sin(angle), 0, -0.5 * cos(angle))))
+            }
+        case "svartalfheim":
+            let iron = NSColor(red: 0.55, green: 0.55, blue: 0.62, alpha: 1)
+            let fire = NSColor(red: 1.0, green: 0.55, blue: 0.20, alpha: 1)
+            group.addChildNode(part(SCNBox(width: 0.7, height: 0.18, length: 0.3, chamferRadius: 0.03), iron, glow: 0.2, at: V3(-0.2, ground + 0.34, 0)))
+            group.addChildNode(part(SCNBox(width: 0.3, height: 0.3, length: 0.2, chamferRadius: 0.02), iron, glow: 0.2, at: V3(-0.2, ground + 0.15, 0)))
+            group.addChildNode(part(SCNCylinder(radius: 0.26, height: 0.55), NSColor(red: 0.28, green: 0.2, blue: 0.2, alpha: 1), glow: 0.1, at: V3(0.45, ground + 0.28, 0)))
+            group.addChildNode(part(SCNSphere(radius: 0.2), fire, glow: 1.5, at: V3(0.45, ground + 0.6, 0)))
+            group.addChildNode(part(SCNCylinder(radius: 0.06, height: 0.5), iron, glow: 0.1, at: V3(0.62, ground + 0.8, 0)))
+        case "helheim":
+            let stone = NSColor(red: 0.50, green: 0.64, blue: 0.66, alpha: 1)
+            for x in [-0.38, 0.38] {
+                group.addChildNode(part(SCNBox(width: 0.17, height: 1.0, length: 0.17, chamferRadius: 0.02), stone, glow: 0.2, at: V3(Float(x), ground + 0.5, 0)))
+            }
+            group.addChildNode(part(SCNBox(width: 1.0, height: 0.16, length: 0.2, chamferRadius: 0.02), stone, glow: 0.2, at: V3(0, ground + 1.05, 0)))
+            let portal = part(SCNPlane(width: 0.6, height: 0.95), NSColor(red: 0.3, green: 0.9, blue: 0.85, alpha: 1), glow: 1.2, at: V3(0, ground + 0.52, 0))
+            portal.opacity = 0.55
+            group.addChildNode(portal)
+        default: // niflheim
+            for index in 0..<8 {
+                let angle = Float(index) * 2 * .pi / 8 + 0.2
+                let height = 0.5 + 0.18 * Float(index % 3)
+                group.addChildNode(part(SCNCone(topRadius: 0, bottomRadius: 0.13, height: CGFloat(height)), color, glow: 1.0,
+                                        at: V3(0.46 * cos(angle), ground + height / 2, 0.46 * sin(angle)),
+                                        euler: V3(0.22 * cos(angle), 0, -0.22 * sin(angle))))
+            }
+            group.addChildNode(part(SCNCone(topRadius: 0, bottomRadius: 0.22, height: 1.5), color, glow: 1.2, at: V3(0, ground + 0.75, 0)))
         }
+        return group
     }
 
     private func glow(_ color: NSColor, intensity: CGFloat = 1) -> SCNMaterial {
@@ -438,56 +928,72 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
         node.simdPosition = realm.position
         let color = realm.nsColor
 
-        // Emblema metallico, luminoso, che ruota piano.
-        let core = SCNNode(geometry: emblem(realm.id))
-        let metal = SCNMaterial()
-        metal.lightingModel = .physicallyBased
-        metal.diffuse.contents = color
-        metal.metalness.contents = 0.6
-        metal.roughness.contents = 0.3
-        metal.emission.contents = color
-        metal.emission.intensity = 0.8
-        core.geometry?.materials = [metal]
-        core.runAction(.repeatForever(.rotateBy(x: 0, y: .pi * 2, z: 0, duration: 14)))
-        node.addChildNode(core)
+        // Isola di roccia sospesa.
+        let rock = SCNCone(topRadius: 0.98, bottomRadius: 0.12, height: 1.0)
+        let rockMaterial = SCNMaterial()
+        rockMaterial.lightingModel = .physicallyBased
+        rockMaterial.diffuse.contents = NSColor(red: 0.11, green: 0.10, blue: 0.13, alpha: 1)
+        rockMaterial.roughness.contents = 0.9
+        rockMaterial.emission.contents = color
+        rockMaterial.emission.intensity = 0.06
+        rock.materials = [rockMaterial]
+        let rockNode = SCNNode(geometry: rock)
+        rockNode.simdPosition = SIMD3(0, -0.5, 0)
+        node.addChildNode(rockNode)
+        let top = SCNCylinder(radius: 0.98, height: 0.08)
+        let topMaterial = SCNMaterial()
+        topMaterial.lightingModel = .physicallyBased
+        topMaterial.diffuse.contents = NSColor(red: Double(realm.rgb.x) * 0.35, green: Double(realm.rgb.y) * 0.35, blue: Double(realm.rgb.z) * 0.35, alpha: 1)
+        topMaterial.emission.contents = color
+        topMaterial.emission.intensity = 0.12
+        top.materials = [topMaterial]
+        node.addChildNode(SCNNode(geometry: top))
 
-        // Guscio di luce.
-        let shellGeometry = SCNSphere(radius: 0.95)
-        shellGeometry.segmentCount = 40
-        let shellMaterial = glow(color, intensity: 0.5)
-        shellMaterial.transparency = 0.16
-        shellMaterial.isDoubleSided = true
-        shellMaterial.blendMode = .add
-        shellMaterial.writesToDepthBuffer = false
-        shellGeometry.materials = [shellMaterial]
-        node.addChildNode(SCNNode(geometry: shellGeometry))
+        // Il paesaggio ruota piano dentro la cupola.
+        let scenery = miniature(realm.id, color: color)
+        scenery.runAction(.repeatForever(.rotateBy(x: 0, y: .pi * 2, z: 0, duration: 40)))
+        node.addChildNode(scenery)
+
+        // Cupola di vetro e anello alla base.
+        let dome = SCNSphere(radius: 1.12)
+        dome.segmentCount = 48
+        let glass = SCNMaterial()
+        glass.lightingModel = .blinn
+        glass.diffuse.contents = NSColor(red: Double(realm.rgb.x), green: Double(realm.rgb.y), blue: Double(realm.rgb.z), alpha: 1)
+        glass.emission.contents = color
+        glass.emission.intensity = 0.12
+        glass.specular.contents = NSColor.white
+        glass.transparency = 0.11
+        glass.isDoubleSided = true
+        glass.blendMode = .add
+        glass.writesToDepthBuffer = false
+        dome.materials = [glass]
+        let domeNode = SCNNode(geometry: dome)
+        domeNode.simdPosition = SIMD3(0, 0.55, 0)
+        node.addChildNode(domeNode)
+        let base = SCNTorus(ringRadius: 1.0, pipeRadius: 0.05)
+        base.materials = [glow(color, intensity: 1.4)]
+        let baseNode = SCNNode(geometry: base)
+        baseNode.simdPosition = SIMD3(0, 0.05, 0)
+        node.addChildNode(baseNode)
 
         // Anelli orbitanti, inclinati in modo diverso.
         for (index, tilt) in [0.35, -0.55].enumerated() {
-            let ring = SCNTorus(ringRadius: CGFloat(1.25 + Double(index) * 0.22), pipeRadius: 0.022)
+            let ring = SCNTorus(ringRadius: CGFloat(1.45 + Double(index) * 0.22), pipeRadius: 0.02)
             ring.materials = [glow(color, intensity: 1.2)]
             let ringNode = SCNNode(geometry: ring)
+            ringNode.simdPosition = SIMD3(0, 0.55, 0)
             ringNode.eulerAngles = SCNVector3(tilt, 0, tilt * 0.6)
             let spin: CGFloat = index == 0 ? 1 : -1
             ringNode.runAction(.repeatForever(.rotateBy(x: 0, y: spin * .pi * 2, z: 0, duration: 7 + Double(index) * 3)))
             node.addChildNode(ringNode)
         }
 
-        // Luce colorata che tinge i rami vicini.
-        let light = SCNNode()
-        light.light = SCNLight()
-        light.light?.type = .omni
-        light.light?.color = color
-        light.light?.intensity = 520
-        light.light?.attenuationStartDistance = 0.5
-        light.light?.attenuationEndDistance = 9
-        node.addChildNode(light)
-
         // Scintille.
         let sparks = SCNParticleSystem()
         sparks.birthRate = 16
         sparks.particleLifeSpan = 2.4
-        sparks.emitterShape = SCNSphere(radius: 1.0)
+        sparks.emitterShape = SCNSphere(radius: 1.2)
         sparks.birthLocation = .surface
         sparks.particleSize = 0.07
         sparks.particleColor = color
@@ -495,7 +1001,10 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
         sparks.blendMode = .additive
         sparks.particleImage = Texture.softDot()
         sparks.isLightingEnabled = false
-        node.addParticleSystem(sparks)
+        let sparkNode = SCNNode()
+        sparkNode.simdPosition = SIMD3(0, 0.55, 0)
+        sparkNode.addParticleSystem(sparks)
+        node.addChildNode(sparkNode)
 
         // Nome sempre rivolto alla camera.
         let text = SCNText(string: realm.name, extrusionDepth: 0.03)
@@ -505,7 +1014,7 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
         let label = SCNNode(geometry: text)
         let (minimum, maximum) = label.boundingBox
         label.pivot = SCNMatrix4MakeTranslation((maximum.x + minimum.x) / 2, minimum.y, 0)
-        label.simdPosition = SIMD3(0, -1.9, 0)
+        label.simdPosition = SIMD3(0, -1.55, 0)
         let billboard = SCNBillboardConstraint()
         billboard.freeAxes = .Y
         label.constraints = [billboard]
@@ -521,9 +1030,9 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
         let lens = SCNCamera()
         lens.fieldOfView = 52
         lens.zNear = 0.1
-        lens.zFar = 220
+        lens.zFar = 240
         lens.wantsHDR = true
-        lens.bloomIntensity = 1.3
+        lens.bloomIntensity = 1.25
         lens.bloomThreshold = 0.55
         lens.bloomBlurRadius = 14
         camera.camera = lens
@@ -543,7 +1052,7 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
         defer { lastTime = time }
         guard orbiting, !reduceMotion, lastTime > 0 else { return }
-        orbitAngle += min(time - lastTime, 0.1) * 0.05
+        orbitAngle += min(time - lastTime, 0.1) * 0.045
         camera.simdPosition = orbitPosition(angle: orbitAngle)
     }
 
@@ -551,7 +1060,7 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
 
     func setHover(_ id: String?) {
         for (key, node) in realmNodes {
-            let wanted: CGFloat = key == id ? 1.22 : 1
+            let wanted: CGFloat = key == id ? 1.2 : 1
             if abs(node.scale.x - wanted) > 0.01 {
                 node.runAction(.scale(to: wanted, duration: 0.18), forKey: "hover")
             }
@@ -562,7 +1071,7 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
     func fly(to id: String) {
         guard let realm = Realm.named(id) else { return }
         orbiting = false
-        let target = realm.position
+        let target = realm.position + SIMD3(0, 0.4, 0)
         let outward = simd_normalize(SIMD3(target.x, 0, target.z))
         let destination = target + outward * 5.6 + SIMD3(0, 0.7, 0)
         SCNTransaction.begin()
