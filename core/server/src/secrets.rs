@@ -34,29 +34,69 @@ pub trait KeyVault {
     fn set(&self, key: &[u8]) -> Result<(), String>;
 }
 
-/// Voce del portachiavi legata alla cartella dei dati, così più installazioni non si sovrascrivono.
+/// Voce del portachiavi legata alla cartella dei dati, così più installazioni non si sovrascrivono. Se la voce
+/// principale manca si cercano quelle con nomi alternativi dello stesso percorso (ADR-0231) e, trovata, la chiave
+/// viene copiata nella principale: un percorso scritto in un'altra forma non deve far perdere i segreti.
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-struct SystemVault(keyring::Entry);
+struct SystemVault {
+    primary: keyring::Entry,
+    alternates: Vec<keyring::Entry>,
+}
 
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 impl KeyVault for SystemVault {
     fn get(&self) -> Result<Option<Vec<u8>>, String> {
-        match self.0.get_secret() {
-            Ok(k) => Ok(Some(k)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(e) => Err(e.to_string()),
+        match self.primary.get_secret() {
+            Ok(k) => return Ok(Some(k)),
+            Err(keyring::Error::NoEntry) => {}
+            Err(e) => return Err(e.to_string()),
         }
+        for entry in &self.alternates {
+            if let Ok(k) = entry.get_secret() {
+                if k.len() == 32 {
+                    let _ = self.primary.set_secret(&k);
+                    return Ok(Some(k));
+                }
+            }
+        }
+        Ok(None)
     }
     fn set(&self, key: &[u8]) -> Result<(), String> {
-        self.0.set_secret(key).map_err(|e| e.to_string())
+        self.primary.set_secret(key).map_err(|e| e.to_string())
     }
+}
+
+fn account_for(path: &Path) -> String {
+    let digest = sha2::Sha256::digest(path.to_string_lossy().as_bytes());
+    format!("secrets-key-{}", &hex::encode(digest)[..16])
 }
 
 /// Nome della voce: impronta del percorso assoluto della cartella dei dati.
 pub fn vault_account(data_dir: &Path) -> String {
     let abs = fs::canonicalize(data_dir).unwrap_or_else(|_| data_dir.to_path_buf());
-    let digest = sha2::Sha256::digest(abs.to_string_lossy().as_bytes());
-    format!("secrets-key-{}", &hex::encode(digest)[..16])
+    account_for(&abs)
+}
+
+/// Nomi alternativi dello stesso percorso: come è stato scritto e, su macOS, con o senza il prefisso `/private`
+/// (le cartelle temporanee e `/var` ne sono un esempio). Il nome principale non è incluso.
+pub fn alternate_vault_accounts(data_dir: &Path) -> Vec<String> {
+    let primary = vault_account(data_dir);
+    let canonical = fs::canonicalize(data_dir).unwrap_or_else(|_| data_dir.to_path_buf());
+    let mut forms: Vec<PathBuf> = vec![data_dir.to_path_buf()];
+    let text = canonical.to_string_lossy().to_string();
+    if let Some(rest) = text.strip_prefix("/private") {
+        forms.push(PathBuf::from(rest));
+    } else if text.starts_with("/var") || text.starts_with("/tmp") || text.starts_with("/etc") {
+        forms.push(PathBuf::from(format!("/private{text}")));
+    }
+    let mut out: Vec<String> = Vec::new();
+    for form in forms {
+        let account = account_for(&form);
+        if account != primary && !out.contains(&account) {
+            out.push(account);
+        }
+    }
+    out
 }
 
 /// Portachiavi del sistema, se la piattaforma lo offre e `JARVIS_SECRETS_KEYCHAIN` non vale `off`.
@@ -69,9 +109,15 @@ pub fn system_vault(data_dir: &Path) -> Option<Box<dyn KeyVault>> {
         // Linux senza sessione D-Bus (server, servizi di sistema): nessun portachiavi, si usa il file 0600.
         #[cfg(target_os = "linux")]
         std::env::var_os("DBUS_SESSION_BUS_ADDRESS")?;
-        keyring::Entry::new("JARVIS", &vault_account(data_dir))
-            .ok()
-            .map(|e| Box::new(SystemVault(e)) as Box<dyn KeyVault>)
+        let primary = keyring::Entry::new("JARVIS", &vault_account(data_dir)).ok()?;
+        let alternates = alternate_vault_accounts(data_dir)
+            .iter()
+            .filter_map(|account| keyring::Entry::new("JARVIS", account).ok())
+            .collect();
+        Some(Box::new(SystemVault {
+            primary,
+            alternates,
+        }) as Box<dyn KeyVault>)
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     {
@@ -374,6 +420,17 @@ mod tests {
         let a = fresh("acc-a");
         let b = fresh("acc-b");
         assert_ne!(vault_account(&a), vault_account(&b));
+        // I nomi alternativi non includono mai il principale e non si ripetono.
+        let alternates = alternate_vault_accounts(&a);
+        assert!(!alternates.contains(&vault_account(&a)));
+        let mut unique = alternates.clone();
+        unique.dedup();
+        assert_eq!(unique, alternates);
+        // Con il prefisso /private la forma senza prefisso è fra le alternative (e viceversa).
+        let with_prefix = alternate_vault_accounts(Path::new("/private/var/jarvis-inesistente"));
+        assert!(with_prefix.contains(&account_for(Path::new("/var/jarvis-inesistente"))));
+        let without = alternate_vault_accounts(Path::new("/var/jarvis-inesistente"));
+        assert!(without.contains(&account_for(Path::new("/private/var/jarvis-inesistente"))));
         assert_eq!(vault_account(&a), vault_account(&a));
     }
 

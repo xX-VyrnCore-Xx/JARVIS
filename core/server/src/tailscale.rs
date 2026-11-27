@@ -74,7 +74,10 @@ pub fn parse_details(raw: &str) -> Details {
     }
 }
 
-/// Indicazione per l'utente, dalla causa più probabile alla meno: il primo ostacolo reale vince.
+/// Indicazione per l'utente. **La prova reale vince sul dato dichiarato** (ADR-0230): `MagicDNSEnabled` e
+/// `CertDomains` del JSON di Tailscale possono essere vuoti o in ritardo anche a funzionalità attive; se il nome si
+/// risolve o Tailscale Serve è già pubblicato, quei campi si ignorano. Se la prova fallisce, diventano un indizio
+/// con la cautela «se l'hai già attivato, ignora».
 pub fn advice(
     connected: bool,
     host: Option<&str>,
@@ -85,19 +88,33 @@ pub fn advice(
     if !connected {
         return "Tailscale è installato ma non è connesso: apri Tailscale e accedi.".into();
     }
-    if host.is_none() || details.magic_dns == Some(false) {
-        return "MagicDNS è disattivato nella tua tailnet, per questo i dispositivi non trovano il nome della macchina («hostname could not be found»): attivalo da login.tailscale.com/admin/dns, poi riprova.".into();
+    let Some(_) = host else {
+        return "Tailscale non mostra ancora il nome della macchina. Se MagicDNS è già attivo (login.tailscale.com/admin/dns), attendi qualche secondo che l'app Tailscale si sincronizzi e riprova; se il nome non compare, esci e rientra dall'app Tailscale.".into();
+    };
+    let flagged = if details.magic_dns == Some(false) {
+        Some("MagicDNS risulta disattivato")
+    } else if details.https_enabled == Some(false) {
+        Some("«HTTPS Certificates» risulta disattivato")
+    } else {
+        None
+    };
+    match resolves {
+        // Il nome funziona: i campi dichiarati, se dicono altro, sono sbagliati o in ritardo.
+        Some(true) if serving => "JARVIS è raggiungibile dai tuoi dispositivi Tailscale. Se un dispositivo non trova il nome, apri Tailscale su quel dispositivo: deve essere connesso con lo stesso account e con «Use Tailscale DNS settings» attivo.".into(),
+        Some(true) => "Tailscale è pronto: tocca «Collega con Tailscale» per rendere raggiungibile JARVIS dai tuoi dispositivi.".into(),
+        Some(false) => {
+            let hint = flagged.map_or(String::new(), |text| {
+                format!(" Tailscale segnala che {text}: se l'hai già attivato nella console, ignora questo avviso (il dato può essere in ritardo)." )
+            });
+            if serving {
+                format!("JARVIS è pubblicato, ma questo computer non risolve il nome della macchina (succede con il demone senza interfaccia di rete o con «Use Tailscale DNS settings» disattivato). Gli altri dispositivi possono funzionare comunque: tocca «Diagnostica» per provare il collegamento direttamente.{hint}")
+            } else {
+                format!("Il nome della macchina non si risolve su questo computer: dopo aver attivato MagicDNS o HTTPS può servire fino a un minuto. Tocca «Collega con Tailscale», poi «Diagnostica».{hint}")
+            }
+        }
+        None if serving => "JARVIS è pubblicato nella tua rete Tailscale.".into(),
+        None => "Tailscale è pronto: tocca «Collega con Tailscale» per rendere raggiungibile JARVIS dai tuoi dispositivi.".into(),
     }
-    if details.https_enabled == Some(false) {
-        return "HTTPS non è abilitato nella tua tailnet: attiva «HTTPS Certificates» da login.tailscale.com/admin/dns, poi tocca di nuovo «Collega con Tailscale».".into();
-    }
-    if resolves == Some(false) {
-        return "Il nome della macchina non si risolve ancora, nemmeno su questo computer: dopo aver attivato MagicDNS o HTTPS può servire fino a un minuto. Controlla in Tailscale che «Use Tailscale DNS settings» sia attivo, poi riprova. Su telefono e altri computer apri l'app Tailscale e verifica che sia connessa con lo stesso account.".into();
-    }
-    if !serving {
-        return "Tailscale è pronto: tocca «Collega con Tailscale» per rendere raggiungibile JARVIS dai tuoi dispositivi.".into();
-    }
-    "JARVIS è raggiungibile dai tuoi dispositivi Tailscale. Se un dispositivo non trova il nome, apri Tailscale su quel dispositivo: deve essere connesso con lo stesso account e con «Use Tailscale DNS settings» attivo.".into()
 }
 
 /// Il nome si risolve su questo computer? Interrogazione con limite di tempo, senza aspettare oltre 4 secondi.
@@ -307,6 +324,9 @@ fn step(name: &str, ok: bool, detail: impl Into<String>) -> Value {
     json!({"step": name, "ok": ok, "detail": detail.into().chars().take(240).collect::<String>()})
 }
 
+/// Esito quando solo il DNS di questo computer non funziona ma il collegamento reale sì.
+const LOCAL_DNS_ONLY: &str = "Il collegamento funziona: JARVIS è pubblicato, il certificato è valido e risponde. Solo questo computer non risolve il nome (demone Tailscale senza interfaccia di rete o «Use Tailscale DNS settings» disattivato qui): non influisce sugli altri dispositivi. Se un dispositivo non si collega, apri Tailscale su quel dispositivo: deve essere connesso con lo stesso account.";
+
 /// Esito della diagnosi dal primo passo che fallisce (`dns`, `connect`, `tls`, `http`) o `ok`.
 pub fn verdict(failed: Option<&str>, serve_text: &str) -> String {
     match failed {
@@ -369,53 +389,100 @@ pub fn diagnose(port: u16) -> Value {
     ));
     let (tx, rx) = std::sync::mpsc::channel();
     let target = host.clone();
+    let ips = details.ips.clone();
     std::thread::spawn(move || {
-        let _ = tx.send(probe_remote(&target));
+        let _ = tx.send(probe_remote(&target, &ips));
     });
     let probe = rx
         .recv_timeout(Duration::from_secs(14))
         .unwrap_or_else(|_| vec![step("dns", false, "nessuna risposta entro 14 secondi")]);
-    let failed = probe
-        .iter()
-        .find(|s| s["ok"] == false)
-        .and_then(|s| s["step"].as_str().map(str::to_string));
+    let failed = failed_step(&probe);
+    let local_dns_only =
+        failed.is_none() && probe.iter().any(|s| s["step"] == "dns" && s["ok"] == false);
     steps.extend(probe);
     let ok = failed.is_none();
     json!({"ok": ok, "host": host, "steps": steps, "health": details.health,
-        "tailscale_ips": details.ips, "verdict": verdict(failed.as_deref(), &serve_text)})
+        "tailscale_ips": details.ips, "local_dns_only": local_dns_only,
+        "verdict": if local_dns_only { LOCAL_DNS_ONLY.to_string() } else { verdict(failed.as_deref(), &serve_text) }})
 }
 
-/// DNS → TCP 443 → HTTPS verso `/api/connectivity`, dal Core su questo computer.
-fn probe_remote(host: &str) -> Vec<Value> {
-    use std::net::{TcpStream, ToSocketAddrs};
-    let mut steps = Vec::new();
-    let addrs: Vec<std::net::SocketAddr> = match (host, 443).to_socket_addrs() {
-        Ok(found) => found.collect(),
-        Err(error) => return vec![step("dns", false, format!("{host}: {error}"))],
-    };
-    if addrs.is_empty() {
-        return vec![step("dns", false, format!("{host}: nessun indirizzo"))];
+/// Risolutore che indirizza il nome della macchina all'IP di Tailscale: il certificato si verifica comunque sul
+/// nome, ma la connessione non dipende dal DNS di questo computer.
+struct PinnedAddress(std::net::SocketAddr);
+
+impl ureq::Resolver for PinnedAddress {
+    fn resolve(&self, _netloc: &str) -> std::io::Result<Vec<std::net::SocketAddr>> {
+        Ok(vec![self.0])
     }
-    steps.push(step(
-        "dns",
-        true,
-        addrs
-            .iter()
-            .take(2)
-            .map(|a| a.ip().to_string())
-            .collect::<Vec<_>>()
-            .join(", "),
-    ));
+}
+
+/// Primo indirizzo IPv4 di Tailscale (100.64.0.0/10) tra quelli del client.
+pub fn tailscale_ipv4(ips: &[String]) -> Option<std::net::Ipv4Addr> {
+    ips.iter()
+        .filter_map(|ip| ip.parse::<std::net::Ipv4Addr>().ok())
+        .find(|ip| ip.octets()[0] == 100 && (64..=127).contains(&ip.octets()[1]))
+}
+
+/// DNS → TCP 443 → HTTPS verso `/api/connectivity`, dal Core su questo computer. Se **questo** computer non
+/// risolve il nome (demone senza interfaccia di rete, DNS di Tailscale non in uso), la prova prosegue
+/// direttamente sull'indirizzo Tailscale: dimostra che pubblicazione e certificato funzionano, che è ciò che
+/// serve agli altri dispositivi (ADR-0230).
+fn probe_remote(host: &str, ips: &[String]) -> Vec<Value> {
+    use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+    let mut steps = Vec::new();
+    let mut pinned = false;
+    let resolved: Result<Vec<SocketAddr>, String> = match (host, 443).to_socket_addrs() {
+        Ok(found) => {
+            let list: Vec<SocketAddr> = found.collect();
+            if list.is_empty() {
+                Err(format!("{host}: nessun indirizzo"))
+            } else {
+                Ok(list)
+            }
+        }
+        Err(error) => Err(format!("{host}: {error}")),
+    };
+    let addrs = match resolved {
+        Ok(list) => {
+            steps.push(step(
+                "dns",
+                true,
+                list.iter()
+                    .take(2)
+                    .map(|a| a.ip().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ));
+            list
+        }
+        Err(reason) => {
+            match tailscale_ipv4(ips) {
+                Some(ip) => {
+                    pinned = true;
+                    steps.push(step(
+                    "dns",
+                    false,
+                    format!("{reason}. Questo computer non risolve il nome: provo direttamente {ip}"),
+                ));
+                    vec![SocketAddr::new(ip.into(), 443)]
+                }
+                None => return vec![step("dns", false, reason)],
+            }
+        }
+    };
     if let Err(error) = TcpStream::connect_timeout(&addrs[0], Duration::from_secs(4)) {
         steps.push(step("connect", false, error.to_string()));
         return steps;
     }
     steps.push(step("connect", true, "porta 443 raggiungibile"));
-    let agent = ureq::AgentBuilder::new()
+    let mut builder = ureq::AgentBuilder::new()
         .tls_config(crate::net::tls_config())
         .timeout(Duration::from_secs(6))
-        .redirects(0)
-        .build();
+        .redirects(0);
+    if pinned {
+        builder = builder.resolver(PinnedAddress(addrs[0]));
+    }
+    let agent = builder.build();
     match agent
         .get(&format!("https://{host}/api/connectivity"))
         .call()
@@ -449,6 +516,16 @@ fn probe_remote(host: &str) -> Vec<Value> {
         }
     }
     steps
+}
+
+/// Esito della prova: i passi dopo il DNS decidono. Un DNS locale che fallisce ma con connessione, certificato e
+/// risposta di JARVIS riusciti sull'IP di Tailscale non è un guasto del collegamento.
+pub fn failed_step(steps: &[Value]) -> Option<String> {
+    let reached = steps.iter().any(|s| s["step"] == "http" && s["ok"] == true);
+    steps
+        .iter()
+        .find(|s| s["ok"] == false && !(reached && s["step"] == "dns"))
+        .and_then(|s| s["step"].as_str().map(str::to_string))
 }
 
 /// Pubblica il Core locale nella rete privata (`tailscale serve --bg <porta>`). Non usa mai Funnel.
@@ -485,6 +562,48 @@ mod tests {
     }
 
     #[test]
+    fn a_failing_local_dns_is_not_a_failure_when_the_direct_probe_works() {
+        let ok = |name: &str, ok: bool| step(name, ok, "x");
+        // DNS locale fallito, ma connessione, certificato e risposta di JARVIS riusciti sull'IP di Tailscale.
+        let reached = [
+            ok("dns", false),
+            ok("connect", true),
+            ok("tls", true),
+            ok("http", true),
+        ];
+        assert_eq!(failed_step(&reached), None);
+        // Il DNS fallisce e anche il resto: il primo passo fallito resta il DNS.
+        assert_eq!(failed_step(&[ok("dns", false)]).as_deref(), Some("dns"));
+        // Un guasto reale dopo il DNS riuscito viene segnalato.
+        let tls = [ok("dns", true), ok("connect", true), ok("tls", false)];
+        assert_eq!(failed_step(&tls).as_deref(), Some("tls"));
+        // Il DNS fallisce, la connessione sull'IP riesce, ma JARVIS non risponde: il guasto è reale.
+        let bad = [
+            ok("dns", false),
+            ok("connect", true),
+            ok("tls", true),
+            ok("http", false),
+        ];
+        assert_eq!(failed_step(&bad).as_deref(), Some("dns"));
+    }
+
+    #[test]
+    fn the_tailscale_address_is_the_ipv4_in_the_cgnat_range() {
+        let ips: Vec<String> = ["fd7a:115c::5", "192.168.1.9", "100.64.0.5"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            tailscale_ipv4(&ips),
+            Some(std::net::Ipv4Addr::new(100, 64, 0, 5))
+        );
+        assert_eq!(
+            tailscale_ipv4(&["100.128.0.1".to_string(), "10.0.0.1".to_string()]),
+            None
+        );
+        assert_eq!(tailscale_ipv4(&[]), None);
+    }
+
+    #[test]
     fn details_explain_why_a_name_cannot_be_found() {
         let raw = r#"{"BackendState":"Running","Health":["DNS non raggiungibile"],
             "CurrentTailnet":{"MagicDNSEnabled":false},"CertDomains":[],
@@ -495,25 +614,47 @@ mod tests {
         assert_eq!(details.ips, ["100.64.0.5", "fd7a::5"]);
         assert_eq!(details.health, ["DNS non raggiungibile"]);
         assert_eq!(parse_details("non json"), Details::default());
-        // Il primo ostacolo reale vince: prima MagicDNS, poi HTTPS, poi la risoluzione sul computer.
+        // La prova reale vince sul dato dichiarato (ADR-0230).
         let host = Some("casa.tail1.ts.net");
+        // Il nome si risolve: se il JSON dice «MagicDNS disattivato» è sbagliato o in ritardo, e non si segnala.
+        let works = advice(true, host, true, &details, Some(true));
+        assert!(
+            works.contains("raggiungibile") && !works.contains("risulta disattivato"),
+            "{works}"
+        );
+        let ready = advice(true, host, false, &details, Some(true));
+        assert!(
+            ready.contains("Collega con Tailscale") && !ready.contains("disattivato"),
+            "{ready}"
+        );
+        // Il nome non si risolve: il dato dichiarato diventa un indizio, con la cautela «se l'hai già attivato».
         let off = advice(true, host, false, &details, Some(false));
-        assert!(off.contains("MagicDNS è disattivato"), "{off}");
+        assert!(
+            off.contains("MagicDNS risulta disattivato") && off.contains("già attivato"),
+            "{off}"
+        );
         let no_https = Details {
             magic_dns: Some(true),
             https_enabled: Some(false),
             ..Default::default()
         };
-        assert!(advice(true, host, false, &no_https, Some(true)).contains("HTTPS Certificates"));
+        assert!(advice(true, host, false, &no_https, Some(false)).contains("HTTPS Certificates"));
         let fine = Details {
             magic_dns: Some(true),
             https_enabled: Some(true),
             ..Default::default()
         };
-        assert!(advice(true, host, true, &fine, Some(false)).contains("non si risolve ancora"));
+        let local = advice(true, host, true, &fine, Some(false));
+        assert!(
+            local.contains("pubblicato") && local.contains("Diagnostica"),
+            "{local}"
+        );
         assert!(advice(true, host, false, &fine, Some(true)).contains("Collega con Tailscale"));
         assert!(advice(true, host, true, &fine, Some(true)).contains("raggiungibile"));
         assert!(advice(false, None, false, &fine, None).contains("non è connesso"));
+        // Nome assente: messaggio prudente, non un'accusa a MagicDNS.
+        let nameless = advice(true, None, false, &details, None);
+        assert!(nameless.contains("Se MagicDNS è già attivo"), "{nameless}");
         // Dati assenti nel JSON: nessuna ipotesi, nessun falso allarme.
         assert!(!advice(true, host, true, &Details::default(), None).contains("disattivato"));
     }

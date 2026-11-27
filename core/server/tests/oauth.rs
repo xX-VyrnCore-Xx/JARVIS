@@ -240,6 +240,59 @@ async fn oauth_pkce_flow_authorizes_refreshes_and_revokes() {
             .await;
         assert_eq!(status, StatusCode::OK);
     }
+    // Il client salvato sopravvive a «Disinstalla» e si condivide fra Gmail e Calendario (ADR-0231): niente
+    // file JSON da reimportare.
+    let (_, templates) = env.json("GET", "/api/connectors/templates", None).await;
+    let gmail_template = templates["templates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == "gmail")
+        .unwrap();
+    assert_eq!(gmail_template["client_saved"], true);
+    assert_eq!(gmail_template["needs_client_id"], false);
+    assert!(!templates.to_string().contains("synthetic-secret"));
+    let (status, out) = env.json("POST", gmail, Some(json!({}))).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let url = url::Url::parse(out["authorize_url"].as_str().unwrap()).unwrap();
+    let q: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+    assert_eq!(q["client_id"], "fixture.apps.googleusercontent.com");
+    let (status, out) = env
+        .json(
+            "POST",
+            "/api/connectors/templates/google_calendar",
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["client_saved"], true);
+    // «Revoca» non cancella il client: si può autorizzare di nuovo senza file né secret.
+    let (status, _) = env
+        .json("POST", "/api/connectors/gmail/revoke", Some(json!({})))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, out) = env
+        .json("POST", "/api/connectors/gmail/oauth/start", Some(json!({})))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    for id in ["gmail", "google_calendar"] {
+        let (status, _) = env
+            .json("DELETE", &format!("/api/connectors/{id}"), None)
+            .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+    // Dimenticare il client è un gesto esplicito; dopo, senza file non si parte.
+    let (status, out) = env
+        .json(
+            "DELETE",
+            "/api/connectors/oauth-clients/oauth2.googleapis.com",
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    assert_eq!(out["forgotten"], true);
+    let (status, _) = env.json("POST", gmail, Some(json!({}))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
     let manifest = json!({
         "contract": "jarvis.connector/1", "id": "profilo", "name": "Profilo", "version": "1.0.0", "description": "Servizio OAuth sintetico",
         "base_url": format!("{server}/api"), "allowed_hosts": ["127.0.0.1"],

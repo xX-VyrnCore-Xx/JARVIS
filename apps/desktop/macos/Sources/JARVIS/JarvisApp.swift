@@ -3505,11 +3505,22 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     private var connectorSetup: some View {
         card("Google Workspace", icon: "link.circle") {
-            Text("Importa il JSON OAuth Desktop esistente. Il consenso si completa nel browser.")
+            Text("Importa il JSON OAuth Desktop una sola volta: resta salvato (cifrato) per Gmail e Calendario, anche dopo aggiornamenti e revoche. Il consenso si completa nel browser.")
                 .foregroundStyle(.secondary)
+            let clientSaved = records(payload, key: "templates").contains {
+                $0.id == "gmail" && $0.data["client_saved"] as? Bool == true
+            }
+            if clientSaved {
+                Label("Client Google già salvato: non serve reimportare il file.", systemImage: "checkmark.seal")
+                    .font(.caption).foregroundStyle(.green)
+                HStack {
+                    Button("Accedi a Gmail") { Task { await startOAuth("/api/connectors/gmail/oauth/import", body: [:]) } }
+                    Button("Accedi a Calendario") { Task { await startOAuth("/api/connectors/google_calendar/oauth/import", body: [:]) } }
+                }
+            }
             HStack {
-                Button("Importa per Gmail") { importGoogle("gmail") }
-                Button("Importa per Calendario") { importGoogle("google_calendar") }
+                Button(clientSaved ? "Sostituisci il file per Gmail" : "Importa per Gmail") { importGoogle("gmail") }
+                Button(clientSaved ? "Sostituisci il file per Calendario" : "Importa per Calendario") { importGoogle("google_calendar") }
             }
             let templates = records(payload, key: "templates")
             if !templates.isEmpty {

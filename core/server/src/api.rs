@@ -786,7 +786,11 @@ pub fn router(state: Shared) -> Router {
             "/api/skills/{id}",
             axum::routing::put(skill_update).delete(skill_delete),
         )
-        .route("/api/connectors/templates", get(connector_templates))
+        .route("/api/connectors/templates", get(connector_templates_view))
+        .route(
+            "/api/connectors/oauth-clients/{provider}",
+            axum::routing::delete(forget_oauth_client),
+        )
         .route("/api/connectors/templates/{id}", post(install_template))
         .route("/api/connectors/new", post(install_new_connector))
         .route("/api/connectors/{id}", delete(uninstall_connector))
@@ -2666,21 +2670,35 @@ async fn skill_delete(State(state): State<Shared>, Path(id): Path<String>) -> Re
     reply(with_core(&state, move |j| j.skill_delete(&id)).await)
 }
 
-async fn connector_templates() -> Json<Value> {
-    Json(crate::connector_catalog::index())
-}
-
-/// Installa un connettore del catalogo con l'ID client OAuth del proprietario.
+/// Installa un connettore del catalogo. Per i servizi OAuth l'ID client è facoltativo se ne esiste già uno salvato
+/// per lo stesso fornitore (ADR-0231).
 async fn install_template(
     State(state): State<Shared>,
     Path(id): Path<String>,
     Json(body): Json<Value>,
 ) -> Response {
-    let manifest = match crate::connector_catalog::manifest(&id, body["client_id"].as_str()) {
-        Ok(m) => m,
-        Err(e) => return error(StatusCode::BAD_REQUEST, "bad_request", &e),
-    };
-    reply(with_core(&state, move |j| j.install_new_connector(&manifest)).await)
+    let client = body["client_id"].as_str().map(str::to_string);
+    reply(with_core(&state, move |j| j.install_template(&id, client.as_deref())).await)
+}
+
+/// Elenco dei modelli, con l'indicazione dei client OAuth già salvati.
+async fn connector_templates_view(State(state): State<Shared>) -> Response {
+    Json(with_core(&state, |j| j.connector_templates()).await).into_response()
+}
+
+/// Dimentica il client OAuth salvato di un fornitore: gesto esplicito, solo dal computer del proprietario.
+async fn forget_oauth_client(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+    Path(provider): Path<String>,
+) -> Response {
+    if let Some(denied) = dataset_owner_only(&device) {
+        return denied;
+    }
+    reply_said(
+        with_core(&state, move |j| j.forget_oauth_client(&provider)).await,
+        "connector.oauth_client",
+    )
 }
 
 fn limit(q: &Value, default: u32) -> u32 {
