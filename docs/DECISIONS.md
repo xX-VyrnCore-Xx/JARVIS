@@ -2552,6 +2552,11 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Perimetro:** solo il tema; nessun cambio di layout, per non introdurre sovrapposizioni che non posso vedere da qui. L'app macOS aveva già transizioni, movimento ridotto e schede con ombra (ADR-0216): invariata.
 - **Verifica:** `cargo fmt --check`; tipi controllati sul sorgente di egui 0.37. La compilazione e l'aspetto reale si provano solo in CI/su Windows: aspetto **non verificato visivamente**.
 
+### ADR-0225 — Nuova icona dell'app (2026-11-27, accettata)
+
+- **Decisione:** la «J» a tubo di neon resta il simbolo, ridisegnata da `scripts/make_icon.py` (Pillow, riproducibile): squircle con **margine e ombra** come richiede macOS (prima la tela era piena), gradiente blu notte con alone, tratto continuo con anima chiara centrata e terminali tondi (prima: anima spostata e estremità tagliate), bordo sottile con riflesso. Genera `icon.png` 1024, `128x128(.@2x).png`, `32x32.png`, `icon.ico` (16–256) e `icon.icns` (16–1024).
+- **Verifica:** letta a 1024 e a 32 px (resta riconoscibile). Non verificata nel Dock, in Esplora file o nell'installer reali. L'icona Android (vettoriale, `ic_launcher_*`) non è stata modificata.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.
