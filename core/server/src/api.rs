@@ -3086,15 +3086,47 @@ async fn voice_say(
     if device.is_some() {
         return owner_only_response();
     }
-    let _ = &state;
     let Some(text) = body["text"].as_str().map(str::to_owned) else {
         return CoreError::BadRequest("campo 'text' mancante".into()).into_response();
     };
-    match tokio::task::spawn_blocking(move || crate::speech::speak(&text)).await {
-        Ok(Ok(doc)) => Json(doc).into_response(),
-        Ok(Err(e)) => error(StatusCode::UNPROCESSABLE_ENTITY, e.code, &e.message),
-        Err(_) => CoreError::Internal("Lettura interrotta.".into()).into_response(),
+    let spoken = text.clone();
+    let first = tokio::task::spawn_blocking(move || crate::speech::speak(&text)).await;
+    let failure = match first {
+        Ok(Ok(doc)) => return Json(doc).into_response(),
+        Ok(Err(e)) => e,
+        Err(_) => return CoreError::Internal("Lettura interrotta.".into()).into_response(),
+    };
+    // Voce di sistema assente o non utilizzabile: si prova il modello vocale locale installato (Piper),
+    // sempre maschile, e si riproduce il suo audio. Se manca anche quello, l'errore originale resta.
+    if matches!(failure.code, "speech.no_male_voice" | "speech.unavailable") {
+        let prepared = crate::speech::prepare(&spoken);
+        if !prepared.is_empty() {
+            let dir = with_core(&state, |j| j.data_dir()).await;
+            let local = with_core(&state, move |j| j.voice_speak(&prepared)).await;
+            if let Ok((audio, _meta)) = local {
+                let played = tokio::task::spawn_blocking(move || {
+                    crate::speech::play_wav(&dir.join("tmp"), &audio)
+                })
+                .await;
+                if let Ok(Ok(doc)) = played {
+                    return Json(doc).into_response();
+                }
+            }
+        }
+        return error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            failure.code,
+            format!(
+                "{} Il modello vocale locale non è riuscito a parlare: controlla in Voce che sia installato.",
+                failure.message
+            ),
+        );
     }
+    error(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        failure.code,
+        &failure.message,
+    )
 }
 
 async fn voice_stop(device: Option<axum::Extension<DeviceCtx>>) -> Response {

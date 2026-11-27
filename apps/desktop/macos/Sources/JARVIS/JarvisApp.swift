@@ -1758,8 +1758,13 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     let duration = min(max(Double(reply.count) / 14, 1.5), 45)
                     Task {
                         avatarSpeaking = true
-                        _ = try? await core.request("/api/voice/say", method: "POST", body: ["text": reply], timeout: 15)
-                        try? await Task.sleep(for: .seconds(duration))
+                        do {
+                            _ = try await core.request("/api/voice/say", method: "POST", body: ["text": reply], timeout: 30)
+                            try? await Task.sleep(for: .seconds(duration))
+                        } catch {
+                            // Prima l'errore veniva ignorato e JARVIS restava muto senza dire perché.
+                            self.info = "Risposta vocale non riuscita: \(error.localizedDescription)"
+                        }
                         avatarSpeaking = false
                     }
                 }
@@ -1838,7 +1843,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 Text("Motore: riconoscimento vocale del Mac, sul dispositivo. Mentre ascolta, il Mac trascrive in memoria ciò che dici e JARVIS agisce solo dopo «Hey Jarvis»: nulla viene salvato né inviato. Per far ascoltare soltanto la parola di attivazione serve il motore locale del Core (voice-setup).")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            Text("JARVIS parla solo con una voce maschile (Luca).").font(.caption).foregroundStyle(.secondary)
+            Text("JARVIS parla solo con una voce maschile: Luca, le voci incluse in macOS (Eddy, Reed, Rocko) o il modello locale installato.").font(.caption).foregroundStyle(.secondary)
             if !voiceHint.isEmpty { Text(voiceHint).font(.caption).foregroundStyle(.secondary) }
             Button("Fai tacere") {
                 Task { _ = try? await core.request("/api/voice/stop", method: "POST", body: [:]) }
