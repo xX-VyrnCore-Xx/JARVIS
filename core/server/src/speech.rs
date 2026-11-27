@@ -91,23 +91,34 @@ fn is_emoji(c: char) -> bool {
 
 // ------------------------------------------------------------------ scelta della voce
 
-/// Voci maschili italiane note su macOS, in ordine di preferenza (la qualità migliore per prima).
-const MAC_MALE: [&str; 3] = ["Luca (Premium)", "Luca (Enhanced)", "Luca"];
+/// Voci maschili italiane note su macOS, in ordine di preferenza: «Luca» (da scaricare) e le voci già incluse in
+/// macOS 13 e successivi («Eddy», «Reed», «Rocko»). I nomi possono avere un suffisso di qualità o di lingua,
+/// per esempio «Luca (Premium)» o «Eddy (Italiano (Italia))».
+const MAC_MALE: [&str; 4] = ["Luca", "Eddy", "Reed", "Rocko"];
 
 /// Voce maschile dall'elenco di `say -v '?'` (righe «Nome  it_IT  # esempio»). Mai una voce non nota come maschile.
 pub fn pick_mac_voice(listing: &str) -> Option<String> {
-    let installed: Vec<String> = listing
+    let rank = |name: &str| -> Option<(usize, u8)> {
+        let base = name.split(" (").next().unwrap_or(name).trim();
+        let order = MAC_MALE.iter().position(|m| *m == base)?;
+        let quality = if name.contains("Premium") {
+            0
+        } else if name.contains("Enhanced") {
+            1
+        } else {
+            2
+        };
+        Some((order, quality))
+    };
+    listing
         .lines()
         .filter(|l| l.contains("it_IT") || l.contains("it-IT"))
         .filter_map(|l| {
             let name = l.split("  ").next()?.trim();
-            (!name.is_empty()).then(|| name.to_string())
+            rank(name).map(|r| (r, name.to_string()))
         })
-        .collect();
-    MAC_MALE
-        .iter()
-        .find(|m| installed.iter().any(|i| i == *m))
-        .map(|m| (*m).to_string())
+        .min_by_key(|(r, _)| *r)
+        .map(|(_, name)| name)
 }
 
 /// Piano per pronunciare un testo: programma, argomenti e variabili d'ambiente.
@@ -162,6 +173,50 @@ pub fn stop() {
         let _ = child.kill();
         let _ = child.wait();
     }
+}
+
+/// Riproduce un file WAV con il lettore di sistema (voce locale, modello Piper): `afplay` su macOS, `SoundPlayer`
+/// su Windows. Interrompe la lettura precedente; il file temporaneo è nella cartella indicata e viene tolto da
+/// `stop()` o dalla lettura successiva.
+pub fn play_wav(dir: &Path, wav: &[u8]) -> Result<Value, ToolError> {
+    stop();
+    let _ = std::fs::create_dir_all(dir);
+    let path = dir.join("risposta.wav");
+    std::fs::write(&path, wav).map_err(|_| {
+        err(
+            "speech.unavailable",
+            "Impossibile preparare l'audio da riprodurre",
+        )
+    })?;
+    let mut cmd = match std::env::consts::OS {
+        "macos" => {
+            let mut c = Command::new("/usr/bin/afplay");
+            c.arg(&path);
+            c
+        }
+        "windows" => {
+            let mut c = Command::new("powershell.exe");
+            c.args(["-NoProfile", "-NonInteractive", "-Command"]);
+            c.arg("(New-Object Media.SoundPlayer $env:JARVIS_WAV).PlaySync()");
+            c.env("JARVIS_WAV", &path);
+            c
+        }
+        _ => {
+            return Err(err(
+                "speech.unavailable",
+                "La riproduzione è disponibile su macOS e Windows",
+            ))
+        }
+    };
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    crate::hide_console(&mut cmd);
+    let child = cmd
+        .spawn()
+        .map_err(|_| err("speech.unavailable", "Avvio del lettore audio non riuscito"))?;
+    *current().lock().unwrap_or_else(|e| e.into_inner()) = Some(child);
+    Ok(json!({"speaking": true, "engine": "local-model", "gender": "male"}))
 }
 
 fn mac_voice() -> Result<String, ToolError> {
@@ -321,6 +376,17 @@ mod tests {
         assert_eq!(pick_mac_voice(listing).as_deref(), Some("Luca"));
         let better = format!("{listing}Luca (Enhanced)     it_IT    # Ciao\n");
         assert_eq!(pick_mac_voice(&better).as_deref(), Some("Luca (Enhanced)"));
+        // Senza Luca si usano le voci maschili già incluse in macOS, anche con il suffisso di lingua.
+        let built_in = "Alice  it_IT  # Ciao\nFlo (Italiano (Italia))  it_IT  # Ciao\nRocko (Italiano (Italia))  it_IT  # Ciao\nEddy (Italiano (Italia))  it_IT  # Ciao\n";
+        assert_eq!(
+            pick_mac_voice(built_in).as_deref(),
+            Some("Eddy (Italiano (Italia))")
+        );
+        // Una voce inglese con lo stesso nome non vale.
+        assert_eq!(
+            pick_mac_voice("Eddy (English (US))  en_US  # Hello\n"),
+            None
+        );
         // Solo voci femminili o non italiane: nessuna scelta, mai un ripiego.
         assert_eq!(
             pick_mac_voice("Alice  it_IT  # Ciao\nPaola  it_IT  # Ciao\nDaniel  en_GB  # Hello\n"),

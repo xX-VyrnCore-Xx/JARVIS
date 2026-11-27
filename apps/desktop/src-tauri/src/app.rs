@@ -5220,7 +5220,7 @@ impl JarvisApp {
         }
         if !self.remote {
             ui.heading("Voce");
-            ui.label("JARVIS parla solo con una voce maschile (Luca su macOS, Cosimo su Windows).");
+            ui.label("JARVIS parla solo con una voce maschile (macOS: Luca, Eddy, Reed o Rocko; Windows: Cosimo) o con il modello locale installato.");
             let mut speak = self.speak_replies;
             if ui
                 .checkbox(&mut speak, "Leggi le risposte ad alta voce")

@@ -2568,6 +2568,20 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Perimetro:** nessun cambio di layout o colori principali: transizione di sezione, aurora, avatar e pressione dei pulsanti c'erano già.
 - **Verifica:** compila solo in CI (job macOS); **aspetto non verificato visivamente**.
 
+### ADR-0228 — Revisione generale: sicurezza, competenze, correttore (2026-11-27, accettata)
+
+- **Audit di sicurezza del Core:** nessun `unsafe`; le query con nome di tabella costruito a testo usano solo costanti interne; il TLS dei nodi è fissato per impronta **con** verifica della firma; `cargo audit` non segnala vulnerabilità (5 avvisi «non più mantenuto»: `chrono`, `rustls-pemfile`, `zbus_names`, `zvariant`, `zvariant_derive`, dipendenze transitive già note). **Trovato e corretto:** `GET /api/nodes` confrontava il token con `!=` (non a tempo costante) mentre il resto del Core usa `same_token`; ora usa la stessa funzione.
+- **Competenze:** da 25 a 31. Nuove: `dataset`, `automazioni`, `refactoring`, `mac`, `documentazione`, `progetto-nuovo` (istruzioni con conferma per le azioni rischiose, dataset sempre privati su Hugging Face). Nuovo test-guardia: ogni competenza incorporata usa solo strumenti presenti nel catalogo, ha id unico, parole di attivazione minuscole e istruzioni entro il limite.
+- **Correttore dei prompt (ADR-0135):** aggiunti accento grave al posto dell'acuto («perchè», «finchè»), apostrofo al posto dell'accento («piu'», «gia'»), voci che non vogliono l'accento («fà», «sà», «stà»), abbreviazioni e refusi frequenti («xò», «anke», «qnd», «eccezzione»). Codice, percorsi e URL restano intatti (test).
+- **Pulizia:** nessun file generato tracciato nel repository; nessun avviso di `clippy`.
+- **Non provato:** Hugging Face, Google e NIM reali; modelli TTS/STT su macOS reale (non modificati in questo giro).
+
+### ADR-0229 — Risposta vocale su macOS: voci incluse, modello locale, errori visibili (2026-11-27, accettata)
+
+- **Problema:** su macOS le risposte lette ad alta voce usavano solo `say` con «Luca»; se Luca non era installato (o il suo nome in elenco aveva un suffisso diverso, come «Eddy (Italiano (Italia))») JARVIS restava muto. Il modello locale scaricato (Piper) non veniva mai usato per le risposte della chat, e l'app ignorava l'errore (`try?`): nessun messaggio.
+- **Decisione:** (a) `pick_mac_voice` accetta anche le voci maschili già incluse in macOS 13+ («Eddy», «Reed», «Rocko»), con qualsiasi suffisso di qualità o lingua, preferendo Luca e la qualità più alta; mai una voce non nota come maschile. (b) `POST /api/voice/say`: se la voce di sistema manca o non è utilizzabile, usa il **modello vocale locale** (sempre maschile) e ne riproduce l'audio con `afplay` (macOS) o `SoundPlayer` (Windows); se fallisce anche quello, l'errore dice cosa fare. (c) L'app macOS mostra l'errore della lettura invece di ignorarlo.
+- **Verifica:** test sulla scelta della voce (suffissi, ripiego, voci non italiane); `clippy` e test del Core verdi. **Non provato su un Mac reale**: `say`, `afplay` e il modello Piper richiedono macOS e il motore vocale installato.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.
