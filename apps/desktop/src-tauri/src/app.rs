@@ -4984,6 +4984,22 @@ impl JarvisApp {
         let Some(client) = self.client.clone() else {
             return;
         };
+        // Se il client Google è già salvato (ADR-0231) non si chiede di nuovo il file JSON: il Core lo ritrova.
+        // Chiamata locale e rapida; se non c'è un client salvato risponde con un errore e si apre il selettore.
+        self.error = None;
+        self.connector_oauth_notice = None;
+        // Con Maiusc premuto si sceglie un file nuovo (per sostituire il client salvato).
+        let replace = ctx.input(|input| input.modifiers.shift);
+        if !replace {
+            if let Ok(result) = client.post(
+                &format!("/api/connectors/{id}/oauth/import"),
+                Some(&json!({})),
+            ) {
+                let _ = self.tx.send(Event::ConnectorOAuth(Ok(result)));
+                ctx.request_repaint();
+                return;
+            }
+        }
         let Some(path) = rfd::FileDialog::new()
             .set_title("Seleziona le credenziali OAuth Desktop di Google")
             .add_filter("Credenziali Google", &["json"])
@@ -5039,7 +5055,7 @@ impl JarvisApp {
             .inner_margin(14)
             .show(ui, |ui| {
                 ui.strong(egui::RichText::new("Google Workspace").color(ACCENT));
-                ui.label("Usa lo stesso JSON OAuth Desktop per Gmail e Calendario. Google chiederà il consenso per ciascun servizio.");
+                ui.label("Importa il JSON OAuth Desktop una sola volta: resta salvato (cifrato) per Gmail e Calendario, anche dopo aggiornamenti e revoche. Per sostituirlo tieni premuto Maiusc mentre clicchi. Google chiederà il consenso per ciascun servizio.");
                 ui.add_space(4.0);
                 ui.horizontal_wrapped(|ui| {
                     for (id, label) in [("gmail", "Importa per Gmail"), ("google_calendar", "Importa per Calendario")] {

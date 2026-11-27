@@ -77,6 +77,28 @@ pub fn manifest(id: &str, client_id: Option<&str>) -> Result<Value, String> {
     Ok(m)
 }
 
+/// Fornitore OAuth di un modello del catalogo: l'host dell'endpoint dei token (per esempio
+/// `oauth2.googleapis.com` per Gmail e Calendario). Chi ha lo stesso fornitore condivide lo stesso client OAuth
+/// (ADR-0231). `None` per i servizi senza OAuth.
+pub fn provider_key(id: &str) -> Option<String> {
+    let raw = MANIFESTS.iter().find(|(k, _)| *k == id).map(|(_, m)| *m)?;
+    let manifest: Value = serde_json::from_str(raw).ok()?;
+    provider_of(&manifest)
+}
+
+/// Fornitore OAuth di un manifest già installato.
+pub fn provider_of(manifest: &Value) -> Option<String> {
+    if manifest["auth"]["type"] != "oauth2" {
+        return None;
+    }
+    let url = manifest["auth"]["token_url"].as_str()?;
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let host = rest.split(['/', '?', '#']).next()?.split(':').next()?;
+    (!host.is_empty()).then(|| host.to_ascii_lowercase())
+}
+
 /// Interpreta il JSON scaricato da Google Cloud per un client OAuth di tipo Desktop.
 pub fn google_credentials(file: &Value) -> Result<(&str, &str), String> {
     let installed = &file["installed"];
@@ -108,6 +130,15 @@ pub fn google_credentials(file: &Value) -> Result<(&str, &str), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gmail_and_calendar_share_one_oauth_provider() {
+        assert_eq!(provider_key("gmail"), provider_key("google_calendar"));
+        assert!(provider_key("gmail").is_some());
+        assert_eq!(provider_key("open_meteo"), None);
+        assert_ne!(provider_key("gmail"), provider_key("github"));
+        assert_eq!(provider_key("non_esiste"), None);
+    }
 
     #[test]
     fn every_template_is_a_valid_manifest() {

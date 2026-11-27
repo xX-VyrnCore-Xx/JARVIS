@@ -6465,6 +6465,12 @@ fn oauth_name(id: &str) -> String {
     format!("connector:{id}:oauth")
 }
 
+/// Client OAuth salvato per fornitore (ADR-0231): sopravvive a «Revoca» e «Disinstalla» e si riusa da tutti i
+/// connettori dello stesso fornitore, così il file JSON del client si importa una volta sola.
+fn oauth_client_name(provider: &str) -> String {
+    format!("oauth_client:{provider}")
+}
+
 fn webhook_name(id: &str) -> String {
     format!("connector:{id}:webhook")
 }
@@ -6581,6 +6587,8 @@ impl Jarvis {
             "id": id, "name": manifest["name"], "version": manifest["version"], "description": manifest["description"],
             "base_url": manifest["base_url"], "auth": manifest["auth"]["type"],
             "installed_at": installed, "authorized_at": authorized, "authorized": authorized.is_some(),
+            "client_saved": crate::connector_catalog::provider_of(manifest)
+                .is_some_and(|p| self.saved_oauth_client(&p).is_some()),
             "has_credential": has(if manifest["auth"]["type"] == "oauth2" { oauth_name(id) } else { token_name(id) }),
             "webhook": manifest["webhook"]["enabled"] == true, "webhook_path": format!("/api/hooks/{id}"),
             "operations": manifest["operations"].as_array().map(|ops| ops.iter().map(|o| json!({
@@ -6792,27 +6800,133 @@ impl Jarvis {
         )
     }
 
+    /// Client OAuth salvato per il fornitore: ID client e, se noto, client secret.
+    fn saved_oauth_client(&self, provider: &str) -> Option<(String, Option<String>)> {
+        let raw = self
+            .secrets
+            .get(&oauth_client_name(provider))
+            .ok()
+            .flatten()?;
+        let doc: Value = serde_json::from_str(&raw).ok()?;
+        let id = doc["client_id"].as_str()?.to_string();
+        Some((id, doc["client_secret"].as_str().map(str::to_string)))
+    }
+
+    /// Salva (o aggiorna) il client OAuth del fornitore. Lo stesso client senza secret non cancella il secret già
+    /// salvato; un client diverso sostituisce il precedente.
+    fn remember_oauth_client(
+        &mut self,
+        provider: &str,
+        client_id: &str,
+        secret: Option<&str>,
+    ) -> Result<(), CoreError> {
+        let keep = match self.saved_oauth_client(provider) {
+            Some((id, old)) if id == client_id => old,
+            _ => None,
+        };
+        let secret = secret.map(str::to_string).or(keep);
+        self.secrets
+            .put(
+                &oauth_client_name(provider),
+                &json!({"client_id": client_id, "client_secret": secret}).to_string(),
+            )
+            .map_err(CoreError::Internal)
+    }
+
+    /// Dimentica il client OAuth salvato di un fornitore (gesto esplicito del proprietario).
+    pub fn forget_oauth_client(&mut self, provider: &str) -> Result<Value, CoreError> {
+        let removed = self
+            .secrets
+            .delete(&oauth_client_name(provider))
+            .map_err(CoreError::Internal)?;
+        self.connector_audit("connector.oauth_client.forget", provider, "revoked")?;
+        Ok(json!({"provider": provider, "forgotten": removed}))
+    }
+
+    /// Modelli del catalogo; per i servizi OAuth il client già salvato rende superfluo reinserirlo.
+    pub fn connector_templates(&self) -> Value {
+        let mut index = crate::connector_catalog::index();
+        if let Some(list) = index["templates"].as_array_mut() {
+            for template in list.iter_mut() {
+                let saved = template["id"]
+                    .as_str()
+                    .and_then(crate::connector_catalog::provider_key)
+                    .and_then(|provider| self.saved_oauth_client(&provider));
+                if let Some((client_id, secret)) = saved {
+                    template["client_saved"] = json!(true);
+                    template["client_saved_id"] = json!(client_id);
+                    template["needs_client_id"] = json!(false);
+                    template["needs_client_secret"] = json!(secret.is_none());
+                }
+            }
+        }
+        index
+    }
+
+    /// Installa un modello del catalogo. Senza ID client usa quello già salvato per lo stesso fornitore.
+    pub fn install_template(
+        &mut self,
+        id: &str,
+        client_id: Option<&str>,
+    ) -> Result<Value, CoreError> {
+        let provider = crate::connector_catalog::provider_key(id);
+        let typed = client_id.map(str::trim).filter(|c| !c.is_empty());
+        let saved = provider
+            .as_deref()
+            .and_then(|p| self.saved_oauth_client(p))
+            .map(|(client, _)| client);
+        let client = typed.map(str::to_string).or(saved);
+        let manifest = crate::connector_catalog::manifest(id, client.as_deref())
+            .map_err(CoreError::BadRequest)?;
+        let view = self.install_new_connector(&manifest)?;
+        if let (Some(provider), Some(client)) = (provider.as_deref(), client.as_deref()) {
+            self.remember_oauth_client(provider, client, None)?;
+        }
+        Ok(view)
+    }
+
     pub fn google_oauth_start(&mut self, id: &str, file: &Value) -> Result<Value, CoreError> {
         if !matches!(id, "gmail" | "google_calendar") {
             return Err(CoreError::BadRequest(
                 "Importazione disponibile per Gmail e Google Calendar.".into(),
             ));
         }
-        let (client_id, secret) =
-            crate::connector_catalog::google_credentials(file).map_err(CoreError::BadRequest)?;
-        let manifest = crate::connector_catalog::manifest(id, Some(client_id))
+        let provider = crate::connector_catalog::provider_key(id)
+            .ok_or_else(|| CoreError::Internal("fornitore OAuth non trovato".into()))?;
+        let empty = file.is_null() || file.as_object().is_some_and(|o| o.is_empty());
+        let (client_id, secret) = if empty {
+            // Nessun file: si usa il client salvato la prima volta (ADR-0231).
+            let (client, secret) = self.saved_oauth_client(&provider).ok_or_else(|| {
+                CoreError::BadRequest(
+                    "Nessun client Google salvato: importa il JSON OAuth Desktop una volta, poi non servirà più."
+                        .into(),
+                )
+            })?;
+            (client, secret)
+        } else {
+            let (client, secret) = crate::connector_catalog::google_credentials(file)
+                .map_err(CoreError::BadRequest)?;
+            self.remember_oauth_client(&provider, client, Some(secret))?;
+            (client.to_string(), Some(secret.to_string()))
+        };
+        let manifest = crate::connector_catalog::manifest(id, Some(&client_id))
             .map_err(CoreError::BadRequest)?;
         let normalized = crate::connectors::validate_manifest(&manifest, &self.cfg.web)
             .map_err(CoreError::BadRequest)?;
         match self.connector_manifest(id) {
             Ok((existing, _)) if existing == normalized => {}
-            Ok(_) => return Err(CoreError::BadRequest(
-                "Il connettore è installato con un altro client OAuth. Rimuovilo prima di sostituirlo.".into(),
-            )),
-            Err(CoreError::NotFound(_)) => { self.install_new_connector(&manifest)?; }
+            Ok(_) => {
+                // Un client diverso sostituisce quello installato: i token del vecchio client non valgono più.
+                // Il client salvato non va perso, quindi si può sostituire senza rimuovere nulla a mano.
+                self.revoke_connector(id, true)?;
+                self.install_new_connector(&manifest)?;
+            }
+            Err(CoreError::NotFound(_)) => {
+                self.install_new_connector(&manifest)?;
+            }
             Err(error) => return Err(error),
         }
-        self.oauth_start(id, Some(secret.into()))
+        self.oauth_start(id, secret)
     }
 
     /// Avvia OAuth (ADR-0027): restituisce la pagina di consenso da aprire nel browser del proprietario.
@@ -6834,6 +6948,11 @@ impl Jarvis {
         {
             return Err(CoreError::BadRequest("client secret non valido".into()));
         }
+        let provider = crate::connector_catalog::provider_of(&manifest);
+        let client_id = manifest["auth"]["client_id"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
         let secret = match secret {
             Some(secret) => Some(secret),
             None => self
@@ -6841,8 +6960,22 @@ impl Jarvis {
                 .get(&oauth_name(id))
                 .map_err(internal)?
                 .and_then(|state| serde_json::from_str::<Value>(&state).ok())
-                .and_then(|state| state["client_secret"].as_str().map(str::to_owned)),
+                .and_then(|state| state["client_secret"].as_str().map(str::to_owned))
+                // Dopo «Revoca» lo stato del connettore è vuoto: il secret si ritrova dal client salvato,
+                // purché sia lo stesso client (ADR-0231).
+                .or_else(|| {
+                    provider
+                        .as_deref()
+                        .and_then(|p| self.saved_oauth_client(p))
+                        .filter(|(saved, _)| *saved == client_id)
+                        .and_then(|(_, secret)| secret)
+                }),
         };
+        if let Some(provider) = provider.as_deref() {
+            if !client_id.is_empty() {
+                self.remember_oauth_client(provider, &client_id, secret.as_deref())?;
+            }
+        }
         let url = self
             .oauth
             .start(&manifest, self.cfg.port, secret)
