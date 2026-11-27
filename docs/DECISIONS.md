@@ -2532,6 +2532,13 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Permessi del token Hugging Face:** token «fine-grained»: lettura dei tuoi repository e **scrittura solo sul repository di destinazione**; nessun permesso di amministrazione, né sull'organizzazione né sulle impostazioni. Si inserisce da Connettori → Hugging Face.
 - **Limiti:** gli esempi esportati sono testo mascherato, ma il proprietario resta responsabile di ciò che accetta; le regole sono tarate sui dataset di base (la misura segnala regressioni, non generalizzazione).
 
+### ADR-0222 — Verifica delle connessioni e dei modelli NIM (2026-11-27, accettata)
+
+- **Contesto:** il test della chiave NIM provava la sola chiave; nulla segnalava un modello d'instradamento ritirato o rinominato, né se Core e rete raggiungessero Hugging Face, Google, GitHub e Tailscale.
+- **Decisione:** (a) `Provider::routing_audit` confronta i modelli dei sette percorsi con il catalogo reale (`/v1/models`) e lo include in `POST /api/cloud/test` come `routing` (`routes[]`, `missing[]`). (b) `GET /api/connections/check` (solo proprietario) prova in parallelo, con 8 s di limite, sette servizi esterni senza credenziali né dati dell'utente: qualsiasi risposta HTTP sotto 500 vale «raggiungibile», una 5xx o un errore di rete no (causa e rimedio da `net::Cause`).
+- **Evidenza:** dal catalogo NIM pubblico (30 modelli) risultano presenti tutti e 5 i modelli usati (lightning-30b, ultra-550b, kimi-k3.1-pro, mistral-large-4, minimax-m3.1-flash). Da questo ambiente: Hugging Face 200, Google OIDC 200, Gmail raggiungibile, Calendar 401 (serve accesso), GitHub 200, Tailscale 302.
+- **Limiti:** «raggiungibile» non significa «autorizzato»: le credenziali si verificano dal singolo connettore. Nessuna chiave NIM reale in questo ambiente: la chat con i modelli non è stata provata.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

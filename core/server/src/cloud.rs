@@ -64,6 +64,33 @@ impl Provider {
         }
     }
 
+    /// Confronto fra i modelli scelti per ogni percorso e il catalogo reale del provider: segnala i modelli
+    /// ritirati o rinominati prima che una richiesta fallisca con «modello non disponibile».
+    pub fn routing_audit(self, available: &[String]) -> Value {
+        let routes = [
+            ("fast", Route::Fast),
+            ("reasoning", Route::Reasoning),
+            ("coding", Route::Coding),
+            ("long", Route::Long),
+            ("writing", Route::Writing),
+            ("translation", Route::Translation),
+            ("analysis", Route::Analysis),
+        ];
+        let mut missing: Vec<&str> = Vec::new();
+        let rows: Vec<Value> = routes
+            .iter()
+            .map(|(name, route)| {
+                let model = self.model(*route);
+                let listed = available.iter().any(|m| m == model);
+                if !listed && !missing.contains(&model) {
+                    missing.push(model);
+                }
+                json!({"route": name, "model": model, "listed": listed})
+            })
+            .collect();
+        json!({"routes": rows, "missing": missing})
+    }
+
     pub fn secret(self) -> String {
         format!("cloud:{}", self.id())
     }
@@ -2834,5 +2861,25 @@ mod agent_tests {
         assert_eq!(settings["nvidia_nim"], "modello");
         assert!(Provider::parse(&json!("ollama_cloud")).is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn routing_audit_flags_retired_models() {
+        let live: Vec<String> = [
+            "nvidia/nemotron-3.5-lightning-30b-a3b",
+            "nvidia/nemotron-3-ultra-550b-a55b",
+            "moonshotai/kimi-k3.1-pro",
+            "mistralai/mistral-large-4-1t-a52b",
+            "minimaxai/minimax-m3.1-flash",
+        ]
+        .map(String::from)
+        .to_vec();
+        let ok = Provider::Nim.routing_audit(&live);
+        assert_eq!(ok["missing"], json!([]));
+        assert_eq!(ok["routes"].as_array().unwrap().len(), 7);
+        let partial = Provider::Nim.routing_audit(&live[..2]);
+        let missing = partial["missing"].as_array().unwrap();
+        assert!(missing.contains(&json!("moonshotai/kimi-k3.1-pro")));
+        assert!(!missing.contains(&json!("nvidia/nemotron-3-ultra-550b-a55b")));
     }
 }
