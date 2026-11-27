@@ -42,14 +42,26 @@ private enum Section: String, Identifiable {
     case system = "Sistema", models = "Modelli AI", updates = "Aggiornamenti", notifications = "Notifiche"
     case missions = "Missioni", profile = "Profilo", plans = "Piani", tools = "Strumenti"
     case agents = "Agenti", plugins = "Pacchetti", users = "Utenti", voice = "Voce", map = "Mappa", privacy = "Privacy"
-    case research = "Ricerche", datasets = "Dataset"
+    case research = "Ricerche", datasets = "Dataset", tree = "Yggdrasill"
 
+    /// I nove regni (ADR-0232): ogni funzione dell'app vive in uno di essi. «Yggdrasill» è l'albero, la porta d'ingresso.
     static let navigation: [(title: String, entries: [Section])] = [
-        ("Assistente", [.dashboard, .chat, .tasks, .models, .voice, .map, .notifications, .profile]),
-        ("Organizzazione", [.missions, .plans, .workflows, .workspace, .memory, .research, .datasets, .skills, .agents]),
-        ("Collegamenti", [.devices, .tools, .plugins, .connectors]),
-        ("Amministrazione", [.confirmations, .users, .security, .privacy, .audit, .system, .updates])
+        ("Yggdrasill", [.tree]),
+        ("Asgard", [.dashboard, .chat, .tasks, .confirmations]),
+        ("Midgard", [.profile, .users, .workspace]),
+        ("Alfheim", [.models, .agents, .datasets]),
+        ("Vanaheim", [.voice, .map, .skills, .plugins]),
+        ("Jotunheim", [.missions, .plans, .tools, .updates]),
+        ("Svartalfheim", [.workflows, .connectors, .devices, .system]),
+        ("Muspelheim", [.security, .privacy]),
+        ("Helheim", [.memory, .research]),
+        ("Niflheim", [.audit, .notifications])
     ]
+
+    /// Il regno a cui appartiene la pagina.
+    var realmName: String {
+        Section.navigation.first { $0.entries.contains(self) }?.title ?? "Yggdrasill"
+    }
 
     var id: Self { self }
 
@@ -84,6 +96,7 @@ private enum Section: String, Identifiable {
         case .privacy: "Cosa viene conservato, cosa può uscire e chi ha il permesso"
         case .research: "Ricerche salvate: risultati, fonti e domande aperte"
         case .datasets: "Esempi con cui JARVIS ti capisce meglio: misura, migliora, carica in privato"
+        case .tree: "Il cuore di JARVIS: i nove regni, lo stato e i comandi"
         }
     }
 
@@ -117,6 +130,7 @@ private enum Section: String, Identifiable {
         case .privacy: "hand.raised.square"
         case .research: "magnifyingglass.circle"
         case .datasets: "tablecells"
+        case .tree: "leaf.fill"
         }
     }
     var endpoint: String {
@@ -148,6 +162,7 @@ private enum Section: String, Identifiable {
         case .privacy: "/api/privacy/overview"
         case .research: "/api/research"
         case .datasets: "/api/datasets"
+        case .tree: "/api/health"
         }
     }
 }
@@ -177,7 +192,10 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var profileShare = true
     @State private var changingInvite = false
 
-    @State private var section: Section = .dashboard
+    @State private var section: Section = .tree
+    /// Regno aperto sull'albero e larghezza disponibile per scegliere il layout della pagina d'ingresso.
+    @State private var realmSelection: String?
+    @State private var homeWidth: CGFloat = 1200
     @State private var n8n: [String: Any] = [:]
     @State private var n8nPullConfirm = false
     @State private var n8nName = ""
@@ -522,12 +540,12 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     Circle().fill(LinearGradient(colors: [Color.cyan.opacity(0.35), Color.blue.opacity(0.2)],
                                                  startPoint: .topLeading, endPoint: .bottomTrailing))
                     Circle().strokeBorder(Color.cyan.opacity(0.6), lineWidth: 1.5)
-                    Image(systemName: "waveform.path.ecg").font(.system(size: 15, weight: .semibold)).foregroundStyle(.cyan)
+                    Image(systemName: "leaf.fill").font(.system(size: 15, weight: .semibold)).foregroundStyle(Color(red: 0.95, green: 0.82, blue: 0.45))
                 }
                 .frame(width: 34, height: 34)
                 VStack(alignment: .leading, spacing: 0) {
                     Text("JARVIS").font(.system(size: 17, weight: .bold, design: .rounded))
-                    Text("AI Assistant").font(.caption2).foregroundStyle(.secondary)
+                    Text("Custode di Yggdrasill").font(.caption2).foregroundStyle(.secondary)
                 }
             }
             .padding(.horizontal, 6).padding(.top, 6)
@@ -538,9 +556,16 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     ForEach(Section.navigation.indices, id: \.self) { index in
                         let group = Section.navigation[index]
                         VStack(alignment: .leading, spacing: 3) {
-                            Text(group.title.uppercased())
-                                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                                .padding(.horizontal, 12).padding(.bottom, 3)
+                            HStack(spacing: 6) {
+                                if let realm = Realm.named(group.title) {
+                                    Circle().fill(realm.color).frame(width: 7, height: 7)
+                                        .shadow(color: realm.color.opacity(0.8), radius: 3)
+                                }
+                                Text(group.title.uppercased())
+                                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                    .tracking(0.6)
+                            }
+                            .padding(.horizontal, 12).padding(.bottom, 3)
                             ForEach(group.entries) { entry in
                                 Button { select(entry) } label: {
                                     HStack(spacing: 11) {
@@ -720,7 +745,8 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 VStack(alignment: .leading, spacing: 2) {
                     Label(section.rawValue, systemImage: section.icon).font(.title2.weight(.semibold))
                         .symbolRenderingMode(.hierarchical)
-                    Text(section.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(section == .tree ? section.subtitle : "\(section.realmName) · \(section.subtitle)")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 .layoutPriority(1)
                 Spacer(minLength: 8)
@@ -762,6 +788,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {
                         switch section {
+                        case .tree: yggdrasilHome
                         case .dashboard: dashboard
                         case .chat: chat
                         // Sulle finestre molto larghe le schede non si allungano oltre una misura leggibile.
@@ -1857,6 +1884,207 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         }
     }
 
+    // MARK: Yggdrasill (ADR-0232)
+
+    private func realmFunctions(_ realmID: String) -> [YggFunction] {
+        guard let group = Section.navigation.first(where: { $0.title.lowercased() == realmID }) else { return [] }
+        return group.entries.map {
+            YggFunction(id: $0.rawValue, title: $0.rawValue, icon: $0.icon, subtitle: $0.subtitle)
+        }
+    }
+
+    private func openFunction(_ id: String) {
+        if let target = Section(rawValue: id) { select(target) }
+    }
+
+    private func statusRow(_ title: String, _ value: String, _ tint: Color) -> some View {
+        HStack(spacing: 8) {
+            Circle().fill(tint).frame(width: 6, height: 6)
+            Text(title).font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.92))
+            Spacer(minLength: 4)
+            Text(value).font(.system(size: 12, weight: .semibold).monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var jarvisStatusCard: some View {
+        let agents = (dash.summary["agents"] as? [[String: Any]])?.count ?? 0
+        let pending = core.health["pending_confirmations"] as? Int ?? 0
+        let tint = coreIsUp ? Mock.green : Color.red
+        return MockCard(title: "Stato di JARVIS", icon: "sparkles",
+                        trailing: AnyView(HStack(spacing: 5) {
+                            PulsingDot(color: tint, size: 5)
+                            Text(coreIsUp ? "Operativo" : "Non raggiungibile")
+                                .font(.system(size: 10.5, weight: .semibold)).foregroundStyle(tint)
+                        })) {
+            statusRow("Core", coreStatus, tint)
+            statusRow("Intelligenza artificiale", aiStatus.0, aiStatus.1)
+            statusRow("Agenti attivi", "\(agents + 1)", Mock.cyan)
+            statusRow("Conferme in attesa", count("pending_confirmations"), pending > 0 ? Mock.amber : Mock.green)
+        }
+    }
+
+    private var yggdrasillLeft: some View {
+        VStack(spacing: 12) {
+            jarvisStatusCard
+            SystemStatusCard(stats: dash.stats, coreUp: coreIsUp, detail: "Modello: \(activeModel)")
+            TodayCard(items: dash.summary["today"] as? [[String: Any]] ?? []) { startChat("Ricordami di ") }
+        }
+    }
+
+    private var yggdrasillRight: some View {
+        let quick: [(String, String, Section)] = [
+            ("bubble.left.and.text.bubble.right", "Chat", .chat), ("mic", "Voce", .voice),
+            ("checklist", "Attività", .tasks), ("magnifyingglass.circle", "Ricerche", .research),
+            ("checkmark.shield", "Conferme", .confirmations)
+        ]
+        return VStack(spacing: 12) {
+            VStack(spacing: 2) {
+                Text("JARVIS").font(.system(size: 26, weight: .heavy, design: .rounded))
+                    .foregroundStyle(LinearGradient(colors: [Mock.cyan, Color(red: 0.4, green: 0.55, blue: 1)],
+                                                    startPoint: .leading, endPoint: .trailing))
+                Text("Custode di Yggdrasill").font(.caption).foregroundStyle(.secondary)
+            }
+            heroAvatar(size: 250)
+            WaveformView(active: sending || avatarSpeaking, barCount: 26).frame(height: 30)
+            Text("Ciao, sono JARVIS. Yggdrasill è \(coreIsUp ? "attivo e tutti i 9 regni sono operativi" : "in attesa del Core"). \(statusHeadline) Come posso aiutarti oggi?")
+                .font(.callout).foregroundStyle(.white.opacity(0.92))
+                .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(panel.opacity(0.9)))
+                .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Mock.cyan.opacity(0.3)) }
+            commandBar
+            HStack(spacing: 8) {
+                ForEach(Array(quick.enumerated()), id: \.offset) { _, item in
+                    Button { select(item.2) } label: {
+                        VStack(spacing: 5) {
+                            Image(systemName: item.0).font(.system(size: 17)).foregroundStyle(Mock.cyan)
+                            Text(item.1).font(.system(size: 10.5, weight: .medium)).foregroundStyle(.white.opacity(0.9))
+                        }
+                        .frame(maxWidth: .infinity).padding(.vertical, 10)
+                        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(panel.opacity(0.85)))
+                        .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Mock.cyan.opacity(0.28)) }
+                    }
+                    .buttonStyle(PressableStyle()).hoverLift()
+                    .accessibilityLabel(item.1)
+                }
+            }
+        }
+    }
+
+    /// Avvisi da mostrare sul regno: conferme in attesa su Asgard, notifiche da leggere su Niflheim.
+    private func realmBadge(_ realm: Realm) -> Int {
+        switch realm.id {
+        case "asgard": return core.health["pending_confirmations"] as? Int ?? 0
+        case "niflheim": return core.health["notifications_unread"] as? Int ?? 0
+        default: return 0
+        }
+    }
+
+    private func realmTile(_ realm: Realm) -> some View {
+        let badge = realmBadge(realm)
+        let active = realmSelection == realm.id
+        return Button { realmSelection = active ? nil : realm.id } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle().fill(RadialGradient(colors: [realm.color.opacity(0.55), realm.color.opacity(0.10)],
+                                                 center: .center, startRadius: 2, endRadius: 28))
+                    Circle().strokeBorder(realm.color.opacity(0.75), lineWidth: 1.2)
+                    Image(systemName: realm.icon).font(.system(size: 17, weight: .semibold)).foregroundStyle(realm.color)
+                }
+                .frame(width: 44, height: 44)
+                .shadow(color: realm.color.opacity(active ? 0.7 : 0.25), radius: active ? 10 : 4)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(realm.name).font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                    Text(realm.summary).font(.system(size: 10.5)).foregroundStyle(.secondary)
+                        .lineLimit(2).multilineTextAlignment(.leading)
+                    HStack(spacing: 5) {
+                        Circle().fill(coreIsUp ? Mock.green : Mock.amber).frame(width: 5, height: 5)
+                        Text(coreIsUp ? "Attivo" : "In attesa").font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(coreIsUp ? Mock.green : Mock.amber)
+                        Text("· \(realmFunctions(realm.id).count) funzioni").font(.system(size: 10)).foregroundStyle(.secondary)
+                        if badge > 0 {
+                            Text("\(badge)").font(.system(size: 9.5, weight: .bold).monospacedDigit())
+                                .padding(.horizontal, 5).padding(.vertical, 1)
+                                .background(Mock.amber, in: Capsule()).foregroundStyle(.black)
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Color.white.opacity(active ? 0.10 : 0.05)))
+            .overlay { RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(realm.color.opacity(active ? 0.95 : 0.30)) }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableStyle())
+        .accessibilityLabel("\(realm.name), \(realm.epithet). \(realm.summary)")
+    }
+
+    private var realmOverview: some View {
+        MockCard(title: "I 9 Regni — panoramica rapida", icon: "circle.hexagongrid.fill") {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 215), spacing: 10, alignment: .top)], spacing: 10) {
+                ForEach(Realm.all) { realmTile($0) }
+            }
+        }
+    }
+
+    private var yggdrasillBottomRight: some View {
+        VStack(spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                ProjectsCard(projects: dash.summary["projects"] as? [[String: Any]] ?? [])
+                ActiveAgentsCard(items: dash.summary["agents"] as? [[String: Any]] ?? [])
+            }
+            MonitoringCard(history: dash.cpuHistory, monitoring: dash.summary["monitoring"] as? [String: Any] ?? [:])
+        }
+    }
+
+    /// La pagina d'ingresso: stato a sinistra, l'albero al centro, JARVIS a destra e i nove regni sotto.
+    private var yggdrasilHome: some View {
+        let tree = YggdrasilHome(functions: realmFunctions, open: openFunction,
+                                 selected: $realmSelection, minHeight: 620)
+        let wide = homeWidth >= 1150
+        return VStack(spacing: 14) {
+            if wide {
+                HStack(alignment: .top, spacing: 14) {
+                    yggdrasillLeft.frame(width: 285)
+                    tree.frame(maxWidth: .infinity)
+                    yggdrasillRight.frame(width: 315)
+                }
+                HStack(alignment: .top, spacing: 14) {
+                    realmOverview.frame(maxWidth: .infinity)
+                    yggdrasillBottomRight.frame(width: 560)
+                }
+            } else {
+                tree
+                realmOverview
+                HStack(alignment: .top, spacing: 14) {
+                    yggdrasillLeft
+                    yggdrasillRight
+                }
+                yggdrasillBottomRight
+            }
+        }
+        .background {
+            GeometryReader { geometry in
+                Color.clear
+                    .onAppear { homeWidth = geometry.size.width }
+                    .onChange(of: geometry.size.width) { _, width in homeWidth = width }
+            }
+        }
+        .task(id: refresh) {
+            while !Task.isCancelled {
+                await dash.refresh(core)
+                try? await Task.sleep(for: .seconds(20))
+            }
+        }
+        .task {
+            while !Task.isCancelled {
+                await dash.sampleSystem(core)
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
+    }
+
     @ViewBuilder private var tools: some View {
         switch section {
         case .memory:
@@ -1892,6 +2120,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         case .privacy: privacyPanel
         case .research: researchPanel
         case .datasets: datasetsPanel
+        case .tree: EmptyView()
         case .devices:
             deviceConnection
         case .models:
