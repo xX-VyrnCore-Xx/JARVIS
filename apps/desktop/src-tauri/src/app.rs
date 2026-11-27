@@ -593,6 +593,20 @@ impl JarvisApp {
         style.visuals.extreme_bg_color = egui::Color32::from_rgb(4, 10, 18);
         style.visuals.faint_bg_color = egui::Color32::from_rgb(9, 21, 34);
         style.visuals.hyperlink_color = ACCENT;
+        // Fluidità e profondità (ADR-0224): passaggi di colore un poco più lenti (hover, selezione), barre di
+        // scorrimento sovrapposte al contenuto che si allargano solo al passaggio del mouse (niente colonna fissa che
+        // sposta il testo), ombre morbide per finestre e menu, bordo sottile per staccarli dallo sfondo.
+        style.animation_time = 0.14;
+        style.spacing.scroll = egui::style::ScrollStyle::floating();
+        let soft_shadow = egui::epaint::Shadow {
+            offset: [0, 10],
+            blur: 28,
+            spread: 0,
+            color: egui::Color32::from_black_alpha(110),
+        };
+        style.visuals.window_shadow = soft_shadow;
+        style.visuals.popup_shadow = soft_shadow;
+        style.visuals.window_stroke = egui::Stroke::new(1.0, egui::Color32::from_rgb(33, 62, 82));
         cc.egui_ctx.set_style_of(egui::Theme::Dark, style);
 
         let (tx, rx) = mpsc::channel();

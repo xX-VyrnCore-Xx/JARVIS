@@ -2546,6 +2546,12 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Verifica:** test unitario `reconnect_delay` (crescita e tetto) per la versione Windows/egui; la versione macOS compila solo in CI. Non provato su dispositivi e reti reali.
 - **Nota:** le transizioni fra sezioni, i movimenti ridotti per l'accessibilità e le animazioni dell'avatar erano già presenti (`Motion.swift`, transizione di sezione): non ho cambiato l'aspetto grafico perché non posso vederlo.
 
+### ADR-0224 — Rifiniture grafiche dell'app Windows/egui (2026-11-27, accettata)
+
+- **Decisione:** transizioni di colore più morbide (`animation_time` 0,14 s), barre di scorrimento sovrapposte al contenuto (`ScrollStyle::floating`) invece di una colonna fissa che sposta il testo, ombre morbide e bordo sottile per finestre e menu.
+- **Perimetro:** solo il tema; nessun cambio di layout, per non introdurre sovrapposizioni che non posso vedere da qui. L'app macOS aveva già transizioni, movimento ridotto e schede con ombra (ADR-0216): invariata.
+- **Verifica:** `cargo fmt --check`; tipi controllati sul sorgente di egui 0.37. La compilazione e l'aspetto reale si provano solo in CI/su Windows: aspetto **non verificato visivamente**.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.
