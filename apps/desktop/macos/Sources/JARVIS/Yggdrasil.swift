@@ -9,7 +9,7 @@ import simd
 
 // MARK: - Regni
 
-/// Un regno: nome, epiteto, colore, simbolo e posizione sull'albero (angolo in gradi, distanza dal tronco, altezza).
+/// Un regno: nome, epiteto, colore, simbolo e posizione sull'anello davanti all'albero.
 struct Realm: Identifiable {
     let id: String
     let name: String
@@ -19,42 +19,46 @@ struct Realm: Identifiable {
     let summary: String
     let icon: String
     let rgb: SIMD3<Double>
+    /// Posizione sul grande anello frontale, in gradi (90 = in alto, senso orario verso destra).
     let angle: Float
-    let radius: Float
-    let height: Float
 
     var color: Color { Color(red: rgb.x, green: rgb.y, blue: rgb.z) }
     var nsColor: NSColor { NSColor(red: rgb.x, green: rgb.y, blue: rgb.z, alpha: 1) }
 
-    /// I nove regni: tre in alto (la chioma), tre al centro, tre in basso (le radici).
+    /// Centro e semiassi dell'anello su cui stanno i regni, davanti all'albero (come un quadro frontale).
+    static let ringCenter: Float = 7.8
+    static let ringX: Float = 9.2
+    static let ringY: Float = 6.9
+
+    /// I nove regni sull'anello, in senso orario dall'alto: Asgard al vertice, Midgard in basso.
     static let all: [Realm] = [
         Realm(id: "asgard", name: "Asgard", epithet: "Controllo & Comando",
               summary: "Plancia, chat, attività e conferme: dai gli ordini e approvi", icon: "crown",
-              rgb: SIMD3(1.00, 0.80, 0.32), angle: 90, radius: 4.2, height: 10.6),
+              rgb: SIMD3(1.00, 0.80, 0.32), angle: 90),
         Realm(id: "alfheim", name: "Alfheim", epithet: "Intelligenza & Conoscenza",
               summary: "Modelli AI, agenti e dataset", icon: "sparkles",
-              rgb: SIMD3(0.72, 0.60, 1.00), angle: 210, radius: 4.2, height: 10.2),
+              rgb: SIMD3(0.72, 0.60, 1.00), angle: 50),
         Realm(id: "vanaheim", name: "Vanaheim", epithet: "Creatività & Contenuti",
               summary: "Voce, mappe, competenze e pacchetti", icon: "leaf",
-              rgb: SIMD3(0.30, 0.92, 0.55), angle: 330, radius: 4.2, height: 10.4),
-        Realm(id: "midgard", name: "Midgard", epithet: "Utente & Progetti",
-              summary: "Il tuo profilo, gli utenti e i workspace", icon: "person.2",
-              rgb: SIMD3(0.45, 0.80, 0.40), angle: 150, radius: 5.6, height: 6.3),
-        Realm(id: "jotunheim", name: "Jotunheim", epithet: "Sviluppo & Costruzione",
-              summary: "Missioni, piani, strumenti e aggiornamenti", icon: "hammer",
-              rgb: SIMD3(0.46, 0.60, 1.00), angle: 270, radius: 5.6, height: 6.1),
+              rgb: SIMD3(0.30, 0.92, 0.55), angle: 10),
         Realm(id: "muspelheim", name: "Muspelheim", epithet: "Sicurezza & Difesa",
               summary: "Sicurezza e privacy", icon: "flame",
-              rgb: SIMD3(1.00, 0.34, 0.18), angle: 30, radius: 5.6, height: 6.4),
+              rgb: SIMD3(1.00, 0.34, 0.18), angle: -30),
         Realm(id: "svartalfheim", name: "Svartalfheim", epithet: "Strumenti & Infrastruttura",
               summary: "Automazioni, connettori, dispositivi e sistema (include Nidavellir)", icon: "gearshape.2",
-              rgb: SIMD3(0.96, 0.60, 0.26), angle: 90, radius: 4.8, height: 2.5),
+              rgb: SIMD3(0.96, 0.60, 0.26), angle: -70),
+        Realm(id: "midgard", name: "Midgard", epithet: "Utente & Progetti",
+              summary: "Il tuo profilo, gli utenti e i workspace", icon: "person.2",
+              rgb: SIMD3(0.45, 0.80, 0.40), angle: -110),
         Realm(id: "helheim", name: "Helheim", epithet: "Archiviazione & Memoria",
               summary: "Memoria e ricerche salvate", icon: "externaldrive",
-              rgb: SIMD3(0.52, 0.72, 0.74), angle: 210, radius: 4.8, height: 2.3),
+              rgb: SIMD3(0.52, 0.72, 0.74), angle: -150),
         Realm(id: "niflheim", name: "Niflheim", epithet: "Monitoraggio & Analisi",
               summary: "Registro di audit e notifiche", icon: "chart.xyaxis.line",
-              rgb: SIMD3(0.42, 0.86, 1.00), angle: 330, radius: 4.8, height: 2.4)
+              rgb: SIMD3(0.42, 0.86, 1.00), angle: 170),
+        Realm(id: "jotunheim", name: "Jotunheim", epithet: "Sviluppo & Costruzione",
+              summary: "Missioni, piani, strumenti e aggiornamenti", icon: "hammer",
+              rgb: SIMD3(0.46, 0.60, 1.00), angle: 130)
     ]
 
     static func named(_ key: String) -> Realm? {
@@ -62,10 +66,10 @@ struct Realm: Identifiable {
         return all.first { $0.id == lowered || $0.name.lowercased() == lowered }
     }
 
-    /// Posizione del regno nello spazio della scena.
+    /// Posizione del regno nello spazio della scena: sull'anello frontale.
     var position: SIMD3<Float> {
         let radians = angle * .pi / 180
-        return SIMD3(radius * cos(radians), height, radius * sin(radians))
+        return SIMD3(Realm.ringX * cos(radians), Realm.ringCenter + Realm.ringY * sin(radians), 0)
     }
 }
 
@@ -398,11 +402,16 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
     private let focus = SCNNode()
     private var realmNodes: [String: SCNNode] = [:]
     private var orbiting = true
-    private var orbitAngle: Double = 0.9
+    /// Fase dell'ondeggiamento: la camera resta davanti all'albero e dondola piano a destra e a sinistra.
+    private var swayPhase: Double = 0
     private var lastTime: TimeInterval = 0
-    private let orbitRadius: Float = 26
-    private let orbitHeight: Float = 7.5
-    private let treeFocus = SIMD3<Float>(0, 6.4, 0)
+    private let orbitRadius: Float = 31
+    private let orbitHeight: Float = 8.4
+    private let treeFocus = SIMD3<Float>(0, Realm.ringCenter, 0)
+    /// Scala delle isole dei regni (più grandi dell'originale per essere leggibili dall'anello).
+    private let realmScale: CGFloat = 1.45
+    /// Curve dei rami verso i regni, ricordate per mettere le foglie lungo di esse.
+    private var branchCurves: [String: (V3, V3, V3, V3)] = [:]
     /// Con «riduci movimento» l'orbita resta ferma e i voli sono quasi immediati.
     var reduceMotion = false
 
@@ -412,7 +421,7 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
         buildTree()
         buildFoliage()
         Realm.all.forEach { buildRealm($0) }
-        buildHalos()
+        buildRing()
         buildCamera()
     }
 
@@ -445,7 +454,7 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
         scene.rootNode.addChildNode(moon)
 
         let crown = SCNNode()
-        crown.simdPosition = SIMD3(0, 12.5, 0)
+        crown.simdPosition = SIMD3(0, 13.5, 0)
         crown.light = SCNLight()
         crown.light?.type = .omni
         crown.light?.color = NSColor(red: 1.0, green: 0.82, blue: 0.5, alpha: 1)
@@ -611,12 +620,12 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
 
         // Tronco: una colonna con creste che si attorcigliano e un grande allargamento alla base.
         var spine: [V3] = []
-        for index in 0...48 {
-            let t = Float(index) / 48
-            let y = -0.9 + t * 14.4
+        for index in 0...56 {
+            let t = Float(index) / 56
+            let y = -0.9 + t * 17.0
             spine.append(V3(0.45 * sin(t * 5.2), y, 0.40 * cos(t * 4.1)))
         }
-        let trunk = Mesh.tube(spine: spine, sides: 56, vRepeat: 5) { t, angle in
+        let trunk = Mesh.tube(spine: spine, sides: 56, vRepeat: 6) { t, angle in
             let flare: Float = 1.35 * exp(-t * 11)
             let taper: Float = 1.35 - 0.95 * t
             let wave1: Float = 0.16 * sin(5 * angle + 7 * t)
@@ -635,7 +644,7 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
                 let t = Float(index) / 44
                 let around = 1.55 * (1 - 0.72 * t) + 0.15
                 let turn = phase + t * 2 * .pi * 1.35
-                helix.append(V3(around * cos(turn), -0.7 + t * 8.2, around * sin(turn)))
+                helix.append(V3(around * cos(turn), -0.7 + t * 9.5, around * sin(turn)))
             }
             let rope = Mesh.tube(spine: helix, sides: 20, vRepeat: 3) { t, angle in
                 let base: Float = 0.62 * (1 - 0.6 * t) + 0.12
@@ -665,35 +674,40 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
             tree.addChildNode(SCNNode(geometry: root))
         }
 
-        // Un ramo per ogni regno, con rametti.
+        // Un ramo per ogni regno: sale dal tronco, si apre sull'anello e arriva sotto l'isola.
         for realm in Realm.all {
             let target = realm.position
-            let angle = realm.angle * .pi / 180
-            let start = V3(0, max(realm.height - 2.8, 1.8), 0)
-            let c1 = V3(realm.radius * 0.30 * cos(angle), start.y + 1.0, realm.radius * 0.30 * sin(angle))
-            let c2 = V3(realm.radius * 0.74 * cos(angle), target.y - 0.4, realm.radius * 0.74 * sin(angle))
-            let end = target - V3(0, 0.85, 0)
+            if abs(target.x) < 1 { continue } // Asgard sta sulla cima del tronco
+            let side: Float = target.x < 0 ? -1 : 1
+            let start = V3(0, min(max(target.y * 0.5 + 1.6, 2.6), 11.0), 0)
+            let end = target - V3(0, 1.5, 0)
+            let rising = end.y > start.y
+            let wobble: Float = realm.angle.truncatingRemainder(dividingBy: 80) > 0 ? 0.9 : -0.9
+            let c1 = start + V3(target.x * 0.32, rising ? 1.2 : 0.5, wobble)
+            let c2 = V3(target.x * 0.86, end.y + (rising ? -1.8 : 1.1), -wobble * 0.6)
+            branchCurves[realm.id] = (start, c1, c2, end)
             var path: [V3] = []
-            for step in 0...22 { path.append(bezier(start, c1, c2, end, Float(step) / 22)) }
-            let branch = Mesh.tube(spine: path, sides: 14, vRepeat: 2) { t, angle in
-                let base: Float = 0.40 * (1 - t) + 0.07
+            for step in 0...30 { path.append(bezier(start, c1, c2, end, Float(step) / 30)) }
+            let branch = Mesh.tube(spine: path, sides: 14, vRepeat: 3) { t, angle in
+                let base: Float = 0.46 * (1 - t) + 0.09
                 let bump: Float = 1 + 0.1 * sin(5 * angle + 7 * t)
                 return base * bump
             }
             branch.materials = [bark]
             tree.addChildNode(SCNNode(geometry: branch))
-            for twig in 0..<4 {
-                let t = Float(twig + 2) / 7
+            for twig in 0..<5 {
+                let t = Float(twig + 2) / 8
                 let origin = bezier(start, c1, c2, end, t)
-                let spread = Float.random(in: -1.4...1.4, using: &generator)
-                let tip = origin + V3(1.5 * cos(angle + spread), Float.random(in: 0.4...1.6, using: &generator), 1.5 * sin(angle + spread))
+                let tip = origin + V3(side * Float.random(in: 0.4...1.6, using: &generator),
+                                      Float.random(in: 0.6...1.8, using: &generator),
+                                      Float.random(in: -1.2...1.2, using: &generator))
                 let reach: V3 = tip - origin
                 let control1: V3 = origin + reach * 0.35 + V3(0, 0.4, 0)
                 let control2: V3 = origin + reach * 0.75
                 var small: [V3] = []
                 for step in 0...8 { small.append(bezier(origin, control1, control2, tip, Float(step) / 8)) }
                 let twigMesh = Mesh.tube(spine: small, sides: 8, vRepeat: 1) { t, _ in
-                    let radius: Float = 0.075 * (1 - t) + 0.015
+                    let radius: Float = 0.08 * (1 - t) + 0.015
                     return radius
                 }
                 twigMesh.materials = [bark]
@@ -704,7 +718,7 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
 
         // Particelle: foglie che scendono piano e lucciole attorno al tronco.
         let canopy = SCNNode()
-        canopy.simdPosition = SIMD3(0, 10.5, 0)
+        canopy.simdPosition = SIMD3(0, 12.0, 0)
         canopy.addParticleSystem(drifting(color: NSColor(red: 1.0, green: 0.82, blue: 0.40, alpha: 0.9), radius: 7.5, rate: 60, size: 0.13))
         canopy.addParticleSystem(drifting(color: NSColor(red: 0.45, green: 0.95, blue: 0.60, alpha: 0.8), radius: 6.5, rate: 34, size: 0.10))
         scene.rootNode.addChildNode(canopy)
@@ -726,26 +740,26 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
             colors.append(SIMD4(tint * Float.random(in: 0.55...1.0, using: &generator), 1))
         }
         let gold = SIMD3<Float>(0.55, 0.42, 0.12), green = SIMD3<Float>(0.14, 0.45, 0.22), teal = SIMD3<Float>(0.12, 0.40, 0.42)
-        // Nuvola della chioma.
-        for _ in 0..<1700 {
+        // Nuvola della chioma, attorno alla cima del tronco.
+        for _ in 0..<1900 {
             let direction = simd_normalize(V3(Float.random(in: -1...1, using: &generator),
-                                              Float.random(in: -0.4...1, using: &generator),
+                                              Float.random(in: -0.5...1, using: &generator),
                                               Float.random(in: -1...1, using: &generator)) + V3(0, 0.001, 0))
             let radius = pow(Float.random(in: 0.25...1, using: &generator), 0.6)
-            let point = V3(0, 11.8, 0) + V3(direction.x * 6.6, direction.y * 3.4, direction.z * 6.6) * radius
+            let point = V3(0, 13.2, 0) + V3(direction.x * 5.4, direction.y * 3.2, direction.z * 3.2) * radius
             add(point, Float.random(in: 0.16...0.34, using: &generator), [gold, green, teal][Int.random(in: 0..<3, using: &generator)])
         }
-        // Foglie lungo il ramo di ogni regno, sul lato del tronco.
+        // Foglie lungo il ramo di ogni regno, tinte del suo colore.
         for realm in Realm.all {
-            let position = realm.position
-            let angle = realm.angle * .pi / 180
-            let inward = V3(-cos(angle), 0, -sin(angle))
+            guard let curve = branchCurves[realm.id] else { continue }
             let tint = SIMD3<Float>(Float(realm.rgb.x), Float(realm.rgb.y), Float(realm.rgb.z)) * 0.5
-            for _ in 0..<150 {
-                let spread = V3(Float.random(in: -1...1, using: &generator), Float.random(in: -0.6...1, using: &generator),
+            for _ in 0..<170 {
+                let t = Float.random(in: 0.25...0.97, using: &generator)
+                let along = bezier(curve.0, curve.1, curve.2, curve.3, t)
+                let spread = V3(Float.random(in: -1...1, using: &generator), Float.random(in: -0.5...1, using: &generator),
                                 Float.random(in: -1...1, using: &generator))
-                let point = position + inward * Float.random(in: 1.6...3.4, using: &generator) + spread * 1.4 + V3(0, 0.3, 0)
-                add(point, Float.random(in: 0.13...0.26, using: &generator), Float.random(in: 0...1, using: &generator) < 0.5 ? tint : green)
+                add(along + spread * 1.3 + V3(0, 0.4, 0), Float.random(in: 0.13...0.26, using: &generator),
+                    Float.random(in: 0...1, using: &generator) < 0.5 ? tint : green)
             }
         }
         let geometry = Mesh.leaves(centres: centres, sizes: sizes, colors: colors, generator: &generator)
@@ -787,24 +801,34 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
         return system
     }
 
-    /// Grandi anelli di luce attorno all'albero, che girano lentamente.
-    private func buildHalos() {
-        for (index, spec) in [(8.6, 0.05, 0.12), (10.4, 0.035, -0.30)].enumerated() {
-            let ring = SCNTorus(ringRadius: CGFloat(spec.0), pipeRadius: CGFloat(spec.1))
-            let material = SCNMaterial()
-            material.lightingModel = .constant
-            material.diffuse.contents = NSColor(red: 0.30, green: 0.80, blue: 1.0, alpha: 1)
-            material.emission.contents = NSColor(red: 0.30, green: 0.80, blue: 1.0, alpha: 1)
-            material.emission.intensity = 1.3
-            ring.materials = [material]
-            let node = SCNNode(geometry: ring)
-            node.simdPosition = SIMD3(0, 6.4, 0)
-            node.eulerAngles = SCNVector3(spec.2 + 0.1, 0, 0.08)
-            node.opacity = 0.55
-            let turn: CGFloat = index == 0 ? CGFloat.pi * 2 : -CGFloat.pi * 2
-            node.runAction(.repeatForever(.rotateBy(x: 0, y: turn, z: 0, duration: 90)))
-            scene.rootNode.addChildNode(node)
+    /// Il grande anello dei nove regni: una fascia luminosa ellittica davanti all'albero, con perline di luce.
+    private func buildRing() {
+        let ring = SCNTorus(ringRadius: CGFloat(Realm.ringX), pipeRadius: 0.05)
+        let material = SCNMaterial()
+        material.lightingModel = .constant
+        material.diffuse.contents = NSColor(red: 0.30, green: 0.80, blue: 1.0, alpha: 1)
+        material.emission.contents = NSColor(red: 0.30, green: 0.80, blue: 1.0, alpha: 1)
+        material.emission.intensity = 1.3
+        ring.materials = [material]
+        let node = SCNNode(geometry: ring)
+        node.simdPosition = SIMD3(0, Realm.ringCenter, 0)
+        node.eulerAngles = SCNVector3(Double.pi / 2, 0, 0)
+        node.simdScale = SIMD3(1, 1, Realm.ringY / Realm.ringX)
+        node.opacity = 0.5
+        scene.rootNode.addChildNode(node)
+        // Perline che scorrono lungo l'anello.
+        let beads = SCNNode()
+        beads.simdPosition = SIMD3(0, Realm.ringCenter, 0)
+        for index in 0..<72 {
+            let angle = Float(index) / 72 * 2 * .pi
+            let bead = SCNSphere(radius: index % 8 == 0 ? 0.16 : 0.07)
+            bead.materials = [glow(NSColor(red: 0.6, green: 0.92, blue: 1.0, alpha: 1), intensity: 1.4)]
+            let beadNode = SCNNode(geometry: bead)
+            beadNode.simdPosition = SIMD3(Realm.ringX * cos(angle), Realm.ringY * sin(angle), 0)
+            beadNode.opacity = 0.75
+            beads.addChildNode(beadNode)
         }
+        scene.rootNode.addChildNode(beads)
     }
 
     // MARK: Regni
@@ -926,6 +950,7 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
         let node = SCNNode()
         node.name = "realm:\(realm.id)"
         node.simdPosition = realm.position
+        node.scale = SCNVector3(realmScale, realmScale, realmScale)
         let color = realm.nsColor
 
         // Isola di roccia sospesa.
@@ -1041,9 +1066,12 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
         let look = SCNLookAtConstraint(target: focus)
         look.isGimbalLockEnabled = true
         camera.constraints = [look]
-        camera.simdPosition = orbitPosition(angle: orbitAngle)
+        camera.simdPosition = orbitPosition(angle: swayAngle())
         scene.rootNode.addChildNode(camera)
     }
+
+    /// Angolo della camera: davanti all'albero (+Z), con un dondolio di circa ±26°.
+    private func swayAngle() -> Double { Double.pi / 2 + 0.45 * sin(swayPhase) }
 
     private func orbitPosition(angle: Double) -> SIMD3<Float> {
         SIMD3(orbitRadius * Float(cos(angle)), orbitHeight, orbitRadius * Float(sin(angle)))
@@ -1052,15 +1080,15 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
     func renderer(_ renderer: SCNSceneRenderer, updateAtTime time: TimeInterval) {
         defer { lastTime = time }
         guard orbiting, !reduceMotion, lastTime > 0 else { return }
-        orbitAngle += min(time - lastTime, 0.1) * 0.045
-        camera.simdPosition = orbitPosition(angle: orbitAngle)
+        swayPhase += min(time - lastTime, 0.1) * 0.16
+        camera.simdPosition = orbitPosition(angle: swayAngle())
     }
 
     // MARK: Interazione
 
     func setHover(_ id: String?) {
         for (key, node) in realmNodes {
-            let wanted: CGFloat = key == id ? 1.2 : 1
+            let wanted: CGFloat = key == id ? realmScale * 1.18 : realmScale
             if abs(node.scale.x - wanted) > 0.01 {
                 node.runAction(.scale(to: wanted, duration: 0.18), forKey: "hover")
             }
@@ -1071,9 +1099,9 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
     func fly(to id: String) {
         guard let realm = Realm.named(id) else { return }
         orbiting = false
-        let target = realm.position + SIMD3(0, 0.4, 0)
-        let outward = simd_normalize(SIMD3(target.x, 0, target.z))
-        let destination = target + outward * 5.6 + SIMD3(0, 0.7, 0)
+        let target = realm.position + SIMD3(0, 0.3, 0)
+        let side: Float = target.x < -1 ? -0.7 : (target.x > 1 ? 0.7 : 0)
+        let destination = target + SIMD3(side, 0.9, 7.4)
         SCNTransaction.begin()
         SCNTransaction.animationDuration = reduceMotion ? 0.2 : 1.7
         SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
@@ -1087,7 +1115,7 @@ final class YggdrasilStage: NSObject, ObservableObject, SCNSceneRendererDelegate
         SCNTransaction.begin()
         SCNTransaction.animationDuration = reduceMotion ? 0.2 : 1.6
         SCNTransaction.animationTimingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
-        camera.simdPosition = orbitPosition(angle: orbitAngle)
+        camera.simdPosition = orbitPosition(angle: swayAngle())
         focus.simdPosition = treeFocus
         SCNTransaction.completionBlock = { [weak self] in self?.orbiting = true }
         SCNTransaction.commit()
@@ -1180,6 +1208,9 @@ struct YggdrasilHome: View {
         ZStack {
             YggdrasilSceneView(stage: stage, onHover: hover, onSelect: choose)
                 .accessibilityHidden(true)
+            // Vignettatura: scurisce i bordi e fa risaltare l'albero.
+            RadialGradient(colors: [.clear, .black.opacity(0.55)], center: .center, startRadius: 180, endRadius: 560)
+                .allowsHitTesting(false)
             VStack(alignment: .leading, spacing: 0) {
                 header
                 Spacer(minLength: 0)
@@ -1197,7 +1228,13 @@ struct YggdrasilHome: View {
         }
         .frame(minHeight: minHeight)
         .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay { RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(.white.opacity(0.10)) }
+        .overlay {
+            RoundedRectangle(cornerRadius: 20, style: .continuous).strokeBorder(
+                LinearGradient(colors: [Color(red: 1, green: 0.82, blue: 0.4).opacity(0.55), .white.opacity(0.08),
+                                        Color(red: 0.4, green: 0.85, blue: 1).opacity(0.45)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.2)
+        }
+        .shadow(color: Color(red: 0.3, green: 0.7, blue: 1).opacity(0.12), radius: 16, y: 6)
         .onAppear { stage.reduceMotion = reduceMotion }
         .onChange(of: reduceMotion) { _, value in stage.reduceMotion = value }
         .onChange(of: selected) { _, value in

@@ -195,6 +195,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var section: Section = .tree
     /// Regno aperto sull'albero e larghezza disponibile per scegliere il layout della pagina d'ingresso.
     @State private var realmSelection: String?
+    @State private var updateLog = ""
     @State private var homeWidth: CGFloat = 1200
     @State private var n8n: [String: Any] = [:]
     @State private var n8nPullConfirm = false
@@ -209,6 +210,9 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var hoveredEntry: Section?
     /// Larghezza della barra laterale, scelta dal proprietario e conservata fra un avvio e l'altro.
     @AppStorage("sidebarWidth") private var sidebarWidth = 256.0
+    @AppStorage("sidebarCollapsed") private var sidebarCollapsed = false
+    /// Regni aperti nella barra laterale (quello della pagina attiva si apre da solo).
+    @State private var expandedRealms: Set<String> = []
     @State private var sidebarDragStart: Double?
     @State private var memoryStats: [String: Any] = [:]
     @State private var speakReplies = false
@@ -299,7 +303,11 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             if core.phase == .ready && !core.uiLocked {
                 GeometryReader { geometry in
                     if geometry.size.width >= 940 {
-                        HStack(spacing: 0) { sidebar.frame(width: sidebarWidth); sidebarResizer; content }
+                        HStack(spacing: 0) {
+                            sidebar.frame(width: sidebarCollapsed ? 68 : sidebarWidth)
+                            if !sidebarCollapsed { sidebarResizer }
+                            content
+                        }
                     } else {
                         VStack(spacing: 0) { compactNavigation; Divider(); content }
                     }
@@ -534,12 +542,165 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     }
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        Group {
+            if sidebarCollapsed { collapsedSidebar } else { expandedSidebar }
+        }
+        .animation(.snappy(duration: 0.28), value: sidebarCollapsed)
+        .onAppear { expandedRealms.insert(section.realmName) }
+        .onChange(of: section) { _, value in expandedRealms.insert(value.realmName) }
+    }
+
+    private func realmAccent(_ title: String) -> Color {
+        Realm.named(title)?.color ?? Color(red: 0.95, green: 0.82, blue: 0.45)
+    }
+
+    /// Barra compatta: solo icone; ogni regno è un menu con le sue pagine.
+    private func railIcon(_ icon: String, _ color: Color, selected: Bool) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous).fill(color.opacity(selected ? 0.30 : 0.10))
+            RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(color.opacity(selected ? 0.95 : 0.35), lineWidth: selected ? 1.4 : 1)
+            Image(systemName: icon).font(.system(size: 17, weight: .semibold)).foregroundStyle(color)
+        }
+        .frame(width: 46, height: 46)
+        .shadow(color: color.opacity(selected ? 0.55 : 0), radius: 8)
+    }
+
+    private var collapsedSidebar: some View {
+        VStack(spacing: 10) {
+            Button { sidebarCollapsed = false } label: {
+                Image(systemName: "sidebar.left").font(.system(size: 15, weight: .semibold)).frame(width: 34, height: 28)
+            }
+            .buttonStyle(PressableStyle()).help("Espandi la barra laterale").accessibilityLabel("Espandi la barra laterale")
+            Button { select(.tree) } label: {
+                railIcon("leaf.fill", Color(red: 0.95, green: 0.82, blue: 0.45), selected: section == .tree)
+            }
+            .buttonStyle(PressableStyle()).help("Yggdrasill").accessibilityLabel("Yggdrasill")
+            Divider().padding(.horizontal, 6)
+            ScrollView {
+                VStack(spacing: 8) {
+                    ForEach(1..<Section.navigation.count, id: \.self) { index in
+                        let group = Section.navigation[index]
+                        let accent = realmAccent(group.title)
+                        Menu {
+                            ForEach(group.entries) { entry in
+                                Button { select(entry) } label: { Label(entry.rawValue, systemImage: entry.icon) }
+                            }
+                        } label: {
+                            railIcon(Realm.named(group.title)?.icon ?? "circle", accent, selected: group.entries.contains(section))
+                        }
+                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                        .help("\(group.title): \(Realm.named(group.title)?.epithet ?? "")")
+                        .accessibilityLabel(group.title)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            .scrollIndicators(.hidden)
+            Spacer(minLength: 0)
+            PulsingDot(color: coreIsUp ? Mock.green : .red, size: 8).help(coreIsUp ? "Core operativo" : "Core non raggiungibile")
+        }
+        .padding(.vertical, 12).padding(.horizontal, 8)
+        .background(panel.opacity(0.56))
+    }
+
+    private func toggleRealm(_ title: String) {
+        if expandedRealms.contains(title) { expandedRealms.remove(title) } else { expandedRealms.insert(title) }
+    }
+
+    private func sidebarRow(_ entry: Section, accent: Color) -> some View {
+        Button { select(entry) } label: {
+            HStack(spacing: 10) {
+                Image(systemName: entry.icon).font(.system(size: 14)).frame(width: 22)
+                Text(entry.rawValue).font(.system(size: 14, weight: section == entry ? .semibold : .regular))
+                Spacer(minLength: 2)
+                if let badge = sidebarBadge(entry) {
+                    Text(badge > 99 ? "99+" : "\(badge)")
+                        .font(.caption2.weight(.bold)).monospacedDigit()
+                        .contentTransition(.numericText())
+                        .animation(.snappy(duration: 0.25), value: badge)
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background(entry == .confirmations ? Color.orange : Color.cyan, in: Capsule())
+                        .foregroundStyle(.black)
+                        .transition(.scale.combined(with: .opacity))
+                        .accessibilityLabel("\(badge) in attesa")
+                }
+            }
+            .foregroundStyle(section == entry ? Color.white : Color.primary.opacity(0.88))
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .background {
+                ZStack {
+                    if section == entry {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(LinearGradient(colors: [accent.opacity(0.55), accent.opacity(0.25)],
+                                                 startPoint: .leading, endPoint: .trailing))
+                            .shadow(color: accent.opacity(0.35), radius: 8, y: 2)
+                            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(accent.opacity(0.7)))
+                            .matchedGeometryEffect(id: "navigation-highlight", in: navigationNamespace)
+                    } else if hoveredEntry == entry {
+                        RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.07))
+                    }
+                }
+            }
+            .contentShape(Rectangle())
+            .animation(.easeOut(duration: 0.14), value: hoveredEntry)
+        }
+        .buttonStyle(PressableStyle())
+        .onHover { inside in
+            if inside { hoveredEntry = entry } else if hoveredEntry == entry { hoveredEntry = nil }
+        }
+        .accessibilityAddTraits(section == entry ? .isSelected : [])
+        .id(entry)
+    }
+
+    private func realmGroup(_ group: (title: String, entries: [Section])) -> some View {
+        let realm = Realm.named(group.title)
+        let accent = realmAccent(group.title)
+        let open = expandedRealms.contains(group.title) || group.entries.contains(section)
+        let alerts = group.entries.compactMap { sidebarBadge($0) }.reduce(0, +)
+        return VStack(alignment: .leading, spacing: 4) {
+            Button { withAnimation(.snappy(duration: 0.25)) { toggleRealm(group.title) } } label: {
+                HStack(spacing: 9) {
+                    Image(systemName: realm?.icon ?? "leaf.fill").font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(accent).frame(width: 22)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(group.title).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(.white.opacity(0.95))
+                        if let realm { Text(realm.epithet).font(.system(size: 9.5)).foregroundStyle(.secondary).lineLimit(1) }
+                    }
+                    Spacer(minLength: 2)
+                    if alerts > 0, !open {
+                        Text("\(alerts)").font(.caption2.weight(.bold)).monospacedDigit()
+                            .padding(.horizontal, 6).padding(.vertical, 1)
+                            .background(Color.orange, in: Capsule()).foregroundStyle(.black)
+                    }
+                    Image(systemName: "chevron.right").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                }
+                .padding(.horizontal, 10).padding(.vertical, 7)
+                .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(accent.opacity(open ? 0.13 : 0.05)))
+                .overlay { RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(accent.opacity(open ? 0.40 : 0.14)) }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressableStyle())
+            .accessibilityLabel("\(group.title), \(open ? "aperto" : "chiuso")")
+            if open {
+                HStack(alignment: .top, spacing: 8) {
+                    RoundedRectangle(cornerRadius: 1).fill(accent.opacity(0.35)).frame(width: 2).padding(.leading, 18)
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(group.entries) { sidebarRow($0, accent: accent) }
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+    }
+
+    private var expandedSidebar: some View {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 ZStack {
                     Circle().fill(LinearGradient(colors: [Color.cyan.opacity(0.35), Color.blue.opacity(0.2)],
                                                  startPoint: .topLeading, endPoint: .bottomTrailing))
-                    Circle().strokeBorder(Color.cyan.opacity(0.6), lineWidth: 1.5)
+                    Circle().strokeBorder(Color(red: 0.95, green: 0.82, blue: 0.45).opacity(0.7), lineWidth: 1.5)
                     Image(systemName: "leaf.fill").font(.system(size: 15, weight: .semibold)).foregroundStyle(Color(red: 0.95, green: 0.82, blue: 0.45))
                 }
                 .frame(width: 34, height: 34)
@@ -547,88 +708,36 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     Text("JARVIS").font(.system(size: 17, weight: .bold, design: .rounded))
                     Text("Custode di Yggdrasill").font(.caption2).foregroundStyle(.secondary)
                 }
+                Spacer(minLength: 0)
+                Button { sidebarCollapsed = true } label: {
+                    Image(systemName: "sidebar.left").font(.system(size: 14, weight: .semibold)).frame(width: 28, height: 28)
+                }
+                .buttonStyle(PressableStyle()).foregroundStyle(.secondary)
+                .help("Riduci la barra laterale").accessibilityLabel("Riduci la barra laterale")
             }
             .padding(.horizontal, 6).padding(.top, 6)
-            .accessibilityElement(children: .combine)
+            .accessibilityElement(children: .contain)
+            sidebarRow(.tree, accent: Color(red: 0.95, green: 0.82, blue: 0.45))
             ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    ForEach(Section.navigation.indices, id: \.self) { index in
-                        let group = Section.navigation[index]
-                        VStack(alignment: .leading, spacing: 3) {
-                            HStack(spacing: 6) {
-                                if let realm = Realm.named(group.title) {
-                                    Circle().fill(realm.color).frame(width: 7, height: 7)
-                                        .shadow(color: realm.color.opacity(0.8), radius: 3)
-                                }
-                                Text(group.title.uppercased())
-                                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                                    .tracking(0.6)
-                            }
-                            .padding(.horizontal, 12).padding(.bottom, 3)
-                            ForEach(group.entries) { entry in
-                                Button { select(entry) } label: {
-                                    HStack(spacing: 11) {
-                                        Image(systemName: entry.icon).font(.system(size: 15)).frame(width: 24)
-                                        Text(entry.rawValue).font(.system(size: 15, weight: section == entry ? .semibold : .regular))
-                                        Spacer(minLength: 2)
-                                        if let badge = sidebarBadge(entry) {
-                                            Text(badge > 99 ? "99+" : "\(badge)")
-                                                .font(.caption2.weight(.bold)).monospacedDigit()
-                                                .contentTransition(.numericText())
-                                                .animation(.snappy(duration: 0.25), value: badge)
-                                                .padding(.horizontal, 6).padding(.vertical, 1)
-                                                .background(entry == .confirmations ? Color.orange : Color.cyan, in: Capsule())
-                                                .foregroundStyle(.black)
-                                                .transition(.scale.combined(with: .opacity))
-                                                .accessibilityLabel("\(badge) in attesa")
-                                        }
-                                    }
-                                    .foregroundStyle(section == entry ? Color.white : Color.primary.opacity(0.88))
-                                    .padding(.horizontal, 12).padding(.vertical, 11)
-                                    .background {
-                                        ZStack {
-                                            if section == entry {
-                                                RoundedRectangle(cornerRadius: 10)
-                                                    .fill(LinearGradient(colors: [Color(red: 0.22, green: 0.42, blue: 0.96).opacity(0.92),
-                                                                                  Color(red: 0.32, green: 0.32, blue: 0.86).opacity(0.85)],
-                                                                         startPoint: .leading, endPoint: .trailing))
-                                                    .shadow(color: Color.blue.opacity(0.35), radius: 8, y: 2)
-                                                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.white.opacity(0.16)))
-                                                    .matchedGeometryEffect(id: "navigation-highlight", in: navigationNamespace)
-                                            } else if hoveredEntry == entry {
-                                                RoundedRectangle(cornerRadius: 10).fill(Color.white.opacity(0.07))
-                                            }
-                                        }
-                                    }
-                                    .contentShape(Rectangle())
-                                    .animation(.easeOut(duration: 0.14), value: hoveredEntry)
-                                }
-                                .buttonStyle(PressableStyle())
-                                .onHover { inside in
-                                    if inside { hoveredEntry = entry } else if hoveredEntry == entry { hoveredEntry = nil }
-                                }
-                                .accessibilityAddTraits(section == entry ? .isSelected : [])
-                                .id(entry)
-                            }
-                        }
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(1..<Section.navigation.count, id: \.self) { realmGroup(Section.navigation[$0]) }
                     }
+                    .padding(.vertical, 6)
                 }
-                .padding(.vertical, 14)
-            }
-            .scrollIndicators(.visible)
-            // Sfumatura ai bordi: lascia intuire che l'elenco continua senza tagliare la prima voce a riposo.
-            .mask(
-                VStack(spacing: 0) {
-                    LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 14)
-                    Rectangle()
-                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 14)
+                .scrollIndicators(.visible)
+                // Sfumatura ai bordi: lascia intuire che l'elenco continua senza tagliare la prima voce a riposo.
+                .mask(
+                    VStack(spacing: 0) {
+                        LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 12)
+                        Rectangle()
+                        LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom).frame(height: 12)
+                    }
+                )
+                // La pagina attiva si porta in vista quando cambia da un'altra parte dell'app.
+                .onChange(of: section) { _, value in
+                    withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo(value, anchor: .center) }
                 }
-            )
-            // La pagina attiva si porta in vista quando cambia da un'altra parte dell'app.
-            .onChange(of: section) { _, value in
-                withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo(value, anchor: .center) }
-            }
             }
             sidebarStatus
         }
@@ -2012,6 +2121,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 Spacer(minLength: 0)
             }
             .padding(10)
+            .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
             .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Color.white.opacity(active ? 0.10 : 0.05)))
             .overlay { RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(realm.color.opacity(active ? 0.95 : 0.30)) }
             .contentShape(Rectangle())
@@ -2032,17 +2142,31 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         VStack(spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
                 ProjectsCard(projects: dash.summary["projects"] as? [[String: Any]] ?? [])
+                    .frame(maxHeight: .infinity, alignment: .top)
                 ActiveAgentsCard(items: dash.summary["agents"] as? [[String: Any]] ?? [])
+                    .frame(maxHeight: .infinity, alignment: .top)
             }
+            .fixedSize(horizontal: false, vertical: true)
+            MonitoringCard(history: dash.cpuHistory, monitoring: dash.summary["monitoring"] as? [String: Any] ?? [:])
+        }
+    }
+
+    /// Le stesse tre schede in una griglia, per le larghezze medie e strette.
+    private var yggdrasillBottomGrid: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 250), spacing: 12, alignment: .top)], spacing: 12) {
+            ProjectsCard(projects: dash.summary["projects"] as? [[String: Any]] ?? [])
+            ActiveAgentsCard(items: dash.summary["agents"] as? [[String: Any]] ?? [])
             MonitoringCard(history: dash.cpuHistory, monitoring: dash.summary["monitoring"] as? [String: Any] ?? [:])
         }
     }
 
     /// La pagina d'ingresso: stato a sinistra, l'albero al centro, JARVIS a destra e i nove regni sotto.
     private var yggdrasilHome: some View {
-        let tree = YggdrasilHome(functions: realmFunctions, open: openFunction,
-                                 selected: $realmSelection, minHeight: 620)
-        let wide = homeWidth >= 1150
+        // Tre disposizioni: larga (colonne ai lati dell'albero), media (albero in alto, poi due colonne) e stretta.
+        let wide = homeWidth >= 1180
+        let medium = homeWidth >= 760
+        let tree = YggdrasilHome(functions: realmFunctions, open: openFunction, selected: $realmSelection,
+                                 minHeight: wide ? 660 : (medium ? 600 : 480))
         return VStack(spacing: 14) {
             if wide {
                 HStack(alignment: .top, spacing: 14) {
@@ -2054,14 +2178,20 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                     realmOverview.frame(maxWidth: .infinity)
                     yggdrasillBottomRight.frame(width: 560)
                 }
+            } else if medium {
+                tree
+                HStack(alignment: .top, spacing: 14) {
+                    yggdrasillLeft.frame(maxWidth: .infinity)
+                    yggdrasillRight.frame(maxWidth: .infinity)
+                }
+                realmOverview
+                yggdrasillBottomGrid
             } else {
                 tree
+                yggdrasillRight
+                yggdrasillLeft
                 realmOverview
-                HStack(alignment: .top, spacing: 14) {
-                    yggdrasillLeft
-                    yggdrasillRight
-                }
-                yggdrasillBottomRight
+                yggdrasillBottomGrid
             }
         }
         .background {
@@ -3956,6 +4086,13 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                         Task {
                             do {
                                 _ = try await core.request("/api/updates/install", method: "POST", body: [:])
+                                info = "Installazione avviata: l'app si chiude e si riapre da sola tra qualche secondo."
+                                // Lo script di aggiornamento attende la chiusura dell'app e la riapre: se la chiusura normale
+                                // non avviene (finestra o servizio che non risponde) si esce comunque dopo pochi secondi.
+                                Task {
+                                    try? await Task.sleep(for: .seconds(4))
+                                    exit(0)
+                                }
                                 NSApplication.shared.terminate(nil)
                             } catch { self.error = error.localizedDescription }
                         }
@@ -3970,6 +4107,23 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 }
             }
         }
+        DisclosureGroup("Registro dell'ultimo aggiornamento") {
+            VStack(alignment: .leading, spacing: 8) {
+                Button("Leggi il registro") {
+                    Task {
+                        if let result = try? await core.request("/api/updates/log"), let text = result["log"] as? String {
+                            updateLog = text.isEmpty ? "Nessun registro: non è ancora stato tentato un aggiornamento." : text
+                        }
+                    }
+                }
+                if !updateLog.isEmpty {
+                    Text(updateLog).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.top, 6)
+        }
+        .font(.callout.weight(.medium)).foregroundStyle(.secondary)
     }
 
     /// Conferma specifica quando il Core non ne manda una: dice cosa è successo, mai un generico «operazione completata».

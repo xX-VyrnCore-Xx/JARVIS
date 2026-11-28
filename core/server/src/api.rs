@@ -572,6 +572,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/updates/check", post(updates_check))
         .route("/api/updates/download", post(updates_download))
         .route("/api/updates/install", post(updates_install))
+        .route("/api/updates/log", get(updates_log))
         .route("/api/notify/channels", get(channels_list).post(channel_add))
         .route("/api/notify/channels/{id}", delete(channel_delete))
         .route("/api/notify/channels/{id}/test", post(channel_test))
@@ -1735,6 +1736,18 @@ async fn updates_install(
         );
     }
     reply(with_core(&state, |j| j.updates_install()).await)
+}
+
+/// Registro dell'ultimo aggiornamento (solo proprietario): serve a capire cosa è andato storto.
+async fn updates_log(
+    State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
+) -> Response {
+    if let Some(denied) = dataset_owner_only(&device) {
+        return denied;
+    }
+    let dir = with_core(&state, |j| j.data_dir()).await;
+    Json(json!({"log": crate::selfupdate::last_log(&dir)})).into_response()
 }
 
 async fn fetch_releases(state: &Shared) -> Result<Vec<Value>, String> {
