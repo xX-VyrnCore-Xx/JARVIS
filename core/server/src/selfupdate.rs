@@ -369,14 +369,34 @@ pub fn install_target(app: &Path, home: Option<&Path>) -> PathBuf {
     let name = app
         .file_name()
         .map_or_else(|| "JARVIS.app".into(), |n| n.to_os_string());
-    let system = Path::new("/Applications");
-    if std::fs::metadata(system).is_ok_and(|m| !m.permissions().readonly()) {
-        return system.join(&name);
-    }
     home.map_or_else(
-        || system.join(&name),
+        || Path::new("/Applications").join(&name),
         |h| h.join("Applications").join(&name),
     )
+}
+
+fn prepare_mac_target(located: &Path, home: Option<&Path>) -> Result<PathBuf, String> {
+    fn writable_parent(app: &Path) -> std::io::Result<()> {
+        let parent = app
+            .parent()
+            .ok_or_else(|| std::io::Error::other("directory mancante"))?;
+        std::fs::create_dir_all(parent)?;
+        let probe = parent.join(format!(".jarvis-update-probe-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&probe)?;
+        std::fs::remove_dir(probe)
+    }
+
+    let target = install_target(located, home);
+    if writable_parent(&target).is_ok() {
+        return Ok(target);
+    }
+    if let (Some(home), Some(name)) = (home, located.file_name()) {
+        let fallback = home.join("Applications").join(name);
+        if fallback != target && writable_parent(&fallback).is_ok() {
+            return Ok(fallback);
+        }
+    }
+    Err("Cartella di installazione non scrivibile. Sposta JARVIS in Applicazioni e riprova.".into())
 }
 
 /// Dati che lo script di aggiornamento usa per diagnosticare e attendere la chiusura dell'app.
@@ -387,6 +407,7 @@ pub struct ScriptCtx<'a> {
     pub result: &'a Path,
     /// Processi da attendere prima di sostituire l'app (il Core e l'app che lo ha avviato).
     pub pids: Vec<u32>,
+    pub original_app: Option<&'a Path>,
 }
 
 const MAC_SCRIPT: &str = r#"#!/bin/sh
@@ -402,42 +423,72 @@ n=0
 for pid in @PIDS@; do
   while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 60 ]; do sleep 1; n=$((n + 1)); done
 done
-log "attesa terminata dopo ${n} s"
-# Se l'app è ancora in esecuzione la si chiude: altrimenti «open» riattiverebbe la vecchia istanza.
-pkill -f "@APP@/Contents/MacOS/" 2>/dev/null && { log "chiusa un'istanza rimasta aperta"; sleep 2; }
-mnt=$(mktemp -d /tmp/jarvis-update.XXXXXX)
-if [ -z "$mnt" ]; then
-  fail "cartella temporanea non creabile"
-elif hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "@INSTALLER@" >> "$LOG" 2>&1; then
-  if [ -d "$mnt/JARVIS.app" ] && rm -rf "@APP@.new" && ditto "$mnt/JARVIS.app" "@APP@.new" >> "$LOG" 2>&1; then
-    xattr -dr com.apple.quarantine "@APP@.new" 2>/dev/null
-    rm -rf "@APP@.old"
-    if [ ! -e "@APP@" ] || mv "@APP@" "@APP@.old" >> "$LOG" 2>&1; then
-      if mv "@APP@.new" "@APP@" >> "$LOG" 2>&1; then
-        rm -rf "@APP@.old"; echo ok > "$RESULT"; log "nuova versione installata"
-      else
-        [ -e "@APP@.old" ] && mv "@APP@.old" "@APP@"; rm -rf "@APP@.new"; fail "sostituzione non riuscita: ripristinata la versione precedente"
-      fi
-    else
-      rm -rf "@APP@.new"; fail "non posso sostituire @APP@: controlla i permessi della cartella"
-    fi
-  else
-    rm -rf "@APP@.new"; fail "copia della nuova versione non riuscita (JARVIS.app assente nell'immagine o spazio insufficiente)"
+for pid in @PIDS@; do
+  if kill -0 "$pid" 2>/dev/null; then
+    fail "JARVIS è ancora in esecuzione. Chiudilo e riprova."
+    exit 1
   fi
-  hdiutil detach "$mnt" -force >> "$LOG" 2>&1
+done
+app="@APP@"
+restart="@ORIGINAL@"
+mnt=
+stage=
+mounted=0
+cleanup() {
+  if [ "$mounted" = 1 ]; then hdiutil detach "$mnt" >> "$LOG" 2>&1; fi
+  if [ -n "$mnt" ]; then rmdir "$mnt" 2>/dev/null; fi
+  if [ -n "$stage" ] && [ ! -e "$stage/previous.app" ]; then rm -rf "$stage"; fi
+}
+trap cleanup EXIT
+install_bundle() {
+  mnt=$(mktemp -d /tmp/jarvis-update.XXXXXX) || return 1
+  stage=$(mktemp -d "${app%/*}/.jarvis-update.XXXXXX") || return 1
+  hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "@INSTALLER@" >> "$LOG" 2>&1 || return 1
+  mounted=1
+  ditto "$mnt/JARVIS.app" "$stage/next.app" >> "$LOG" 2>&1 || return 1
+  codesign --verify --deep --strict "$stage/next.app" >> "$LOG" 2>&1 || return 1
+  if [ -e "$app" ]; then mv "$app" "$stage/previous.app" >> "$LOG" 2>&1 || return 1; fi
+  if ! mv "$stage/next.app" "$app" >> "$LOG" 2>&1; then
+    if [ -e "$stage/previous.app" ] && ! mv "$stage/previous.app" "$app" >> "$LOG" 2>&1; then
+      restart="$stage/previous.app"
+      log "Versione precedente conservata in $restart"
+    fi
+    return 1
+  fi
+  restart="$app"
+  return 0
+}
+if install_bundle; then
+  log "nuova versione installata"
+  installed=1
 else
-  fail "impossibile aprire l'immagine disco dell'aggiornamento"
+  fail "installazione non riuscita. Consulta il registro per i dettagli."
+  installed=0
 fi
-rmdir "$mnt" 2>/dev/null
 log "riavvio JARVIS"
-# Fino a cinque tentativi: «open -n» avvia un'istanza nuova anche se Launch Services non ha ancora registrato la chiusura.
-started=0
 for attempt in 1 2 3 4 5; do
-  if open -n "@APP@" >> "$LOG" 2>&1; then started=1; break; fi
+  if open -n "$restart" >> "$LOG" 2>&1; then
+    if [ "$installed" = 1 ]; then
+      rm -rf "$stage/previous.app"
+      echo ok > "$RESULT"
+    fi
+    log "JARVIS riavviato"
+    exit 0
+  fi
   log "riavvio, tentativo $attempt non riuscito"
   sleep 2
 done
-[ "$started" = 1 ] && log "JARVIS riavviato" || log "ERRORE: riavvio non riuscito: apri JARVIS da @APP@"
+if [ "$installed" = 1 ] && [ -e "$stage/previous.app" ]; then
+  if mv "$app" "$stage/failed.app" >> "$LOG" 2>&1 &&
+     mv "$stage/previous.app" "$app" >> "$LOG" 2>&1; then
+    fail "la nuova versione non si apre. Ripristinata la versione precedente."
+    open -n "$app" >> "$LOG" 2>&1
+    exit 1
+  fi
+  log "Ripristino non completato: copia precedente in $stage/previous.app"
+fi
+fail "riavvio non riuscito: apri JARVIS da $restart"
+exit 1
 "#;
 
 const WINDOWS_SCRIPT: &str = "@echo off\r\n\
@@ -467,6 +518,7 @@ pub fn install_script(
     app: &Path,
     ctx: &ScriptCtx,
 ) -> Result<String, String> {
+    let original = safe_path(ctx.original_app.unwrap_or(app))?;
     let installer = safe_path(installer)?;
     let app = safe_path(app)?;
     let log = safe_path(ctx.log)?;
@@ -487,7 +539,8 @@ pub fn install_script(
         .replace("@RESULT@", &result)
         .replace("@PIDS@", &pids)
         .replace("@INSTALLER@", &installer)
-        .replace("@APP@", app.trim_end_matches(['/', '\\'])))
+        .replace("@APP@", app.trim_end_matches(['/', '\\']))
+        .replace("@ORIGINAL@", original.trim_end_matches(['/', '\\'])))
 }
 
 /// Esito dell'ultima installazione, letto una sola volta al riavvio: `None` se non c'è stato un tentativo.
@@ -525,9 +578,9 @@ pub fn apply(data_dir: &Path) -> Result<Value, String> {
         .ok_or("installazione non riconosciuta: aggiorna scaricando la release")?;
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let app = if std::env::consts::OS == "macos" {
-        install_target(&located, home.as_deref())
+        prepare_mac_target(&located, home.as_deref())?
     } else {
-        located
+        located.clone()
     };
     let os = std::env::consts::OS;
     let dir = updates_dir(data_dir);
@@ -548,6 +601,7 @@ pub fn apply(data_dir: &Path) -> Result<Value, String> {
             log: &log,
             result: &result,
             pids,
+            original_app: Some(&located),
         },
     )?;
     let path = dir.join(if os == "windows" {
@@ -574,7 +628,8 @@ pub fn apply(data_dir: &Path) -> Result<Value, String> {
             c.arg(&path);
             c
         };
-        cmd.stdin(std::process::Stdio::null())
+        cmd.current_dir(&dir)
+            .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null());
         #[cfg(windows)]
@@ -698,6 +753,7 @@ mod tests {
             log: Path::new(log),
             result: Path::new(result),
             pids: vec![111, 222],
+            original_app: None,
         };
         let win = install_script(
             "windows",
@@ -717,9 +773,16 @@ mod tests {
         );
         assert!(win.contains("apply.log") && win.contains("apply-result.txt"));
         assert!(
-            !["@LOG@", "@RESULT@", "@PIDS@", "@INSTALLER@", "@APP@"]
-                .iter()
-                .any(|k| win.contains(k)),
+            ![
+                "@LOG@",
+                "@RESULT@",
+                "@PIDS@",
+                "@INSTALLER@",
+                "@APP@",
+                "@ORIGINAL@"
+            ]
+            .iter()
+            .any(|k| win.contains(k)),
             "segnaposto rimasto: {win}"
         );
 
@@ -736,21 +799,25 @@ mod tests {
             "attende i processi per PID"
         );
         assert!(
-            mac.contains("ripristinata la versione precedente"),
+            mac.contains("mv \"$stage/previous.app\" \"$app\""),
             "ripristina se la sostituzione fallisce"
         );
-        assert!(
-            mac.contains("log \"riavvio JARVIS\"")
-                && mac.contains("open -n \"/Applications/JARVIS.app\"")
-        );
+        assert!(mac.contains("log \"riavvio JARVIS\"") && mac.contains("open -n \"$restart\""));
         assert!(
             !mac.contains("/Applications/JARVIS.app/\""),
             "barra finale rimossa"
         );
         assert!(
-            !["@LOG@", "@RESULT@", "@PIDS@", "@INSTALLER@", "@APP@"]
-                .iter()
-                .any(|k| mac.contains(k)),
+            ![
+                "@LOG@",
+                "@RESULT@",
+                "@PIDS@",
+                "@INSTALLER@",
+                "@APP@",
+                "@ORIGINAL@"
+            ]
+            .iter()
+            .any(|k| mac.contains(k)),
             "segnaposto rimasto: {mac}"
         );
 
