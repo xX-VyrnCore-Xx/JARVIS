@@ -358,6 +358,27 @@ pub fn app_location(exe: &Path) -> Option<PathBuf> {
         })
 }
 
+/// Dove installare davvero la nuova versione. Se l'app gira da una copia «traslocata» da Gatekeeper
+/// (`/private/var/folders/…/AppTranslocation/…`, sola lettura) o direttamente dall'immagine disco (`/Volumes/…`),
+/// sostituirla non servirebbe e fallirebbe: si installa in `/Applications` (o in `~/Applications`).
+pub fn install_target(app: &Path, home: Option<&Path>) -> PathBuf {
+    let text = app.to_string_lossy();
+    if !(text.contains("/AppTranslocation/") || text.starts_with("/Volumes/")) {
+        return app.to_path_buf();
+    }
+    let name = app
+        .file_name()
+        .map_or_else(|| "JARVIS.app".into(), |n| n.to_os_string());
+    let system = Path::new("/Applications");
+    if std::fs::metadata(system).is_ok_and(|m| !m.permissions().readonly()) {
+        return system.join(&name);
+    }
+    home.map_or_else(
+        || system.join(&name),
+        |h| h.join("Applications").join(&name),
+    )
+}
+
 /// Dati che lo script di aggiornamento usa per diagnosticare e attendere la chiusura dell'app.
 pub struct ScriptCtx<'a> {
     /// Registro dell'aggiornamento (`apply.log`): cosa è successo, passo per passo.
@@ -369,16 +390,21 @@ pub struct ScriptCtx<'a> {
 }
 
 const MAC_SCRIPT: &str = r#"#!/bin/sh
+PATH="${PATH:+$PATH:}/usr/bin:/bin:/usr/sbin:/sbin"
+export PATH
 LOG="@LOG@"
 RESULT="@RESULT@"
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG"; }
 fail() { log "ERRORE: $*"; echo "failed: $*" > "$RESULT"; }
+log "avvio dello script (utente $(id -un), app @APP@, immagine @INSTALLER@)"
 log "attendo la chiusura di JARVIS"
 n=0
 for pid in @PIDS@; do
   while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 60 ]; do sleep 1; n=$((n + 1)); done
 done
-sleep 1
+log "attesa terminata dopo ${n} s"
+# Se l'app è ancora in esecuzione la si chiude: altrimenti «open» riattiverebbe la vecchia istanza.
+pkill -f "@APP@/Contents/MacOS/" 2>/dev/null && { log "chiusa un'istanza rimasta aperta"; sleep 2; }
 mnt=$(mktemp -d /tmp/jarvis-update.XXXXXX)
 if [ -z "$mnt" ]; then
   fail "cartella temporanea non creabile"
@@ -386,11 +412,11 @@ elif hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "@INSTALLER@" >> "$LO
   if [ -d "$mnt/JARVIS.app" ] && rm -rf "@APP@.new" && ditto "$mnt/JARVIS.app" "@APP@.new" >> "$LOG" 2>&1; then
     xattr -dr com.apple.quarantine "@APP@.new" 2>/dev/null
     rm -rf "@APP@.old"
-    if mv "@APP@" "@APP@.old" >> "$LOG" 2>&1; then
+    if [ ! -e "@APP@" ] || mv "@APP@" "@APP@.old" >> "$LOG" 2>&1; then
       if mv "@APP@.new" "@APP@" >> "$LOG" 2>&1; then
         rm -rf "@APP@.old"; echo ok > "$RESULT"; log "nuova versione installata"
       else
-        mv "@APP@.old" "@APP@"; rm -rf "@APP@.new"; fail "sostituzione non riuscita: ripristinata la versione precedente"
+        [ -e "@APP@.old" ] && mv "@APP@.old" "@APP@"; rm -rf "@APP@.new"; fail "sostituzione non riuscita: ripristinata la versione precedente"
       fi
     else
       rm -rf "@APP@.new"; fail "non posso sostituire @APP@: controlla i permessi della cartella"
@@ -404,7 +430,14 @@ else
 fi
 rmdir "$mnt" 2>/dev/null
 log "riavvio JARVIS"
-open "@APP@" >> "$LOG" 2>&1 || log "ERRORE: riavvio non riuscito: apri JARVIS dal Launchpad"
+# Fino a cinque tentativi: «open -n» avvia un'istanza nuova anche se Launch Services non ha ancora registrato la chiusura.
+started=0
+for attempt in 1 2 3 4 5; do
+  if open -n "@APP@" >> "$LOG" 2>&1; then started=1; break; fi
+  log "riavvio, tentativo $attempt non riuscito"
+  sleep 2
+done
+[ "$started" = 1 ] && log "JARVIS riavviato" || log "ERRORE: riavvio non riuscito: apri JARVIS da @APP@"
 "#;
 
 const WINDOWS_SCRIPT: &str = "@echo off\r\n\
@@ -477,12 +510,25 @@ pub fn take_install_result(data_dir: &Path) -> Option<Result<(), String>> {
     }
 }
 
+/// Ultime righe del registro dell'ultimo aggiornamento (`apply.log`), per capire cosa è successo.
+pub fn last_log(data_dir: &Path) -> String {
+    let text = std::fs::read_to_string(updates_dir(data_dir).join("apply.log")).unwrap_or_default();
+    let lines: Vec<&str> = text.lines().collect();
+    lines[lines.len().saturating_sub(40)..].join("\n")
+}
+
 /// Avvia lo script in un processo staccato. L'app deve chiudersi subito dopo la risposta.
 pub fn apply(data_dir: &Path) -> Result<Value, String> {
     let (installer, version) = ready_installer(data_dir)?;
     let exe = std::env::current_exe().map_err(|_| "percorso del Core non disponibile")?;
-    let app = app_location(&exe)
+    let located = app_location(&exe)
         .ok_or("installazione non riconosciuta: aggiorna scaricando la release")?;
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let app = if std::env::consts::OS == "macos" {
+        install_target(&located, home.as_deref())
+    } else {
+        located
+    };
     let os = std::env::consts::OS;
     let dir = updates_dir(data_dir);
     let log = dir.join("apply.log");
@@ -492,6 +538,8 @@ pub fn apply(data_dir: &Path) -> Result<Value, String> {
     let mut pids = vec![std::process::id()];
     #[cfg(unix)]
     pids.push(std::os::unix::process::parent_id());
+    // Mai attendere il processo 0 o 1 (launchd): è sempre vivo e farebbe aspettare il limite per niente.
+    pids.retain(|pid| *pid > 1);
     let script = install_script(
         os,
         &installer,
@@ -514,7 +562,15 @@ pub fn apply(data_dir: &Path) -> Result<Value, String> {
             c.args(["/C", "call"]).arg(&path);
             c
         } else {
-            let mut c = std::process::Command::new("/bin/sh");
+            // «nohup» ignora il segnale di chiusura: lo script sopravvive all'uscita del Core e dell'app.
+            let nohup = Path::new("/usr/bin/nohup");
+            let mut c = if nohup.exists() {
+                let mut c = std::process::Command::new(nohup);
+                c.arg("/bin/sh");
+                c
+            } else {
+                std::process::Command::new("/bin/sh")
+            };
             c.arg(&path);
             c
         };
@@ -675,7 +731,7 @@ mod tests {
         );
         assert!(
             mac.contains("log \"riavvio JARVIS\"")
-                && mac.contains("open \"/Applications/JARVIS.app\"")
+                && mac.contains("open -n \"/Applications/JARVIS.app\"")
         );
         assert!(
             !mac.contains("/Applications/JARVIS.app/\""),
@@ -694,6 +750,42 @@ mod tests {
         assert!(bad("windows", "C:/a&b/x.exe", "C:/u").is_err());
         assert!(bad("macos", "/a$b/x.dmg", "/Applications/JARVIS.app").is_err());
         assert!(bad("linux", "/x", "/y").is_err());
+    }
+
+    #[test]
+    fn the_install_target_leaves_translocated_and_mounted_copies() {
+        let normal = Path::new("/Applications/JARVIS.app");
+        assert_eq!(install_target(normal, None), normal);
+        let home = Path::new("/Users/test");
+        let moved = install_target(
+            Path::new("/private/var/folders/ab/xyz/T/AppTranslocation/1234/d/JARVIS.app"),
+            Some(home),
+        );
+        assert!(
+            moved == Path::new("/Applications/JARVIS.app")
+                || moved == home.join("Applications/JARVIS.app"),
+            "{moved:?}"
+        );
+        let mounted = install_target(Path::new("/Volumes/JARVIS/JARVIS.app"), Some(home));
+        assert!(
+            mounted.ends_with("JARVIS.app") && !mounted.starts_with("/Volumes"),
+            "{mounted:?}"
+        );
+    }
+
+    #[test]
+    fn the_last_log_shows_the_final_lines_only() {
+        let dir =
+            std::env::temp_dir().join(format!("jarvis-log-{}", uuid::Uuid::new_v4().simple()));
+        let up = updates_dir(&dir);
+        std::fs::create_dir_all(&up).unwrap();
+        assert_eq!(last_log(&dir), "");
+        let text: String = (0..60).map(|n| format!("riga {n}\n")).collect();
+        std::fs::write(up.join("apply.log"), text).unwrap();
+        let shown = last_log(&dir);
+        assert_eq!(shown.lines().count(), 40);
+        assert!(shown.ends_with("riga 59") && !shown.contains("riga 5\n"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

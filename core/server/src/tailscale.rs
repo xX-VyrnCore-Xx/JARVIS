@@ -341,6 +341,183 @@ pub fn json_part(out: &Out) -> String {
     }
 }
 
+// ---------------------------------------------------------------- API locale del client di macOS (ADR-0235)
+
+/// Accesso alle API locali del client Tailscale, senza il programma a riga di comando. Su macOS il programma
+/// dell'app, lanciato da un altro processo, può rispondere «The Tailscale GUI failed to start»: il client però
+/// espone le stesse informazioni su una porta locale protetta da un segreto che solo l'utente può leggere.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalApi {
+    base: String,
+    token: String,
+}
+
+/// Porta e segreto da un nome del tipo `sameuserproof-<porta>-<segreto>` (anche dentro un percorso).
+pub fn parse_proof(text: &str) -> Option<(u16, String)> {
+    let start = text.find("sameuserproof-")? + "sameuserproof-".len();
+    let rest = &text[start..];
+    let end = rest
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-'))
+        .unwrap_or(rest.len());
+    let (port, token) = rest[..end].split_once('-')?;
+    let port: u16 = port.parse().ok()?;
+    (port > 0 && !token.is_empty() && token.len() <= 128).then(|| (port, token.to_string()))
+}
+
+impl LocalApi {
+    pub fn new(port: u16, token: &str) -> Self {
+        Self {
+            base: format!("http://127.0.0.1:{port}"),
+            token: token.to_string(),
+        }
+    }
+
+    /// Versione «standalone» di macOS: porta e segreto in `/Library/Tailscale`.
+    fn locate_standalone() -> Option<Self> {
+        let port = std::fs::read_link("/Library/Tailscale/ipnport").ok()?;
+        let port = port.to_string_lossy().trim().to_string();
+        let token =
+            std::fs::read_to_string(format!("/Library/Tailscale/sameuserproof-{port}")).ok()?;
+        Some(Self::new(port.parse().ok()?, token.trim()))
+    }
+
+    /// Versione dell'App Store: il segreto è nel nome di un file aperto dall'estensione di rete.
+    fn locate_sandboxed() -> Option<Self> {
+        let out = run_one(
+            "/usr/sbin/lsof",
+            &["-n", "-a", "-c", "IPNExtension", "-F", "n"],
+        )
+        .ok()??;
+        let (port, token) = parse_proof(&out.stdout)?;
+        Some(Self::new(port, &token))
+    }
+
+    /// Le API locali di questo computer, se è macOS e il client è in esecuzione.
+    pub fn locate() -> Option<Self> {
+        if !cfg!(target_os = "macos") {
+            return None;
+        }
+        Self::locate_standalone().or_else(Self::locate_sandboxed)
+    }
+
+    /// Una richiesta alle API locali: corpo della risposta ed etichetta (`ETag`) per le modifiche.
+    pub fn request(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&str>,
+        etag: Option<&str>,
+    ) -> Result<(String, Option<String>), String> {
+        use base64::Engine as _;
+        let auth = format!(
+            "Basic {}",
+            base64::engine::general_purpose::STANDARD.encode(format!(":{}", self.token))
+        );
+        let agent = crate::net::builder(Duration::from_secs(8))
+            .try_proxy_from_env(false)
+            .build();
+        let mut request = agent
+            .request(method, &format!("{}{}", self.base, path))
+            .set("Authorization", &auth)
+            .set("Sec-Tailscale", "localapi")
+            .set("Accept", "application/json");
+        if let Some(tag) = etag {
+            request = request.set("If-Match", tag);
+        }
+        let response = match body {
+            Some(text) => request
+                .set("Content-Type", "application/json")
+                .send_string(text),
+            None => request.call(),
+        };
+        match response {
+            Ok(response) => {
+                let tag = response.header("ETag").map(str::to_string);
+                let mut text = String::new();
+                response
+                    .into_reader()
+                    .take(8 * 1024 * 1024)
+                    .read_to_string(&mut text)
+                    .map_err(|e| e.to_string())?;
+                Ok((text, tag))
+            }
+            Err(ureq::Error::Status(code, response)) => {
+                let detail: String = response
+                    .into_string()
+                    .unwrap_or_default()
+                    .chars()
+                    .take(200)
+                    .collect();
+                Err(
+                    format!("API locale di Tailscale: stato HTTP {code} {detail}")
+                        .trim()
+                        .to_string(),
+                )
+            }
+            Err(error) => Err(format!(
+                "API locale di Tailscale non raggiungibile: {error}"
+            )),
+        }
+    }
+
+    /// Lo stesso JSON di `tailscale status --json`, senza l'elenco degli altri dispositivi.
+    pub fn status_json(&self) -> Result<String, String> {
+        self.request("GET", "/localapi/v0/status?peers=false", None, None)
+            .map(|(text, _)| text)
+    }
+}
+
+/// Configurazione di Tailscale Serve con il Core pubblicato su HTTPS (443) verso la porta locale; il resto della
+/// configurazione già presente resta com'è.
+pub fn merged_serve_config(existing: &str, host: &str, port: u16) -> Value {
+    let mut doc: Value = serde_json::from_str(existing)
+        .ok()
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    doc["TCP"]["443"] = json!({"HTTPS": true});
+    let key = format!("{host}:443");
+    doc["Web"][&key]["Handlers"]["/"] = json!({"Proxy": format!("http://127.0.0.1:{port}")});
+    doc
+}
+
+/// Pubblica il Core con le API locali (senza il programma a riga di comando).
+fn publish_via_api(api: &LocalApi, port: u16) -> Result<String, String> {
+    let (_, host) = parse_status(&api.status_json()?);
+    let host =
+        host.ok_or("il nome della macchina non è disponibile: attendi che Tailscale sia connesso")?;
+    let (existing, etag) = api.request("GET", "/localapi/v0/serve-config", None, None)?;
+    let config = merged_serve_config(&existing, &host, port);
+    api.request(
+        "POST",
+        "/localapi/v0/serve-config",
+        Some(&config.to_string()),
+        etag.as_deref(),
+    )?;
+    Ok(format!(
+        "Pubblicato con le API locali di Tailscale: https://{host}"
+    ))
+}
+
+/// Testo della configurazione di Serve: dal programma o, se non risponde, dalle API locali.
+fn serve_text() -> String {
+    if let Ok(Some(out)) = run(&["serve", "status"]) {
+        if out.ok
+            || !out.text().trim().is_empty()
+                && !daemon_unreachable(&out.text())
+                && !out.text().contains("failed to start")
+        {
+            return out.text();
+        }
+    }
+    LocalApi::locate()
+        .and_then(|api| {
+            api.request("GET", "/localapi/v0/serve-config", None, None)
+                .ok()
+        })
+        .map(|(text, _)| text)
+        .unwrap_or_default()
+}
+
 /// `status --json` senza l'elenco degli altri dispositivi (non serve e può essere enorme); se il client è
 /// così vecchio da non conoscere l'opzione, ripiega sulla forma completa. Prova tutte le copie di Tailscale e
 /// restituisce la risposta migliore (ADR-0233).
@@ -353,6 +530,16 @@ fn status_out() -> Result<Option<Out>, String> {
     };
     if outs.iter().any(unknown_flag) {
         outs = run_all(&programs, &["status", "--json"])?;
+    }
+    // Se nessun programma vede Tailscale connesso, si chiede direttamente al client (macOS).
+    if outs.iter().map(status_rank).max().unwrap_or(0) < 3 {
+        if let Some(Ok(text)) = LocalApi::locate().map(|api| api.status_json()) {
+            outs.push(Out {
+                ok: true,
+                stdout: text,
+                stderr: String::new(),
+            });
+        }
     }
     Ok(best_status(outs))
 }
@@ -378,8 +565,7 @@ pub fn status(port: u16) -> Value {
     let (state, host) = parse_status(&raw);
     let details = parse_details(&raw);
     let connected = is_active(&raw);
-    let serving = connected
-        && matches!(run(&["serve", "status"]), Ok(Some(out)) if serving_port(&out.text(), port));
+    let serving = connected && serving_port(&serve_text(), port);
     let resolves = host.as_deref().filter(|_| connected).map(resolves_here);
     let mut message = advice(connected, host.as_deref(), serving, &details, resolves);
     if state.is_empty() {
@@ -498,11 +684,7 @@ pub fn diagnose(port: u16) -> Value {
         return json!({"ok": false, "steps": steps, "health": details.health,
             "verdict": advice(true, None, false, &details, None)});
     };
-    let serve_text = run(&["serve", "status"])
-        .ok()
-        .flatten()
-        .map(|out| out.text())
-        .unwrap_or_default();
+    let serve_text = serve_text();
     steps.push(step(
         "serve",
         serving_port(&serve_text, port),
@@ -660,17 +842,37 @@ pub fn failed_step(steps: &[Value]) -> Option<String> {
 
 /// Pubblica il Core locale nella rete privata (`tailscale serve --bg <porta>`). Non usa mai Funnel.
 pub fn publish(port: u16) -> Result<String, String> {
-    let port = port.to_string();
-    match run(&["serve", "--bg", &port])? {
-        None => Err("Tailscale non è installato su questo computer.".into()),
-        Some(out) if out.ok => Ok(out.text()),
+    let port_text = port.to_string();
+    let cli = run(&["serve", "--bg", &port_text]);
+    if let Ok(Some(out)) = &cli {
+        if out.ok {
+            return Ok(out.text());
+        }
+    }
+    // Il programma non c'è o non riesce (su macOS: «The Tailscale GUI failed to start»): si usano le API locali.
+    let mut api_error = None;
+    if let Some(api) = LocalApi::locate() {
+        match publish_via_api(&api, port) {
+            Ok(note) => return Ok(note),
+            Err(error) => api_error = Some(error),
+        }
+    }
+    match cli? {
+        None => {
+            Err(api_error
+                .unwrap_or_else(|| "Tailscale non è installato su questo computer.".into()))
+        }
         Some(out) => {
             let text = out.text();
             let detail = text.trim();
             Err(if detail.is_empty() {
                 "Tailscale non ha completato la pubblicazione: controlla di essere connesso e di aver abilitato HTTPS nella console.".into()
             } else {
-                detail.chars().take(400).collect()
+                let mut message: String = detail.chars().take(400).collect();
+                if let Some(error) = api_error {
+                    message = format!("{message} · {error}");
+                }
+                message
             })
         }
     }
@@ -746,6 +948,76 @@ mod tests {
         assert!(state_message("Stopped").contains("fermo"));
         assert!(state_message("NeedsLogin").contains("accedere"));
         assert!(state_message("").contains("non risponde"));
+    }
+
+    #[test]
+    fn the_local_api_secret_is_found_in_a_file_name_and_serve_config_is_merged() {
+        let listing = "p123\nn/Users/x/Library/Group Containers/W5364U7YZB.io.tailscale.ipn.macos/sameuserproof-61577-4a5bc9d0e1\nn/other\n";
+        assert_eq!(
+            parse_proof(listing),
+            Some((61577, "4a5bc9d0e1".to_string()))
+        );
+        assert_eq!(parse_proof("sameuserproof-xx-abc"), None);
+        assert_eq!(parse_proof("niente"), None);
+        assert_eq!(parse_proof("sameuserproof-0-abc"), None);
+        // La configurazione esistente non si perde.
+        let existing = r#"{"TCP":{"8443":{"HTTPS":true}},"Web":{"x.ts.net:8443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:9"}}}}}"#;
+        let merged = merged_serve_config(existing, "casa.tail1.ts.net", 8765);
+        assert_eq!(merged["TCP"]["443"]["HTTPS"], true);
+        assert_eq!(merged["TCP"]["8443"]["HTTPS"], true);
+        assert_eq!(
+            merged["Web"]["casa.tail1.ts.net:443"]["Handlers"]["/"]["Proxy"],
+            "http://127.0.0.1:8765"
+        );
+        assert!(merged["Web"]["x.ts.net:8443"].is_object());
+        assert!(serving_port(&merged.to_string(), 8765));
+        // Da vuoto o da testo non JSON.
+        assert_eq!(
+            merged_serve_config("", "a.b.ts.net", 1)["TCP"]["443"]["HTTPS"],
+            true
+        );
+        assert_eq!(
+            merged_serve_config("non json", "a.b.ts.net", 1)["TCP"]["443"]["HTTPS"],
+            true
+        );
+    }
+
+    #[test]
+    fn the_local_api_sends_the_secret_and_reads_the_etag() {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let seen_by_server = seen.clone();
+        std::thread::spawn(move || {
+            if let Ok((stream, _)) = listener.accept() {
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut head = String::new();
+                let mut line = String::new();
+                while reader.read_line(&mut line).is_ok() && line.trim() != "" {
+                    head.push_str(&line);
+                    line.clear();
+                }
+                *seen_by_server.lock().unwrap() = head;
+                let body = r#"{"BackendState":"Running","Self":{"DNSName":"casa.tail1.ts.net."}}"#;
+                let mut out = stream;
+                let _ = write!(out, "HTTP/1.1 200 OK\r\nETag: \"abc\"\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            }
+        });
+        let api = LocalApi::new(port, "segreto");
+        let (text, etag) = api
+            .request("GET", "/localapi/v0/status?peers=false", None, None)
+            .unwrap();
+        assert!(is_active(&text));
+        assert_eq!(etag.as_deref(), Some("\"abc\""));
+        let head = seen.lock().unwrap().to_ascii_lowercase();
+        assert!(head.contains("sec-tailscale: localapi"), "{head}");
+        // «:segreto» in base64.
+        assert!(head.contains("authorization: basic onnlz3jldg8="), "{head}");
+        assert!(
+            head.starts_with("get /localapi/v0/status?peers=false"),
+            "{head}"
+        );
     }
 
     #[test]

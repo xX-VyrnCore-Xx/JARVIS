@@ -195,6 +195,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     @State private var section: Section = .tree
     /// Regno aperto sull'albero e larghezza disponibile per scegliere il layout della pagina d'ingresso.
     @State private var realmSelection: String?
+    @State private var updateLog = ""
     @State private var homeWidth: CGFloat = 1200
     @State private var n8n: [String: Any] = [:]
     @State private var n8nPullConfirm = false
@@ -4085,6 +4086,13 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                         Task {
                             do {
                                 _ = try await core.request("/api/updates/install", method: "POST", body: [:])
+                                info = "Installazione avviata: l'app si chiude e si riapre da sola tra qualche secondo."
+                                // Lo script di aggiornamento attende la chiusura dell'app e la riapre: se la chiusura normale
+                                // non avviene (finestra o servizio che non risponde) si esce comunque dopo pochi secondi.
+                                Task {
+                                    try? await Task.sleep(for: .seconds(4))
+                                    exit(0)
+                                }
                                 NSApplication.shared.terminate(nil)
                             } catch { self.error = error.localizedDescription }
                         }
@@ -4099,6 +4107,23 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 }
             }
         }
+        DisclosureGroup("Registro dell'ultimo aggiornamento") {
+            VStack(alignment: .leading, spacing: 8) {
+                Button("Leggi il registro") {
+                    Task {
+                        if let result = try? await core.request("/api/updates/log"), let text = result["log"] as? String {
+                            updateLog = text.isEmpty ? "Nessun registro: non è ancora stato tentato un aggiornamento." : text
+                        }
+                    }
+                }
+                if !updateLog.isEmpty {
+                    Text(updateLog).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.top, 6)
+        }
+        .font(.callout.weight(.medium)).foregroundStyle(.secondary)
     }
 
     /// Conferma specifica quando il Core non ne manda una: dice cosa è successo, mai un generico «operazione completata».
