@@ -2646,6 +2646,13 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Barra laterale macOS:** senza barra di scorrimento; in alto «Nuova chat» (⌘N) e le chat recenti (come ChatGPT, con le API `/api/conversations` già esistenti); in basso il profilo, modificabile da una finestra rapida (ruolo, azienda, competenze, tono) o dalla pagina completa. Compila solo in CI macOS; aspetto non visto da me. Windows (egui): invariato in questo giro.
 - **Orchestratore:** nessuna modifica in questo giro; dichiarato come non fatto.
 
+### ADR-0238 — Identità e carattere di JARVIS: creazione personale, non prodotto di NVIDIA (2026-11-28, accettata)
+
+- **Segnalazione:** JARVIS, quando risponde con un modello NIM, poteva presentarsi come il modello (Nemotron/NVIDIA) invece che come creazione del proprietario.
+- **Decisione:** il nucleo del prompt dichiara che JARVIS è una creazione personale di chi l'ha sviluppato, non un prodotto di NVIDIA, Anthropic, OpenAI, Meta o altre aziende; i modelli sono motori intercambiabili scelti dal Core e il modello non dice mai «sono Nemotron/GPT/Claude» né «sono stato addestrato da…». Il motore in uso è indicato come dato («Motore attuale») e si può dire se richiesto: nessuna bugia sul motore. Carattere: maggiordomo-ingegnere fidato, leale, attento ai dettagli, schietto sui rischi, sicuro ma non arrogante. Le domande «sei di NVIDIA?», «che modello sei?», «chi ti ha creato?» ricevono una risposta deterministica (`selfknow`, argomento origine). Dataset identità a 89 casi. Il testo per gli utenti non nomina il proprietario.
+- **Prompt:** per restare sotto il limite di 6500 caratteri alcune frasi del nucleo sono state accorciate senza cambiarne il senso.
+- **Limite:** nessuna prova con un modello reale (serve la chiave NIM): il comportamento del modello dipende dal rispetto delle istruzioni; le domande dirette sono comunque coperte dalla risposta deterministica.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

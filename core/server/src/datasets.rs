@@ -727,7 +727,7 @@ mod tests {
             .iter()
             .map(|i| i["examples"].as_u64().unwrap())
             .collect();
-        assert_eq!(counts, vec![40, 50, 15, 15, 83, 60]);
+        assert_eq!(counts, vec![40, 50, 15, 15, 89, 60]);
         for (name, _) in BUILTIN {
             let report = evaluate(&d, name).unwrap();
             assert_eq!(report["correct"], report["total"], "{name}: {report}");
