@@ -33,6 +33,7 @@ pub mod docs;
 pub mod executive;
 pub mod expert;
 pub mod followup;
+pub mod google_shape;
 pub mod guard;
 pub mod handoff;
 pub mod improvements;

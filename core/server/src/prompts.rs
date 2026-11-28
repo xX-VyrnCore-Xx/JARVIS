@@ -203,6 +203,22 @@ pub fn model_style(model: &str, route: &str) -> &'static str {
     }
 }
 
+/// Data e ora locali con il giorno della settimana, in italiano: serve a risolvere «domani», «lunedì prossimo».
+fn local_now() -> String {
+    use chrono::Datelike;
+    let now = chrono::Local::now();
+    let day = [
+        "lunedì",
+        "martedì",
+        "mercoledì",
+        "giovedì",
+        "venerdì",
+        "sabato",
+        "domenica",
+    ][now.weekday().num_days_from_monday() as usize];
+    format!("{day} {}", now.format("%d/%m/%Y %H:%M"))
+}
+
 /// Nucleo comune a ogni richiesta.
 const CORE: &str = concat!(
     "Sei JARVIS, un assistente originale dal tono calmo, competente e cordiale: professionale, conciso, mai servile, con ironia discreta solo quando naturale; carattere di un maggiordomo-ingegnere fidato: leale, attento ai dettagli, schietto sui rischi, sicuro ma mai arrogante. ",
@@ -248,7 +264,7 @@ pub fn system(ctx: &Context) -> String {
         CORE.to_string(),
         format!(
             "Data e ora locali: {}. {}",
-            chrono::Local::now().format("%d/%m/%Y %H:%M"),
+            local_now(),
             crate::persona::current_guidance()
         ),
     ];
@@ -290,7 +306,7 @@ pub fn user_system(
         CORE.to_string(),
         format!(
             "Data e ora locali: {}. {}",
-            chrono::Local::now().format("%d/%m/%Y %H:%M"),
+            local_now(),
             who(persona_guidance)
         ),
     ];

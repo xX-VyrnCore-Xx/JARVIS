@@ -2653,6 +2653,13 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Prompt:** per restare sotto il limite di 6500 caratteri alcune frasi del nucleo sono state accorciate senza cambiarne il senso.
 - **Limite:** nessuna prova con un modello reale (serve la chiave NIM): il comportamento del modello dipende dal rispetto delle istruzioni; le domande dirette sono comunque coperte dalla risposta deterministica.
 
+### ADR-0239 — Gmail e Calendar più facili da usare per JARVIS (2026-11-28, accettata)
+
+- **Segnalazione:** JARVIS fa ancora fatica a usare Gmail e Calendar.
+- **Cause (dal codice):** Gmail «cerca» restituiva solo identificatori (servivano poi tante letture, ognuna con intestazioni grezze e `payload` annidati); Calendar «eventi» senza data né ordine partiva dal passato e chiedeva date RFC 3339 complete; «crea evento» falliva senza fuso orario; il prompt non indicava il giorno della settimana («lunedì prossimo»).
+- **Decisione** (`google_shape.rs`, stesse operazioni, stessi permessi e conferme): (a) «cerca» restituisce già mittente, destinatari, oggetto, data, anteprima e stato di lettura di ogni messaggio (fino a 10), «leggi» una scheda leggibile e, con `format=full`, il testo decodificato (max 8000 caratteri); (b) «eventi» parte da oggi, in ordine di inizio, con la scorciatoia `days` (oggi = 1, settimana = 7) e date anche solo come «2026-11-28»; risposta ridotta a titolo, inizio, fine, luogo, partecipanti; (c) «crea evento» completa ora e fuso locali e, senza fine, dura un'ora; (d) il prompt riporta data, ora e **giorno della settimana** in italiano; (e) le descrizioni degli strumenti dicono cosa restituiscono.
+- **Verifica:** test unitari sulle trasformazioni e un test con server finto che risponde come Gmail/Calendar (richieste inviate e risposte ridotte); `clippy` e suite del Core. **Non provato con account Google reali**: se un'operazione fallisce, il messaggio d'errore indica già API non abilitata o scope mancanti.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.
