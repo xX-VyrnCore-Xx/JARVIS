@@ -1340,6 +1340,11 @@ fn complete_partial(
     Answer::Text(format!("{written}\n\n{TRUNCATION_NOTE}"))
 }
 
+/// Modelli di cui si può spegnere il ragionamento con `chat_template_kwargs` (famiglia NVIDIA Nemotron).
+fn thinking_switchable(model: &str) -> bool {
+    model.starts_with("nvidia/nemotron")
+}
+
 fn payload(
     provider: Provider,
     model: &str,
@@ -1382,6 +1387,11 @@ fn payload(
             json!({"model": model, "messages": messages, "stream": false, "max_tokens": output_tokens, "temperature": 0.2})
         }
     };
+    // I modelli Nemotron «ragionano» prima di rispondere: sui percorsi veloci (conversazione, scrittura,
+    // traduzione) il ragionamento si spegne, e la prima parola arriva molto prima (ADR-0237).
+    if provider == Provider::Nim && thinking_switchable(model) && route.is_quick() {
+        body["chat_template_kwargs"] = json!({"enable_thinking": false});
+    }
     if !tools.is_empty() {
         body["tools"] = json!(tools.iter().map(|tool| &tool.wire).collect::<Vec<_>>());
         if provider == Provider::Nim {
@@ -1732,6 +1742,37 @@ fn stream_at(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quick_routes_switch_thinking_off_only_for_models_that_support_it() {
+        let quick = payload(
+            Provider::Nim,
+            "nvidia/nemotron-3.5-lightning-30b-a3b",
+            "ciao",
+            &[],
+            &[],
+            (Route::Fast, QualityPreference::default(), 0),
+        );
+        assert_eq!(quick["chat_template_kwargs"]["enable_thinking"], false);
+        let deep = payload(
+            Provider::Nim,
+            "nvidia/nemotron-3-ultra-550b-a55b",
+            "ciao",
+            &[],
+            &[],
+            (Route::Reasoning, QualityPreference::default(), 0),
+        );
+        assert!(deep.get("chat_template_kwargs").is_none());
+        let other = payload(
+            Provider::Nim,
+            "mistralai/mistral-large-4-1t-a52b",
+            "ciao",
+            &[],
+            &[],
+            (Route::Fast, QualityPreference::default(), 0),
+        );
+        assert!(other.get("chat_template_kwargs").is_none());
+    }
 
     #[test]
     fn agent_requests_carry_previous_turns_between_system_and_goal() {

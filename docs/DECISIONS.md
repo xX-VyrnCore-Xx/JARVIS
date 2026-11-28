@@ -2639,6 +2639,13 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Illustrazioni dei regni (macOS):** `RealmArt` disegna con `Canvas` un paesaggio vettoriale per ciascun regno, usato come sfondo delle tessere; nessun file immagine né costo di generazione. Aspetto non visto da me (compila solo in CI macOS).
 - **Verifica:** `cargo fmt`, `clippy`, `cargo test --locked` del Core, test contratti e AI, E2E locale, `node --check`. Il test di streaming usa ora un messaggio neutro.
 
+### ADR-0237 — Consenso di Tailscale Serve, NIM più rapido e barra laterale con chat e profilo (2026-11-28, accettata)
+
+- **Tailscale Serve (segnalazione:** «non va ancora per colpa di Serve, con MagicDNS e HTTPS già abilitati»). Causa probabile e verificabile nel codice: Serve è un consenso **separato** sulla tailnet (pagina `login.tailscale.com/f/serve?node=…`), diverso da MagicDNS e HTTPS; senza, `tailscale serve` resta in attesa di quel consenso e il Core mostrava solo un errore generico. Ora `publish` prova **prima le API locali** (non interattive, funzionano con l'app di macOS), poi il programma; se l'errore indica che Serve non è abilitato, risponde con la spiegazione e il **link già pronto** (preso dall'output di Tailscale, o composto con l'identificatore della macchina). Test su riconoscimento e composizione del link. **Non provato con la tailnet reale**: se dopo il consenso fallisce ancora, il testo dell'errore indicherà il passo.
+- **NIM:** sui percorsi veloci (conversazione, scrittura, traduzione) i modelli Nemotron ricevono `chat_template_kwargs.enable_thinking=false`: niente ragionamento prima della prima parola. Restano con ragionamento i percorsi di analisi e ragionamento. Gli altri modelli non ricevono il parametro. Test sul payload. Misura di velocità reale **non effettuata** (serve la chiave NIM).
+- **Barra laterale macOS:** senza barra di scorrimento; in alto «Nuova chat» (⌘N) e le chat recenti (come ChatGPT, con le API `/api/conversations` già esistenti); in basso il profilo, modificabile da una finestra rapida (ruolo, azienda, competenze, tono) o dalla pagina completa. Compila solo in CI macOS; aspetto non visto da me. Windows (egui): invariato in questo giro.
+- **Orchestratore:** nessuna modifica in questo giro; dichiarato come non fatto.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

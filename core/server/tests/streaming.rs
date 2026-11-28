@@ -39,7 +39,9 @@ async fn chat_stream_sends_deltas_then_the_same_final_result() {
         .header("host", format!("127.0.0.1:{PORT}"))
         .header("content-type", "application/json")
         .header("x-jarvis-token", TOKEN)
-        .body(Body::from(json!({"message": "raccontami una barzelletta breve"}).to_string()))
+        .body(Body::from(
+            json!({"message": "raccontami una barzelletta breve"}).to_string(),
+        ))
         .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
