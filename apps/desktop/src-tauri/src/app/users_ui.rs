@@ -863,8 +863,8 @@ mod tests {
     #[test]
     fn user_pages_are_owner_only_and_in_the_right_groups() {
         for (page, api, group) in [
-            ("profile", "/api/me", "Assistente"),
-            ("users", "/api/users", "Protezione"),
+            ("profile", "/api/me", "Midgard"),
+            ("users", "/api/users", "Midgard"),
         ] {
             assert_eq!(endpoint(page), api);
             assert_eq!(nav_group(page), group);

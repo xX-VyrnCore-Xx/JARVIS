@@ -1,0 +1,84 @@
+# Domande su JARVIS e frasi vicine che NON lo sono. Formato: frase | argomento (o none). Solo frasi sintetiche.
+chi sei | identity
+chi sei tu? | identity
+chi è JARVIS | identity
+presentati | identity
+presentati, per favore | identity
+fai una breve presentazione | identity
+fammi una autopresentazione | identity
+parlami di te | identity
+raccontami di te | identity
+dimmi chi sei | identity
+cosa sei | identity
+che cosa sei esattamente | identity
+come ti chiami | identity
+descriviti | identity
+che cos'è JARVIS | identity
+cosa sai fare | capabilities
+cosa sai fare davvero | capabilities
+che cosa sai fare per me | capabilities
+cosa puoi fare | capabilities
+a cosa servi | capabilities
+che funzioni hai | capabilities
+quali strumenti hai | capabilities
+che strumenti hai a disposizione | capabilities
+quali competenze hai | capabilities
+cosa posso chiederti | capabilities
+come posso usarti | capabilities
+in cosa puoi aiutarmi | capabilities
+come puoi aiutarmi con il lavoro | capabilities
+come funzioni | architecture
+come sei fatto | architecture
+come sei fatta | architecture
+di cosa sei fatto | architecture
+come sei costruito | architecture
+dove giri | architecture
+su cosa giri | architecture
+che tecnologie usi | architecture
+qual è la tua architettura | architecture
+come sei strutturato | architecture
+che dati conservi | privacy
+che dati conservi di me | privacy
+dove salvi i dati | privacy
+dove tieni i miei dati | privacy
+i miei dati sono al sicuro | privacy
+cosa invii al cloud | privacy
+cosa mandi al cloud | privacy
+cosa esce dal computer | privacy
+come proteggi i miei dati | privacy
+cosa salvi di me | privacy
+la mia privacy è protetta | privacy
+cos'è Yggdrasill | realms
+spiegami Yggdrasill | realms
+cosa sono i nove regni | realms
+parlami dei nove regni | realms
+a cosa servono i 9 regni | realms
+cosa non sai fare | limits
+cosa non puoi fare | limits
+quali sono i tuoi limiti | limits
+dimmi i tuoi limiti | limits
+dove sbagli di solito | limits
+che versione sei | version
+che versione di JARVIS è questa | version
+quale versione sei | version
+chi ti ha creato | origin
+chi ti ha fatto | origin
+chi ti ha costruito | origin
+chi ti ha programmato | origin
+chi è il tuo creatore | origin
+apri jarvis nelle impostazioni | none
+ciao | none
+grazie mille | none
+ci sei | none
+a che punto siamo | none
+scrivi una presentazione per il progetto di domani con dieci diapositive | none
+presentami il report delle spese del mese | none
+cosa sai fare di questo file e come lo ripari se è rotto in più punti del codice | none
+come funziona il protocollo https | none
+come funzioni tu con le tabelle di un foglio di calcolo e le formule annidate complesse | none
+quanto fa 12 per 12 | none
+sei sicuro di questo risultato | none
+come ti sembra il mio piano | none
+chi ha creato il linguaggio rust | none
+che versione di python serve per il progetto | none
+cosa non sai fare se ti do la password del server e ti chiedo di cancellare tutti i backup vecchi | none

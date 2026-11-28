@@ -77,7 +77,7 @@ impl Act {
 /// Più parole di così: è una richiesta vera con un soggetto, non un atto di conversazione.
 const MAX_WORDS: usize = 9;
 
-fn fold(text: &str) -> String {
+pub(crate) fn fold(text: &str) -> String {
     text.to_lowercase()
         .chars()
         .map(|c| match c {

@@ -1345,3 +1345,59 @@ struct YggdrasilHome: View {
         .shadow(color: realm.color.opacity(0.25), radius: 18)
     }
 }
+
+// MARK: - Illustrazioni dei regni (vettoriali, disegnate con Canvas: nessun file immagine)
+
+/// Piccolo paesaggio stilizzato di ogni regno: cielo sfumato, sagome e un tocco di luce nel colore del regno.
+struct RealmArt: View {
+    let realm: Realm
+
+    var body: some View {
+        Canvas { context, size in
+            let w = size.width, h = size.height
+            let c = realm.color
+            // Cielo.
+            context.fill(Path(CGRect(origin: .zero, size: size)),
+                         with: .linearGradient(Gradient(colors: [c.opacity(0.10), c.opacity(0.42)]),
+                                               startPoint: .zero, endPoint: CGPoint(x: 0, y: h)))
+            // Astro o luce principale.
+            let sun = CGRect(x: w * 0.68, y: h * 0.14, width: h * 0.34, height: h * 0.34)
+            context.fill(Path(ellipseIn: sun.insetBy(dx: -h * 0.10, dy: -h * 0.10)), with: .color(c.opacity(0.18)))
+            context.fill(Path(ellipseIn: sun), with: .color(.white.opacity(0.80)))
+            // Sagome di fondo e di primo piano, diverse per regno.
+            func ridge(_ points: [(Double, Double)], _ color: Color) {
+                var p = Path()
+                p.move(to: CGPoint(x: 0, y: h))
+                for (x, y) in points { p.addLine(to: CGPoint(x: w * x, y: h * y)) }
+                p.addLine(to: CGPoint(x: w, y: h))
+                p.closeSubpath()
+                context.fill(p, with: .color(color))
+            }
+            let dark = Color.black
+            switch realm.id {
+            case "asgard":      // torri dorate
+                ridge([(0, 0.78), (0.2, 0.55), (0.25, 0.30), (0.30, 0.55), (0.5, 0.62), (0.62, 0.36), (0.68, 0.62), (1, 0.72)], dark.opacity(0.45))
+            case "midgard":     // colline
+                ridge([(0, 0.70), (0.25, 0.52), (0.5, 0.68), (0.75, 0.50), (1, 0.66)], dark.opacity(0.38))
+                ridge([(0, 0.88), (0.4, 0.74), (1, 0.86)], dark.opacity(0.55))
+            case "alfheim":     // cupole di luce
+                ridge([(0, 0.80), (0.15, 0.50), (0.30, 0.80), (0.5, 0.58), (0.70, 0.80), (0.85, 0.52), (1, 0.80)], dark.opacity(0.35))
+            case "vanaheim":    // foresta
+                ridge([(0, 0.8), (0.1, 0.45), (0.2, 0.8), (0.32, 0.40), (0.44, 0.8), (0.58, 0.46), (0.70, 0.8), (0.84, 0.42), (1, 0.8)], dark.opacity(0.45))
+            case "jotunheim":   // montagne
+                ridge([(0, 0.85), (0.22, 0.28), (0.45, 0.80), (0.62, 0.38), (0.85, 0.82), (1, 0.62)], dark.opacity(0.48))
+            case "svartalfheim": // forge e ingranaggi
+                ridge([(0, 0.84), (0.1, 0.60), (0.3, 0.60), (0.34, 0.84), (0.5, 0.52), (0.7, 0.52), (0.75, 0.84), (1, 0.66)], dark.opacity(0.52))
+            case "muspelheim":  // vulcano
+                ridge([(0, 0.86), (0.35, 0.60), (0.5, 0.34), (0.58, 0.42), (0.66, 0.34), (0.82, 0.62), (1, 0.86)], dark.opacity(0.55))
+            case "helheim":     // nebbia e lapidi
+                ridge([(0, 0.76), (0.2, 0.76), (0.2, 0.55), (0.3, 0.55), (0.3, 0.76), (0.6, 0.76), (0.6, 0.48), (0.72, 0.48), (0.72, 0.76), (1, 0.76)], dark.opacity(0.50))
+            default:            // niflheim: ghiaccio
+                ridge([(0, 0.84), (0.12, 0.50), (0.2, 0.84), (0.38, 0.40), (0.5, 0.84), (0.7, 0.46), (0.82, 0.84), (1, 0.60)], dark.opacity(0.40))
+            }
+            // Luce radente sul terreno.
+            context.fill(Path(CGRect(x: 0, y: h * 0.90, width: w, height: h * 0.10)), with: .color(c.opacity(0.35)))
+        }
+        .accessibilityHidden(true)
+    }
+}

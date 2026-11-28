@@ -17,6 +17,8 @@ La prima versione include Core, Orchestrator, agenti fondamentali, AI locale e c
 ## Checkpoint del Project Continuity Engine
 
 Il checkpoint è la sezione di ripresa versionata con Git. Ogni voce va aggiornata quando cambia lo stato verificato. Includere gli identificativi dei requisiti e percorsi alle prove.
+**Conoscenza di sé e dataset (2026-11-28, base `330073c` su `main`).** ADR-0236. `selfknow` risponde su identità, capacità, architettura, privacy, regni, limiti, versione e origine con i fatti reali del Core (`GET /api/self`); dataset built-in `jarvis-identity` (83 casi) e `jarvis-skills` (60), misurati nei test; test di contratto contro dati sensibili in CI e `.gitignore` completato; barra laterale egui per regni. Verifiche locali: `cargo fmt --check`, `clippy -D warnings`, `cargo test --locked`, test contratti e AI, E2E locale, `node --check`: superate; `src-tauri` non compilabile su Linux (winit), solo `cargo fmt --check`; Swift/egui compilano in CI. Modifiche nel checkout, in pubblicazione sul branch `claude/cool-ramanujan-bogarl`. Non provati: Hugging Face con token reale (MCP in sola lettura), Tailscale, Google, NIM, aspetto su Mac/Windows. Prossimo passo: verificare la CI e il caricamento privato dei dataset dalla pagina Dataset con un token reale.
+
 
 **Ripresa del 2026-11-19 da `2c499e5` (JARVIS 1.11.0).** La nuova veste desktop e la preparazione guidata delle chiamate ai connettori sono integrate con il catalogo di servizi e il ciclo dell’agente (RF-10, RF-14, ADR-0051). Gli strumenti dinamici citati in chat hanno precedenza tra quelli ammessi per il task. Per la resa nella finestra WebKit e la prova dell’installer resta il collaudo su macOS.
 

@@ -20,16 +20,20 @@ use base64::Engine as _;
 use serde_json::{json, Value};
 
 /// Nomi e tipi dei dataset di base.
-pub const BUILTIN: [(&str, &str); 4] = [
+pub const BUILTIN: [(&str, &str); 6] = [
     ("jarvis-routing", "routing"),
     ("jarvis-dialogue-acts", "acts"),
     ("jarvis-complex-requests", "complex"),
     ("jarvis-conversations", "conversations"),
+    ("jarvis-identity", "identity"),
+    ("jarvis-skills", "skills"),
 ];
 
 const ROUTING: &str = include_str!("../../../tests/datasets/routing_dataset.tsv");
 const ACTS: &str = include_str!("../../../tests/datasets/colloquial_dataset.tsv");
 const COMPLEX: &str = include_str!("../../../tests/datasets/complex_requests.tsv");
+const IDENTITY: &str = include_str!("../../../tests/datasets/identity_dataset.tsv");
+const SKILLS: &str = include_str!("../../../tests/datasets/skills_dataset.tsv");
 const CONVERSATIONS: &str = include_str!("../../../tests/datasets/conversation_dataset.json");
 
 const MAX_CANDIDATES: usize = 500;
@@ -83,6 +87,16 @@ fn seed(kind: &str) -> Vec<Value> {
             })
             .collect(),
         "conversations" => serde_json::from_str::<Vec<Value>>(CONVERSATIONS).unwrap_or_default(),
+        "identity" => rows(IDENTITY)
+            .into_iter()
+            .filter(|p| p.len() >= 2)
+            .map(|p| json!({"text": p[0], "topic": p[1]}))
+            .collect(),
+        "skills" => rows(SKILLS)
+            .into_iter()
+            .filter(|p| p.len() >= 2)
+            .map(|p| json!({"text": p[0], "skill": p[1]}))
+            .collect(),
         _ => Vec::new(),
     }
 }
@@ -218,6 +232,26 @@ pub fn add_candidate(data_dir: &Path, name: &str, input: &Value) -> Result<Value
             }
             json!({"text": text, "act": act})
         }
+        "identity" => {
+            let topic = input["topic"].as_str().unwrap_or_default();
+            let known = crate::selfknow::Topic::ALL.iter().any(|t| t.id() == topic);
+            if !known && topic != "none" {
+                return Err(format!("argomento non valido: {topic} (o «none» per le frasi che non sono domande su JARVIS)"));
+            }
+            json!({"text": text, "topic": topic})
+        }
+        "skills" => {
+            let skill = input["skill"].as_str().unwrap_or_default();
+            if skill.is_empty()
+                || skill.len() > 64
+                || !skill
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+            {
+                return Err("serve l'identificativo della competenza (per esempio «debug»)".into());
+            }
+            json!({"text": text, "skill": skill})
+        }
         _ => {
             let agents = validate_agents(&input["agents"])?;
             if agents.is_empty() {
@@ -344,6 +378,14 @@ pub fn evaluate(data_dir: &Path, name: &str) -> Result<Value, String> {
             "acts" => {
                 crate::dialogue::act(text).map(crate::dialogue::Act::id) == row["act"].as_str()
             }
+            "identity" => {
+                let want = row["topic"].as_str().unwrap_or("none");
+                crate::selfknow::topic(text).map_or("none", crate::selfknow::Topic::id) == want
+            }
+            "skills" => {
+                let want = row["skill"].as_str().unwrap_or_default();
+                builtin_skills_active(text).iter().any(|id| id == want)
+            }
             "complex" => {
                 let team = crate::dispatch::team(text);
                 row["agents"]
@@ -361,7 +403,7 @@ pub fn evaluate(data_dir: &Path, name: &str) -> Result<Value, String> {
         if ok {
             correct += 1;
         } else if misses.len() < 10 {
-            misses.push(json!({"text": text, "expected": row.get("primary").or(row.get("act")).or(row.get("agents")).or(row.get("expect"))}));
+            misses.push(json!({"text": text, "expected": row.get("primary").or(row.get("act")).or(row.get("agents")).or(row.get("topic")).or(row.get("skill")).or(row.get("expect"))}));
         }
     }
     let pct = |a: usize, b: usize| {
@@ -377,6 +419,21 @@ pub fn evaluate(data_dir: &Path, name: &str) -> Result<Value, String> {
         "misses": misses,
         "note": "Le regole sono tarate sugli esempi di base: misurano le regressioni, non la generalizzazione.",
     }))
+}
+
+/// Identificativi delle competenze di base che la frase attiva (la stessa regola dell'attivazione reale).
+fn builtin_skills_active(text: &str) -> Vec<String> {
+    let Ok(store) = crate::store::Store::open(Path::new(":memory:")) else {
+        return Vec::new();
+    };
+    if crate::skills::migrate(&store).is_err() {
+        return Vec::new();
+    }
+    crate::skills::active(&store, text)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|s| s["id"].as_str().map(str::to_string))
+        .collect()
 }
 
 fn evaluate_conversation(row: &Value) -> bool {
@@ -661,16 +718,16 @@ mod tests {
     }
 
     #[test]
-    fn the_four_builtin_datasets_are_copied_and_measured() {
+    fn the_builtin_datasets_are_copied_and_measured() {
         let d = scratch();
         let listing = list(&d);
         let items = listing["items"].as_array().unwrap();
-        assert_eq!(items.len(), 4);
+        assert_eq!(items.len(), 6);
         let counts: Vec<u64> = items
             .iter()
             .map(|i| i["examples"].as_u64().unwrap())
             .collect();
-        assert_eq!(counts, vec![40, 50, 15, 15]);
+        assert_eq!(counts, vec![40, 50, 15, 15, 83, 60]);
         for (name, _) in BUILTIN {
             let report = evaluate(&d, name).unwrap();
             assert_eq!(report["correct"], report["total"], "{name}: {report}");

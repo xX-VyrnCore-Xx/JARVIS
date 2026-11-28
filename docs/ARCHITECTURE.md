@@ -41,7 +41,7 @@ flowchart TB
         ORCH["orchestrator<br/>task, passi, deleghe, piani, missioni"]
 
         subgraph Brain["Cognizione"]
-            INT["intent, dialogue, followup, dispatch<br/>atti di conversazione, vincoli, squadra di agenti"]
+            INT["intent, dialogue, followup, dispatch, selfknow<br/>atti di conversazione, vincoli, squadra di agenti, conoscenza di sé"]
             AGT["agents, expert, skills, prompts, promptfix, collab"]
             PLAN["planner, plans, missions, proactive, improvements, reflect"]
             MEM["memory, memcog, world, handoff, persona, profile, research, datasets"]

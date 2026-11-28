@@ -1,0 +1,61 @@
+# Richieste che devono attivare una competenza di base. Formato: frase | identificativo della competenza. Solo frasi sintetiche.
+fammi il briefing di oggi | briefing
+buongiorno, cosa ho oggi | briefing
+cerca un modello open source per il riassunto | huggingface
+mostrami la scheda del modello su hugging face | huggingface
+correggi questo testo | scrittura
+riscrivi la mail in modo più formale | scrittura
+fai una ricerca approfondita sulle batterie allo stato solido | ricerca
+confronta le fonti su questo argomento | ricerca
+pianifica la settimana | organizzazione
+aiutami a organizzare i prossimi giorni | organizzazione
+ho speso trenta euro per la cena | spese
+quanto ho speso questo mese | spese
+fai una code review di questo modulo | sviluppo
+analizza il codice del servizio | sviluppo
+prepara il business plan del progetto | azienda
+calcola il margine del prodotto | azienda
+scrivi il runbook per il riavvio del servizio | it-operazioni
+calcola la subnet della rete di casa | it-operazioni
+credo di essere vittima di phishing | incidenti
+ho un account compromesso | incidenti
+come mi metto in regola con il gdpr | conformita
+prepara il registro dei trattamenti | conformita
+fai l'analisi swot dell'idea | direzione
+definisci gli okr del trimestre | direzione
+calcola il punto di pareggio | finanza
+quanto vale il burn rate | finanza
+prepara l'ordine del giorno della riunione | riunioni
+scrivi il verbale di ieri | riunioni
+prepara la proposta commerciale per il cliente | commerciale
+quale sconto posso fare sul listino | commerciale
+crea un'app per gestire le spese | app-completa
+sviluppa un'applicazione per i promemoria | app-completa
+voglio una landing page moderna | interfaccia-moderna
+migliora la grafica dell'app | interfaccia-moderna
+rivedi il codice di questa funzione | revisione-codice
+controlla questo codice prima del commit | revisione-codice
+ho questo stack trace da capire | debug
+trova il bug nel parser | debug
+scrivi i test per il modulo | test-software
+aggiungi gli unit test | test-software
+progetta un'api per le prenotazioni | api-design
+documenta le api del servizio | api-design
+disegna lo schema del database | database
+questa query lenta va ottimizzata | database
+configura la pipeline ci | devops
+scrivi il dockerfile del progetto | devops
+fai un controllo owasp del codice | sicurezza-applicativa
+cerca una sql injection nel progetto | sicurezza-applicativa
+migliora i dataset di addestramento | dataset
+valuta i dataset di jarvis | dataset
+automatizza il report del lunedì | automazioni
+crea un workflow per le fatture | automazioni
+fai il refactoring del modulo | refactoring
+rimuovi il codice morto | refactoring
+apri l'app e clicca su salva | mac
+cosa c'è sullo schermo del mac | mac
+scrivi la documentazione del progetto | documentazione
+prepara il changelog | documentazione
+inizia un progetto nuovo per il blog | progetto-nuovo
+imposta il progetto da zero | progetto-nuovo

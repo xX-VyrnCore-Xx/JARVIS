@@ -16,3 +16,17 @@ apps/desktop/macos/.build/
 # Dati temporanei dei test di integrazione
 core/server/.*-test-*/
 core/server/..*-test-*.jarvis-lock
+
+# Segreti e chiavi: non vanno mai nel repository (ADR-0236)
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+*.sqlite3
+*.sqlite
+*.keystore
+*.jks
+secrets.json
+service-account*.json

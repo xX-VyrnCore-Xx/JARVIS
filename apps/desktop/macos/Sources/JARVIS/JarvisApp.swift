@@ -214,6 +214,9 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     /// Regni aperti nella barra laterale (quello della pagina attiva si apre da solo).
     @State private var expandedRealms: Set<String> = []
     @State private var sidebarDragStart: Double?
+    /// Chat recenti mostrate nella barra laterale e finestra di modifica rapida del profilo.
+    @State private var sidebarChats: [[String: Any]] = []
+    @State private var profilePopover = false
     @State private var memoryStats: [String: Any] = [:]
     @State private var speakReplies = false
     @State private var systemStats: [String: Any] = [:]
@@ -547,7 +550,152 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
         }
         .animation(.snappy(duration: 0.28), value: sidebarCollapsed)
         .onAppear { expandedRealms.insert(section.realmName) }
-        .onChange(of: section) { _, value in expandedRealms.insert(value.realmName) }
+        .onChange(of: section) { _, value in
+            expandedRealms.insert(value.realmName)
+            Task { await refreshSidebarChats() }
+        }
+        .task { await refreshSidebarChats(); await refreshSidebarProfile() }
+    }
+
+    private func refreshSidebarChats() async {
+        if let result = try? await core.request("/api/conversations", timeout: 5) {
+            sidebarChats = (result["items"] as? [[String: Any]]) ?? []
+        }
+    }
+
+    private func refreshSidebarProfile() async {
+        if let result = try? await core.request("/api/profile", timeout: 5) { applyProfile(result) }
+    }
+
+    /// Nuova conversazione vuota, come «New chat» di ChatGPT: la crea, la rende attiva e apre la chat.
+    private func startNewChat() {
+        Task {
+            do {
+                _ = try await core.request("/api/conversations", method: "POST", body: [:])
+                error = nil
+                if section == .chat { await load(.chat) } else { select(.chat) }
+                await refreshSidebarChats()
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+
+    private func openChat(_ id: String) {
+        Task {
+            do {
+                _ = try await core.request("/api/conversations/select", method: "POST", body: ["id": id])
+                error = nil
+                if section == .chat { await load(.chat) } else { select(.chat) }
+                await refreshSidebarChats()
+            } catch { self.error = error.localizedDescription }
+        }
+    }
+
+    private var newChatButton: some View {
+        Button { startNewChat() } label: {
+            HStack(spacing: 9) {
+                Image(systemName: "square.and.pencil").font(.system(size: 14, weight: .semibold))
+                Text("Nuova chat").font(.system(size: 14, weight: .semibold))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12).padding(.vertical, 9)
+            .background(RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(LinearGradient(colors: [Color.cyan.opacity(0.42), Color.blue.opacity(0.28)],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing)))
+            .overlay { RoundedRectangle(cornerRadius: 11, style: .continuous).strokeBorder(Color.cyan.opacity(0.55)) }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableStyle())
+        .keyboardShortcut("n", modifiers: .command)
+        .help("Nuova chat (⌘N)").accessibilityLabel("Nuova chat")
+    }
+
+    private var recentChats: some View {
+        let recent = Array(sidebarChats.prefix(6))
+        return VStack(alignment: .leading, spacing: 2) {
+            if !recent.isEmpty {
+                Text("RECENTI").font(.system(size: 10, weight: .bold)).foregroundStyle(.secondary)
+                    .padding(.horizontal, 10).padding(.top, 4).padding(.bottom, 2)
+                ForEach(recent.indices, id: \.self) { index in
+                    let item = recent[index]
+                    let active = item["active"] as? Bool == true && section == .chat
+                    Button { openChat(item["id"] as? String ?? "") } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "bubble.left").font(.system(size: 11)).frame(width: 18)
+                            Text(item["title"] as? String ?? "Chat").font(.system(size: 12.5)).lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                        .foregroundStyle(active ? Color.white : Color.primary.opacity(0.8))
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.white.opacity(active ? 0.12 : 0)))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(PressableStyle())
+                }
+            }
+        }
+    }
+
+    /// Profilo in fondo alla barra: tocca per modificarlo senza lasciare la pagina.
+    private var sidebarProfile: some View {
+        let role = profileDraft["role"] ?? ""
+        let company = profileDraft["company"] ?? ""
+        let title = role.isEmpty ? "Il tuo profilo" : role
+        let subtitle = company.isEmpty ? "Tocca per completarlo" : company
+        return Button { profilePopover = true } label: {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle().fill(LinearGradient(colors: [Color.cyan.opacity(0.55), Color.purple.opacity(0.4)],
+                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
+                    Image(systemName: "person.fill").font(.system(size: 14, weight: .semibold)).foregroundStyle(.white)
+                }
+                .frame(width: 32, height: 32)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(title).font(.system(size: 12.5, weight: .semibold)).lineLimit(1)
+                    Text(subtitle).font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "slider.horizontal.3").font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .background(panel, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.white.opacity(0.10)) }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableStyle())
+        .help("Modifica il tuo profilo").accessibilityLabel("Profilo: \(title). Modifica")
+        .popover(isPresented: $profilePopover, arrowEdge: .trailing) { quickProfile }
+    }
+
+    private var quickProfile: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Il tuo profilo").font(.headline)
+            profileField("Ruolo", "role", "Direttore operativo")
+            profileField("Azienda", "company", "Nome dell'azienda")
+            profileField("Competenze", "expertise", "Cosa conosci bene")
+            Picker("Tono", selection: Binding(get: { profileDraft["tone"] ?? "auto" }, set: { profileDraft["tone"] = $0 })) {
+                Text("Automatico").tag("auto"); Text("Formale").tag("formale")
+                Text("Cordiale").tag("cordiale"); Text("Diretto").tag("diretto")
+            }
+            HStack {
+                Button("Profilo completo") { profilePopover = false; select(.profile) }
+                Spacer()
+                Button("Salva", systemImage: "checkmark") {
+                    var body: [String: Any] = profileDraft.reduce(into: [:]) { $0[$1.key] = $1.value }
+                    body["share_with_cloud"] = profileShare
+                    profilePopover = false
+                    Task {
+                        do {
+                            _ = try await core.request("/api/profile", method: "PATCH", body: body)
+                            info = "Profilo aggiornato."
+                            await refreshSidebarProfile()
+                        } catch { self.error = error.localizedDescription }
+                    }
+                }.buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(16).frame(width: 300)
     }
 
     private func realmAccent(_ title: String) -> Color {
@@ -571,6 +719,10 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 Image(systemName: "sidebar.left").font(.system(size: 15, weight: .semibold)).frame(width: 34, height: 28)
             }
             .buttonStyle(PressableStyle()).help("Espandi la barra laterale").accessibilityLabel("Espandi la barra laterale")
+            Button { startNewChat() } label: {
+                railIcon("square.and.pencil", Color.cyan, selected: false)
+            }
+            .buttonStyle(PressableStyle()).help("Nuova chat (⌘N)").accessibilityLabel("Nuova chat")
             Button { select(.tree) } label: {
                 railIcon("leaf.fill", Color(red: 0.95, green: 0.82, blue: 0.45), selected: section == .tree)
             }
@@ -598,6 +750,11 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             .scrollIndicators(.hidden)
             Spacer(minLength: 0)
             PulsingDot(color: coreIsUp ? Mock.green : .red, size: 8).help(coreIsUp ? "Core operativo" : "Core non raggiungibile")
+            Button { profilePopover = true } label: {
+                Image(systemName: "person.crop.circle.fill").font(.system(size: 24)).foregroundStyle(Color.cyan.opacity(0.9))
+            }
+            .buttonStyle(PressableStyle()).help("Modifica il tuo profilo").accessibilityLabel("Profilo")
+            .popover(isPresented: $profilePopover, arrowEdge: .trailing) { quickProfile }
         }
         .padding(.vertical, 12).padding(.horizontal, 8)
         .background(panel.opacity(0.56))
@@ -717,15 +874,17 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             }
             .padding(.horizontal, 6).padding(.top, 6)
             .accessibilityElement(children: .contain)
+            newChatButton
             sidebarRow(.tree, accent: Color(red: 0.95, green: 0.82, blue: 0.45))
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
+                        recentChats
                         ForEach(1..<Section.navigation.count, id: \.self) { realmGroup(Section.navigation[$0]) }
                     }
                     .padding(.vertical, 6)
                 }
-                .scrollIndicators(.visible)
+                .scrollIndicators(.hidden)
                 // Sfumatura ai bordi: lascia intuire che l'elenco continua senza tagliare la prima voce a riposo.
                 .mask(
                     VStack(spacing: 0) {
@@ -740,6 +899,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 }
             }
             sidebarStatus
+            sidebarProfile
         }
         .padding(12).background(panel.opacity(0.56))
         .animation(.snappy(duration: 0.28), value: section)
@@ -1587,6 +1747,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
                 _ = try await core.request(path, method: "POST", body: body)
                 error = nil
                 await load(.chat)
+                await refreshSidebarChats()
             } catch {
                 self.error = error.localizedDescription
             }
@@ -2122,7 +2283,15 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             }
             .padding(10)
             .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Color.white.opacity(active ? 0.10 : 0.05)))
+            .background {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Color.white.opacity(active ? 0.10 : 0.05))
+                    RealmArt(realm: realm)
+                        .opacity(active ? 0.55 : 0.30)
+                        .mask(LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing))
+                        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                }
+            }
             .overlay { RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(realm.color.opacity(active ? 0.95 : 0.30)) }
             .contentShape(Rectangle())
         }

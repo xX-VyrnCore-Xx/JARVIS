@@ -840,22 +840,77 @@ pub fn failed_step(steps: &[Value]) -> Option<String> {
         .and_then(|s| s["step"].as_str().map(str::to_string))
 }
 
-/// Pubblica il Core locale nella rete privata (`tailscale serve --bg <porta>`). Non usa mai Funnel.
+/// Indirizzo di abilitazione che Tailscale stampa quando una funzione della tailnet va autorizzata una volta
+/// (per esempio `https://login.tailscale.com/f/serve?node=…`).
+pub fn consent_url(text: &str) -> Option<String> {
+    text.split(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '<' | '>' | '(' | ')'))
+        .find(|word| word.starts_with("https://login.tailscale.com/"))
+        .map(|word| word.trim_end_matches(['.', ',', ';']).to_string())
+}
+
+/// Identificatore stabile della macchina (`Self.ID`) dallo stato di Tailscale.
+pub fn parse_node_id(raw: &str) -> Option<String> {
+    let doc: Value = serde_json::from_str(raw).ok()?;
+    doc["Self"]["ID"]
+        .as_str()
+        .filter(|id| !id.is_empty())
+        .map(str::to_string)
+}
+
+/// Spiega l'errore più frequente di Serve: la funzione va abilitata **una volta** sulla tailnet, anche con
+/// MagicDNS e HTTPS già attivi (sono impostazioni diverse). Con l'indirizzo giusto basta un tocco (ADR-0237).
+pub fn serve_consent_message(text: &str, node_id: Option<&str>) -> Option<String> {
+    let lower = text.to_lowercase();
+    let url = consent_url(text).or_else(|| {
+        let needs_it = lower.contains("not enabled")
+            || lower.contains("serve is disabled")
+            || lower.contains("enable serve")
+            || lower.contains("serve not enabled");
+        needs_it.then(|| match node_id {
+            Some(id) => format!("https://login.tailscale.com/f/serve?node={id}"),
+            None => "https://login.tailscale.com/admin/machines".to_string(),
+        })
+    })?;
+    Some(format!(
+        "Tailscale Serve non è ancora abilitato sulla tua tailnet (è un consenso a parte, diverso da MagicDNS e HTTPS, già attivi). Apri {url}, conferma l'abilitazione e tocca di nuovo «Collega con Tailscale»."
+    ))
+}
+
+/// Pubblica il Core locale nella rete privata. Prima le API locali (non interattive, funzionano anche con
+/// l'app di macOS), poi `tailscale serve --bg <porta>`. Non usa mai Funnel.
 pub fn publish(port: u16) -> Result<String, String> {
     let port_text = port.to_string();
+    let mut api_error = None;
+    let api = LocalApi::locate();
+    if let Some(api) = &api {
+        match publish_via_api(api, port) {
+            Ok(note) => return Ok(note),
+            Err(error) => api_error = Some(error),
+        }
+    }
     let cli = run(&["serve", "--bg", &port_text]);
     if let Ok(Some(out)) = &cli {
         if out.ok {
             return Ok(out.text());
         }
     }
-    // Il programma non c'è o non riesce (su macOS: «The Tailscale GUI failed to start»): si usano le API locali.
-    let mut api_error = None;
-    if let Some(api) = LocalApi::locate() {
-        match publish_via_api(&api, port) {
-            Ok(note) => return Ok(note),
-            Err(error) => api_error = Some(error),
-        }
+    let cli_text = match &cli {
+        Ok(Some(out)) => out.text(),
+        _ => String::new(),
+    };
+    let everything = format!("{cli_text}\n{}", api_error.clone().unwrap_or_default());
+    let node_id = api
+        .as_ref()
+        .and_then(|api| api.status_json().ok())
+        .and_then(|raw| parse_node_id(&raw))
+        .or_else(|| {
+            status_out()
+                .ok()
+                .flatten()
+                .and_then(|out| parse_node_id(&json_part(&out)))
+        });
+    if let Some(message) = serve_consent_message(&everything, node_id.as_deref()) {
+        return Err(message);
     }
     match cli? {
         None => {
@@ -1090,6 +1145,22 @@ mod tests {
         assert!(nameless.contains("Se MagicDNS è già attivo"), "{nameless}");
         // Dati assenti nel JSON: nessuna ipotesi, nessun falso allarme.
         assert!(!advice(true, host, true, &Details::default(), None).contains("disattivato"));
+    }
+
+    #[test]
+    fn the_serve_consent_is_explained_with_the_link_to_approve_it() {
+        let cli = "Serve is not enabled on your tailnet.\nTo enable, visit:\n\n         https://login.tailscale.com/f/serve?node=n123abc\n";
+        let message = serve_consent_message(cli, None).unwrap();
+        assert!(message.contains("https://login.tailscale.com/f/serve?node=n123abc"));
+        assert!(message.contains("MagicDNS e HTTPS"));
+        // Senza indirizzo nel testo, lo si compone con l'identificatore della macchina.
+        let composed = serve_consent_message("serve not enabled", Some("nXYZ")).unwrap();
+        assert!(composed.contains("/f/serve?node=nXYZ"));
+        assert!(serve_consent_message("connection refused", Some("nXYZ")).is_none());
+        assert_eq!(
+            parse_node_id(r#"{"Self":{"ID":"n9","DNSName":"a.b.ts.net."}}"#).as_deref(),
+            Some("n9")
+        );
     }
 
     #[test]
