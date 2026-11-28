@@ -3108,7 +3108,7 @@ async fn datasets_are_measured_improved_and_never_leave_without_confirmation() {
     let e = env();
     let (status, list) = e.api("GET", "/api/datasets", None).await;
     assert_eq!(status, StatusCode::OK, "{list}");
-    assert_eq!(list["items"].as_array().unwrap().len(), 4);
+    assert_eq!(list["items"].as_array().unwrap().len(), 6);
     assert_eq!(list["private_only"], true);
     // Misura: gli esempi di base sono rispettati.
     let (_, report) = e

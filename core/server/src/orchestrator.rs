@@ -802,6 +802,13 @@ impl Jarvis {
                 "id": "core.intent", "name": "Lettura della richiesta", "instructions": hint, "tools": [],
             }));
         }
+        // Domande più libere su di sé: la scheda dei fatti veri guida il modello (ADR-0236).
+        if crate::selfknow::mentions_self(&query) {
+            skills.push(json!({
+                "id": "core.self", "name": "Conoscenza di sé", "tools": [],
+                "instructions": crate::selfknow::sheet(&self.self_facts()),
+            }));
+        }
         if let Some(shared) = &self.shared_context {
             skills.push(json!({
                 "id": "core.shared", "name": "Contesto condiviso", "tools": [],
@@ -835,7 +842,30 @@ impl Jarvis {
     }
 
     /// Risposta deterministica agli atti di conversazione che il Core sa soddisfare da solo (ADR-0217).
+    /// Fatti verificabili su JARVIS per la conoscenza di sé (ADR-0236): solo conteggi, nessun dato personale.
+    pub fn self_facts(&self) -> crate::selfknow::Facts {
+        let connectors = self.store.connectors().unwrap_or_default();
+        crate::selfknow::Facts {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            os: std::env::consts::OS.to_string(),
+            tools: self.catalog.iter().count(),
+            skills: crate::skills::list(&self.store)
+                .map(|list| list.iter().filter(|s| s["enabled"] == true).count())
+                .unwrap_or_default(),
+            connectors_installed: connectors.len(),
+            connectors_authorized: connectors
+                .iter()
+                .filter(|(_, _, auth)| auth.is_some())
+                .count(),
+            datasets: crate::datasets::BUILTIN.len(),
+        }
+    }
+
     fn dialogue_reply(&mut self, message: &str) -> Result<Option<String>, CoreError> {
+        // Domande su JARVIS stesso («chi sei?», «cosa sai fare?»): risposta con i fatti veri, senza modello.
+        if let Some(topic) = crate::selfknow::topic(message) {
+            return Ok(Some(crate::selfknow::answer(topic, &self.self_facts())));
+        }
         let Some(act) = crate::dialogue::act(message).filter(|a| a.answered_by_core()) else {
             return Ok(None);
         };

@@ -573,6 +573,7 @@ pub fn router(state: Shared) -> Router {
         .route("/api/updates/download", post(updates_download))
         .route("/api/updates/install", post(updates_install))
         .route("/api/updates/log", get(updates_log))
+        .route("/api/self", get(self_description))
         .route("/api/notify/channels", get(channels_list).post(channel_add))
         .route("/api/notify/channels/{id}", delete(channel_delete))
         .route("/api/notify/channels/{id}/test", post(channel_test))
@@ -1736,6 +1737,23 @@ async fn updates_install(
         );
     }
     reply(with_core(&state, |j| j.updates_install()).await)
+}
+
+/// Chi è JARVIS, con i fatti veri sul suo stato (ADR-0236): presentazione, capacità, architettura, privacy, regni.
+async fn self_description(State(state): State<Shared>) -> Response {
+    let facts = with_core(&state, |j| j.self_facts()).await;
+    let topics: Vec<Value> = crate::selfknow::Topic::ALL
+        .iter()
+        .map(|topic| json!({"topic": topic.id(), "text": crate::selfknow::answer(*topic, &facts)}))
+        .collect();
+    Json(json!({
+        "name": "JARVIS", "world": "Yggdrasill", "version": facts.version, "os": facts.os,
+        "tools": facts.tools, "skills": facts.skills,
+        "connectors": {"installed": facts.connectors_installed, "authorized": facts.connectors_authorized},
+        "realms": crate::selfknow::REALMS.iter().map(|(n, t, w)| json!({"name": n, "title": t, "contains": w})).collect::<Vec<_>>(),
+        "answers": topics,
+    }))
+    .into_response()
 }
 
 /// Registro dell'ultimo aggiornamento (solo proprietario): serve a capire cosa è andato storto.

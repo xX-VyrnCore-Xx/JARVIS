@@ -25,32 +25,42 @@ const NEGATIVE: egui::Color32 = egui::Color32::from_rgb(255, 125, 135);
 mod users_ui;
 use users_ui::UserState;
 
+/// Pagine ordinate per regno (ADR-0232): ogni regno è un gruppo contiguo della barra laterale.
 const NAV: [(&str, &str, bool); 25] = [
+    // Asgard
     ("dashboard", "Plancia", true),
     ("chat", "Chat", false),
-    ("profile", "Profilo", true),
     ("tasks", "Attività", false),
-    ("models", "Modelli AI", true),
-    ("missions", "Missioni", true),
-    ("automations", "Automazioni", true),
-    ("plans", "Piani", true),
+    // Midgard
+    ("profile", "Profilo", true),
+    ("users", "Utenti", true),
     ("workspace", "Workspace", true),
-    ("memory", "Memoria", true),
-    ("research", "Ricerche", true),
-    ("datasets", "Dataset", true),
-    ("skills", "Competenze", true),
+    // Alfheim
+    ("models", "Modelli AI", true),
     ("agents", "Agenti", true),
-    ("tools", "Strumenti", true),
+    ("datasets", "Dataset", true),
+    // Vanaheim
+    ("skills", "Competenze", true),
     ("plugins", "Pacchetti", true),
+    // Jotunheim
+    ("missions", "Missioni", true),
+    ("plans", "Piani", true),
+    ("tools", "Strumenti", true),
+    ("updates", "Aggiornamenti", true),
+    // Svartalfheim
+    ("automations", "Automazioni", true),
     ("connectors", "Connettori", true),
     ("devices", "Dispositivi", true),
+    ("system", "Sistema", true),
+    // Muspelheim
     ("security", "Sicurezza", true),
     ("permissions", "Permessi", true),
     ("privacy", "Privacy", true),
-    ("users", "Utenti", true),
+    // Helheim
+    ("memory", "Memoria", true),
+    ("research", "Ricerche", true),
+    // Niflheim
     ("audit", "Audit", true),
-    ("system", "Sistema", true),
-    ("updates", "Aggiornamenti", true),
 ];
 
 /// Sfumatura ai bordi di un elenco che scorre: dal colore del pannello alla trasparenza, in cima o in fondo.
@@ -82,15 +92,33 @@ fn scroll_fade(ui: &egui::Ui, view: egui::Rect, fill: egui::Color32, top: bool) 
     ui.painter().add(egui::Shape::mesh(mesh));
 }
 
-/// Gruppo della barra laterale di ogni pagina (stessi titoli dell'app macOS).
+/// Regno della barra laterale di ogni pagina (stessi regni dell'app macOS).
 fn nav_group(id: &str) -> &'static str {
     match id {
-        "dashboard" | "chat" | "profile" | "tasks" | "models" => "Assistente",
-        "missions" | "plans" | "automations" | "workspace" | "memory" | "research" | "skills"
-        | "agents" => "Organizzazione",
-        "connectors" | "tools" | "plugins" | "devices" => "Connessioni",
-        "security" | "permissions" | "privacy" | "users" | "audit" => "Protezione",
-        _ => "Sistema",
+        "dashboard" | "chat" | "tasks" => "Asgard",
+        "profile" | "users" | "workspace" => "Midgard",
+        "models" | "agents" | "datasets" => "Alfheim",
+        "skills" | "plugins" => "Vanaheim",
+        "missions" | "plans" | "tools" | "updates" => "Jotunheim",
+        "automations" | "connectors" | "devices" | "system" => "Svartalfheim",
+        "security" | "permissions" | "privacy" => "Muspelheim",
+        "memory" | "research" => "Helheim",
+        _ => "Niflheim",
+    }
+}
+
+/// Colore del regno, lo stesso dell'albero di Yggdrasill.
+fn realm_tint(group: &str) -> egui::Color32 {
+    match group {
+        "Asgard" => egui::Color32::from_rgb(255, 204, 82),
+        "Midgard" => egui::Color32::from_rgb(115, 204, 102),
+        "Alfheim" => egui::Color32::from_rgb(184, 153, 255),
+        "Vanaheim" => egui::Color32::from_rgb(77, 235, 140),
+        "Jotunheim" => egui::Color32::from_rgb(117, 153, 255),
+        "Svartalfheim" => egui::Color32::from_rgb(245, 153, 66),
+        "Muspelheim" => egui::Color32::from_rgb(255, 87, 46),
+        "Helheim" => egui::Color32::from_rgb(133, 184, 189),
+        _ => egui::Color32::from_rgb(107, 219, 255),
     }
 }
 
@@ -2168,13 +2196,28 @@ impl JarvisApp {
             if !compact {
                 let group = nav_group(id);
                 if group != last_group {
-                    ui.add_space(if last_group.is_empty() { 2.0 } else { 16.0 });
-                    ui.label(
-                        egui::RichText::new(group.to_uppercase())
-                            .size(11.5)
-                            .strong()
-                            .color(egui::Color32::from_rgb(102, 130, 152)),
-                    );
+                    ui.add_space(if last_group.is_empty() { 2.0 } else { 14.0 });
+                    ui.horizontal(|ui| {
+                        let (dot, _) =
+                            ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                        ui.painter()
+                            .circle_filled(dot.center(), 3.6, realm_tint(group));
+                        ui.painter().circle_filled(
+                            dot.center(),
+                            6.0,
+                            crate::avatar::alpha(realm_tint(group), 0.18),
+                        );
+                        ui.label(
+                            egui::RichText::new(group.to_uppercase())
+                                .size(11.5)
+                                .strong()
+                                .color(mix_color(
+                                    egui::Color32::from_rgb(102, 130, 152),
+                                    realm_tint(group),
+                                    0.35,
+                                )),
+                        );
+                    });
                     ui.add_space(3.0);
                     last_group = group;
                 }
@@ -7066,8 +7109,8 @@ mod tests {
     #[test]
     fn agents_and_packages_pages_are_owner_only_and_use_the_supervision_and_plugin_apis() {
         for (page, api, group) in [
-            ("agents", "/api/agents/supervisor", "Organizzazione"),
-            ("plugins", "/api/plugins", "Connessioni"),
+            ("agents", "/api/agents/supervisor", "Alfheim"),
+            ("plugins", "/api/plugins", "Vanaheim"),
         ] {
             assert_eq!(endpoint(page), api);
             assert_eq!(nav_group(page), group);
