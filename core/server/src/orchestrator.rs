@@ -1365,7 +1365,7 @@ impl Jarvis {
         let task = Task::new(message, json!({"kind": "owner", "id": "owner"}));
         let allows = self.task_scope(&task);
         let defensive = crate::agents::route(message).filter(|agent| agent.name == "monitoring");
-        let tools = crate::cloud::TOOLS
+        let mut tools: Vec<Function> = crate::cloud::TOOLS
             .iter()
             .filter(|_| crate::cloud::may_need_calculation(message))
             .filter(|tool| allows(tool))
@@ -1373,6 +1373,43 @@ impl Jarvis {
             .filter_map(|tool| self.catalog.get(tool))
             .map(Function::from)
             .collect();
+        // I servizi collegati e autorizzati (posta, agenda, GitHub…) sono offerti al modello quando la richiesta
+        // li riguarda: prima la chat cloud vedeva solo i calcoli e rispondeva «non ho accesso» (ADR-0240).
+        // Solo per il proprietario; permessi e conferme restano quelli di ogni strumento.
+        if body["connectors"] == true {
+            let candidates: Vec<&crate::catalog::Tool> = self
+                .catalog
+                .iter()
+                .filter(|t| t.name().starts_with("connector.") && allows(t.name()))
+                .collect();
+            let view: Vec<crate::visibility::Candidate> = candidates
+                .iter()
+                .map(|t| crate::visibility::Candidate {
+                    name: t.name(),
+                    summary: t.descriptor["summary"].as_str().unwrap_or_default(),
+                })
+                .collect();
+            let named = crate::visibility::mentioned(message, &view);
+            if !named.is_empty() {
+                let relevant: Vec<usize> = (0..view.len())
+                    .filter(|&i| {
+                        named
+                            .iter()
+                            .any(|n| view[i].name.starts_with(&format!("connector.{n}.")))
+                    })
+                    .collect();
+                let subset: Vec<crate::visibility::Candidate> = relevant
+                    .iter()
+                    .map(|&i| crate::visibility::Candidate {
+                        name: view[i].name,
+                        summary: view[i].summary,
+                    })
+                    .collect();
+                for index in crate::visibility::pick(message, None, &subset, 12) {
+                    tools.push(Function::from(candidates[relevant[index]]));
+                }
+            }
+        }
         let preferences = [
             self.store
                 .cloud_quality(target.provider.id(), &target.model)
@@ -1409,9 +1446,10 @@ impl Jarvis {
         } = completed;
         let response = match answer {
             Ok(Answer::Call(call))
-                if !call["tool"]
-                    .as_str()
-                    .is_some_and(|name| crate::cloud::TOOLS.contains(&name)) =>
+                if !call["tool"].as_str().is_some_and(|name| {
+                    crate::cloud::TOOLS.contains(&name)
+                        || (name.starts_with("connector.") && self.catalog.get(name).is_some())
+                }) =>
             {
                 Err(Failure::InvalidTool)
             }

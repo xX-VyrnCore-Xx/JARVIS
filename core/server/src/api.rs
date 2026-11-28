@@ -1328,6 +1328,9 @@ async fn run_cloud_chat_inner(
     if is_device {
         body["provider"] = json!("auto");
         body["use_context"] = json!(false);
+        body["connectors"] = json!(false);
+    } else {
+        body["connectors"] = json!(true);
     }
     let conversation = with_core(state, move |j| {
         Ok::<_, CoreError>(conversation.unwrap_or_else(|| j.active_conversation_id()))

@@ -117,6 +117,27 @@ fn score(request: &[String], padded: &str, explicit: Option<&str>, candidate: &C
     total + overlap * 5
 }
 
+/// Connettori che la richiesta cita (nome o sinonimi italiani: «posta», «agenda», «appuntamenti»…), senza duplicati.
+/// Serve alla chat cloud, che offre gli strumenti di un servizio solo quando l'utente ne parla.
+pub fn mentioned(request: &str, candidates: &[Candidate]) -> Vec<String> {
+    let request_words = words(request);
+    let padded = format!(" {} ", request_words.join(" "));
+    let mut out: Vec<String> = Vec::new();
+    for candidate in candidates {
+        let namespace = candidate.name.split('.').nth(1).unwrap_or_default();
+        let named = namespace
+            .split('_')
+            .all(|p| request_words.iter().any(|w| w == p))
+            || aliases(namespace)
+                .iter()
+                .any(|a| mentions(&request_words, &padded, a));
+        if named && !out.iter().any(|n| n == namespace) {
+            out.push(namespace.to_string());
+        }
+    }
+    out
+}
+
 /// Indici dei candidati scelti, nell'ordine da offrire al modello: l'operazione più pertinente di ogni connettore
 /// (connettori ordinati per pertinenza), poi le altre per pertinenza, fino a `limit`.
 pub fn pick(
@@ -245,6 +266,24 @@ mod tests {
             .into_iter()
             .map(|i| all[i].0.clone())
             .collect()
+    }
+
+    #[test]
+    fn only_the_services_the_request_talks_about_are_mentioned() {
+        let all = catalog();
+        let view: Vec<Candidate> = all
+            .iter()
+            .map(|(n, s)| Candidate {
+                name: n,
+                summary: s,
+            })
+            .collect();
+        assert_eq!(
+            mentioned("Che appuntamenti ho domani in agenda?", &view),
+            vec!["google_calendar"]
+        );
+        assert_eq!(mentioned("controlla la mia posta", &view), vec!["gmail"]);
+        assert!(mentioned("quanto fa 2 più 2", &view).is_empty());
     }
 
     #[test]
