@@ -487,7 +487,7 @@ async fn credential_like_content_is_rejected_before_the_cloud_request() {
             "POST",
             "/api/cloud",
             Some(json!({
-                "provider":"nvidia_nim", "model":"synthetic", "key":"synthetic"
+                "provider":"nvidia_nim", "model":"synthetic", "key":"fixtureCredential12345"
             })),
         )
         .await;
@@ -503,6 +503,17 @@ async fn credential_like_content_is_rejected_before_the_cloud_request() {
         .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(!body.to_string().contains("valore-di-prova"));
+    let (status, body) = e
+        .api(
+            "POST",
+            "/api/cloud/chat",
+            Some(json!({
+                "provider": "auto", "message": "ricorda che fixtureCredential12345 è una chiave"
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(!body.to_string().contains("fixtureCredential12345"));
     let (_, turns) = e.api("GET", "/api/conversation", None).await;
     assert_eq!(turns["items"], json!([]));
 }
@@ -661,6 +672,18 @@ async fn new_chats_keep_their_own_history() {
     let (_, list) = e.api("GET", "/api/conversations", None).await;
     assert_eq!(list["items"].as_array().unwrap().len(), 1);
     assert_eq!(list["active"], "main");
+    let (status, _) = e
+        .api(
+            "POST",
+            "/api/cloud/chat",
+            Some(json!({
+                "conversation_id": new_id, "provider":"auto", "message":"che ore sono"
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (_, main) = e.api("GET", "/api/conversation", None).await;
+    assert_eq!(main["items"], first["items"]);
 }
 
 #[tokio::test]

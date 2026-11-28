@@ -23,6 +23,7 @@ class AppUpdateTest {
         assertTrue(AppUpdate.isNewer("1.3.0", "1.3.0-rc.1"))
         assertFalse(AppUpdate.isNewer("1.3.0-rc.1", "1.3.0"))
         assertFalse(AppUpdate.isNewer("boh", "1.0.0"))
+        assertFalse(AppUpdate.isNewer("999999999999.1.1", "1.0.0"))
     }
 
     @Test fun theNewestStableReleaseWithAnApkIsChosen() {
@@ -43,7 +44,7 @@ class AppUpdateTest {
         assertTrue(AppUpdate.allowedUrl("https://github.com/o/r/releases/download/v1/x"))
         assertTrue(AppUpdate.allowedUrl("https://release-assets.githubusercontent.com/a"))
         for (bad in listOf("http://github.com/x", "https://evilgithub.com/x", "https://github.com.evil.org/x",
-            "https://u:p@github.com/x", "https://example.com/x", "file:///etc/passwd")) {
+            "https://u:p@github.com/x", "https://github.com:8443/x", "https://fixture.githubusercontent.com/x", "https://example.com/x", "file:///etc/passwd")) {
             assertFalse(bad, AppUpdate.allowedUrl(bad))
         }
     }
@@ -52,6 +53,9 @@ class AppUpdateTest {
         val h = "a".repeat(64)
         val sums = AppUpdate.parseSums("$h  one.apk\n$h *two.apk\nnope  bad\n")
         assertEquals(setOf("one.apk", "two.apk"), sums.keys)
+        val conflicting = "b".repeat(64)
+        assertFalse(AppUpdate.parseSums("$h  one.apk\n$conflicting  one.apk").containsKey("one.apk"))
+        assertEquals(h, AppUpdate.parseSums("$h  one.apk\n$h *one.apk")["one.apk"])
         val file = File.createTempFile("jarvis", ".bin")
         file.writeText("abc")
         assertEquals("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", AppUpdate.sha256(file))

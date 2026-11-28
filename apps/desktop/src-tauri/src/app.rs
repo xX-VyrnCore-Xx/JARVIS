@@ -433,7 +433,72 @@ enum Mutation {
     Delete,
 }
 
+#[cfg(windows)]
+struct JarvisTray {
+    _icon: tray_icon::TrayIcon,
+    open: tray_icon::menu::MenuId,
+    exit: tray_icon::menu::MenuId,
+    events: std::sync::mpsc::Receiver<tray_icon::menu::MenuEvent>,
+}
+
+#[cfg(windows)]
+impl JarvisTray {
+    fn new(cc: &eframe::CreationContext<'_>) -> Option<Self> {
+        use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+        use tray_icon::menu::{Menu, MenuItem};
+        use windows_sys::Win32::UI::WindowsAndMessaging::{ShowWindowAsync, SW_RESTORE, SW_SHOWNA};
+
+        let open = MenuItem::new("Apri JARVIS", true, None);
+        let exit = MenuItem::new("Esci definitivamente", true, None);
+        let menu = Menu::new();
+        menu.append(&open).ok()?;
+        menu.append(&exit).ok()?;
+        let icon = application_icon();
+        let icon = tray_icon::Icon::from_rgba(icon.rgba, icon.width, icon.height).ok()?;
+        let tray = tray_icon::TrayIconBuilder::new()
+            .with_menu(Box::new(menu))
+            .with_tooltip("JARVIS")
+            .with_icon(icon)
+            .build()
+            .ok()?;
+        let RawWindowHandle::Win32(window) = cc.window_handle().ok()?.as_raw() else {
+            return None;
+        };
+        let hwnd = window.hwnd.get();
+        let open_id = open.id().clone();
+        let exit_id = exit.id().clone();
+        let ctx = cc.egui_ctx.clone();
+        let (sender, events) = std::sync::mpsc::channel();
+        tray_icon::menu::MenuEvent::set_event_handler(Some(
+            move |event: tray_icon::menu::MenuEvent| {
+                let show = if event.id == open_id {
+                    SW_RESTORE
+                } else if event.id == exit_id {
+                    SW_SHOWNA
+                } else {
+                    return;
+                };
+                if sender.send(event).is_ok() {
+                    // Re-show the native window so eframe can process the command even from the tray.
+                    unsafe {
+                        ShowWindowAsync(hwnd as _, show);
+                    }
+                    ctx.request_repaint();
+                }
+            },
+        ));
+        Some(Self {
+            _icon: tray,
+            open: open.id().clone(),
+            exit: exit.id().clone(),
+            events,
+        })
+    }
+}
+
 pub struct JarvisApp {
+    #[cfg(windows)]
+    tray: Option<JarvisTray>,
     tx: Sender<Event>,
     rx: Receiver<Event>,
     startup_icon: egui::TextureHandle,
@@ -758,6 +823,8 @@ impl JarvisApp {
             github_update_token: String::new(),
             update_remove_confirm: false,
             update_restarting: false,
+            #[cfg(windows)]
+            tray: JarvisTray::new(cc),
             persona_loaded: false,
             voice_loaded: false,
             speak_replies: false,
@@ -2465,6 +2532,21 @@ impl JarvisApp {
                     });
                 if ui.button("Copia chat").on_hover_text("Copia la chat in Markdown").clicked() {
                     self.export_chat();
+                }
+                if let Some(id) = self.conversations.iter()
+                    .find(|chat| chat["active"] == true)
+                    .and_then(|chat| chat["id"].as_str()).map(str::to_owned)
+                {
+                    let label = if id == "main" { "Svuota chat" } else { "Elimina chat" };
+                    if ui.button(label).clicked()
+                        && rfd::MessageDialog::new().set_title(label)
+                            .set_description("Eliminare i messaggi di questa chat?")
+                            .set_level(rfd::MessageLevel::Warning)
+                            .set_buttons(rfd::MessageButtons::YesNo)
+                            .show() == rfd::MessageDialogResult::Yes
+                    {
+                        self.change_chat("/api/conversations/delete", Some(json!({"id": id})));
+                    }
                 }
                 if self.background_running > 0
                     && ui
@@ -6211,6 +6293,24 @@ impl JarvisApp {
 
 impl eframe::App for JarvisApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        #[cfg(windows)]
+        if let Some(tray) = &self.tray {
+            for event in tray.events.try_iter() {
+                if event.id == tray.exit {
+                    self.tray = None;
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    return;
+                }
+                if event.id == tray.open {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+                }
+            }
+            if !self.update_restarting && ctx.input(|input| input.viewport().close_requested()) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            }
+        }
         self.focused = ctx.input(|i| i.viewport().focused.unwrap_or(false));
         self.receive_events(ctx);
     }

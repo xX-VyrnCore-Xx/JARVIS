@@ -207,7 +207,7 @@ pub fn guidance(profile: &Profile) -> String {
         ("interessi", "interests"),
     ] {
         let value = profile.get(key);
-        if !value.is_empty() && !(key == "sector" && sector.is_empty()) {
+        if !(value.is_empty() || (key == "sector" && sector.is_empty())) {
             parts.push(format!("{label}: {value}"));
         }
     }

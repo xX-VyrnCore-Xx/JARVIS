@@ -1329,9 +1329,14 @@ async fn run_cloud_chat_inner(
         body["provider"] = json!("auto");
         body["use_context"] = json!(false);
     }
+    let conversation = with_core(state, move |j| {
+        Ok::<_, CoreError>(conversation.unwrap_or_else(|| j.active_conversation_id()))
+    })
+    .await?;
     let target = conversation.clone();
     match with_core(state, move |j| {
-        j.in_conversation(target.as_deref(), |j| j.local_command(&local))
+        j.validate_cloud_text(&local)?;
+        j.in_conversation(Some(&target), |j| j.local_command(&local))
     })
     .await
     {
@@ -1352,7 +1357,7 @@ async fn run_cloud_chat_inner(
     };
     let target = conversation.clone();
     let request = with_core(state, move |j| {
-        j.in_conversation(target.as_deref(), |j| j.prepare_cloud_chat(&body))
+        j.in_conversation(Some(&target), |j| j.prepare_cloud_chat(&body))
     })
     .await?;
     let timer = crate::observability::Timer::start();
@@ -1371,7 +1376,7 @@ async fn run_cloud_chat_inner(
         return Err(CoreError::Internal("richiesta cloud interrotta".into()).into());
     };
     let out = with_core(state, move |j| {
-        j.in_conversation(conversation.as_deref(), |j| {
+        j.in_conversation(Some(&conversation), |j| {
             j.finish_cloud_chat(message, completed, timer)
         })
     })
@@ -2771,10 +2776,20 @@ async fn chat_sync(
 
 async fn conversation(
     State(state): State<Shared>,
+    device: Option<axum::Extension<DeviceCtx>>,
     Query(q): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
     let n = limit(&json!(q), 100);
-    match with_core(&state, move |j| j.owner_conversation(n)).await {
+    let owner = device.is_none();
+    match with_core(&state, move |j| {
+        if owner {
+            j.owner_conversation(n)
+        } else {
+            j.conversation(n)
+        }
+    })
+    .await
+    {
         Ok(items) => Json(json!({"items": items})).into_response(),
         Err(e) => e.into_response(),
     }

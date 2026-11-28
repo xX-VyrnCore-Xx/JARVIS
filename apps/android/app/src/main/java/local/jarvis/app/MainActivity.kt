@@ -271,12 +271,21 @@ private fun ColumnScope.DeviceScreen(
     LaunchedEffect(notificationId) {
         if (notificationId != null) tab = NOTIFICATIONS_TAB_INDEX
     }
-    Text(
-        tabs[tab],
-        modifier = Modifier.padding(horizontal = 22.dp, vertical = 12.dp),
-        style = MaterialTheme.typography.headlineLarge,
-        fontWeight = FontWeight.Bold,
-    )
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer) {
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 22.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(tabs[tab], style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            if (tab == NOTIFICATIONS_TAB_INDEX && unread > 0) {
+                Surface(shape = RoundedCornerShape(20.dp), color = MaterialTheme.colorScheme.secondaryContainer) {
+                    Text("$unread da leggere", Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        style = MaterialTheme.typography.labelMedium)
+                }
+            }
+        }
+    }
     AnimatedContent(
         targetState = tab,
         modifier = Modifier.weight(1f).fillMaxWidth(),

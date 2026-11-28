@@ -569,25 +569,11 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     /// Nuova conversazione vuota, come «New chat» di ChatGPT: la crea, la rende attiva e apre la chat.
     private func startNewChat() {
-        Task {
-            do {
-                _ = try await core.request("/api/conversations", method: "POST", body: [:])
-                error = nil
-                if section == .chat { await load(.chat) } else { select(.chat) }
-                await refreshSidebarChats()
-            } catch { self.error = error.localizedDescription }
-        }
+        changeChat("/api/conversations", body: [:])
     }
 
     private func openChat(_ id: String) {
-        Task {
-            do {
-                _ = try await core.request("/api/conversations/select", method: "POST", body: ["id": id])
-                error = nil
-                if section == .chat { await load(.chat) } else { select(.chat) }
-                await refreshSidebarChats()
-            } catch { self.error = error.localizedDescription }
-        }
+        changeChat("/api/conversations/select", body: ["id": id])
     }
 
     private var newChatButton: some View {
@@ -1696,8 +1682,12 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     }
 
     /// Chat multiple e lavoro in background (ADR-0143, ADR-0144).
+    @State private var chatToDelete: String?
+    @State private var changingChat = false
+
     private var chatControls: some View {
         let chats = (payload["chats"] as? [[String: Any]]) ?? []
+        let active = chats.first { $0["active"] as? Bool == true }
         return HStack(spacing: 8) {
             Menu {
                 ForEach(chats.indices, id: \.self) { index in
@@ -1716,13 +1706,29 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             Button("Nuova chat", systemImage: "square.and.pencil") {
                 changeChat("/api/conversations", body: [:])
             }
-            Button("Copia chat", systemImage: "doc.on.doc") { copyChat() }
-                .help("Copia la chat in Markdown negli appunti")
+            Menu {
+                Button("Copia chat", systemImage: "doc.on.doc") { copyChat() }
+                if let id = active?["id"] as? String {
+                    Button(id == "main" ? "Svuota chat" : "Elimina chat", role: .destructive) {
+                        chatToDelete = id
+                    }
+                }
+            } label: {
+                Label("Opzioni chat", systemImage: "ellipsis.circle")
+            }.menuStyle(.borderlessButton)
             Toggle(isOn: $chatInBackground) {
                 Label("In background", systemImage: "moon.zzz")
             }
             .toggleStyle(.button)
             .help("JARVIS lavora nel cloud anche se l'app è in secondo piano o chiusa e ti avvisa alla fine.")
+        }
+        .disabled(sending || changingChat)
+        .confirmationDialog("Eliminare i messaggi di questa chat?", isPresented: Binding(
+            get: { chatToDelete != nil }, set: { if !$0 { chatToDelete = nil } }
+        ), titleVisibility: .visible, presenting: chatToDelete) { id in
+            Button(id == "main" ? "Svuota chat" : "Elimina chat", role: .destructive) {
+                changeChat("/api/conversations/delete", body: ["id": id])
+            }
         }
     }
 
@@ -1742,11 +1748,14 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     }
 
     private func changeChat(_ path: String, body: [String: Any]) {
+        guard !sending, !changingChat else { return }
+        changingChat = true
         Task {
+            defer { changingChat = false }
             do {
                 _ = try await core.request(path, method: "POST", body: body)
                 error = nil
-                await load(.chat)
+                if section == .chat { await load(.chat) } else { select(.chat) }
                 await refreshSidebarChats()
             } catch {
                 self.error = error.localizedDescription
@@ -2007,7 +2016,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     /// Comando pronunciato dopo «Hey Jarvis»: la risposta viene letta ad alta voce anche se la lettura è spenta.
     private func handleVoiceCommand(_ text: String) {
-        guard !sending else { return }
+        guard !sending, !changingChat else { return }
         select(.chat)
         message = text
         sendMessage(spoken: true)
@@ -2015,7 +2024,7 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     private func sendMessage(spoken: Bool) {
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, !sending else { return }
+        guard !text.isEmpty, !sending, !changingChat else { return }
         let includeContext = useCloudContext
         if chatInBackground {
             message = ""

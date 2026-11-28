@@ -21,6 +21,7 @@ data class AppRelease(
  */
 object AppUpdate {
     const val RELEASES_URL = "https://api.github.com/repos/xX-VyrnCore-Xx/JARVIS/releases?per_page=15"
+    private val releaseVersion = Regex("""[0-9]+\.[0-9]+\.[0-9]+""")
     private const val MAX_APK_BYTES = 200L * 1024 * 1024
     private const val MAX_SMALL_BYTES = 2L * 1024 * 1024
 
@@ -28,7 +29,7 @@ object AppUpdate {
         val core = version.trim().removePrefix("v")
         val numbers = core.substringBefore('-').substringBefore('+').split('.')
         if (numbers.size < 2 || numbers.any { it.isEmpty() || !it.all(Char::isDigit) }) return null
-        return numbers.map { it.toInt() } to core.substringAfter('-', "")
+        return numbers.map { it.toIntOrNull() ?: return null } to core.substringBefore('+').substringAfter('-', "")
     }
 
     /** Vero se `candidate` è più recente di `current` (una prerelease precede la stabile con gli stessi numeri). */
@@ -58,6 +59,7 @@ object AppUpdate {
             val tag = r.optString("tag_name")
             if (parts(tag) == null || !isNewer(tag, current)) continue
             val version = tag.removePrefix("v")
+            if (!releaseVersion.matches(version)) continue
             val assets = r.optJSONArray("assets") ?: continue
             val find = { name: String ->
                 (0 until assets.length()).mapNotNull { assets.optJSONObject(it) }.firstOrNull { it.optString("name") == name }
@@ -83,14 +85,17 @@ object AppUpdate {
             if (hash.length == 64 && hash.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' } && name.isNotEmpty()) {
                 name to hash.lowercase()
             } else null
-        }.toMap()
+        }.groupBy({ it.first }, { it.second })
+            .mapNotNull { (name, hashes) -> hashes.distinct().singleOrNull()?.let { name to it } }
+            .toMap()
 
     /** Solo HTTPS verso GitHub, senza credenziali nell'indirizzo. */
     fun allowedUrl(url: String): Boolean {
         val uri = runCatching { URI(url) }.getOrNull() ?: return false
         val host = uri.host?.lowercase() ?: return false
-        return uri.scheme.equals("https", ignoreCase = true) && uri.userInfo == null &&
-            (host == "api.github.com" || host == "github.com" || host.endsWith(".githubusercontent.com"))
+        return uri.scheme.equals("https", ignoreCase = true) && uri.userInfo == null && uri.fragment == null &&
+            (uri.port == -1 || uri.port == 443) &&
+            host in setOf("api.github.com", "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com")
     }
 
     fun sha256(file: File): String {
@@ -118,14 +123,23 @@ object AppUpdate {
             connection.readTimeout = 60_000
             connection.setRequestProperty("Accept", accept)
             connection.setRequestProperty("User-Agent", "JARVIS-Android")
-            val status = connection.responseCode
-            if (status in 300..399) {
-                val next = connection.getHeaderField("Location") ?: throw IllegalStateException("reindirizzamento senza destinazione")
-                current = URI.create(current).resolve(next).toString()
+            val status = try {
+                connection.responseCode
+            } catch (error: Exception) {
                 connection.disconnect()
+                throw error
+            }
+            if (status in 300..399) {
+                val next = connection.getHeaderField("Location")
+                connection.disconnect()
+                check(next != null) { "reindirizzamento senza destinazione" }
+                current = URI.create(current).resolve(next).toString()
                 return@repeat
             }
-            check(status in 200..299) { "GitHub ha risposto HTTP $status" }
+            if (status !in 200..299) {
+                connection.disconnect()
+                error("GitHub ha risposto HTTP $status")
+            }
             return connection
         }
         throw IllegalStateException("troppi reindirizzamenti")
@@ -155,38 +169,41 @@ object AppUpdate {
 
     /** Scarica e verifica l'APK in `dir`; restituisce il file solo se il SHA-256 coincide con `SHA256SUMS`. */
     fun download(release: AppRelease, dir: File, onProgress: (Long, Long) -> Unit): File {
+        require(releaseVersion.matches(release.version) &&
+            release.apkName == "JARVIS_${release.version}_android-release.apk") { "nome APK non valido" }
         val expected = parseSums(readText(release.sumsUrl, "text/plain"))[release.apkName]
             ?: throw IllegalStateException("SHA256SUMS non contiene l'APK: aggiornamento rifiutato")
-        dir.mkdirs()
-        dir.listFiles()?.forEach { it.delete() }
-        val part = File(dir, release.apkName + ".part")
-        val connection = open(release.apkUrl, "application/octet-stream")
+        check(dir.isDirectory || dir.mkdirs()) { "cartella aggiornamenti non disponibile" }
+        val part = File.createTempFile("jarvis-", ".part", dir)
         try {
-            val total = connection.contentLengthLong.takeIf { it > 0 } ?: release.apkSize
-            check(total <= MAX_APK_BYTES) { "il file supera il limite" }
-            var written = 0L
-            connection.inputStream.use { input ->
-                part.outputStream().use { output ->
-                    val buffer = ByteArray(1 shl 16)
-                    while (true) {
-                        val n = input.read(buffer)
-                        if (n < 0) break
-                        written += n
-                        check(written <= MAX_APK_BYTES) { "il file supera il limite" }
-                        output.write(buffer, 0, n)
-                        onProgress(written, total)
+            val connection = open(release.apkUrl, "application/octet-stream")
+            try {
+                val total = connection.contentLengthLong.takeIf { it > 0 } ?: release.apkSize
+                check(total <= MAX_APK_BYTES) { "il file supera il limite" }
+                var written = 0L
+                connection.inputStream.use { input ->
+                    part.outputStream().use { output ->
+                        val buffer = ByteArray(1 shl 16)
+                        while (true) {
+                            val n = input.read(buffer)
+                            if (n < 0) break
+                            written += n
+                            check(written <= MAX_APK_BYTES) { "il file supera il limite" }
+                            output.write(buffer, 0, n)
+                            onProgress(written, total)
+                        }
                     }
                 }
+                check(total <= 0 || written == total) { "download incompleto" }
+            } finally {
+                connection.disconnect()
             }
+            check(sha256(part) == expected) { "la verifica SHA-256 è fallita: file scartato" }
+            val ready = File(dir, release.apkName)
+            check(part.renameTo(ready)) { "file verificato non salvabile" }
+            return ready
         } finally {
-            connection.disconnect()
-        }
-        if (sha256(part) != expected) {
             part.delete()
-            throw IllegalStateException("la verifica SHA-256 è fallita: file scartato")
         }
-        val ready = File(dir, release.apkName)
-        check(part.renameTo(ready)) { "file verificato non salvabile" }
-        return ready
     }
 }

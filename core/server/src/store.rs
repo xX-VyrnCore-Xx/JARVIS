@@ -1002,16 +1002,19 @@ impl Store {
 
     /// Elimina una chat con i suoi messaggi. La principale viene solo svuotata.
     pub fn conversation_delete(&self, id: &str) -> StoreResult<bool> {
-        let removed = self
-            .conn
-            .execute("DELETE FROM messages WHERE conversation = ?1", [id])?;
+        let transaction = self.conn.unchecked_transaction()?;
+        transaction.execute(
+            "DELETE FROM cloud_feedback WHERE task_id IN
+             (SELECT task_id FROM messages WHERE conversation = ?1 AND role = 'assistant')",
+            [id],
+        )?;
+        let removed = transaction.execute("DELETE FROM messages WHERE conversation = ?1", [id])?;
         let existed = if id == MAIN_CONVERSATION {
             removed > 0
         } else {
-            self.conn
-                .execute("DELETE FROM conversations WHERE id = ?1", [id])?
-                > 0
+            transaction.execute("DELETE FROM conversations WHERE id = ?1", [id])? > 0
         };
+        transaction.commit()?;
         if existed && self.conversation_active() == id {
             self.set_active(MAIN_CONVERSATION);
         }
