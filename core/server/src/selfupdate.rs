@@ -556,7 +556,7 @@ pub fn apply(data_dir: &Path) -> Result<Value, String> {
         "apply.sh"
     });
     std::fs::write(&path, script).map_err(|_| "script di aggiornamento non scrivibile")?;
-    let build = |_extra: u32| {
+    let build = || {
         let mut cmd = if os == "windows" {
             let mut c = std::process::Command::new("cmd.exe");
             c.args(["/C", "call"]).arg(&path);
@@ -580,9 +580,12 @@ pub fn apply(data_dir: &Path) -> Result<Value, String> {
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
-            // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW (+ CREATE_BREAKAWAY_FROM_JOB
-            // al primo tentativo: se l'app è in un job che chiude i figli, lo script deve sopravvivere).
-            cmd.creation_flags(0x0000_0008 | 0x0000_0200 | 0x0800_0000 | _extra);
+            const DETACHED_PROCESS: u32 = 0x0000_0008;
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+            const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+            cmd.creation_flags(
+                DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_BREAKAWAY_FROM_JOB,
+            );
         }
         #[cfg(unix)]
         {
@@ -591,11 +594,18 @@ pub fn apply(data_dir: &Path) -> Result<Value, String> {
         }
         cmd
     };
-    // Se il job non ammette il distacco il primo tentativo fallisce: si ripete senza.
-    build(0x0100_0000)
-        .spawn()
-        .or_else(|_| build(0).spawn())
-        .map_err(|_| "avvio dell'installazione non riuscito")?;
+    // A Windows updater still in the Core job would be killed during desktop shutdown.
+    build().spawn().map_err(|error| {
+        let message = if os == "windows" {
+            format!(
+                "Avvio dell’installatore separato non riuscito ({error}). Installa il setup scaricato con JARVIS chiuso."
+            )
+        } else {
+            format!("Avvio dell’installazione non riuscito ({error}).")
+        };
+        let _ = std::fs::write(&log, &message);
+        message
+    })?;
     Ok(json!({"installing": true, "version": version, "restart": true}))
 }
 

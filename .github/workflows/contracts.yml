@@ -127,6 +127,9 @@ jobs:
         run: cargo build --locked
       - if: runner.os == 'Windows'
         run: cargo test --locked
+      - name: Verifica che l’installer sopravviva alla chiusura del Core
+        if: runner.os == 'Windows'
+        run: cargo test --manifest-path ../../../core/Cargo.toml --locked -p jarvis-launcher --lib windows_job
 
 
   audit:

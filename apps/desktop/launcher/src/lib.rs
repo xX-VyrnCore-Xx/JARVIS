@@ -120,7 +120,7 @@ impl CoreJob {
         use windows_sys::Win32::System::JobObjects::{
             AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
             SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            JOB_OBJECT_LIMIT_BREAKAWAY_OK, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
         };
 
         // The job handle is non-inheritable and is the only handle that keeps the job alive.
@@ -130,7 +130,9 @@ impl CoreJob {
         }
         let job = Self(unsafe { OwnedHandle::from_raw_handle(handle) });
         let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
-        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        // Ordinary descendants remain supervised. The updater asks to leave the job explicitly.
+        limits.BasicLimitInformation.LimitFlags =
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE | JOB_OBJECT_LIMIT_BREAKAWAY_OK;
         let configured = unsafe {
             SetInformationJobObject(
                 job.0.as_raw_handle(),
@@ -332,4 +334,63 @@ pub fn launch(cfg: &LaunchConfig) -> Result<RunningCore, LaunchError> {
         )));
     }
     Err(LaunchError::Timeout { log })
+}
+
+#[cfg(all(test, windows))]
+mod windows_job_tests {
+    use super::*;
+    use std::os::windows::process::CommandExt;
+
+    fn wait_for(path: &Path) {
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while !path.exists() {
+            assert!(Instant::now() < deadline, "missing {path:?}");
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    }
+
+    #[test]
+    fn windows_job_helper() {
+        let Some(dir) = std::env::var_os("JARVIS_TEST_UPDATE_JOB") else {
+            return;
+        };
+        let dir = PathBuf::from(dir);
+        if std::env::var_os("JARVIS_TEST_UPDATE_DETACHED").is_some() {
+            wait_for(&dir.join("job-closed"));
+            std::fs::write(dir.join("survived"), []).unwrap();
+            return;
+        }
+        wait_for(&dir.join("job-assigned"));
+        let mut updater = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "windows_job_tests::windows_job_helper"])
+            .env("JARVIS_TEST_UPDATE_DETACHED", "1")
+            .creation_flags(0x0100_0000) // CREATE_BREAKAWAY_FROM_JOB
+            .spawn()
+            .unwrap();
+        std::fs::write(dir.join("updater-started"), []).unwrap();
+        assert!(updater.wait().unwrap().success());
+    }
+
+    #[test]
+    fn windows_job_preserves_the_detached_updater_on_exit() {
+        let dir = std::env::temp_dir().join(format!("jarvis-update-job-{}", session_token()));
+        std::fs::create_dir(&dir).unwrap();
+        let mut core = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "windows_job_tests::windows_job_helper"])
+            .env("JARVIS_TEST_UPDATE_JOB", &dir)
+            .spawn()
+            .unwrap();
+        let job = CoreJob::new(&core).unwrap();
+        std::fs::write(dir.join("job-assigned"), []).unwrap();
+        wait_for(&dir.join("updater-started"));
+        drop(job);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while core.try_wait().unwrap().is_none() {
+            assert!(Instant::now() < deadline, "supervised Core did not stop");
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        std::fs::write(dir.join("job-closed"), []).unwrap();
+        wait_for(&dir.join("survived"));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 }
