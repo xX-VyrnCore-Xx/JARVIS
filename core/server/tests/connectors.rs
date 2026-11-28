@@ -573,3 +573,43 @@ fn mail_is_sent_as_rfc822_only_after_confirmation() {
     );
     let _ = std::fs::remove_dir_all(&data);
 }
+
+#[test]
+fn cloud_chat_offers_the_tools_of_the_services_the_request_talks_about() {
+    let (port, _) = serve();
+    let data = fresh();
+    let mut j = Jarvis::new(config(&data, web())).unwrap();
+    let key = format!("nvapi-{}", "a1B2".repeat(16));
+    j.configure_cloud(&json!({"provider": "nvidia_nim", "key": key}))
+        .unwrap();
+    let mut mail = manifest(port, false);
+    mail["id"] = json!("gmail");
+    mail["name"] = json!("Gmail di prova");
+    mail["auth"] = json!({"type": "none"});
+    j.install_connector(&mail).unwrap();
+    let names = |j: &Jarvis, message: &str, connectors: bool| -> Vec<String> {
+        j.prepare_cloud_chat(
+            &json!({"provider": "auto", "message": message, "connectors": connectors}),
+        )
+        .unwrap()
+        .tools
+        .iter()
+        .map(|t| t.name.clone())
+        .collect()
+    };
+    let with_mail = names(&j, "Controlla la mia posta di oggi", true);
+    assert!(
+        with_mail.iter().any(|n| n.starts_with("connector.gmail.")),
+        "{with_mail:?}"
+    );
+    assert!(!names(&j, "Raccontami una barzelletta", true)
+        .iter()
+        .any(|n| n.starts_with("connector.")));
+    assert!(
+        !names(&j, "Controlla la mia posta di oggi", false)
+            .iter()
+            .any(|n| n.starts_with("connector.")),
+        "i dispositivi associati non ricevono i connettori"
+    );
+    let _ = std::fs::remove_dir_all(data);
+}
