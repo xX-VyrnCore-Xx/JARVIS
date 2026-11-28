@@ -1248,9 +1248,15 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             }
             .frame(minWidth: 980)
             VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .center, spacing: 14) {
-                    greetingBlock.frame(maxWidth: .infinity, alignment: .leading)
-                    heroAvatar(size: 170).frame(width: 200)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 14) {
+                        greetingBlock.frame(minWidth: 200, maxWidth: .infinity, alignment: .leading)
+                        heroAvatar(size: 160).frame(width: 174)
+                    }
+                    VStack(alignment: .leading, spacing: 10) {
+                        heroAvatar(size: 124)
+                        greetingBlock
+                    }
                 }
                 commandBar
                 rightColumn
@@ -1269,19 +1275,24 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
     }
 
     private var greetingBlock: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Ciao,").font(.system(size: 40, weight: .bold, design: .rounded)).foregroundStyle(.white)
-            HStack(spacing: 10) {
-                Text("sono").font(.system(size: 40, weight: .bold, design: .rounded)).foregroundStyle(.white)
-                Text("JARVIS").font(.system(size: 40, weight: .bold, design: .rounded))
-                    .foregroundStyle(LinearGradient(colors: [Color.cyan, Color(red: 0.4, green: 0.55, blue: 1)],
-                                                    startPoint: .leading, endPoint: .trailing))
-                    .shadow(color: Color.cyan.opacity(0.45), radius: 8)
+        VStack(alignment: .leading, spacing: 9) {
+            Label(coreStatus, systemImage: coreIsUp ? "checkmark.circle.fill" : "exclamationmark.circle")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(coreIsUp ? Color.green : Color.orange)
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background((coreIsUp ? Color.green : Color.orange).opacity(0.10), in: Capsule())
+                .accessibilityLabel("Core: \(coreStatus)")
+            Text(timeGreeting).font(.title3.weight(.medium)).foregroundStyle(.secondary)
+            Text("JARVIS")
+                .font(.system(size: 46, weight: .bold, design: .rounded))
+                .tracking(2)
+                .foregroundStyle(LinearGradient(colors: [.white, .cyan],
+                                                startPoint: .topLeading, endPoint: .bottomTrailing))
+                .accessibilityAddTraits(.isHeader)
+            if coreIsUp {
+                Text(statusHeadline).font(.callout).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .accessibilityElement(children: .combine).accessibilityAddTraits(.isHeader)
-            Text("\(timeGreeting). Il tuo assistente intelligente: cosa vuoi fare oggi?")
-                .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            Text(statusHeadline).font(.caption).foregroundStyle(.secondary.opacity(0.8))
         }
     }
 
@@ -1416,22 +1427,25 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
 
     /// Barra dei comandi: scrivi e vai direttamente in chat.
     private var commandBar: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "mic.fill").foregroundStyle(.cyan)
-            TextField("Parlami o scrivi un comando…", text: $commandText)
+        HStack(spacing: 10) {
+            Image(systemName: "text.bubble").foregroundStyle(.cyan).accessibilityHidden(true)
+            TextField("Scrivi un comando…", text: $commandText)
                 .textFieldStyle(.plain).font(.body).onSubmit(sendCommand)
-            Button { sendCommand() } label: { Image(systemName: "paperplane.fill").font(.body.weight(.semibold)) }
-                .buttonStyle(PressableStyle()).foregroundStyle(.cyan)
-                .disabled(sending || commandText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .accessibilityLabel("Invia")
+                .accessibilityLabel("Comando per JARVIS")
+            Button { sendCommand() } label: {
+                Label("Invia", systemImage: "arrow.up.circle.fill")
+                    .font(.callout.weight(.semibold))
+                    .padding(.horizontal, 4)
+            }
+            .buttonStyle(.borderedProminent).tint(.cyan)
+            .disabled(sending || commandText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
-        .padding(.horizontal, 20).padding(.vertical, 14)
-        .background(Capsule().fill(panel))
+        .padding(12)
+        .background(base.opacity(0.82), in: RoundedRectangle(cornerRadius: 14))
         .overlay {
-            Capsule().strokeBorder(LinearGradient(colors: [Color.cyan.opacity(0.55), Color.indigo.opacity(0.5)],
-                                                  startPoint: .leading, endPoint: .trailing), lineWidth: 1.2)
+            RoundedRectangle(cornerRadius: 14).strokeBorder(.cyan.opacity(0.28))
         }
-        .frame(maxWidth: 760).frame(maxWidth: .infinity)
+        .frame(maxWidth: 760).frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func sendCommand() {
