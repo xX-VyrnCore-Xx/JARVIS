@@ -350,4 +350,6 @@ La precedente chat Web con avatar, PWA e service worker è stata rimossa dal pro
 
 **Ripristino dell’aggiornamento Windows (2026-11-28, base `df03661`).** Il job del Core ammette il distacco esplicito dell’installer. I processi ordinari restano sotto supervisione. L’API segnala il fallimento del distacco senza chiedere al client di chiudersi. Per passare dalla build affetta dal problema a questa correzione occorre una prima installazione con il setup della release.
 
+**Plancia macOS (2026-11-28, base `1f77c31`).** Gerarchia del saluto e degli stati rivista, avatar affiancato o impilato secondo lo spazio e comando con azione di invio esplicita. Il collaudo visivo dello scroll a finestra larga e stretta richiede macOS.
+
 Per ogni ripresa registrare data, revisione, lavoro completato, verifiche eseguite, blocchi, ipotesi e prossimo passo concreto. Conservare il checkpoint con le modifiche alle quali si riferisce.
