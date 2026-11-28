@@ -214,6 +214,24 @@ pub fn call(
             )
         })?;
     let mut rest = args.as_object().cloned().unwrap_or_default();
+    // Gmail e Calendar: valori predefiniti sensati e risposte ridotte (ADR-0239).
+    let shape = (manifest["id"].as_str().unwrap_or_default(), op_name);
+    let with_body = rest.get("format").and_then(Value::as_str) == Some("full");
+    match shape {
+        ("google_calendar", "eventi") => crate::google_shape::prepare_events(&mut rest),
+        ("google_calendar", "crea_evento") => crate::google_shape::prepare_new_event(&mut rest),
+        ("gmail", "cerca") => {
+            rest.entry("maxResults").or_insert(json!(10));
+        }
+        ("gmail", "leggi") if !with_body => {
+            rest.insert("format".into(), json!("metadata"));
+            rest.insert(
+                "metadataHeaders".into(),
+                json!(crate::google_shape::MAIL_HEADERS),
+            );
+        }
+        _ => {}
+    }
     let mut path = op["path"].as_str().unwrap_or("/").to_string();
     while let Some(start) = path.find('{') {
         let end = path[start..]
@@ -240,13 +258,19 @@ pub fn call(
     let method = op["method"].as_str().unwrap_or("GET");
     let body = if method == "GET" {
         for (k, v) in &rest {
-            url.query_pairs_mut().append_pair(
-                k,
-                &match v {
-                    Value::String(s) => s.clone(),
-                    other => other.to_string(),
-                },
-            );
+            let values: Vec<&Value> = match v {
+                Value::Array(items) => items.iter().collect(),
+                other => vec![other],
+            };
+            for v in values {
+                url.query_pairs_mut().append_pair(
+                    k,
+                    &match v {
+                        Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    },
+                );
+            }
         }
         None
     } else {
@@ -364,6 +388,40 @@ pub fn call(
                 .take(20_000)
                 .collect(),
         )
+    };
+    let content = match shape {
+        ("google_calendar", "eventi") => crate::google_shape::summarize_events(&content),
+        ("gmail", "leggi") if content.is_object() => {
+            crate::google_shape::summarize_message(&content, with_body)
+        }
+        ("gmail", "cerca") if content.is_object() => {
+            let headers_query: String = crate::google_shape::MAIL_HEADERS
+                .iter()
+                .map(|h| format!("&metadataHeaders={h}"))
+                .collect();
+            let messages: Vec<Value> = content["messages"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|m| m["id"].as_str())
+                .take(10)
+                .filter_map(|id| {
+                    let url = Url::parse(&format!(
+                        "{base}/messages/{}?format=metadata{headers_query}",
+                        encode_segment(&json!(id))
+                    ))
+                    .ok()?;
+                    let (code, _, data) =
+                        crate::web::request(web, "GET", &url, &headers, None, &hosts).ok()?;
+                    (code < 400)
+                        .then(|| serde_json::from_slice::<Value>(&data).ok())
+                        .flatten()
+                        .map(|m| crate::google_shape::summarize_message(&m, false))
+                })
+                .collect();
+            crate::google_shape::summarize_search(&content, messages)
+        }
+        _ => content,
     };
     Ok(json!({
         "connector": manifest["id"], "operation": op_name, "status": status, "data": content,
@@ -573,6 +631,85 @@ mod tests {
             .unwrap()
             .iter()
             .any(|r| r == "private"));
+    }
+
+    #[test]
+    fn gmail_search_returns_readable_messages_and_calendar_orders_from_today() {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let lines = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let log = lines.clone();
+        let server = std::thread::spawn(move || {
+            for _ in 0..4 {
+                let (stream, _) = listener.accept().unwrap();
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                loop {
+                    let mut h = String::new();
+                    reader.read_line(&mut h).unwrap();
+                    if h.len() <= 2 {
+                        break;
+                    }
+                }
+                log.lock().unwrap().push(line.clone());
+                let body = if line.contains("/messages?") {
+                    r#"{"messages":[{"id":"m1","threadId":"t1"},{"id":"m2","threadId":"t2"}],"resultSizeEstimate":2}"#.to_string()
+                } else if line.contains("/messages/m1") {
+                    r#"{"id":"m1","threadId":"t1","snippet":"Ciao","labelIds":["UNREAD"],"payload":{"headers":[{"name":"From","value":"Anna <anna@example.test>"},{"name":"Subject","value":"Fattura"},{"name":"Date","value":"Mon, 30 Nov 2026 09:00:00 +0100"}]}}"#.to_string()
+                } else if line.contains("/messages/m2") {
+                    r#"{"id":"m2","threadId":"t2","snippet":"Ok","payload":{"headers":[{"name":"Subject","value":"Riunione"}]}}"#.to_string()
+                } else {
+                    r#"{"summary":"Lavoro","timeZone":"Europe/Rome","items":[{"id":"e1","summary":"Visita","start":{"dateTime":"2026-12-01T10:00:00+01:00"},"end":{"dateTime":"2026-12-01T11:00:00+01:00"}}]}"#.to_string()
+                };
+                let mut s = stream;
+                let _ = write!(s, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            }
+        });
+        let web = WebConfig {
+            allow_private: true,
+            ..WebConfig::default()
+        };
+        let mut gmail: Value = serde_json::from_str(include_str!(
+            "../../../contracts/catalog/connectors/gmail.json"
+        ))
+        .unwrap();
+        gmail["base_url"] = json!(format!("http://127.0.0.1:{port}"));
+        gmail["allowed_hosts"] = json!(["127.0.0.1"]);
+        let found = call(&gmail, "cerca", &json!({"q": "is:unread"}), Some("t"), &web).unwrap();
+        let messages = &found["data"]["messaggi"];
+        assert_eq!(messages.as_array().unwrap().len(), 2, "{found}");
+        assert_eq!(messages[0]["oggetto"], "Fattura");
+        assert_eq!(messages[0]["da"], "Anna <anna@example.test>");
+        assert_eq!(messages[0]["non_letta"], true);
+        assert_eq!(messages[1]["oggetto"], "Riunione");
+        let mut calendar: Value = serde_json::from_str(include_str!(
+            "../../../contracts/catalog/connectors/google_calendar.json"
+        ))
+        .unwrap();
+        calendar["base_url"] = json!(format!("http://127.0.0.1:{port}"));
+        calendar["allowed_hosts"] = json!(["127.0.0.1"]);
+        let events = call(&calendar, "eventi", &json!({"days": 1}), Some("t"), &web).unwrap();
+        server.join().unwrap();
+        assert_eq!(events["data"]["eventi"][0]["titolo"], "Visita", "{events}");
+        let seen = lines.lock().unwrap().clone();
+        assert!(
+            seen[0].contains("maxResults=10") && seen[0].contains("q=is%3Aunread"),
+            "{seen:?}"
+        );
+        assert!(
+            seen[1].contains("format=metadata") && seen[1].contains("metadataHeaders=Subject"),
+            "{seen:?}"
+        );
+        let last = &seen[3];
+        assert!(
+            last.contains("singleEvents=true")
+                && last.contains("orderBy=startTime")
+                && last.contains("timeMin=")
+                && last.contains("timeMax="),
+            "{last}"
+        );
     }
 
     #[test]

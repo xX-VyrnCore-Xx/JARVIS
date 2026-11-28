@@ -2646,6 +2646,20 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Barra laterale macOS:** senza barra di scorrimento; in alto «Nuova chat» (⌘N) e le chat recenti (come ChatGPT, con le API `/api/conversations` già esistenti); in basso il profilo, modificabile da una finestra rapida (ruolo, azienda, competenze, tono) o dalla pagina completa. Compila solo in CI macOS; aspetto non visto da me. Windows (egui): invariato in questo giro.
 - **Orchestratore:** nessuna modifica in questo giro; dichiarato come non fatto.
 
+### ADR-0238 — Identità e carattere di JARVIS: creazione personale, non prodotto di NVIDIA (2026-11-28, accettata)
+
+- **Segnalazione:** JARVIS, quando risponde con un modello NIM, poteva presentarsi come il modello (Nemotron/NVIDIA) invece che come creazione del proprietario.
+- **Decisione:** il nucleo del prompt dichiara che JARVIS è una creazione personale di chi l'ha sviluppato, non un prodotto di NVIDIA, Anthropic, OpenAI, Meta o altre aziende; i modelli sono motori intercambiabili scelti dal Core e il modello non dice mai «sono Nemotron/GPT/Claude» né «sono stato addestrato da…». Il motore in uso è indicato come dato («Motore attuale») e si può dire se richiesto: nessuna bugia sul motore. Carattere: maggiordomo-ingegnere fidato, leale, attento ai dettagli, schietto sui rischi, sicuro ma non arrogante. Le domande «sei di NVIDIA?», «che modello sei?», «chi ti ha creato?» ricevono una risposta deterministica (`selfknow`, argomento origine). Dataset identità a 89 casi. Il testo per gli utenti non nomina il proprietario.
+- **Prompt:** per restare sotto il limite di 6500 caratteri alcune frasi del nucleo sono state accorciate senza cambiarne il senso.
+- **Limite:** nessuna prova con un modello reale (serve la chiave NIM): il comportamento del modello dipende dal rispetto delle istruzioni; le domande dirette sono comunque coperte dalla risposta deterministica.
+
+### ADR-0239 — Gmail e Calendar più facili da usare per JARVIS (2026-11-28, accettata)
+
+- **Segnalazione:** JARVIS fa ancora fatica a usare Gmail e Calendar.
+- **Cause (dal codice):** Gmail «cerca» restituiva solo identificatori (servivano poi tante letture, ognuna con intestazioni grezze e `payload` annidati); Calendar «eventi» senza data né ordine partiva dal passato e chiedeva date RFC 3339 complete; «crea evento» falliva senza fuso orario; il prompt non indicava il giorno della settimana («lunedì prossimo»).
+- **Decisione** (`google_shape.rs`, stesse operazioni, stessi permessi e conferme): (a) «cerca» restituisce già mittente, destinatari, oggetto, data, anteprima e stato di lettura di ogni messaggio (fino a 10), «leggi» una scheda leggibile e, con `format=full`, il testo decodificato (max 8000 caratteri); (b) «eventi» parte da oggi, in ordine di inizio, con la scorciatoia `days` (oggi = 1, settimana = 7) e date anche solo come «2026-11-28»; risposta ridotta a titolo, inizio, fine, luogo, partecipanti; (c) «crea evento» completa ora e fuso locali e, senza fine, dura un'ora; (d) il prompt riporta data, ora e **giorno della settimana** in italiano; (e) le descrizioni degli strumenti dicono cosa restituiscono.
+- **Verifica:** test unitari sulle trasformazioni e un test con server finto che risponde come Gmail/Calendar (richieste inviate e risposte ridotte); `clippy` e suite del Core. **Non provato con account Google reali**: se un'operazione fallisce, il messaggio d'errore indica già API non abilitata o scope mancanti.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

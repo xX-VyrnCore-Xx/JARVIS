@@ -23,7 +23,7 @@
   "operations": [
     {
       "name": "cerca",
-      "summary": "Cerca email con la sintassi di Gmail (es. «from:anna is:unread newer_than:7d»); restituisce gli id",
+      "summary": "Cerca email con la sintassi di Gmail (es. «from:anna is:unread newer_than:7d», «in:inbox», «subject:fattura»); restituisce già mittente, oggetto, data e anteprima di ogni messaggio (id incluso)",
       "method": "GET",
       "path": "/messages",
       "effects": "read",
@@ -46,7 +46,7 @@
     },
     {
       "name": "leggi",
-      "summary": "Legge un'email per id: intestazioni (mittente, oggetto, data) e anteprima; format=full per il corpo",
+      "summary": "Legge un'email per id: mittente, destinatari, oggetto, data e anteprima; con format=full anche il testo del messaggio",
       "method": "GET",
       "path": "/messages/{id}",
       "effects": "read",

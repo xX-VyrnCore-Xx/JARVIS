@@ -142,6 +142,19 @@ pub fn topic(message: &str) -> Option<Topic> {
             "chi ti ha sviluppato",
             "chi e il tuo creatore",
             "chi ti ha ideato",
+            "sei di nvidia",
+            "sei un prodotto nvidia",
+            "sei nemotron",
+            "ti ha creato nvidia",
+            "ti ha creato anthropic",
+            "ti ha creato openai",
+            "sei un modello di nvidia",
+            "sei chatgpt",
+            "sei claude",
+            "che modello sei",
+            "quale modello sei",
+            "che modello usi",
+            "quale modello usi",
         ],
     ) {
         return Some(Topic::Origin);
@@ -343,8 +356,8 @@ pub fn answer(topic: Topic, facts: &Facts) -> String {
             facts.version,
             os_name(&facts.os)
         ),
-        Topic::Origin => "Sono un progetto personale del mio proprietario, sviluppato con l'assistenza di Claude Code: il codice sta nel suo repository (Core in Rust, intelligenza in Python, app per macOS, Windows e Android). \
-             Non appartengo a nessun servizio esterno: giro sul suo computer e i modelli cloud li uso solo se li abilita.".to_string(),
+        Topic::Origin => "Sono una creazione personale del mio proprietario, non un prodotto di NVIDIA né di altre aziende: il codice sta nel suo repository (Core in Rust, intelligenza in Python, app per macOS, Windows e Android) ed è stato sviluppato con l'assistenza di Claude Code. \
+             I modelli di linguaggio sono solo motori intercambiabili che uso se li abilita; io resto JARVIS e giro sul suo computer.".to_string(),
     }
 }
 

@@ -23,7 +23,7 @@
   "operations": [
     {
       "name": "eventi",
-      "summary": "Eventi del calendario principale da una data (timeMin in RFC 3339, es. 2026-11-20T00:00:00Z), in ordine",
+      "summary": "Eventi del calendario principale, già in ordine di inizio. Senza parametri: da oggi in poi. Usa days per la finestra (oggi = 1, questa settimana = 7); timeMin e timeMax accettano anche solo la data (2026-11-28)",
       "method": "GET",
       "path": "/calendars/primary/events",
       "effects": "read",
@@ -57,13 +57,18 @@
               "startTime",
               "updated"
             ]
+          },
+          "days": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 90
           }
         }
       }
     },
     {
       "name": "crea_evento",
-      "summary": "Crea un evento nel calendario principale (start/end con dateTime RFC 3339 e timeZone, es. Europe/Rome)",
+      "summary": "Crea un evento nel calendario principale: summary, start e end con dateTime (es. 2026-11-28T15:00; il fuso del computer si applica da solo; senza end dura un'ora) oppure date per l'intera giornata",
       "method": "POST",
       "path": "/calendars/primary/events",
       "effects": "write_external",
