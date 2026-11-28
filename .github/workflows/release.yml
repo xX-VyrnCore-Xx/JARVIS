@@ -235,7 +235,11 @@ jobs:
           python tests/smoke/start_smoke.py http://127.0.0.1:8765 120
           if ($LASTEXITCODE -ne 0) { Get-Content core.log, core.err; exit 1 }
           $uninstaller = Start-Process -FilePath "$root\uninstall.exe" -ArgumentList "/S _?=$root" -Wait -PassThru
-          if ($uninstaller.ExitCode -ne 0) { throw "Disinstallazione non riuscita: $($uninstaller.ExitCode)" }
+          if ($uninstaller.ExitCode -ne 0) {
+            $uninstallLog = Join-Path $env:TEMP 'JARVIS-setup-error.txt'
+            if (Test-Path $uninstallLog) { Get-Content $uninstallLog }
+            throw "Disinstallazione non riuscita: $($uninstaller.ExitCode)"
+          }
           if (-not $runningCore.WaitForExit(10000)) { throw "Il Core installato è rimasto in esecuzione." }
           if (Test-Path "$root\resources\jarvis-core.exe") { throw "File del Core rimasti dopo la disinstallazione." }
           if (-not (Test-Path $env:JARVIS_DATA_DIR)) { throw "La disinstallazione ha rimosso i dati utente." }
