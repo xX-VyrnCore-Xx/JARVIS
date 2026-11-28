@@ -2122,7 +2122,15 @@ private let iris = Color(red: 0.64, green: 0.68, blue: 1)
             }
             .padding(10)
             .frame(maxWidth: .infinity, minHeight: 78, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Color.white.opacity(active ? 0.10 : 0.05)))
+            .background {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 13, style: .continuous).fill(Color.white.opacity(active ? 0.10 : 0.05))
+                    RealmArt(realm: realm)
+                        .opacity(active ? 0.55 : 0.30)
+                        .mask(LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing))
+                        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+                }
+            }
             .overlay { RoundedRectangle(cornerRadius: 13, style: .continuous).strokeBorder(realm.color.opacity(active ? 0.95 : 0.30)) }
             .contentShape(Rectangle())
         }

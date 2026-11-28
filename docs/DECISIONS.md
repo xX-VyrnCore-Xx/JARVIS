@@ -2636,6 +2636,7 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Dataset:** i built-in passano a sei; `jarvis-identity` (83 casi, con negativi) e `jarvis-skills` (60 casi) sono incorporati, misurabili (soglie di test: identità ≥ 97%, competenze ≥ 90%), migliorabili con candidati validati e caricabili **solo privati** su Hugging Face con conferma esplicita tramite `dataset.push_hf`. Il server MCP di Hugging Face autorizzato è in sola lettura: i repository non sono stati creati da me; **non provato con un token reale**.
 - **Dati sensibili:** nuovo test di contratto che scansiona i file tracciati (chiavi di servizi, chiavi private, domini di posta pubblici) e verifica il `.gitignore`; ha trovato che `.env`, `*.key`, `*.pem` e simili non erano ignorati: corretto. Solo fixture sintetiche.
 - **Windows:** la barra laterale egui è raggruppata per regni con il colore del regno, come su macOS (compila solo in CI Windows/macOS; non compilabile qui).
+- **Illustrazioni dei regni (macOS):** `RealmArt` disegna con `Canvas` un paesaggio vettoriale per ciascun regno, usato come sfondo delle tessere; nessun file immagine né costo di generazione. Aspetto non visto da me (compila solo in CI macOS).
 - **Verifica:** `cargo fmt`, `clippy`, `cargo test --locked` del Core, test contratti e AI, E2E locale, `node --check`. Il test di streaming usa ora un messaggio neutro.
 
 ## Aggiornamento del registro
