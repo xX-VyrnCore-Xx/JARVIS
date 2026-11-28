@@ -110,9 +110,50 @@ pub fn free_port() -> std::io::Result<u16> {
     Ok(TcpListener::bind(("127.0.0.1", 0))?.local_addr()?.port())
 }
 
+#[cfg(windows)]
+struct CoreJob(std::os::windows::io::OwnedHandle);
+
+#[cfg(windows)]
+impl CoreJob {
+    fn new(child: &Child) -> std::io::Result<Self> {
+        use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+        use windows_sys::Win32::System::JobObjects::{
+            AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+            SetInformationJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+            JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        };
+
+        // The job handle is non-inheritable and is the only handle that keeps the job alive.
+        let handle = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
+        if handle.is_null() {
+            return Err(std::io::Error::last_os_error());
+        }
+        let job = Self(unsafe { OwnedHandle::from_raw_handle(handle) });
+        let mut limits = JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        let configured = unsafe {
+            SetInformationJobObject(
+                job.0.as_raw_handle(),
+                JobObjectExtendedLimitInformation,
+                std::ptr::from_ref(&limits).cast(),
+                std::mem::size_of_val(&limits) as u32,
+            )
+        };
+        if configured == 0
+            || unsafe { AssignProcessToJobObject(job.0.as_raw_handle(), child.as_raw_handle()) }
+                == 0
+        {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(job)
+    }
+}
+
 /// Core in esecuzione. Alla distruzione il processo viene arrestato ordinatamente o terminato forzatamente.
 pub struct RunningCore {
     child: Child,
+    #[cfg(windows)]
+    _job: CoreJob,
     /// Finché resta aperto, il Core continua a funzionare; si chiude anche se questo processo muore.
     parent_pipe: Option<ChildStdin>,
     pub port: u16,
@@ -249,9 +290,22 @@ pub fn launch(cfg: &LaunchConfig) -> Result<RunningCore, LaunchError> {
     let mut child = cmd
         .spawn()
         .map_err(|e| LaunchError::Io(format!("avvio di {}: {e}", cfg.core_bin.display())))?;
+    #[cfg(windows)]
+    let job = match CoreJob::new(&child) {
+        Ok(job) => job,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(LaunchError::Io(format!(
+                "supervisione dei processi JARVIS: {error}"
+            )));
+        }
+    };
     let parent_pipe = child.stdin.take();
     let mut core = RunningCore {
         child,
+        #[cfg(windows)]
+        _job: job,
         parent_pipe,
         token,
         port,

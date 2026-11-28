@@ -166,24 +166,24 @@ fn a_forgotten_confirmation_is_recalled_once() {
     .unwrap();
     let out = j.chat("scrivi bozza.txt: testo").unwrap().to_json();
     assert_eq!(out["task"]["state"], "waiting_confirmation", "{out}");
+    let expires =
+        chrono::DateTime::parse_from_rfc3339(out["confirmation"]["expires_at"].as_str().unwrap())
+            .unwrap()
+            .with_timezone(&Local);
     assert!(j
-        .proactive_tick(Local::now() + chrono::Duration::minutes(5))
+        .proactive_tick(expires + chrono::Duration::seconds(1))
         .unwrap()
         .is_empty());
-    let later = Local::now() + chrono::Duration::minutes(20);
-    assert_eq!(j.proactive_tick(later).unwrap(), ["confirmations"]);
-    assert!(
-        j.proactive_tick(later + chrono::Duration::minutes(5))
-            .unwrap()
-            .is_empty(),
-        "una sola volta"
-    );
-    let recalls: Vec<Value> = notes(&j, "confirmation")
-        .into_iter()
-        .filter(|n| n["title"] == "Un'azione attende la tua conferma")
-        .collect();
-    assert_eq!(recalls.len(), 1);
-    assert!(recalls[0]["body"].as_str().unwrap().contains("bozza.txt"));
+    assert!(j
+        .proactive_tick(expires - chrono::Duration::minutes(4))
+        .unwrap()
+        .is_empty());
+    let during = expires - chrono::Duration::minutes(2);
+    assert_eq!(j.proactive_tick(during).unwrap(), ["confirmations"]);
+    assert!(j
+        .proactive_tick(during + chrono::Duration::minutes(1))
+        .unwrap()
+        .is_empty());
 }
 
 #[test]

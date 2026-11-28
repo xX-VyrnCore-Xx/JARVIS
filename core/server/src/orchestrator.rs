@@ -1271,6 +1271,27 @@ impl Jarvis {
         Ok(json!({"saved": true}))
     }
 
+    fn configured_cloud_keys(&self) -> Result<Vec<(crate::cloud::Provider, String)>, CoreError> {
+        crate::cloud::Provider::ALL
+            .into_iter()
+            .filter_map(|provider| {
+                self.secrets
+                    .get(&provider.secret())
+                    .transpose()
+                    .map(|result| result.map(|key| (provider, key)).map_err(internal))
+            })
+            .collect()
+    }
+
+    pub(crate) fn validate_cloud_text(&self, text: &str) -> Result<(), CoreError> {
+        if cloud_text_has_credentials(text, &self.configured_cloud_keys()?) {
+            return Err(CoreError::BadRequest(
+                "Rimuovi le credenziali dalla richiesta.".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub fn prepare_cloud_chat(&self, body: &Value) -> Result<crate::cloud::Request, CoreError> {
         use crate::cloud::{Function, Provider, Request};
 
@@ -1285,7 +1306,8 @@ impl Jarvis {
             .map(str::trim)
             .filter(|message| !message.is_empty() && message.chars().count() <= MAX_MESSAGE)
             .ok_or_else(|| CoreError::BadRequest("messaggio mancante o troppo lungo".into()))?;
-        if crate::cloud::contains_credentials(message) {
+        let keys = self.configured_cloud_keys()?;
+        if cloud_text_has_credentials(message, &keys) {
             return Err(CoreError::BadRequest(
                 "La richiesta contiene una credenziale. Rimuovila prima dell’invio al provider."
                     .into(),
@@ -1300,7 +1322,7 @@ impl Jarvis {
         let settings = crate::cloud::settings(&self.cfg.data_dir);
         let mut targets = Vec::new();
         for provider in providers {
-            if let Some(key) = self.secrets.get(&provider.secret()).map_err(internal)? {
+            if let Some((_, key)) = keys.iter().find(|(id, _)| *id == provider) {
                 let mut budget = CLOUD_CONVERSATION_TOKENS
                     .saturating_sub(crate::cloud::estimated_tokens(message));
                 let mut history = Vec::new();
@@ -1311,8 +1333,8 @@ impl Jarvis {
                     let Some(assistant) = turn.assistant.as_deref() else {
                         continue;
                     };
-                    if crate::cloud::contains_credentials(&turn.user)
-                        || crate::cloud::contains_credentials(assistant)
+                    if cloud_text_has_credentials(&turn.user, &keys)
+                        || cloud_text_has_credentials(assistant, &keys)
                     {
                         break;
                     }
@@ -1327,7 +1349,7 @@ impl Jarvis {
                     history.push(crate::cloud::Turn { user, assistant });
                 }
                 history.reverse();
-                targets.push(provider.target(key, message, history, &settings));
+                targets.push(provider.target(key.clone(), message, history, &settings));
             }
         }
         // Il messaggio resta con un solo provider, anche in caso di errore.
@@ -2755,15 +2777,28 @@ impl Jarvis {
 
     /// Esegue `f` come se la chat attiva fosse `id` e ripristina poi quella dell'utente: un lavoro in background
     /// scrive nella chat da cui è partito anche se nel frattempo se ne è aperta un'altra.
-    pub fn in_conversation<T>(&mut self, id: Option<&str>, f: impl FnOnce(&mut Self) -> T) -> T {
-        let Some(id) = id.filter(|id| self.store.conversation_exists(id)) else {
+    pub fn in_conversation<T>(
+        &mut self,
+        id: Option<&str>,
+        f: impl FnOnce(&mut Self) -> Result<T, CoreError>,
+    ) -> Result<T, CoreError> {
+        let Some(id) = id else {
             return f(self);
         };
+        if !self.store.conversation_exists(id) {
+            return Err(CoreError::NotFound(
+                "La chat di destinazione non esiste più.".into(),
+            ));
+        }
         let previous = self.store.conversation_active();
         self.store.set_active(id);
         let out = f(self);
         self.store.set_active(&previous);
         out
+    }
+
+    pub(crate) fn active_conversation_id(&self) -> String {
+        self.store.conversation_active()
     }
 
     /// Chat recenti e quale è attiva (ADR-0143).
@@ -7409,6 +7444,14 @@ fn explicit_connector_tool(objective: &str) -> Option<String> {
         }
         _ => None,
     }
+}
+
+fn cloud_text_has_credentials(text: &str, keys: &[(crate::cloud::Provider, String)]) -> bool {
+    crate::cloud::contains_credentials(text)
+        || keys.iter().any(|(_, key)| {
+            !key.is_empty()
+                && (text.trim() == key || (key.len() >= 12 && text.contains(key.as_str())))
+        })
 }
 
 /// I comandi deterministici si risolvono nel Core anche se è stata scelta la chat cloud.

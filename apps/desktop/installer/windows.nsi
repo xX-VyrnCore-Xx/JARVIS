@@ -1,5 +1,6 @@
 Unicode true
 !include "MUI2.nsh"
+!include "LogicLib.nsh"
 
 !ifndef APP_VERSION
   !error "APP_VERSION is required"
@@ -37,7 +38,28 @@ SetCompressor /SOLID lzma
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "Italian"
 
+!macro StopInstalledJarvis
+  InitPluginsDir
+  SetOutPath "$PLUGINSDIR"
+  File /oname=stop-windows.ps1 "stop-windows.ps1"
+  nsExec::ExecToLog /TIMEOUT=30000 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\stop-windows.ps1" -InstallDir "$INSTDIR\."'
+  Pop $0
+  ${If} $0 != 0
+    SetErrorLevel 1
+    ${IfNot} ${Silent}
+      MessageBox MB_ICONSTOP "Impossibile arrestare JARVIS. Chiudi l'app e riprova."
+    ${EndIf}
+    Abort
+  ${EndIf}
+!macroend
+
 Section "JARVIS" Install
+  ${If} ${FileExists} "$INSTDIR\jarvis-desktop.exe"
+  ${OrIf} ${FileExists} "$INSTDIR\jarvis.exe"
+  ${OrIf} ${FileExists} "$INSTDIR\jarvis-core.exe"
+  ${OrIf} ${FileExists} "$INSTDIR\resources\jarvis-core.exe"
+    !insertmacro StopInstalledJarvis
+  ${EndIf}
   SetOutPath "$INSTDIR"
   File "${APP_EXE}"
   File "${CORE_EXE}"
@@ -55,9 +77,26 @@ Section "JARVIS" Install
 SectionEnd
 
 Section "Uninstall"
+  !insertmacro StopInstalledJarvis
+  SetOutPath "$TEMP"
+  ClearErrors
+  Delete "$INSTDIR\jarvis-desktop.exe"
+  Delete "$INSTDIR\jarvis.exe"
+  Delete "$INSTDIR\jarvis-core.exe"
+  ${If} ${FileExists} "$INSTDIR\resources\."
+    RMDir /r "$INSTDIR\resources"
+  ${EndIf}
+  ${If} ${Errors}
+    SetErrorLevel 1
+    ${IfNot} ${Silent}
+      MessageBox MB_ICONSTOP "Alcuni file di JARVIS sono ancora in uso. Riprova a disinstallare."
+    ${EndIf}
+    Abort
+  ${EndIf}
+  Delete "$INSTDIR\uninstall.exe"
+  RMDir "$INSTDIR"
   Delete "$SMPROGRAMS\JARVIS\JARVIS.lnk"
   RMDir "$SMPROGRAMS\JARVIS"
   Delete "$DESKTOP\JARVIS.lnk"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\JARVIS"
-  RMDir /r "$INSTDIR"
 SectionEnd

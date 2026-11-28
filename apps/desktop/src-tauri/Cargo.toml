@@ -23,3 +23,6 @@ rfd = { version = "0.17", default-features = false }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 cpal = "0.16"
+tray-icon = { version = "0.21", default-features = false }
+raw-window-handle = "0.6"
+windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }

@@ -9,7 +9,7 @@ use chrono::{Datelike, NaiveTime, Timelike};
 use serde_json::{json, Value};
 
 /// Minuti dopo i quali una conferma ferma viene ricordata.
-pub const CONFIRMATION_NUDGE_MINUTES: i64 = 15;
+pub const CONFIRMATION_NUDGE_MINUTES: i64 = 2;
 /// Occupazione del disco oltre la quale JARVIS avvisa.
 pub const DISK_ALERT_PERCENT: f64 = 90.0;
 /// Il briefing si manda solo entro queste ore dall'orario scelto: più tardi non è più un briefing.

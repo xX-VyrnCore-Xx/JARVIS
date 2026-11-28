@@ -325,7 +325,7 @@ impl Route {
             Self::Fast => "Rispondi in modo diretto e completo: prima la risposta concreta, poi solo i dettagli che servono (valori, nomi, comandi, passaggi, un esempio). Niente panoramiche generiche. Per un dato attuale usa uno strumento pertinente, se disponibile.",
             Self::Reasoning => "Organizza i requisiti prima di rispondere. Confronta le opzioni sulla base dei vincoli espliciti e indica le verifiche mancanti.",
             Self::Long => "Individua le informazioni pertinenti nel contesto lungo e mantieni i riferimenti ai passaggi originali.",
-            Self::Coding => "Verifica linguaggio, interfacce e vincoli di compatibilità. Se serve il repository, chiedi il file o usa gli strumenti concessi prima di suggerire modifiche.",
+            Self::Coding => "Verifica linguaggio, versioni, manifest, interfacce e vincoli di compatibilità. Preferisci le librerie e gli strumenti già adottati. Se serve il repository, chiedi il file o usa gli strumenti concessi. Proponi una verifica riproducibile e indica quali controlli restano da fare.",
             Self::Writing => "Consegna subito il testo pronto all'uso, adatto a destinatario e canale, con tono coerente; poi al massimo una riga con ciò che hai assunto. Non inventare fatti, nomi o cifre.",
             Self::Translation => "Traduci fedelmente senso e registro, senza aggiungere né togliere contenuto; conserva nomi propri, numeri, formattazione e tono. Aggiungi una nota solo per un termine ambiguo.",
             Self::Analysis => "Dichiara unità, periodo e ipotesi; ogni cifra calcolata passa da uno strumento di calcolo, non a memoria. Mostra il metodo in una riga, poi il risultato, poi cosa significa e quali limiti hanno i dati.",

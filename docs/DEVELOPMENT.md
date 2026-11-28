@@ -62,7 +62,7 @@ Prima di chiudere, distinguere modifiche nel checkout, commit locali, revisioni 
 
 ## Integrazione delle modifiche
 
-Il proprietario ha autorizzato, il 2026-11-17, il merge automatico delle pull request di Claude Code quando tutti i job della CI (`.github/workflows/contracts.yml`) sono verdi. Il merge resta vietato con CI rossa, conflitti o revisioni che chiedono modifiche. Dopo il merge il branch di lavoro riparte da `main`, avanzando senza riscrivere la storia.
+Il proprietario ha autorizzato, il 2026-11-17, il merge automatico delle pull request di Claude Code quando tutti i job della CI (`.github/workflows/contracts.yml`) sono verdi. Il merge resta vietato con CI rossa, conflitti o revisioni che chiedono modifiche. Dopo il merge il branch di lavoro riparte da `main`, avanzando senza riscrivere la storia. Ogni modifica passa da un branch e da una PR su GitHub prima del merge in `main`.
 
 ### Pubblicazione automatica dopo il merge
 

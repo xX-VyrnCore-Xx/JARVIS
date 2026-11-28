@@ -103,27 +103,24 @@ impl Jarvis {
 
         if s["confirmations"] == true {
             let limit = chrono::Duration::minutes(proactive::CONFIRMATION_NUDGE_MINUTES);
-            let waiting: Vec<(String, String)> = self
+            let lifetime = chrono::Duration::seconds(crate::policy::CONFIRMATION_TTL_SECS);
+            let waiting: Vec<String> = self
                 .pending
                 .iter()
-                .filter(|(_, p)| {
-                    automation::parse_ts(p.task.doc["created_at"].as_str().unwrap_or_default())
-                        .is_some_and(|c| utc - c >= limit)
-                })
-                .map(|(id, p)| {
-                    (
-                        id.clone(),
-                        clip(p.task.doc["objective"].as_str().unwrap_or_default(), 100),
-                    )
+                .filter_map(|(id, pending)| {
+                    let expires = automation::parse_ts(
+                        pending.decision["confirmation"]["expires_at"].as_str()?,
+                    )?;
+                    (utc < expires && utc >= expires - lifetime + limit).then(|| id.clone())
                 })
                 .collect();
-            for (id, objective) in waiting {
+            for id in waiting {
                 if self.proactive_once(&format!("confirm:{id}"), &now) {
                     self.notify(json!({
                         "severity": "info", "category": "confirmation",
                         "title": "Un'azione attende la tua conferma",
-                        "body": format!("«{objective}» è ferma da più di {} minuti.", proactive::CONFIRMATION_NUDGE_MINUTES),
-                        "source": {"kind": "module", "id": "proactive"}, "link": {"view": "chat"},
+                        "body": "Apri JARVIS per verificare l’azione prima che scada.",
+                        "source": {"kind": "module", "id": "proactive"}, "link": {"view": "chat", "ref": id},
                     }))?;
                     fired.push("confirmations");
                 }

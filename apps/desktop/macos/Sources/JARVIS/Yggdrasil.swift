@@ -1203,6 +1203,7 @@ struct YggdrasilHome: View {
     @StateObject private var stage = YggdrasilStage()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovered: String?
+    @State private var query = ""
 
     var body: some View {
         ZStack {
@@ -1238,6 +1239,7 @@ struct YggdrasilHome: View {
         .onAppear { stage.reduceMotion = reduceMotion }
         .onChange(of: reduceMotion) { _, value in stage.reduceMotion = value }
         .onChange(of: selected) { _, value in
+            query = ""
             if let value { stage.fly(to: value) } else { stage.returnToTree() }
         }
         .animation(reduceMotion ? nil : .smooth(duration: 0.35), value: selected)
@@ -1294,6 +1296,7 @@ struct YggdrasilHome: View {
                     .buttonStyle(PressableStyle())
                     .onHover { inside in hover(inside ? realm.id : (hovered == realm.id ? nil : hovered)) }
                     .accessibilityLabel("\(realm.name): \(realm.epithet)")
+                    .accessibilityAddTraits(selected == realm.id ? .isSelected : [])
                 }
             }
             .padding(.vertical, 2)
@@ -1313,10 +1316,19 @@ struct YggdrasilHome: View {
                     .buttonStyle(.plain).foregroundStyle(.secondary)
                     .help("Torna all'albero").accessibilityLabel("Torna all'albero")
             }
+            TextField("Cerca in \(realm.name)", text: $query)
+                .textFieldStyle(.roundedBorder)
             Divider().overlay(realm.color.opacity(0.4))
+            let entries = functions(realm.id).filter { function in
+                query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    || "\(function.title) \(function.subtitle)".localizedStandardContains(query)
+            }
             ScrollView {
-                VStack(spacing: 8) {
-                    ForEach(functions(realm.id)) { function in
+                LazyVStack(spacing: 8) {
+                    if entries.isEmpty {
+                        Text("Nessuna funzione corrisponde alla ricerca.").foregroundStyle(.secondary)
+                    }
+                    ForEach(entries) { function in
                         Button { open(function.id) } label: {
                             HStack(spacing: 11) {
                                 Image(systemName: function.icon).frame(width: 24).foregroundStyle(realm.color)

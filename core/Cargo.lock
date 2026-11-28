@@ -1405,6 +1405,7 @@ name = "jarvis-launcher"
 version = "0.1.0"
 dependencies = [
  "ureq",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -231,9 +231,14 @@ jobs:
           if (-not (Test-Path "$root\resources\python\python.exe")) { throw "Python incluso assente in $root" }
           $env:JARVIS_HOME = "$root\resources"; $env:JARVIS_PYTHON = "$root\resources\python\python.exe"; $env:JARVIS_DATA_DIR = "$env:RUNNER_TEMP\dati"
           $env:JARVIS_TOKEN = 'jarvise2eownertoken0000000000000000'
-          Start-Process -FilePath $core.FullName -RedirectStandardOutput core.log -RedirectStandardError core.err -NoNewWindow
+          $runningCore = Start-Process -FilePath $core.FullName -RedirectStandardOutput core.log -RedirectStandardError core.err -NoNewWindow -PassThru
           python tests/smoke/start_smoke.py http://127.0.0.1:8765 120
           if ($LASTEXITCODE -ne 0) { Get-Content core.log, core.err; exit 1 }
+          $uninstaller = Start-Process -FilePath "$root\uninstall.exe" -ArgumentList "/S _?=$root" -Wait -PassThru
+          if ($uninstaller.ExitCode -ne 0) { throw "Disinstallazione non riuscita: $($uninstaller.ExitCode)" }
+          if (-not $runningCore.WaitForExit(10000)) { throw "Il Core installato è rimasto in esecuzione." }
+          if (Test-Path "$root\resources\jarvis-core.exe") { throw "File del Core rimasti dopo la disinstallazione." }
+          if (-not (Test-Path $env:JARVIS_DATA_DIR)) { throw "La disinstallazione ha rimosso i dati utente." }
       - name: Installer da pubblicare
         shell: bash
         run: |

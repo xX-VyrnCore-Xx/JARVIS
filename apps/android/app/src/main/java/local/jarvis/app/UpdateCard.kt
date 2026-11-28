@@ -2,12 +2,16 @@ package local.jarvis.app
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
@@ -41,15 +45,25 @@ private object AppInstaller {
     fun currentVersion(context: Context): String =
         context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "0.0.0"
 
+    @Suppress("DEPRECATION")
+    fun verifyPackage(context: Context, apk: File) {
+        val manager = context.packageManager
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
+            PackageManager.GET_SIGNING_CERTIFICATES else PackageManager.GET_SIGNATURES
+        val archive = manager.getPackageArchiveInfo(apk.absolutePath, flags)
+        check(archive?.packageName == context.packageName) { "pacchetto Android non corrispondente" }
+        val installed = manager.getPackageInfo(context.packageName, flags)
+        fun PackageInfo.signers() = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
+            signingInfo?.apkContentsSigners.orEmpty().toSet() else signatures.orEmpty().toSet()
+        val trusted = installed.signers()
+        check(trusted.isNotEmpty() && archive?.signers() == trusted) { "firma APK non corrispondente" }
+    }
+
     fun canInstall(context: Context): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.O || context.packageManager.canRequestPackageInstalls()
 
-    fun openInstallPermission(context: Context) {
-        context.startActivity(
-            Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
-    }
+    fun installPermissionIntent(context: Context) =
+        Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
 
     fun install(context: Context, apk: File) {
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.updates", apk)
@@ -77,6 +91,14 @@ fun UpdateCard(modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf<UpdateState>(UpdateState.Idle) }
 
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        val ready = state as? UpdateState.Ready
+        if (ready != null && AppInstaller.canInstall(context)) {
+            runCatching { AppInstaller.install(context, ready.file) }
+                .onFailure { state = UpdateState.Failed("Installazione non disponibile: ${it.message}") }
+        }
+    }
+
     fun check() {
         state = UpdateState.Checking
         scope.launch {
@@ -95,8 +117,17 @@ fun UpdateCard(modifier: Modifier = Modifier) {
         scope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    AppUpdate.download(release, AppInstaller.dir(context)) { done, total ->
+                    val apk = AppUpdate.download(release, AppInstaller.dir(context)) { done, total ->
                         state = UpdateState.Downloading(release, done, total)
+                    }
+                    try {
+                        AppInstaller.verifyPackage(context, apk)
+                        apk.parentFile?.listFiles()?.filter { it != apk && it.name.endsWith("_android-release.apk") }
+                            ?.forEach { it.delete() }
+                        apk
+                    } catch (error: Exception) {
+                        apk.delete()
+                        throw error
                     }
                 }
             }
@@ -144,7 +175,7 @@ fun UpdateCard(modifier: Modifier = Modifier) {
                 }
                 is UpdateState.Ready -> {
                     Text(
-                        "JARVIS ${current.release.version} è scaricato e verificato (SHA-256).",
+                        "JARVIS ${current.release.version} è scaricato e verificato (SHA-256 e firma APK).",
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Text(
@@ -154,8 +185,10 @@ fun UpdateCard(modifier: Modifier = Modifier) {
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = {
-                            if (AppInstaller.canInstall(context)) AppInstaller.install(context, current.file)
-                            else AppInstaller.openInstallPermission(context)
+                            runCatching {
+                                if (AppInstaller.canInstall(context)) AppInstaller.install(context, current.file)
+                                else permission.launch(AppInstaller.installPermissionIntent(context))
+                            }.onFailure { state = UpdateState.Failed("Installazione non disponibile: ${it.message}") }
                         }) { Text(if (AppInstaller.canInstall(context)) "Installa" else "Consenti e installa") }
                         OutlinedButton(onClick = { state = UpdateState.Idle }) { Text("Più tardi") }
                     }
