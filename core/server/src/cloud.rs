@@ -64,6 +64,39 @@ impl Provider {
         }
     }
 
+    fn fallback_model(self, route: Route) -> &'static str {
+        match (self, route) {
+            (Self::Nim, Route::Fast | Route::Writing | Route::Translation) => {
+                "minimaxai/minimax-m3.1-flash"
+            }
+            (Self::Nim, _) => self.model(Route::Fast),
+        }
+    }
+
+    /// Catalogo instradabile: ogni attività mostra il modello predefinito e il ripiego effettivo.
+    pub fn model_catalog(self) -> Vec<Value> {
+        let routes = [
+            ("fast", Route::Fast),
+            ("reasoning", Route::Reasoning),
+            ("coding", Route::Coding),
+            ("long", Route::Long),
+            ("writing", Route::Writing),
+            ("translation", Route::Translation),
+            ("analysis", Route::Analysis),
+        ];
+        routes
+            .iter()
+            .map(|(name, route)| {
+                json!({
+                    "route": name,
+                    "model": self.model(*route),
+                    "fallback_model": self.fallback_model(*route),
+                    "quick": route.is_quick(),
+                })
+            })
+            .collect()
+    }
+
     /// Confronto fra i modelli scelti per ogni percorso e il catalogo reale del provider: segnala i modelli
     /// ritirati o rinominati prima che una richiesta fallisca con «modello non disponibile».
     pub fn routing_audit(self, available: &[String]) -> Value {
@@ -81,11 +114,18 @@ impl Provider {
             .iter()
             .map(|(name, route)| {
                 let model = self.model(*route);
+                let fallback_model = self.fallback_model(*route);
                 let listed = available.iter().any(|m| m == model);
                 if !listed && !missing.contains(&model) {
                     missing.push(model);
                 }
-                json!({"route": name, "model": model, "listed": listed})
+                json!({
+                    "route": name,
+                    "model": model,
+                    "listed": listed,
+                    "fallback_model": fallback_model,
+                    "fallback_listed": available.iter().any(|m| m == fallback_model),
+                })
             })
             .collect();
         json!({"routes": rows, "missing": missing})
@@ -107,6 +147,7 @@ impl Provider {
                 "translation": self.model(Route::Translation),
                 "analysis": self.model(Route::Analysis)
             },
+            "model_catalog": self.model_catalog(),
             "configured": configured,
             "effective_rpm": (self == Self::Nim).then_some(NIM_RPM),
             "cooldown_seconds": limiter.remaining(self).as_secs_f64().ceil() as u64,
@@ -122,12 +163,8 @@ impl Provider {
         let model = configured.unwrap_or(default);
         let alternative = if model != default {
             default
-        } else if route.is_quick() {
-            match self {
-                Self::Nim => "minimaxai/minimax-m3.1-flash",
-            }
         } else {
-            self.model(Route::Fast)
+            self.fallback_model(route)
         };
         Target {
             provider: self,
@@ -2918,9 +2955,32 @@ mod agent_tests {
         let ok = Provider::Nim.routing_audit(&live);
         assert_eq!(ok["missing"], json!([]));
         assert_eq!(ok["routes"].as_array().unwrap().len(), 7);
+        assert!(ok["routes"][0]["fallback_listed"].as_bool().unwrap());
         let partial = Provider::Nim.routing_audit(&live[..2]);
         let missing = partial["missing"].as_array().unwrap();
         assert!(missing.contains(&json!("moonshotai/kimi-k3.1-pro")));
         assert!(!missing.contains(&json!("nvidia/nemotron-3-ultra-550b-a55b")));
+        assert!(!partial["routes"][0]["fallback_listed"].as_bool().unwrap());
+    }
+
+    #[test]
+    fn model_catalog_matches_primary_and_fallback_routing() {
+        let catalog = Provider::Nim.model_catalog();
+        assert_eq!(catalog.len(), 7);
+        for item in &catalog {
+            let route = match item["route"].as_str().unwrap() {
+                "fast" => Route::Fast,
+                "reasoning" => Route::Reasoning,
+                "coding" => Route::Coding,
+                "long" => Route::Long,
+                "writing" => Route::Writing,
+                "translation" => Route::Translation,
+                "analysis" => Route::Analysis,
+                other => panic!("rotta inattesa: {other}"),
+            };
+            assert_eq!(item["model"], Provider::Nim.model(route));
+            assert_eq!(item["fallback_model"], Provider::Nim.fallback_model(route));
+            assert_eq!(item["quick"], route.is_quick());
+        }
     }
 }

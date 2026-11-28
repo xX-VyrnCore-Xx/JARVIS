@@ -53,7 +53,9 @@ La chat cloud dei client desktop usa `POST /api/cloud/chat/stream` (NDJSON con f
 Il worker espone `voice.transcribe` e `voice.synthesize` sul bridge, con faster-whisper, Piper e openWakeWord in locale (ADR-0010). La trascrizione entra nella chat come testo, quindi l'agente e la policy non distinguono fra comando scritto e parlato. Lo stato dei motori fa parte della salute del worker.
 
 
-**Specializzazioni (ADR-0038).** Il Core sceglie lo specialista dalla richiesta (`research`, `system`, `automation`, `memory`, `coding`) o il generalista se gli ambiti sono zero o più di uno; lo specialista riceve il proprio ruolo nel prompt e solo gli strumenti del proprio ambito più `time.now` e `memory.search`.
+**Specializzazioni (ADR-0038, ADR-0241).** Il Core sceglie lo specialista dalla richiesta (`research`, `system`, `automation`, `memory`, `coding`) o il generalista se gli ambiti sono zero o più di uno. La specializzazione orienta prompt e strumenti consigliati, non restringe il catalogo: ogni agente permanente può proporre qualunque strumento del catalogo, sempre attraverso policy, permessi del proprietario, conferme e audit. Gli agenti temporanei ricevono ancora soltanto gli strumenti assegnati; le missioni autonome restano limitate ai loro strumenti sicuri.
+
+Il catalogo dei modelli NIM è esposto in `GET /api/cloud` e `GET /api/models/route`: per ciascuna delle sette rotte indica modello principale e ripiego. La prova della chiave confronta entrambi con i modelli effettivamente visibili al provider, così l'assenza del ripiego non è confusa con la validità del modello principale.
 
 
 **Agenti temporanei (ADR-0040).** Con `agent.delegate` l'agente principale crea un agente temporaneo con un ruolo e pochi strumenti senza conferma (predefiniti di sola lettura): task figlio con la stessa traccia, al massimo 3 strumenti, nessuna sottodelega, al massimo 2 per richiesta.

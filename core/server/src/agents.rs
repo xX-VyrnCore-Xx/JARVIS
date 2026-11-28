@@ -1,8 +1,7 @@
-//! Specializzazioni degli agenti (RF-03, ADR-0038). Il Core sceglie la specializzazione dalla richiesta e
-//! concede solo gli strumenti del suo ambito; una richiesta che tocca più ambiti, o nessuno, va all'agente
-//! generalista con tutti gli strumenti. Uno strumento fuori dall'ambito concesso viene negato dal Core.
+//! Specializzazioni degli agenti (RF-03, ADR-0038). La specializzazione orienta il ruolo, non i permessi:
+//! ogni agente permanente può usare il catalogo sotto le stesse policy e conferme del Core.
 
-/// Specializzazione: nome del contratto di delega, ruolo per il prompt, parole chiave e strumenti concessi.
+/// Specializzazione: nome del contratto di delega, ruolo per il prompt, parole chiave e strumenti consigliati.
 pub struct Agent {
     pub name: &'static str,
     pub role: &'static str,
@@ -12,7 +11,7 @@ pub struct Agent {
     tools: &'static [&'static str],
 }
 
-/// Strumenti concessi a ogni specializzazione oltre al proprio ambito: ora e ricerca nella memoria.
+/// Strumenti consigliati a ogni specializzazione: ora e ricerca nella memoria.
 const COMMON: [&str; 2] = ["time.now", "memory.search"];
 
 pub const SPECIALISTS: [Agent; 7] = [
@@ -213,7 +212,10 @@ fn route_by_stems(text: &str) -> Option<&'static Agent> {
 
 /// Registro degli agenti (ADR-0153): competenze, ambito di strumenti, rischio massimo e risorse. `risk_of` dà il
 /// rischio di uno strumento del catalogo.
-pub fn registry(risk_of: &dyn Fn(&str) -> Option<String>) -> Vec<serde_json::Value> {
+pub fn registry(
+    catalog_tools: &[&str],
+    risk_of: &dyn Fn(&str) -> Option<String>,
+) -> Vec<serde_json::Value> {
     let rank = |risk: &str| match risk {
         "low" => 0,
         "medium" => 1,
@@ -223,27 +225,32 @@ pub fn registry(risk_of: &dyn Fn(&str) -> Option<String>) -> Vec<serde_json::Val
     let mut out: Vec<serde_json::Value> = SPECIALISTS
         .iter()
         .map(|agent| {
-            let tools: Vec<&str> = agent.tools.iter().chain(COMMON.iter()).copied().collect();
+            let recommended_tools: Vec<&str> =
+                agent.tools.iter().chain(COMMON.iter()).copied().collect();
             let mut categories: Vec<&str> =
-                tools.iter().map(|t| crate::toolsys::category(t)).collect();
+                catalog_tools
+                    .iter()
+                    .map(|t| crate::toolsys::category(t))
+                    .collect();
             categories.sort_unstable();
             categories.dedup();
-            let max_risk = tools
+            let max_risk = catalog_tools
                 .iter()
                 .filter_map(|t| risk_of(t))
                 .max_by_key(|r| rank(r))
                 .unwrap_or_else(|| "low".into());
             serde_json::json!({
                 "name": agent.name, "role": agent.role, "kind": "specialist",
-                "capabilities": categories, "tools": tools, "keywords": agent.keywords.len(),
+                "capabilities": categories, "tools": catalog_tools, "recommended_tools": recommended_tools,
+                "keywords": agent.keywords.len(),
                 "max_risk": max_risk, "context": "isolated",
-                "resources": {"max_steps": 6, "tool_scope": "only_granted"},
+                "resources": {"max_steps": 6, "tool_scope": "catalog"},
             })
         })
         .collect();
     out.push(serde_json::json!({
         "name": GENERAL, "role": "Generalista: riceve le richieste che toccano più ambiti o nessuno, con tutti gli strumenti entro policy e conferme.",
-        "kind": "generalist", "capabilities": ["all"], "tools": "all", "keywords": 0, "max_risk": "critical",
+        "kind": "generalist", "capabilities": ["all"], "tools": catalog_tools, "keywords": 0, "max_risk": "critical",
         "context": "shared", "resources": {"max_steps": 8, "tool_scope": "catalog"},
     }));
     out
@@ -270,14 +277,14 @@ pub fn explain(message: &str) -> serde_json::Value {
         (true, 0) => "nessuna parola chiave di una specializzazione: va al generalista",
         (true, _) => "la richiesta tocca più ambiti: va al generalista con tutti gli strumenti",
         (false, _) => {
-            "un solo ambito riconosciuto: va alla specializzazione con i soli strumenti concessi"
+            "un solo ambito riconosciuto: va alla specializzazione con gli strumenti del catalogo"
         }
     };
     serde_json::json!({"agent": chosen, "reason": reason, "candidates": hits})
 }
 
-/// Lo strumento rientra nell'ambito concesso alla specializzazione.
-pub fn allows(agent: &Agent, tool: &str) -> bool {
+/// Strumento consigliato per la specializzazione; l'autorizzazione effettiva usa catalogo e policy del Core.
+pub fn recommends(agent: &Agent, tool: &str) -> bool {
     COMMON.contains(&tool) || agent.tools.contains(&tool)
 }
 
@@ -329,21 +336,33 @@ mod tests {
         assert_eq!(name("ho ricevuto un phishing, cosa faccio"), "monitoring");
         assert_eq!(name("calcola la sottorete 10.0.0.0/8"), "system");
         let business = route("analisi aziendale dei costi").unwrap();
-        assert!(
-            allows(business, "biz.vat")
-                && !allows(business, "shell.run")
-                && !allows(business, "fs.write")
-        );
+        assert!(recommends(business, "biz.vat"));
         let security = route("cvss 9.8").unwrap();
-        assert!(allows(security, "security.hash") && !allows(security, "shell.run"));
+        assert!(recommends(security, "security.hash"));
     }
 
     #[test]
-    fn specialists_only_get_their_tools() {
+    fn specialists_recommend_tools_without_restricting_the_catalog_scope() {
         let research = route("cerca sul web Rust").unwrap();
-        assert!(allows(research, "web.fetch") && allows(research, "time.now"));
-        assert!(!allows(research, "shell.run") && !allows(research, "fs.write"));
+        assert!(recommends(research, "web.fetch") && recommends(research, "time.now"));
+        assert!(!recommends(research, "shell.run"));
         let memory = route("cosa ricordi?").unwrap();
-        assert!(!allows(memory, "web.search"));
+        assert!(!recommends(memory, "web.search"));
+    }
+
+    #[test]
+    fn registry_reports_catalog_access_and_keeps_recommendations_separate() {
+        let names = ["time.now", "shell.run", "web.search"];
+        let items = registry(&names, &|_| Some("critical".into()));
+        let research = items
+            .iter()
+            .find(|item| item["name"] == "research")
+            .unwrap();
+        assert_eq!(research["tools"], serde_json::json!(names));
+        assert!(research["recommended_tools"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("web.search")));
+        assert_eq!(research["resources"]["tool_scope"], "catalog");
     }
 }

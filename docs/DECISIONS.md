@@ -2667,6 +2667,21 @@ Valutare stack mobile, trasporto degli eventi e RPC, implementazioni di storage,
 - **Decisione:** per il proprietario, quando la richiesta cita un servizio collegato (nome o sinonimi italiani: «posta», «agenda», «appuntamenti»…), gli strumenti di quel servizio, scelti per pertinenza (fino a 12), sono offerti al modello; la chiamata proposta è accettata se lo strumento esiste nel catalogo (prima solo i calcoli) e passa da policy, audit e conferma come ogni altro (invii e creazioni chiedono conferma). I dispositivi associati non li ricevono. Il prompt dice: se hai lo strumento, non dire mai di non avere accesso.
 - **Verifica:** test sulla scelta dei servizi citati, test con un connettore sintetico (offerti solo se citati e solo al proprietario), suite del Core. **Non provato con account Google reali né con un modello reale.**
 
+### ADR-0241 — Catalogo modelli e strumenti per gli agenti permanenti (2026-11-28, implementata nel checkout)
+
+- **Richiesta:** migliorare il catalogo modelli dell'orchestratore e permettere a tutti gli agenti di usare gli strumenti.
+- **Modelli:** `GET /api/cloud` e `GET /api/models/route` espongono, per ciascuna rotta NIM, modello principale e ripiego effettivo. Il controllo della chiave confronta separatamente la disponibilità dei modelli principali e dei ripieghi nel catalogo restituito dal provider; nessuna richiesta di chat viene aggiunta al routing di diagnosi.
+- **Strumenti:** ruolo e specializzazione continuano a orientare l'agente, ma non limitano gli strumenti del catalogo. Il registro elenca i tool disponibili e distingue quelli consigliati per specializzazione. Ogni esecuzione passa ancora da validazione, policy, permessi del proprietario, conferma, audit e limiti del Core. Gli account utente restano senza strumenti; agenti temporanei, missioni autonome, controllo desktop e controllo applicazioni mantengono i propri limiti espliciti.
+- **Motivazione:** le specializzazioni descrivono il compito, non un'autorizzazione. L'accesso universale al catalogo migliora i passaggi tra domini senza trasformare la scelta del modello in un bypass delle policy.
+- **Verifica:** test sintetici del catalogo e dei ripieghi, test di delega per uno specialista con strumenti trasversali e tool sconosciuti rifiutati. Nessun provider reale interrogato.
+
+### ADR-0242 — Rifiuto sicuro di database con schema più recente (2026-11-28, implementata nel checkout)
+
+- **Contesto:** il Core esegue migrazioni additive all'apertura e registra la versione in `PRAGMA user_version`; un binario precedente non controllava se il file provenisse da una versione più nuova.
+- **Decisione:** `Store::open` legge la versione prima di pragma, tabelle o migrazioni e rifiuta ogni versione superiore a `SCHEMA_VERSION`, mantenendo invariati versione e contenuto. Gli schemi uguali o precedenti continuano nel percorso di migrazione esistente.
+- **Motivazione:** impedire che un avvio con binario precedente modifichi o retroceda un archivio futuro.
+- **Verifica:** fixture SQLite sintetica con versione futura, tabella e riga conservate dopo il rifiuto.
+
 ## Aggiornamento del registro
 
 Per un nuovo ADR registrare identificativo, data, stato, contesto, opzioni, decisione, motivazione, conseguenze, evidenza e documenti interessati. Indicare esplicitamente quando una nuova scelta sostituisce una precedente. Se si recupera una risposta storica, collegare la fonte e verificare domanda, scelta e precisazioni prima di aggiungerla.

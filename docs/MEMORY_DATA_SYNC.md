@@ -49,6 +49,8 @@ Una cancellazione eseguita in JARVIS non modifica i backup già creati: per rend
 
 **Database e deduplicazione (ADR-0037).** SQLite in WAL con `synchronous=NORMAL`, `busy_timeout` di 5 secondi e versione dello schema in `user_version`; manutenzione ogni 6 ore e diagnostica in `GET /api/database`. `memory.remember` non duplica un fatto già presente (confronto sul testo normalizzato).
 
+All'apertura il Core controlla `user_version` prima di applicare pragma o migrazioni: un archivio creato da una versione più nuova viene rifiutato senza modificarlo. Per riaprirlo serve una versione di JARVIS che supporti quello schema; non viene effettuato un downgrade automatico.
+
 ### Uso da più app con un Core sul Mac
 
 L’app desktop host usa la porta stabile di loopback 8765 con `remote-hosts.txt` o `JARVIS_ALLOWED_HOSTS`. Il proxy HTTPS privato espone solo il nome configurato. Browser, Android e finestre desktop in modalità client leggono e aggiornano lo stesso database del Core. Chat e conferme si aggiornano dal Core; le app mobili aggiornano anche le proprie viste di attività e notifiche. L’accesso rispetta i permessi dell’associazione ed è revocabile dal Mac. Le viste conservano i dati già caricati durante un’interruzione; le nuove operazioni richiedono una connessione al Core.

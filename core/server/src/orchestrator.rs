@@ -536,7 +536,7 @@ impl Jarvis {
         })
     }
 
-    /// Gli strumenti dinamici citati nella richiesta hanno precedenza dentro il budget di delega.
+    /// I connettori dinamici sono selezionati per pertinenza; la delega ammette fino a 128 strumenti.
     fn delegated_tools(
         &self,
         objective: &str,
@@ -570,7 +570,6 @@ impl Jarvis {
             .iter()
             .filter(|t| {
                 in_scope(t.name())
-                    && t.name() != crate::desktop::TOOL
                     && !dynamic(t)
                     && (t.name() != "n8n.create" || self.n8n.enabled())
             })
@@ -625,13 +624,13 @@ impl Jarvis {
         )
     }
 
-    /// Strumento concesso all'agente del task: la specializzazione scelta dalla richiesta (ADR-0038) limita
-    /// gli strumenti al proprio ambito; il generalista li riceve tutti.
+    /// Strumento disponibile all'agente permanente nel catalogo; gli agenti temporanei restano limitati
+    /// all'elenco assegnato alla delega.
     fn task_allows(&self, task: &Task, tool: &str) -> bool {
         self.task_scope(task)(tool)
     }
 
-    /// Ambito degli strumenti del task, calcolato una volta (le competenze attive richiedono una query).
+    /// Gli agenti permanenti usano il catalogo; quelli temporanei restano circoscritti alla delega.
     fn task_scope(&self, task: &Task) -> impl Fn(&str) -> bool + '_ {
         let temporary = self
             .temporary
@@ -641,41 +640,13 @@ impl Jarvis {
             .as_str()
             .unwrap_or_default()
             .to_string();
-        let specialist = self.route_agent(&objective);
-        let explicit = explicit_connector_tool(&objective.to_ascii_lowercase());
-        // Una competenza attiva rende disponibili i suoi strumenti anche fuori dall'ambito dello specialista
-        // (ADR-0048); policy, conferme e audit restano quelli di ogni strumento.
-        let skill_tools: Vec<String> = if temporary.is_some() || specialist.is_none() {
-            Vec::new()
-        } else {
-            match crate::skills::active(&self.store, &objective) {
-                Ok(skills) => skills
-                    .iter()
-                    .flat_map(|s| s["tools"].as_array().cloned().unwrap_or_default())
-                    .filter_map(|v| v.as_str().map(str::to_string))
-                    .collect(),
-                Err(error) => {
-                    eprintln!(
-                        "[competenze] impossibile caricare l'ambito degli strumenti: {error}"
-                    );
-                    Vec::new()
-                }
-            }
-        };
         let explicit_desktop = crate::desktop::Target::from_request(&objective).is_some();
         let explicit_app = crate::appcontrol::is_app_request(&objective);
         move |tool: &str| match &temporary {
             _ if tool == crate::desktop::TOOL => temporary.is_none() && explicit_desktop,
             _ if crate::appcontrol::is_control_tool(tool) => temporary.is_none() && explicit_app,
             Some(tools) => tools.iter().any(|t| t == tool),
-            None => {
-                explicit.as_deref() == Some(tool)
-                    // I servizi che il proprietario ha collegato e autorizzato sono visibili a ogni agente
-                    // (ADR-0220): un'operazione che scrive all'esterno chiede comunque la conferma.
-                    || tool.starts_with("connector.")
-                    || specialist.is_none_or(|a| crate::agents::allows(a, tool))
-                    || skill_tools.iter().any(|t| t == tool)
-            }
+            None => self.catalog.get(tool).is_some(),
         }
     }
 
@@ -1364,12 +1335,10 @@ impl Jarvis {
         })?;
         let task = Task::new(message, json!({"kind": "owner", "id": "owner"}));
         let allows = self.task_scope(&task);
-        let defensive = crate::agents::route(message).filter(|agent| agent.name == "monitoring");
         let mut tools: Vec<Function> = crate::cloud::TOOLS
             .iter()
             .filter(|_| crate::cloud::may_need_calculation(message))
             .filter(|tool| allows(tool))
-            .filter(|tool| defensive.is_none_or(|agent| crate::agents::allows(agent, tool)))
             .filter_map(|tool| self.catalog.get(tool))
             .map(Function::from)
             .collect();
@@ -4420,6 +4389,7 @@ impl Jarvis {
                 json!({
                     "id": provider.id(), "configured": configured, "route": target.route_name(),
                     "model": target.model, "fallback_model": target.alternative, "quick": target.is_quick(),
+                    "catalog": provider.model_catalog(),
                 })
             })
             .collect();
@@ -4520,8 +4490,10 @@ impl Jarvis {
 
     pub fn agent_registry(&self) -> Value {
         let stats = self.store.agent_stats().unwrap_or_default();
-        let mut items =
-            crate::agents::registry(&|tool| self.catalog.get(tool).map(|t| t.risk().to_string()));
+        let catalog_tools: Vec<&str> = self.catalog.iter().map(|tool| tool.name()).collect();
+        let mut items = crate::agents::registry(&catalog_tools, &|tool| {
+            self.catalog.get(tool).map(|t| t.risk().to_string())
+        });
         for item in &mut items {
             item["performance"] = stats
                 .iter()

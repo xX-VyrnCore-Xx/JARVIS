@@ -150,41 +150,20 @@ async fn loop_stops_after_four_tools() {
 }
 
 #[tokio::test]
-async fn specialist_gets_only_its_tools_and_cannot_leave_its_scope() {
-    // Richiesta di ricerca: l'agente `research` riceve solo Web, mappe (ADR-0202), ricerche salvate (ADR-0206), estrazione di testo, note, ora e ricerca nella memoria (ADR-0038, ADR-0171).
-    let (url, seen) = fake_worker(vec![("shell.run", json!({"command": "ls"}))], false);
+async fn every_permanent_specialist_gets_catalog_tools_but_unknown_tools_stay_out_of_scope() {
+    let (url, seen) = fake_worker(vec![("unknown.tool", json!({}))], false);
     let out = chat(url, 18774, "cerca sul web le novità di Rust").await;
     let first = seen.lock().unwrap()[0].clone();
-    let mut offered: Vec<String> = first["tools"]
+    let offered: Vec<String> = first["tools"]
         .as_array()
         .unwrap()
         .iter()
         .map(|t| t["name"].as_str().unwrap().to_string())
         .collect();
-    offered.sort();
-    assert_eq!(
-        offered,
-        [
-            "map.route",
-            "map.search",
-            "mcp.call",
-            "mcp.list",
-            "mcp.read",
-            "memory.search",
-            "notes.add",
-            "notes.search",
-            "research.list",
-            "research.read",
-            "research.save",
-            "text.extract",
-            "time.now",
-            "web.browse",
-            "web.fetch",
-            "web.form",
-            "web.search"
-        ],
-        "{first}"
-    );
+    assert!(offered.contains(&"web.search".into()), "{first}");
+    assert!(offered.contains(&"shell.run".into()), "{first}");
+    assert!(offered.contains(&"fs.write".into()), "{first}");
+    assert!(offered.len() > 64, "{first}");
     assert_eq!(first["delegate"]["agent"], "research");
     let steps = out["steps"].as_array().unwrap();
     assert!(
@@ -277,9 +256,9 @@ async fn missing_required_tool_arguments_are_requested_without_a_retry() {
 }
 
 #[tokio::test]
-async fn active_skills_enter_the_prompt_and_widen_only_the_offered_tools() {
+async fn active_skills_enter_the_prompt_without_restricting_catalog_tools() {
     // «buongiorno» attiva la competenza inclusa «Briefing del mattino» anche per una richiesta di ricerca:
-    // le sue istruzioni entrano nel prompt e i suoi strumenti vengono offerti per primi (ADR-0048).
+    // le sue istruzioni entrano nel prompt, mentre l'agente conserva l'accesso al catalogo (ADR-0048, ADR-0241).
     let (url, seen) = fake_worker(vec![], false);
     let out = chat(url, 18780, "buongiorno, cerca sul web le notizie di oggi").await;
     let first = seen.lock().unwrap()[0].clone();
@@ -298,7 +277,7 @@ async fn active_skills_enter_the_prompt_and_widen_only_the_offered_tools() {
         offered.iter().any(|tool| tool == "todo.list"),
         "{offered:?}"
     );
-    assert!(!offered.iter().any(|t| t == "shell.run"), "{offered:?}");
+    assert!(offered.iter().any(|t| t == "shell.run"), "{offered:?}");
     assert!(out["steps"]
         .as_array()
         .unwrap()

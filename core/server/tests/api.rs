@@ -1407,6 +1407,14 @@ async fn agents_and_model_routing_are_explained_without_sending_anything() {
         .await;
     assert_eq!(model["task"], "traduzione");
     assert_eq!(model["providers"][0]["route"], "translation");
+    assert_eq!(
+        model["providers"][0]["catalog"].as_array().unwrap().len(),
+        7
+    );
+    assert_eq!(
+        model["providers"][0]["catalog"][5]["fallback_model"],
+        "minimaxai/minimax-m3.1-flash"
+    );
     assert_eq!(model["decision"], "local_only");
     let (_, secret) = e
         .api(

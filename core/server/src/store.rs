@@ -55,6 +55,15 @@ pub(crate) fn should_compact(free_pages: i64, total_pages: i64, page_size: i64) 
 impl Store {
     pub fn open(path: &Path) -> StoreResult<Self> {
         let conn = Connection::open(path)?;
+        let database_version: i64 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        if database_version > SCHEMA_VERSION {
+            return Err(rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
+                Some(format!(
+                    "database schema version {database_version} is newer than supported version {SCHEMA_VERSION}"
+                )),
+            ));
+        }
         // WAL con sincronizzazione NORMAL (durevole ai crash dell'app, ADR-0037), attesa sui blocchi invece di
         // errori «database is locked» quando il nodo o il backup leggono in parallelo, temporanei in memoria.
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
@@ -1639,6 +1648,45 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn newer_database_schema_is_rejected_without_modifying_the_file() {
+        let dir =
+            std::env::temp_dir().join(format!("jarvis-future-schema-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("jarvis.db");
+        let future_version = SCHEMA_VERSION + 1;
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch("CREATE TABLE preserve_me (value TEXT NOT NULL);")
+                .unwrap();
+            conn.execute("INSERT INTO preserve_me VALUES ('fixture')", [])
+                .unwrap();
+            conn.pragma_update(None, "user_version", future_version)
+                .unwrap();
+        }
+
+        let error = match Store::open(&path) {
+            Ok(_) => panic!("il database più recente deve essere rifiutato"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains("newer than supported"),
+            "{error}"
+        );
+
+        let conn = Connection::open(&path).unwrap();
+        let version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        let value: String = conn
+            .query_row("SELECT value FROM preserve_me", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, future_version);
+        assert_eq!(value, "fixture");
+        drop(conn);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn ratings_are_replaced_and_isolated_by_provider_and_model() {

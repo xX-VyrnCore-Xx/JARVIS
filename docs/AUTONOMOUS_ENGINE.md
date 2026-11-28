@@ -68,10 +68,12 @@ sono sempre registrati. Si disattiva solo dal computer del proprietario.
 ## Agenti (ADR-0153)
 
 `GET /api/agents` elenca gli agenti: sette specialisti (sicurezza, ricerca, sistemi, automazione, memoria, business, coding)
-con competenze, strumenti concessi, rischio massimo e contesto **isolato**, più il generalista, con le prestazioni di ciascuno (lavori, successo, durata). `GET /api/agents/route?q=
+con competenze, strumenti del catalogo e strumenti consigliati, rischio massimo e contesto **isolato**, più il generalista,
+con le prestazioni di ciascuno (lavori, successo, durata). La specializzazione orienta la richiesta; ogni agente permanente
+può proporre gli strumenti del catalogo, soggetti a policy, permessi, conferme e audit. `GET /api/agents/route?q=`
 spiega perché una richiesta va a un agente (parole chiave attivate). `GET /api/models/route?q=` spiega la rotta per compito,
-il modello per provider e la riservatezza (credenziali bloccate), senza inviare nulla. La delega (ADR-0040) assegna a un agente
-isolato solo gli strumenti del suo ambito.
+il modello e il ripiego per provider, e la riservatezza (credenziali bloccate), senza inviare nulla. Le deleghe temporanee
+(ADR-0040) ricevono solo gli strumenti assegnati; le missioni autonome mantengono il proprio insieme ristretto e sicuro.
 
 ## Miglioramento controllato e supervisione (ADR-0163, 0164)
 
