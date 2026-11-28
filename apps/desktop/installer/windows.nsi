@@ -42,10 +42,19 @@ SetCompressor /SOLID lzma
   InitPluginsDir
   SetOutPath "$PLUGINSDIR"
   File /oname=stop-windows.ps1 "stop-windows.ps1"
-  nsExec::ExecToLog /TIMEOUT=30000 '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\stop-windows.ps1" -InstallDir "$INSTDIR\."'
+  StrCpy $1 "$SYSDIR\WindowsPowerShell\v1.0\powershell.exe"
+  ; NSIS is 32-bit. Use 64-bit PowerShell to inspect the paths of the x64 processes.
+  ${If} ${FileExists} "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+    StrCpy $1 "$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe"
+  ${EndIf}
+  nsExec::ExecToStack /TIMEOUT=30000 '"$1" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\stop-windows.ps1" -InstallDir "$INSTDIR\."'
   Pop $0
+  Pop $2
   ${If} $0 != 0
-    SetErrorLevel 1
+    FileOpen $3 "$TEMP\JARVIS-setup-error.txt" w
+    FileWrite $3 "Arresto processi ($0)$\r$\n$2"
+    FileClose $3
+    SetErrorLevel 10
     ${IfNot} ${Silent}
       MessageBox MB_ICONSTOP "Impossibile arrestare JARVIS. Chiudi l'app e riprova."
     ${EndIf}
@@ -87,7 +96,10 @@ Section "Uninstall"
     RMDir /r "$INSTDIR\resources"
   ${EndIf}
   ${If} ${Errors}
-    SetErrorLevel 1
+    FileOpen $3 "$TEMP\JARVIS-setup-error.txt" w
+    FileWrite $3 "Rimozione dei file del programma non riuscita."
+    FileClose $3
+    SetErrorLevel 11
     ${IfNot} ${Silent}
       MessageBox MB_ICONSTOP "Alcuni file di JARVIS sono ancora in uso. Riprova a disinstallare."
     ${EndIf}
